@@ -1,1 +1,10 @@
 CHATPRIMER_THIRDRAIL.md
+.env
+
+# Local Vite and validation output
+node_modules/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+output/playwright/

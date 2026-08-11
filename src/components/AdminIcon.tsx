@@ -1,0 +1,32 @@
+import type { ReactNode } from "react";
+import type { AdminArea } from "../config/navigation";
+
+type Props = {
+  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "shield" | "signal";
+  size?: number;
+};
+
+const paths: Record<Props["name"], ReactNode> = {
+  overview: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
+  content: <><path d="M5 3h10l4 4v14H5z"/><path d="M14 3v5h5M8 12h8M8 16h6"/></>,
+  products: <><path d="m4 7 8-4 8 4-8 4z"/><path d="m4 7 8 4 8-4v10l-8 4-8-4zM12 11v10"/></>,
+  orders: <><path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/></>,
+  media: <><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 17 5-4 3 2 3-3 3 5"/></>,
+  vip: <><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></>,
+  users: <><circle cx="9" cy="8" r="3"/><path d="M3 20c.5-4 2.5-6 6-6s5.5 2 6 6M16 6h5M18.5 3.5v5"/></>,
+  integrations: <><path d="M8 12h8M12 8v8"/><path d="M7 4h10v4h3v8h-3v4H7v-4H4V8h3z"/></>,
+  settings: <><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 15 6l-.3-2.6h-4L10.4 6A7 7 0 0 0 8 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A7 7 0 0 0 10.4 18l.3 2.6h4L15 18a7 7 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></>,
+  menu: <><path d="M4 7h16M4 12h16M4 17h16"/></>,
+  close: <><path d="m6 6 12 12M18 6 6 18"/></>,
+  arrow: <><path d="M5 12h14M14 7l5 5-5 5"/></>,
+  shield: <><path d="M12 3 5 6v5c0 4.6 2.8 8.2 7 10 4.2-1.8 7-5.4 7-10V6zM9 12l2 2 4-5"/></>,
+  signal: <><path d="M5 18h14M8 18l4-14 4 14M9.5 12h5M7 7 4 4M17 7l3-3"/></>,
+};
+
+export function AdminIcon({ name, size = 20 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {paths[name]}
+    </svg>
+  );
+}

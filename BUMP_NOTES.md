@@ -1,0 +1,29 @@
+# Bump notes
+
+CURRENT VER=0.0.0-seed
+
+PENDING VER=0.1.0-alpha.0
+
+No prior version metadata or release scheme existed in this repository. `0.0.0-seed` names the seeded pre-scaffold state; `0.1.0-alpha.0` establishes the first pending, non-production Admin milestone.
+
+## Pending 0.1.0-alpha.0
+
+### Technical
+
+- Added a Vite/React/TypeScript/React Router application with deterministic npm metadata.
+- Added a responsive Third Railify operational shell, centralized route configuration, Overview, eight future-area shells, mobile navigation with Escape handling, visible focus, reduced motion, state examples, and a branded 404.
+- Established the seeded American Captain face as the main display/header font, supported by Blinker and Geist Mono.
+- Made system boundaries explicit: no auth, APIs, users, orders, memberships, analytics, provider state, privileged data, or writes are implemented or simulated.
+- Added document/response noindex, restrictive static headers, SPA fallback, `.node-version`, and Cloudflare Pages staging documentation.
+- Added lint, TypeScript, and production-build scripts. Validation evidence belongs in the completion report for this milestone.
+- No Pages project, deployment, DNS, domain, provider, or Wix change was performed.
+
+### Human-readable
+
+The separate Admin repository now has a real, polished frontend that can be reviewed on an isolated staging URL. It clearly shows where future operational areas will live while refusing to pretend that accounts, orders, products, or integrations are connected. It is a visual and routing foundation, not an administration system.
+
+### Known deferrals
+
+- Authentication, authorization, sessions, audit trail, Cloudflare access policy, and private-data handling.
+- CMS, catalogue/provider writes, orders, membership operations, users, media uploads, settings persistence, and integrations.
+- Pages project creation, deployment, custom domain, DNS, analytics, and production acceptance.
