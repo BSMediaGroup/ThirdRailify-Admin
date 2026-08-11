@@ -124,7 +124,7 @@ img { display: block; max-width: 100%; }
 .brand-lockup strong { color: var(--ink); font-family: "American Captain", "Arial Narrow", sans-serif; font-size: 1.18rem; font-weight: 400; letter-spacing: .025em; text-transform: uppercase; }
 
 @supports ((-webkit-mask-image: url("")) or (mask-image: url(""))) {
-  .brand-mark::before { position: absolute; width: 24px; height: 28px; background: linear-gradient(145deg, #936313 0%, var(--gold) 38%, #ffe37a 58%, #d58b14 78%, #87580d 100%); content: ""; -webkit-mask: url("../../assets/logos/boltv2.svg") center / contain no-repeat; mask: url("../../assets/logos/boltv2.svg") center / contain no-repeat; }
+  .brand-mark::before { position: absolute; width: 24px; height: 28px; background: linear-gradient(145deg, #936313 0%, var(--gold) 38%, #ffe37a 58%, #d58b14 78%, #87580d 100%); content: ""; -webkit-mask: url("../../assets/logos/boltv2straight.svg") center / contain no-repeat; mask: url("../../assets/logos/boltv2straight.svg") center / contain no-repeat; }
   .brand-mark img { opacity: 0; }
 }
 

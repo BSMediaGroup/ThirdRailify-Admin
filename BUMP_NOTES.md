@@ -22,6 +22,9 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Rebuilt the sidebar lockup around the exact `assets/logos/boltv2.svg` silhouette, a POC-derived dark square, gradient-gold mask paint, and a larger `THIRD RAILIFY` title with a subordinate `CONTROL ROOM` label.
 - Replaced the temporary inline favicon with the exact `assets/icons/boltv2.ico` asset.
 - Checked the visual-polish milestone responsively at 390px, 768px, and 1440px, including the mobile sidebar, overflow, built assets, and browser-console behavior.
+- Switched the Admin sidebar lockup to its exact local `assets/logos/boltv2straight.svg` copy while preserving the established gold-gradient mask, rounded dark square, inset highlight, and responsive lockup treatment.
+- Replaced the active Admin favicon with the byte-identical local `assets/icons/thirdfavstraight.ico` copy sourced from the authoritative Public asset; previous ICO assets remain preserved but inactive.
+- Validated the milestone with Admin lint, TypeScript, production build, diff checks, exact built-favicon bytes/content type, and rendered 390px/768px/1440px checks including the mobile sidebar with no overflow, broken assets, or console errors.
 
 ### Human-readable
 

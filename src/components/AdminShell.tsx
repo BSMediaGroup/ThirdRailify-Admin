@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import boltMark from "../../assets/logos/boltv2.svg";
+import boltMark from "../../assets/logos/boltv2straight.svg";
 import { adminAreas } from "../config/navigation";
 import { AdminIcon } from "./AdminIcon";
 
