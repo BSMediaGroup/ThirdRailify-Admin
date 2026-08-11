@@ -13,6 +13,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Added a Vite/React/TypeScript/React Router application with deterministic npm metadata.
 - Added a responsive Third Railify operational shell, centralized route configuration, Overview, eight future-area shells, mobile navigation with Escape handling, visible focus, reduced motion, state examples, and a branded 404.
 - Established the seeded American Captain face as the main display/header font, supported by Blinker and Geist Mono.
+- Relaxed American Captain heading and brand-lockup tracking/line-height and removed faux-heavy rendering so titles remain condensed without crowding.
 - Made system boundaries explicit: no auth, APIs, users, orders, memberships, analytics, provider state, privileged data, or writes are implemented or simulated.
 - Added document/response noindex, restrictive static headers, SPA fallback, `.node-version`, and Cloudflare Pages staging documentation.
 - Added lint, TypeScript, and production-build scripts. Validation evidence belongs in the completion report for this milestone.

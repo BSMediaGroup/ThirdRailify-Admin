@@ -6,6 +6,7 @@ Independent frontend foundation for future Third Railify operations. The current
 
 - Vite 5, React 18, TypeScript, and React Router.
 - Branded responsive sidebar, sticky operational header, overview, future-area route shells, state language, and a branded 404.
+- American Captain display typography rendered at its real weight with lightly relaxed heading tracking and line-height.
 - Routes for Overview, Site Content, Shop / Products, Orders, Media, VIP / Membership, Users / Access, Integrations, and Settings.
 - Explicit cards for the real current posture: authentication not implemented, APIs not configured, writes disabled, and no sensitive data present.
 - Cloudflare Pages static output, SPA fallback, document and response-level noindex, restrictive baseline headers, and no custom domain.
@@ -69,7 +70,7 @@ ThirdRailify-Admin/
 └── package.json
 ```
 
-The display system uses the seeded American Captain asset for the primary header voice, with seeded Blinker and Geist Mono for readable body and technical roles.
+The display system uses the seeded American Captain asset at its real weight with lightly relaxed tracking for the primary header voice, with seeded Blinker and Geist Mono for readable body and technical roles.
 
 ## Security boundary
 
