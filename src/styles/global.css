@@ -54,8 +54,34 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: var(--bg); scroll-behavior: smooth; }
+html { min-width: 320px; background: var(--bg); scroll-behavior: smooth; scrollbar-color: var(--gold) #0b0b09; scrollbar-width: thin; }
 body { min-width: 320px; min-height: 100vh; margin: 0; background: var(--bg); }
+
+html::-webkit-scrollbar,
+.sidebar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track,
+.sidebar::-webkit-scrollbar-track {
+  background: #0b0b09;
+}
+
+html::-webkit-scrollbar-thumb,
+.sidebar::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  border: 2px solid #0b0b09;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #a97717, var(--gold));
+}
+
+html::-webkit-scrollbar-thumb:hover,
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--gold), var(--gold-hot));
+}
+
+.sidebar { scrollbar-color: var(--gold) #0b0b09; scrollbar-width: thin; }
 body::before {
   position: fixed;
   inset: 0;
@@ -90,10 +116,17 @@ img { display: block; max-width: 100%; }
   background: linear-gradient(180deg, #0d0d0a, #090907 70%);
 }
 .brand-lockup { display: flex; align-items: center; gap: 12px; min-height: 49px; padding: 0 6px; }
-.brand-lockup img { width: 42px; height: 42px; object-fit: contain; filter: drop-shadow(0 0 12px rgba(243,201,40,.18)); }
-.brand-lockup div { display: grid; gap: 2px; }
-.brand-lockup span { color: var(--muted); font-size: .76rem; letter-spacing: .11em; text-transform: uppercase; }
-.brand-lockup strong { font-family: "American Captain", "Arial Narrow", sans-serif; font-size: 1.05rem; font-weight: 400; letter-spacing: .015em; text-transform: uppercase; }
+.brand-mark { position: relative; display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; border: 1px solid rgba(243,201,40,.38); border-radius: 12px; background: radial-gradient(circle at 50% 25%, rgba(243,201,40,.16), transparent 66%), #10100d; box-shadow: inset 0 1px 0 rgba(255,223,85,.12), inset 0 0 18px rgba(243,201,40,.05), 0 0 22px rgba(243,201,40,.08); }
+.brand-mark::after { position: absolute; inset: 3px; border: 1px solid rgba(255,223,85,.07); border-radius: 9px; content: ""; pointer-events: none; }
+.brand-mark img { width: 24px; height: 28px; object-fit: contain; filter: brightness(0) saturate(100%) invert(83%) sepia(93%) saturate(1508%) hue-rotate(328deg) brightness(104%) contrast(103%); }
+.brand-lockup div { display: grid; gap: 4px; line-height: 1; }
+.brand-lockup div span { color: var(--gold-soft); font-family: "Geist Mono", monospace; font-size: .62rem; font-weight: 700; letter-spacing: .19em; text-transform: uppercase; }
+.brand-lockup strong { color: var(--ink); font-family: "American Captain", "Arial Narrow", sans-serif; font-size: 1.18rem; font-weight: 400; letter-spacing: .025em; text-transform: uppercase; }
+
+@supports ((-webkit-mask-image: url("")) or (mask-image: url(""))) {
+  .brand-mark::before { position: absolute; width: 24px; height: 28px; background: linear-gradient(145deg, #936313 0%, var(--gold) 38%, #ffe37a 58%, #d58b14 78%, #87580d 100%); content: ""; -webkit-mask: url("../../assets/logos/boltv2.svg") center / contain no-repeat; mask: url("../../assets/logos/boltv2.svg") center / contain no-repeat; }
+  .brand-mark img { opacity: 0; }
+}
 
 .environment-note { display: flex; align-items: center; gap: 10px; margin: 25px 2px 28px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: rgba(243,201,40,.045); }
 .environment-note div { display: grid; gap: 2px; }

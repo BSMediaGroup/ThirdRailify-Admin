@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import logo from "../../assets/logos/thirdrail-logo4.png";
+import boltMark from "../../assets/logos/boltv2.svg";
 import { adminAreas } from "../config/navigation";
 import { AdminIcon } from "./AdminIcon";
 
@@ -33,8 +33,8 @@ export function AdminShell() {
       <a className="skip-link" href="#admin-main">Skip to content</a>
       <aside id="admin-sidebar" className={`sidebar ${mobileOpen ? "sidebar--open" : ""}`} aria-label="Admin navigation">
         <div className="brand-lockup">
-          <img src={logo} alt="" />
-          <div><span>Third Railify</span><strong>Control room</strong></div>
+          <span className="brand-mark" aria-hidden="true"><img src={boltMark} alt="" /></span>
+          <div><strong>THIRD RAILIFY</strong><span>CONTROL ROOM</span></div>
         </div>
 
         <div className="environment-note">

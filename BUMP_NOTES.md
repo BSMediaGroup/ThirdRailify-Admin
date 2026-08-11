@@ -18,6 +18,10 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Added document/response noindex, restrictive static headers, SPA fallback, `.node-version`, and Cloudflare Pages staging documentation.
 - Added lint, TypeScript, and production-build scripts. Validation evidence belongs in the completion report for this milestone.
 - No Pages project, deployment, DNS, domain, provider, or Wix change was performed.
+- Polished the document and scrollable sidebar with a narrow graphite/gold scrollbar treatment adapted from the approved POC.
+- Rebuilt the sidebar lockup around the exact `assets/logos/boltv2.svg` silhouette, a POC-derived dark square, gradient-gold mask paint, and a larger `THIRD RAILIFY` title with a subordinate `CONTROL ROOM` label.
+- Replaced the temporary inline favicon with the exact `assets/icons/boltv2.ico` asset.
+- Checked the visual-polish milestone responsively at 390px, 768px, and 1440px, including the mobile sidebar, overflow, built assets, and browser-console behavior.
 
 ### Human-readable
 

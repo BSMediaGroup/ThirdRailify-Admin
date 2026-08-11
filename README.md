@@ -55,7 +55,8 @@ ThirdRailify-Admin/
 ├── assets/
 │   ├── backgrounds/        Seeded brand backgrounds
 │   ├── fonts/              Seeded font files and licences
-│   ├── logos/              Seeded Third Railify marks
+│   ├── icons/              Favicon artwork
+│   ├── logos/              Seeded marks and the sidebar bolt silhouette
 │   └── people/             Seeded host imagery (not used in admin)
 ├── public/
 │   ├── _headers            Noindex and static response safeguards
