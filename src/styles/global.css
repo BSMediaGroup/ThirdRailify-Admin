@@ -153,6 +153,11 @@ img { display: block; max-width: 100%; }
 .topbar-title span { color: var(--quiet); }
 .topbar-title strong { color: var(--muted); font-weight: 500; }
 .topbar-status { display: flex; align-items: center; gap: 9px; margin-left: auto; color: var(--muted); font-family: "Geist Mono", monospace; font-size: .68rem; text-transform: uppercase; }
+.admin-shell-loading { position: absolute; right: 0; bottom: -3px; left: 0; height: 3px; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity .14s ease; }
+.admin-shell-loading__track { position: absolute; inset: 0; background: rgba(243,201,40,.09); }
+.admin-shell-loading__bar { position: absolute; top: 0; bottom: 0; left: -36%; width: 36%; border-radius: 999px; background: linear-gradient(90deg, rgba(169,119,23,0), rgba(201,166,45,.72) 24%, rgba(243,201,40,.96) 48%, rgba(255,223,85,.92) 68%, rgba(213,139,20,0) 100%); box-shadow: 0 0 8px rgba(243,201,40,.5), 0 0 18px rgba(255,223,85,.3); animation: admin-shell-loader-indeterminate .95s linear infinite; }
+.admin-shell-loading.is-active { opacity: 1; }
+@keyframes admin-shell-loader-indeterminate { from { left: -36%; } to { left: 100%; } }
 .icon-button { display: inline-grid; width: 42px; height: 42px; place-items: center; padding: 0; color: var(--ink); border: 1px solid var(--line); border-radius: 9px; background: var(--panel); cursor: pointer; }
 .menu-button { display: none; }
 .admin-main { width: min(1240px, 100%); margin: 0 auto; padding: clamp(42px, 6vw, 80px) clamp(22px, 5vw, 68px) 90px; }
@@ -291,6 +296,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .admin-shell-loading__bar { left: 0; width: 100%; animation: none !important; }
 }
 
 /* Shared account authority */

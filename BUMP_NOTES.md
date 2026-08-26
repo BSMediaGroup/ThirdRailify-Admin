@@ -10,6 +10,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Added a shell-level horizontal loading indicator adapted from the StreamSuites Dashboard/Public pattern with Third Railify gold gradients, real Overview/Accounts async tracking, concurrent-load-safe tokens, main-content `aria-busy` state, and a static reduced-motion treatment.
 - Switched the Admin dashboard favicon to the supplied `assets/icons/thirdadminfavx.png` artwork with an explicit PNG MIME declaration; all previous icon assets remain preserved but inactive.
 - Wired the confirmed production Google OAuth client ID while keeping staging explicitly gated with `GOOGLE_OAUTH_ENABLED=false`. Admin now exposes truthful provider states and blocks both Google OAuth start and callback/token exchange until the gate is enabled with both credentials present; the production callback remains deferred to the domain migration and derived from `THIRDRAILIFY_ADMIN_ORIGIN`.
 - Established `ThirdRailify-Admin` as the shared D1 account authority with an idempotent schema for accounts, identities, PBKDF2 credentials, hashed sessions, OAuth transactions, public handoffs, verification/reset tokens, rate limits, and bounded audit events.
@@ -37,6 +38,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Wired the GitHub OAuth App client ID into safe Admin configuration. Its staging and production callbacks remain registered externally on the same GitHub App; GitHub stays credential-driven and becomes available only after the encrypted client secret is provisioned.
 
 ### Human-readable
+
+The Admin shell now shows a slim animated gold signal beneath the top bar while real dashboard data or account actions are loading, with a non-moving alternative for reduced-motion users.
 
 The Admin surface now has a real shared account foundation and refuses to show the control room until the server confirms an Admin role. Master Admins can manage account access from the new Accounts page; every other operational module remains accurately deferred.
 

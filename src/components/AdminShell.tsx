@@ -1,14 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import boltMark from "../../assets/logos/boltv2straight.svg";
 import { adminAreas } from "../config/navigation";
 import { AdminIcon } from "./AdminIcon";
 import { AdminAccountWidget } from "../auth/AdminAccountWidget";
 
+export type AdminShellOutletContext = {
+  startLoading: (reason?: string) => () => void;
+};
+
 export function AdminShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loadingReason, setLoadingReason] = useState("");
   const location = useLocation();
   const menuButton = useRef<HTMLButtonElement>(null);
+  const loadingTokens = useRef(new Map<symbol, string>());
+
+  const startLoading = useCallback((reason = "Loading Admin view") => {
+    const token = Symbol("admin-shell-loading");
+    loadingTokens.current.set(token, reason.trim() || "Loading Admin view");
+    setLoadingReason(loadingTokens.current.values().next().value || "Loading Admin view");
+
+    return () => {
+      if (!loadingTokens.current.delete(token)) return;
+      setLoadingReason(loadingTokens.current.values().next().value || "");
+    };
+  }, []);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -68,9 +85,13 @@ export function AdminShell() {
           </button>
           <div className="topbar-title"><span>Admin /</span><strong>{currentArea?.shortLabel ?? "Not found"}</strong></div>
           <AdminAccountWidget />
+          <div className={`admin-shell-loading${loadingReason ? " is-active" : ""}`} role="status" aria-live="polite" aria-hidden={!loadingReason} aria-label={loadingReason || "Idle"}>
+            <span className="admin-shell-loading__track" aria-hidden="true" />
+            <span className="admin-shell-loading__bar" aria-hidden="true" />
+          </div>
         </header>
-        <main id="admin-main" className="admin-main" tabIndex={-1}>
-          <Outlet />
+        <main id="admin-main" className="admin-main" tabIndex={-1} aria-busy={Boolean(loadingReason)}>
+          <Outlet context={{ startLoading }} />
         </main>
       </div>
     </div>

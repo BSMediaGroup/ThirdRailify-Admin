@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import { AdminAvatar } from "../auth/AdminAccountWidget";
 import { useAuth } from "../auth/AuthProvider";
 import { adminApi } from "../auth/client";
 import type { AuthAccount } from "../auth/types";
+import type { AdminShellOutletContext } from "../components/AdminShell";
 
 type AccountsPayload = { ok: boolean; accounts: AuthAccount[]; access: { isAdmin: boolean; isMasterAdmin: boolean }; checkedAt: string };
 type AccountAction = "promote" | "demote" | "disable" | "enable" | "revoke-sessions";
@@ -10,6 +12,7 @@ type PendingAction = { account: AuthAccount; action: AccountAction };
 
 export function AccountsPage() {
   const { csrfToken, account: currentAccount, access } = useAuth();
+  const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<AccountsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
@@ -21,11 +24,12 @@ export function AccountsPage() {
   const [pending, setPending] = useState<PendingAction | null>(null);
 
   const load = useCallback(async () => {
+    const stopLoading = startLoading("Loading D1 accounts");
     setLoading(true); setError("");
     try { setPayload(await adminApi<AccountsPayload>("/api/admin/accounts")); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Accounts could not be loaded."); }
-    finally { setLoading(false); }
-  }, []);
+    finally { setLoading(false); stopLoading(); }
+  }, [startLoading]);
   useEffect(() => { void load(); }, [load]);
 
   const providers = useMemo(() => Array.from(new Set((payload?.accounts || []).flatMap((account) => account.providers))).sort(), [payload]);
@@ -36,12 +40,13 @@ export function AccountsPage() {
 
   const mutate = async () => {
     if (!pending || !csrfToken) return;
+    const stopLoading = startLoading(`${actionLabel(pending.action)} in progress`);
     setBusyId(pending.account.id); setError("");
     try {
       const next = await adminApi<AccountsPayload>(`/api/admin/accounts/${encodeURIComponent(pending.account.id)}/${pending.action}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: "{}" });
       setPayload(next); setPending(null);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The account action failed."); }
-    finally { setBusyId(""); }
+    finally { setBusyId(""); stopLoading(); }
   };
 
   return <>

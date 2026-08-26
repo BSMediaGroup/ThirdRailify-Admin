@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import { adminApi } from "../auth/client";
 import { AdminIcon } from "../components/AdminIcon";
+import type { AdminShellOutletContext } from "../components/AdminShell";
 
 type StatusPayload = {
   ok: boolean;
@@ -19,15 +20,17 @@ const deferredAreas = [
 ];
 
 export function OverviewPage() {
+  const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
+    const stopLoading = startLoading("Loading Admin status");
     adminApi<StatusPayload>("/api/admin/status", { signal: controller.signal }).then(setStatus).catch((reason: unknown) => {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Status could not be loaded.");
-    });
+    }).finally(stopLoading);
     return () => controller.abort();
-  }, []);
+  }, [startLoading]);
 
   return <>
     <section className="page-hero page-hero--status">
