@@ -8,5 +8,13 @@
     "THIRDRAILIFY_PUBLIC_ORIGIN": "https://thirdrailify.pages.dev",
     "THIRDRAILIFY_ADMIN_ORIGIN": "https://thirdrailify-admin.pages.dev",
     "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": ""
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "THIRDRAILIFY_AUTH_DB",
+      "database_name": "thirdrailify-accounts",
+      "database_id": "b8be3879-7aa1-4d70-af3f-617abce7a929",
+      "migrations_dir": "migrations"
+    }
+  ]
 }
