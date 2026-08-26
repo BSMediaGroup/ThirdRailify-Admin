@@ -58,7 +58,7 @@ ThirdRailify-Admin/
 ├── assets/
 │   ├── backgrounds/        Seeded brand backgrounds
 │   ├── fonts/              Seeded font files and licences
-│   ├── icons/              Active straight-bolt favicon and preserved earlier favicon artwork
+│   ├── icons/              Active thirdadminfavx PNG favicon and preserved earlier favicon artwork
 │   ├── logos/              Seeded marks and the active straight sidebar bolt silhouette
 │   └── people/             Seeded host imagery (not used in admin)
 ├── public/
