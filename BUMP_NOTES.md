@@ -30,6 +30,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Switched the Admin sidebar lockup to its exact local `assets/logos/boltv2straight.svg` copy while preserving the established gold-gradient mask, rounded dark square, inset highlight, and responsive lockup treatment.
 - Replaced the active Admin favicon with the byte-identical local `assets/icons/thirdfavstraight.ico` copy sourced from the authoritative Public asset; previous ICO assets remain preserved but inactive.
 - Validated the milestone with Admin lint, TypeScript, production build, diff checks, exact built-favicon bytes/content type, and rendered 390px/768px/1440px checks including the mobile sidebar with no overflow, broken assets, or console errors.
+- Configured the confirmed safe Resend sender identity and reply-to address in Admin Wrangler without adding or changing the encrypted `RESEND_API_KEY`; no deployment or email acceptance test was performed.
 
 ### Human-readable
 
@@ -37,8 +38,10 @@ The Admin surface now has a real shared account foundation and refuses to show t
 
 The separate Admin repository now has a real, polished frontend that can be reviewed on an isolated staging URL. It clearly shows where future operational areas will live while refusing to pretend that accounts, orders, products, or integrations are connected. It is a visual and routing foundation, not an administration system.
 
+Admin now carries the confirmed public sender identity and reply-to address as safe configuration; the Resend API key remains remote and encrypted.
+
 ### Known deferrals
 
-- Creation/binding of the real staging D1 database, encrypted secrets, provider applications, Turnstile widget, Resend sender, deployment, and live acceptance.
+- Creation/binding of the real staging D1 database, remaining encrypted secrets, provider applications, Turnstile widget, deployment, and live Resend acceptance.
 - CMS, catalogue/provider writes, orders, membership operations, users, media uploads, settings persistence, and integrations.
 - Pages project creation, deployment, custom domain, DNS, analytics, and production acceptance.

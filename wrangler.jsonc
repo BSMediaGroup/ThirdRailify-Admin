@@ -10,7 +10,9 @@
     "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": "",
     "THIRDRAILIFY_TURNSTILE_SITE_KEY": "0x4AAAAAAEctN9Bb4evywXmW",
     "ADMIN_EMAIL_1": "mail@danielclancy.net",
-    "ADMIN_EMAIL_2": "thirdmailify@gmail.com"
+    "ADMIN_EMAIL_2": "thirdmailify@gmail.com",
+    "MAIL_FROM": "Third Railify Official <alerts@notify.thirdrailify.com>",
+    "MAIL_REPLY_TO": "info@thirdrailify.com"
   },
   "d1_databases": [
     {
