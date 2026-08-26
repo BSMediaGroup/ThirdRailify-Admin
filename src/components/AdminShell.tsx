@@ -65,11 +65,6 @@ export function AdminShell() {
           <div className="brand-lockup__copy"><strong>THIRD RAILIFY</strong><span>CONTROL ROOM</span></div>
         </div>
 
-        <button className="sidebar-collapse" type="button" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={collapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>
-          <AdminIcon name="collapse" size={18} />
-          <span>{collapsed ? "Expand" : "Collapse"}</span>
-        </button>
-
         <div className="environment-note">
           <span className="status-dot" aria-hidden="true" />
           <div><strong>Authenticated staging</strong><span>D1 account authority</span></div>
@@ -97,6 +92,9 @@ export function AdminShell() {
         <header className="topbar">
           <button ref={menuButton} className="icon-button menu-button" type="button" aria-expanded={mobileOpen} aria-controls="admin-sidebar" aria-label={mobileOpen ? "Close navigation" : "Open navigation"} onClick={() => setMobileOpen((value) => !value)}>
             <AdminIcon name={mobileOpen ? "close" : "menu"} />
+          </button>
+          <button className="topbar-collapse" type="button" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={collapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>
+            <AdminIcon name="collapse" size={16} />
           </button>
           <div className="topbar-title"><span>Admin /</span><strong>{currentArea?.shortLabel ?? "Not found"}</strong></div>
           <AdminAccountWidget />

@@ -10,6 +10,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Moved the oversized sidebar collapse control into the desktop top bar as a discreet icon-only action pinned 12px from the sidebar/workspace boundary before the breadcrumb; mobile continues using only its established drawer button.
+- Restored the Admin account trigger from an unrequested pill treatment to the shell's existing 9px squared control radius without changing its identity content or dropdown.
 - Upgraded the Admin shell with a persistent desktop icon-only sidebar state, full-width mobile drawer behavior, and a StreamSuites-reference account menu adapted to Third Railify with an identity header, details matrix, icon-prefixed actions, keyboard navigation, and separated sign-out treatment.
 - Added Admin-authoritative avatar changes to `/access`: JPG/PNG/WebP uploads and public HTTPS URL imports are session/CSRF/rate-limit protected, capped at 5 MB, byte-validated, stored as immutable `u/<opaque-account-key>/avatar/<sha256>.<ext>` objects through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` R2 binding, and persisted to D1 only as a clean HTTPS URL. The binding/custom domain remain manual deployment prerequisites.
 - Added a shell-level horizontal loading indicator adapted from the StreamSuites Dashboard/Public pattern with Third Railify gold gradients, real Overview/Accounts async tracking, concurrent-load-safe tokens, main-content `aria-busy` state, and a static reduced-motion treatment.
