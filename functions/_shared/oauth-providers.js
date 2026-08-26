@@ -62,25 +62,51 @@ const PROVIDERS = {
   },
 };
 
+const GOOGLE_DISABLED_MESSAGE = "Available after site migration";
+
 export function knownProvider(provider) {
   return Object.prototype.hasOwnProperty.call(PROVIDERS, provider);
 }
 
 export function configuredOAuthProviders(env) {
-  return Object.entries(PROVIDERS)
-    .filter(([, provider]) => Boolean(env?.[provider.clientIdEnv] && env?.[provider.clientSecretEnv]))
-    .map(([id, provider]) => ({ id, label: provider.label }));
+  return oauthProviderStates(env)
+    .filter((provider) => provider.status === "enabled")
+    .map(({ id, label }) => ({ id, label }));
+}
+
+export function oauthProviderStates(env) {
+  return Object.entries(PROVIDERS).map(([id, provider]) => {
+    if (id === "google" && !googleOAuthEnabled(env)) {
+      return { id, label: provider.label, status: "disabled", message: GOOGLE_DISABLED_MESSAGE };
+    }
+    return {
+      id,
+      label: provider.label,
+      status: oauthCredentialsConfigured(env, provider) ? "enabled" : "unavailable",
+    };
+  });
 }
 
 export function oauthProviderConfig(env, provider) {
   const definition = PROVIDERS[provider];
   if (!definition) throw new AuthFailure(404, "oauth_provider_unknown", "That OAuth provider is not supported.");
+  if (provider === "google" && !googleOAuthEnabled(env)) {
+    throw new AuthFailure(503, "oauth_provider_disabled", "Google sign-in is disabled until the site migration.");
+  }
   const clientId = String(env?.[definition.clientIdEnv] || "");
   const clientSecret = String(env?.[definition.clientSecretEnv] || "");
   if (!clientId || !clientSecret) {
     throw new AuthFailure(503, "oauth_provider_not_configured", `${definition.label} sign-in is not configured.`);
   }
   return { ...definition, id: provider, clientId, clientSecret };
+}
+
+function googleOAuthEnabled(env) {
+  return String(env?.GOOGLE_OAUTH_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+function oauthCredentialsConfigured(env, provider) {
+  return Boolean(env?.[provider.clientIdEnv] && env?.[provider.clientSecretEnv]);
 }
 
 export function oauthCallbackUrl(env, provider) {

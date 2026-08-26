@@ -8,6 +8,10 @@ export type AuthAccount = {
 export type AuthConfig = {
   configured: boolean; emailSignupConfigured: boolean; turnstileSiteKey: string | null;
   oauthProviders: Array<{ id: "discord" | "google" | "github" | "twitter"; label: string }>;
+  oauthProviderStates: Array<{
+    id: "discord" | "google" | "github" | "twitter"; label: string;
+    status: "enabled" | "disabled" | "unavailable"; message?: string;
+  }>;
   publicOrigin: string | null; adminOrigin: string | null; environment: string; cookieMode: "host-only" | "shared-domain";
 };
 export type SessionPayload = {

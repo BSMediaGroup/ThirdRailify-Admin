@@ -48,6 +48,7 @@ import {
   fetchOAuthIdentity,
   knownProvider,
   oauthProviderConfig,
+  oauthProviderStates,
   registerOAuthIdentity,
   startOAuth,
 } from "../../_shared/oauth-providers.js";
@@ -125,6 +126,7 @@ function handleConfig(request, env) {
       emailSignupConfigured: Boolean(d1Configured && turnstileConfigured && rateLimitConfigured && resendConfigured),
       turnstileSiteKey: turnstileConfigured ? String(env.THIRDRAILIFY_TURNSTILE_SITE_KEY) : null,
       oauthProviders: providers,
+      oauthProviderStates: oauthProviderStates(env),
       publicOrigin: publicOrigin || null,
       adminOrigin: adminOrigin || null,
       environment: String(env?.AUTH_ENVIRONMENT || "unconfigured"),
@@ -346,6 +348,7 @@ async function handleOAuthStart(request, env, provider, fetchImpl) {
 
 async function handleOAuthCallback(request, env, provider, fetchImpl) {
   if (!knownProvider(provider)) throw new AuthFailure(404, "oauth_provider_unknown", "That OAuth provider is not supported.");
+  oauthProviderConfig(env, provider);
   const url = new URL(request.url);
   const state = url.searchParams.get("state") || "";
   const transaction = await consumeOAuthTransaction(env, provider, state);

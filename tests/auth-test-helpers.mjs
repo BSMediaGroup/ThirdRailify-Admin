@@ -45,6 +45,7 @@ export function authEnvironment(db, overrides = {}) {
     DISCORD_CLIENT_SECRET: "discord-test-secret",
     GOOGLE_CLIENT_ID: "google-test-client",
     GOOGLE_CLIENT_SECRET: "google-test-secret",
+    GOOGLE_OAUTH_ENABLED: "true",
     GITHUB_CLIENT_ID: "github-test-client",
     GITHUB_CLIENT_SECRET: "github-test-secret",
     X_OAUTH_CLIENT_ID: "x-test-client",

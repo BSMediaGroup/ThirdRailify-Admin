@@ -14,6 +14,12 @@ import {
   verifyTurnstile,
 } from "../functions/_shared/auth-core.js";
 import {
+  configuredOAuthProviders,
+  oauthCallbackUrl,
+  oauthProviderConfig,
+  oauthProviderStates,
+} from "../functions/_shared/oauth-providers.js";
+import {
   authEnvironment,
   cookiePair,
   createAuthDatabase,
@@ -59,6 +65,82 @@ test("Turnstile validation requires success, the expected action, hostname, and 
     verifyTurnstile({ ...env, THIRDRAILIFY_TURNSTILE_SECRET_KEY: "" }, request, "valid-login", "thirdrailify-login"),
     (error) => error instanceof AuthFailure && error.code === "turnstile_not_configured",
   );
+});
+
+test("Google OAuth is ineligible and server-blocked until its explicit migration gate is enabled", async () => {
+  const db = { prepare: () => { throw new Error("the disabled Google gate must run before D1 access"); } };
+  const disabledEnv = authEnvironment(db, { GOOGLE_OAUTH_ENABLED: "false" });
+  const authFetch = makeAuthFetch();
+
+  const configResponse = await callAuth("config", { method: "GET", origin: PUBLIC_ORIGIN }, disabledEnv, authFetch);
+  assert.equal(configResponse.status, 200);
+  const config = await configResponse.json();
+  assert.equal(config.configured, true, "the existing generic auth prerequisites remain satisfied");
+  assert.equal(config.oauthProviders.some((provider) => provider.id === "google"), false);
+  assert.deepEqual(
+    config.oauthProviderStates.find((provider) => provider.id === "google"),
+    { id: "google", label: "Google", status: "disabled", message: "Available after site migration" },
+  );
+  assert.equal(config.oauthProviderStates.find((provider) => provider.id === "discord")?.status, "enabled");
+  assert.equal(config.oauthProviders.some((provider) => provider.id === "discord"), true);
+  assert.equal(oauthProviderConfig(disabledEnv, "discord").clientId, "discord-test-client");
+
+  let disabledStartFetches = 0;
+  const disabledStart = await callAuth(
+    "oauth/google/start",
+    { origin: PUBLIC_ORIGIN, body: { turnstileToken: "valid-oauth", returnTo: "/account" } },
+    disabledEnv,
+    async () => {
+      disabledStartFetches += 1;
+      throw new Error("Google-disabled OAuth start must not fetch");
+    },
+  );
+  assert.equal(disabledStart.status, 503);
+  assert.equal((await disabledStart.json()).error, "oauth_provider_disabled");
+  assert.equal(disabledStartFetches, 0);
+
+  const enabledEnv = authEnvironment(db, { GOOGLE_OAUTH_ENABLED: "true" });
+  assert.equal(configuredOAuthProviders(enabledEnv).some((provider) => provider.id === "google"), true);
+  assert.equal(oauthProviderStates(enabledEnv).find((provider) => provider.id === "google")?.status, "enabled");
+  const enabledConfigResponse = await callAuth("config", { method: "GET", origin: PUBLIC_ORIGIN }, enabledEnv, authFetch);
+  const enabledConfig = await enabledConfigResponse.json();
+  assert.equal(enabledConfig.configured, true);
+  assert.equal(enabledConfig.oauthProviders.some((provider) => provider.id === "google"), true);
+  assert.equal(
+    oauthCallbackUrl(enabledEnv, "google"),
+    `${ADMIN_ORIGIN}/api/auth/oauth/google/callback`,
+    "the callback remains derived from the configured Admin origin",
+  );
+
+  let disabledCallbackFetches = 0;
+  const disabledCallback = await authRequest({
+    request: new Request(
+      `${ADMIN_ORIGIN}/api/auth/oauth/google/callback?code=test-code&state=pre-migration-transaction-state`,
+    ),
+    env: disabledEnv,
+    data: {
+      authFetch: async () => {
+        disabledCallbackFetches += 1;
+        throw new Error("Google-disabled OAuth callback must not fetch");
+      },
+    },
+  });
+  assert.equal(disabledCallback.status, 503);
+  assert.equal((await disabledCallback.json()).error, "oauth_provider_disabled");
+  assert.equal(disabledCallbackFetches, 0, "no Google token exchange or profile fetch occurs while disabled");
+
+  for (const overrides of [
+    { GOOGLE_OAUTH_ENABLED: "true", GOOGLE_CLIENT_ID: "" },
+    { GOOGLE_OAUTH_ENABLED: "true", GOOGLE_CLIENT_SECRET: "" },
+  ]) {
+    const incompleteEnv = authEnvironment(db, overrides);
+    assert.equal(configuredOAuthProviders(incompleteEnv).some((provider) => provider.id === "google"), false);
+    assert.equal(oauthProviderStates(incompleteEnv).find((provider) => provider.id === "google")?.status, "unavailable");
+    assert.throws(
+      () => oauthProviderConfig(incompleteEnv, "google"),
+      (error) => error instanceof AuthFailure && error.code === "oauth_provider_not_configured",
+    );
+  }
 });
 
 test("auth API covers masters, signup, verification, reset, OAuth, handoff, and Admin account controls", async (t) => {

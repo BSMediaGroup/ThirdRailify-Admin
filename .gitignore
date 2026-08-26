@@ -13,3 +13,4 @@ output/playwright/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+client_secret_251695505982-1tcah0go61p82620kcfs8dnlhf79m1ik.apps.googleusercontent.com.json

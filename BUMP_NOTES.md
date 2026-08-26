@@ -10,6 +10,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Wired the confirmed production Google OAuth client ID while keeping staging explicitly gated with `GOOGLE_OAUTH_ENABLED=false`. Admin now exposes truthful provider states and blocks both Google OAuth start and callback/token exchange until the gate is enabled with both credentials present; the production callback remains deferred to the domain migration and derived from `THIRDRAILIFY_ADMIN_ORIGIN`.
 - Established `ThirdRailify-Admin` as the shared D1 account authority with an idempotent schema for accounts, identities, PBKDF2 credentials, hashed sessions, OAuth transactions, public handoffs, verification/reset tokens, rate limits, and bounded audit events.
 - Added explicit Turnstile validation, Resend verification/reset flows, two locked environment Master Admins, Discord/Google/GitHub/X OAuth with one-time state and PKCE where supported, provider-subject uniqueness, verified-email linking, and immediate token discard.
 - Added fail-closed Admin session/role gates, the real account widget, protected status hydration, and a functional `/access` registry. Full Admins may read; only Master Admins may promote, demote, enable/disable, or revoke sessions.
