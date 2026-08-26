@@ -34,6 +34,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Validated the milestone with Admin lint, TypeScript, production build, diff checks, exact built-favicon bytes/content type, and rendered 390px/768px/1440px checks including the mobile sidebar with no overflow, broken assets, or console errors.
 - Configured the confirmed safe Resend sender identity and reply-to address in Admin Wrangler without adding or changing the encrypted `RESEND_API_KEY`; no deployment or email acceptance test was performed.
 - Wired the existing Third Railify Official Discord application ID (`1283057181578625034`) into Admin Wrangler as safe staging OAuth configuration.
+- Wired the GitHub OAuth App client ID into safe Admin configuration. Its staging and production callbacks remain registered externally on the same GitHub App; GitHub stays credential-driven and becomes available only after the encrypted client secret is provisioned.
 
 ### Human-readable
 

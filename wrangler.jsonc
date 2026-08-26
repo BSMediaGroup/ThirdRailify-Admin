@@ -12,6 +12,7 @@
     "DISCORD_CLIENT_ID": "1283057181578625034",
     "GOOGLE_CLIENT_ID": "251695505982-1tcah0go61p82620kcfs8dnlhf79m1ik.apps.googleusercontent.com",
     "GOOGLE_OAUTH_ENABLED": "false",
+    "GITHUB_CLIENT_ID": "Ov23liRIUUOXfTcmIPhG",
     "ADMIN_EMAIL_1": "mail@danielclancy.net",
     "ADMIN_EMAIL_2": "thirdmailify@gmail.com",
     "MAIL_FROM": "Third Railify Official <alerts@notify.thirdrailify.com>",
