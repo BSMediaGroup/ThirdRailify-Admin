@@ -7,7 +7,8 @@
     "AUTH_ENVIRONMENT": "staging",
     "THIRDRAILIFY_PUBLIC_ORIGIN": "https://thirdrailify.pages.dev",
     "THIRDRAILIFY_ADMIN_ORIGIN": "https://thirdrailify-admin.pages.dev",
-    "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": ""
+    "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": "",
+    "THIRDRAILIFY_TURNSTILE_SITE_KEY": "0x4AAAAAAEctN9Bb4evywXmW"
   },
   "d1_databases": [
     {
