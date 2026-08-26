@@ -36,6 +36,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Configured the confirmed safe Resend sender identity and reply-to address in Admin Wrangler without adding or changing the encrypted `RESEND_API_KEY`; no deployment or email acceptance test was performed.
 - Wired the existing Third Railify Official Discord application ID (`1283057181578625034`) into Admin Wrangler as safe staging OAuth configuration.
 - Wired the GitHub OAuth App client ID into safe Admin configuration. Its staging and production callbacks remain registered externally on the same GitHub App; GitHub stays credential-driven and becomes available only after the encrypted client secret is provisioned.
+- Wired the confirmed X OAuth 2.0 Client ID into safe Admin configuration. The X application is configured externally as a confidential Web App with both staging and production callbacks; its separate numeric X App ID is not used by website authentication, and X becomes operational once `X_OAUTH_CLIENT_SECRET` is provisioned as an encrypted Admin secret.
 
 ### Human-readable
 
