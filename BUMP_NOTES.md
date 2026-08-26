@@ -10,6 +10,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Upgraded the Admin shell with a persistent desktop icon-only sidebar state, full-width mobile drawer behavior, and a StreamSuites-reference account menu adapted to Third Railify with an identity header, details matrix, icon-prefixed actions, keyboard navigation, and separated sign-out treatment.
+- Added Admin-authoritative avatar changes to `/access`: JPG/PNG/WebP uploads and public HTTPS URL imports are session/CSRF/rate-limit protected, capped at 5 MB, byte-validated, stored as immutable `u/<opaque-account-key>/avatar/<sha256>.<ext>` objects through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` R2 binding, and persisted to D1 only as a clean HTTPS URL. The binding/custom domain remain manual deployment prerequisites.
 - Added a shell-level horizontal loading indicator adapted from the StreamSuites Dashboard/Public pattern with Third Railify gold gradients, real Overview/Accounts async tracking, concurrent-load-safe tokens, main-content `aria-busy` state, and a static reduced-motion treatment.
 - Switched the Admin dashboard favicon to the supplied `assets/icons/thirdadminfavx.png` artwork with an explicit PNG MIME declaration; all previous icon assets remain preserved but inactive.
 - Wired the confirmed production Google OAuth client ID while keeping staging explicitly gated with `GOOGLE_OAUTH_ENABLED=false`. Admin now exposes truthful provider states and blocks both Google OAuth start and callback/token exchange until the gate is enabled with both credentials present; the production callback remains deferred to the domain migration and derived from `THIRDRAILIFY_ADMIN_ORIGIN`.
@@ -39,6 +41,10 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Wired the confirmed X OAuth 2.0 Client ID into safe Admin configuration. The X application is configured externally as a confidential Web App with both staging and production callbacks; its separate numeric X App ID is not used by website authentication, and X becomes operational once `X_OAUTH_CLIENT_SECRET` is provisioned as an encrypted Admin secret.
 
 ### Human-readable
+
+The control room sidebar can now tuck down to its icons without losing navigation, while phones continue to receive a full readable drawer. The account menu now carries the same level of identity detail and action polish as the supplied StreamSuites examples, in Third Railify’s own black-and-gold treatment.
+
+Admins can change their own avatar from Accounts & Access using a file or image URL. Uploaded bytes live behind a clean immutable media path instead of being stuffed into account URLs as browser data.
 
 The Admin shell now shows a slim animated gold signal beneath the top bar while real dashboard data or account actions are loading, with a non-moving alternative for reduced-motion users.
 

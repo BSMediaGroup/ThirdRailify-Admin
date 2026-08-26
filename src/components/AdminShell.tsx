@@ -11,6 +11,7 @@ export type AdminShellOutletContext = {
 
 export function AdminShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(readSidebarPreference);
   const [loadingReason, setLoadingReason] = useState("");
   const location = useLocation();
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -44,16 +45,30 @@ export function AdminShell() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [mobileOpen]);
 
+  useEffect(() => {
+    try { window.localStorage.setItem("thirdrailify.admin.sidebar", collapsed ? "collapsed" : "expanded"); } catch { /* Preference persistence is optional. */ }
+  }, [collapsed]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("admin-mobile-nav-open", mobileOpen);
+    return () => document.documentElement.classList.remove("admin-mobile-nav-open");
+  }, [mobileOpen]);
+
   const currentArea = adminAreas.find((area) => area.path === location.pathname);
 
   return (
-    <div className="admin-layout">
+    <div className={`admin-layout${collapsed ? " admin-layout--collapsed" : ""}`}>
       <a className="skip-link" href="#admin-main">Skip to content</a>
       <aside id="admin-sidebar" className={`sidebar ${mobileOpen ? "sidebar--open" : ""}`} aria-label="Admin navigation">
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true"><img src={boltMark} alt="" /></span>
-          <div><strong>THIRD RAILIFY</strong><span>CONTROL ROOM</span></div>
+          <div className="brand-lockup__copy"><strong>THIRD RAILIFY</strong><span>CONTROL ROOM</span></div>
         </div>
+
+        <button className="sidebar-collapse" type="button" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={collapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((value) => !value)}>
+          <AdminIcon name="collapse" size={18} />
+          <span>{collapsed ? "Expand" : "Collapse"}</span>
+        </button>
 
         <div className="environment-note">
           <span className="status-dot" aria-hidden="true" />
@@ -63,7 +78,7 @@ export function AdminShell() {
         <nav className="primary-nav">
           <p className="nav-label">Workspace</p>
           {adminAreas.map((area) => (
-            <NavLink key={area.path} to={area.path} end={area.path === "/"} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
+            <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
               <AdminIcon name={area.icon} />
               <span>{area.label}</span>
             </NavLink>
@@ -96,4 +111,9 @@ export function AdminShell() {
       </div>
     </div>
   );
+}
+
+function readSidebarPreference() {
+  try { return window.localStorage.getItem("thirdrailify.admin.sidebar") === "collapsed"; }
+  catch { return false; }
 }

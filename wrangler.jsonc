@@ -7,6 +7,7 @@
     "AUTH_ENVIRONMENT": "staging",
     "THIRDRAILIFY_PUBLIC_ORIGIN": "https://thirdrailify.pages.dev",
     "THIRDRAILIFY_ADMIN_ORIGIN": "https://thirdrailify-admin.pages.dev",
+    "THIRDRAILIFY_PROFILE_MEDIA_ORIGIN": "https://thirdrailify-admin.pages.dev",
     "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": "",
     "THIRDRAILIFY_TURNSTILE_SITE_KEY": "0x4AAAAAAEctN9Bb4evywXmW",
     "DISCORD_CLIENT_ID": "1283057181578625034",
@@ -25,6 +26,12 @@
       "database_name": "thirdrailify-accounts",
       "database_id": "b8be3879-7aa1-4d70-af3f-617abce7a929",
       "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "THIRDRAILIFY_PROFILE_MEDIA",
+      "bucket_name": "thirdrailify-profile-media"
     }
   ]
 }

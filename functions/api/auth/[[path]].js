@@ -52,6 +52,7 @@ import {
   registerOAuthIdentity,
   startOAuth,
 } from "../../_shared/oauth-providers.js";
+import { updateAvatar } from "../../_shared/profile-media.js";
 
 const ROUTE_PREFIX = "/api/auth";
 
@@ -80,6 +81,10 @@ export async function onRequest(context) {
     if (path === "signup") return await handleSignup(request, env, fetchImpl);
     if (path === "logout") return await handleLogout(request, env);
     if (path === "handoff") return await handleHandoff(request, env);
+    if (path === "avatar") {
+      requireAllowedOrigin(request, env);
+      return jsonResponse(await updateAvatar(request, env, fetchImpl), { headers: corsHeaders(request, env) });
+    }
     if (path === "email/resend") return await handleVerificationResend(request, env, fetchImpl);
     if (path === "password/forgot") return await handlePasswordForgot(request, env, fetchImpl);
     if (path === "password/reset") return await handlePasswordReset(request, env, fetchImpl);

@@ -30,6 +30,7 @@ The Public repository does not own migrations, so omit `migrations_dir` there. D
 AUTH_ENVIRONMENT=staging
 THIRDRAILIFY_PUBLIC_ORIGIN=https://thirdrailify.pages.dev
 THIRDRAILIFY_ADMIN_ORIGIN=https://thirdrailify-admin.pages.dev
+THIRDRAILIFY_PROFILE_MEDIA_ORIGIN=https://thirdrailify-admin.pages.dev
 THIRDRAILIFY_AUTH_COOKIE_DOMAIN=
 ```
 
@@ -54,6 +55,14 @@ Set `ADMIN_EMAIL_1` and `ADMIN_EMAIL_2` as ordinary variables and the correspond
 7. Configure Resend with an authenticated sender domain, then set `MAIL_FROM` and optional `MAIL_REPLY_TO`. Verification links expire after 24 hours and reset links after 30 minutes.
 8. Create provider applications and add client IDs as ordinary Admin variables. Add client secrets only as encrypted values. Use no wildcard callback URLs.
 9. Deploy Admin first, verify config/session/error behavior, then deploy Public. Apply no custom-domain or DNS change during staging.
+
+## Profile-media storage
+
+Avatar changes use the verified existing `thirdrailify-profile-media` bucket through one Admin-only R2 binding named `THIRDRAILIFY_PROFILE_MEDIA`. The checked-in Admin Wrangler configuration declares that binding; Public has no R2 binding. Public `r2.dev` access remains disabled, and a custom `cdn.thirdrailify.com` media domain remains deferred.
+
+`THIRDRAILIFY_PROFILE_MEDIA_ORIGIN` is safe configuration. Staging uses `https://thirdrailify-admin.pages.dev`, where the Admin `/u/*` Function serves immutable objects. A future R2 custom domain such as `https://cdn.thirdrailify.com` can become the value only after its bucket, DNS, TLS, and exact `/u/*` delivery are verified. The stored key remains `u/<opaque-account-key>/avatar/<sha256>.<jpg|png|webp>`, so moving to a custom media origin does not require base64/data URLs or browser-owned identity state.
+
+The avatar endpoint accepts a multipart `avatar` file or JSON `imageUrl`, requires a live session plus CSRF proof, applies the existing D1-backed abuse controls, validates a 5 MB maximum and JPG/PNG/WebP bytes, and stores URL imports in R2 rather than persisting the third-party source URL. Old immutable revisions are retained so cached account payloads never point at overwritten bytes; lifecycle cleanup is an explicit later operational policy.
 
 ## Exact OAuth callbacks
 

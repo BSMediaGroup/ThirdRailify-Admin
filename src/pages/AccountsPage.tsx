@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router-dom";
 import { AdminAvatar } from "../auth/AdminAccountWidget";
 import { useAuth } from "../auth/AuthProvider";
-import { adminApi } from "../auth/client";
+import { adminApi, importAvatarUrl, uploadAvatar } from "../auth/client";
 import type { AuthAccount } from "../auth/types";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 
@@ -11,7 +11,7 @@ type AccountAction = "promote" | "demote" | "disable" | "enable" | "revoke-sessi
 type PendingAction = { account: AuthAccount; action: AccountAction };
 
 export function AccountsPage() {
-  const { csrfToken, account: currentAccount, access } = useAuth();
+  const { csrfToken, account: currentAccount, access, refresh } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<AccountsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +51,7 @@ export function AccountsPage() {
 
   return <>
     <section className="accounts-heading"><div><p className="eyebrow"><span /> D1 account authority</p><h1>Accounts &amp; access</h1><p>Review shared identities, roles, status, and active access controls. Authority is enforced by the server on every request.</p></div><button className="secondary-button" type="button" onClick={() => void load()} disabled={loading}>Refresh</button></section>
+    {currentAccount && <AvatarSettings account={currentAccount} csrfToken={csrfToken} onUpdated={async () => { await refresh(); await load(); }} />}
     {error && <div className="admin-alert" role="alert">{error}</div>}
     <section className="account-filters" aria-label="Account filters">
       <label><span>Search</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, username or subject" /></label>
@@ -74,6 +75,46 @@ export function AccountsPage() {
     </section>
     {pending && <div className="confirm-backdrop" role="presentation"><div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><p className="eyebrow">Security action</p><h2 id="confirm-title">{actionLabel(pending.action)}?</h2><p>This will apply immediately to <strong>{pending.account.displayName}</strong> through the signed Admin API.</p><div><button type="button" className="secondary-button" onClick={() => setPending(null)} disabled={Boolean(busyId)}>Cancel</button><button type="button" className="danger-button" onClick={() => void mutate()} disabled={Boolean(busyId)}>{busyId ? "Applying..." : "Confirm"}</button></div></div></div>}
   </>;
+}
+
+function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccount; csrfToken: string; onUpdated: () => Promise<void> }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [imageUrl, setImageUrl] = useState("");
+  const [busy, setBusy] = useState<"file" | "url" | "">("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const saveFile = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!file || !csrfToken) return;
+    if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type) || file.size > 5 * 1024 * 1024) {
+      setError("Choose a JPG, PNG, or WebP image no larger than 5 MB."); return;
+    }
+    setBusy("file"); setError(""); setMessage("");
+    try {
+      await uploadAvatar(csrfToken, file); await onUpdated(); setFile(null); if (fileInput.current) fileInput.current.value = ""; setMessage("Avatar updated from your upload.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The avatar could not be updated."); }
+    finally { setBusy(""); }
+  };
+
+  const saveUrl = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!imageUrl.trim() || !csrfToken) return;
+    setBusy("url"); setError(""); setMessage("");
+    try { await importAvatarUrl(csrfToken, imageUrl.trim()); await onUpdated(); setImageUrl(""); setMessage("Avatar updated from the image URL."); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "The avatar could not be updated."); }
+    finally { setBusy(""); }
+  };
+
+  return <section className="avatar-settings" aria-labelledby="admin-avatar-settings-title">
+    <div className="avatar-settings__intro"><AdminAvatar account={account} /><div><p className="eyebrow">Profile image</p><h2 id="admin-avatar-settings-title">Your avatar</h2><p>Upload a JPG, PNG, or WebP up to 5 MB, or import a public HTTPS image URL. The Admin service stores a validated immutable media object; browser data URLs are never persisted.</p></div></div>
+    <div className="avatar-settings__forms">
+      <form onSubmit={saveFile}><label><span>Upload image</span><input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={(event) => { setFile(event.target.files?.[0] || null); setError(""); setMessage(""); }} /></label><button className="secondary-button" type="submit" disabled={!file || Boolean(busy)}>{busy === "file" ? "Uploading..." : "Upload avatar"}</button></form>
+      <form onSubmit={saveUrl}><label><span>Direct image URL</span><input type="url" inputMode="url" value={imageUrl} onChange={(event) => { setImageUrl(event.target.value); setError(""); setMessage(""); }} placeholder="https://example.com/avatar.webp" /></label><button className="secondary-button" type="submit" disabled={!imageUrl.trim() || Boolean(busy)}>{busy === "url" ? "Importing..." : "Use image URL"}</button></form>
+    </div>
+    {(error || message) && <p className={`avatar-settings__status${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error || message}</p>}
+  </section>;
 }
 
 function Filter({ label: text, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) { return <label><span>{text}</span><select value={value} onChange={(event) => onChange(event.target.value)}><option value="all">All</option>{options.map((option) => <option key={option} value={option}>{label(option)}</option>)}</select></label>; }

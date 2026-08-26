@@ -28,6 +28,7 @@ const RATE_RULES = {
   resend: { limit: 5, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   oauth: { limit: 20, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   handoff: { limit: 10, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
+  avatar: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
 };
 
 const ONE_TIME_TABLES = new Set(["email_verification_tokens", "password_reset_tokens"]);
@@ -122,11 +123,14 @@ export function safeReturnPath(value, fallback = "/account") {
   return path.slice(0, 1024);
 }
 
-export function safeAvatarUrl(value) {
+export function safeAvatarUrl(value, env = null) {
   if (!value) return null;
   try {
     const url = new URL(String(value));
-    if (url.protocol !== "https:" || !SAFE_AVATAR_HOSTS.has(url.hostname)) return null;
+    const configuredMediaOrigins = new Set(
+      [env?.THIRDRAILIFY_ADMIN_ORIGIN, env?.THIRDRAILIFY_PROFILE_MEDIA_ORIGIN].map(normalizeOrigin).filter(Boolean),
+    );
+    if (url.protocol !== "https:" || (!SAFE_AVATAR_HOSTS.has(url.hostname) && !configuredMediaOrigins.has(url.origin))) return null;
     url.username = "";
     url.password = "";
     return url.toString().slice(0, 1024);
@@ -434,7 +438,7 @@ export async function serializeAccount(env, row, options = {}) {
     email: row.email_normalized || null,
     displayName: row.display_name,
     username: identities.find((identity) => identity.provider_username)?.provider_username || null,
-    avatarUrl: safeAvatarUrl(row.avatar_url),
+    avatarUrl: safeAvatarUrl(row.avatar_url, env),
     providers: identities.map((identity) => identity.provider),
     identities: identities.map((identity) => ({
       provider: identity.provider,

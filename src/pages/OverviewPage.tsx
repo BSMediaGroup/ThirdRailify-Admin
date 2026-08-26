@@ -16,7 +16,7 @@ type StatusPayload = {
 const deferredAreas = [
   ["Content authority", "Deferred", "Editorial writes remain outside this milestone."],
   ["Commerce authority", "Deferred", "Products and orders remain provider-neutral shells."],
-  ["Media operations", "Deferred", "No upload or asset mutation pipeline is represented as live."],
+  ["Editorial media", "Deferred", "Profile avatars are bounded account media; the broader asset library remains deferred."],
 ];
 
 export function OverviewPage() {

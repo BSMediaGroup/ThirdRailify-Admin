@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test:functions": "node --test tests/auth-migration.test.mjs tests/auth-functions.test.mjs",
+    "test:functions": "node --test --test-concurrency=1 tests/auth-migration.test.mjs tests/auth-functions.test.mjs tests/profile-media.test.mjs",
     "typecheck": "tsc -b --pretty false",
     "preview": "vite preview --host 127.0.0.1"
   },

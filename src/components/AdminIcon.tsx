@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { AdminArea } from "../config/navigation";
 
 type Props = {
-  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "shield" | "signal";
+  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "shield" | "signal" | "collapse" | "profile" | "external" | "logout";
   size?: number;
 };
 
@@ -21,6 +21,10 @@ const paths: Record<Props["name"], ReactNode> = {
   arrow: <><path d="M5 12h14M14 7l5 5-5 5"/></>,
   shield: <><path d="M12 3 5 6v5c0 4.6 2.8 8.2 7 10 4.2-1.8 7-5.4 7-10V6zM9 12l2 2 4-5"/></>,
   signal: <><path d="M5 18h14M8 18l4-14 4 14M9.5 12h5M7 7 4 4M17 7l3-3"/></>,
+  collapse: <><path d="m14 7-5 5 5 5"/><path d="M20 4v16"/></>,
+  profile: <><circle cx="12" cy="8" r="3"/><path d="M5 21c.6-4.7 3-7 7-7s6.4 2.3 7 7"/></>,
+  external: <><path d="M14 5h5v5M19 5l-8 8"/><path d="M18 13v6H5V6h6"/></>,
+  logout: <><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10"/></>,
 };
 
 export function AdminIcon({ name, size = 20 }: Props) {
