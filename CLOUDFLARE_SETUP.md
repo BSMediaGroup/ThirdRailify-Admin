@@ -1,6 +1,6 @@
 # Cloudflare Pages staging setup
 
-This document describes dashboard values for the current static Vite scaffold. It does not claim a Pages project exists and does not authorize deployment, Cloudflare Access, DNS, nameserver, Wix, or custom-domain changes.
+This document retains the base Pages build values. The current milestone also includes Pages Functions and shared D1 authentication; follow `CLOUDFLARE_AUTH_SETUP.md` for the required database binding, secrets, callbacks, deployment order, and Access caveat. Neither document claims a Pages resource exists or authorizes deployment, Cloudflare Access, DNS, nameserver, Wix, or custom-domain changes.
 
 ## Project values
 
@@ -19,7 +19,7 @@ Cloudflare's current Pages documentation lists `npm run build` and `dist` for Re
 
 ## Environment names
 
-No application runtime environment variables are currently required or optional. There are no Pages Functions, auth providers, databases, or server APIs. Do not copy the repository's local `.env` into Cloudflare and never expose later provider credentials as `VITE_*` values.
+The auth Functions require the safe origins and environment mode documented in `CLOUDFLARE_AUTH_SETUP.md`, plus one shared D1 binding and Admin-only encrypted secrets. Do not copy the repository's local `.env` into Cloudflare and never expose provider credentials as `VITE_*` values.
 
 `NODE_VERSION` does not need to be added in the dashboard because `.node-version` already pins it. If dashboard policy requires an explicit build variable, use the same name/value and keep both settings synchronized.
 
@@ -31,11 +31,11 @@ No application runtime environment variables are currently required or optional.
 4. Confirm the document meta and static response both specify `noindex, nofollow, noarchive`.
 5. Confirm the response security headers and SPA fallback are present.
 6. Check phone, tablet, and desktop layouts, mobile menu/Escape, keyboard focus, reduced motion, overflow, local assets, and browser console/network errors.
-7. Keep the surface free of privileged data and controls. `noindex` is not authentication.
+7. Verify signed-out and non-Admin users never receive the dashboard shell, and verify `/api/admin/*` rejects missing or insufficient sessions. `noindex` is not authentication.
 
 ## Security and domain hold
 
-This scaffold is safe only because it contains no privileged state. Before any sensitive functionality, implement authenticated server enforcement, deny-by-default authorization, session controls, secure credential storage, audit logs, and an explicit staging access decision.
+The account milestone implements application authentication, deny-by-default role checks, session controls, hashed credentials/tokens, and bounded audit records. It is not live until the real D1 binding and secrets are configured and the documented staging acceptance is completed.
 
 **DO NOT ATTACH `thirdrailify.com` OR `admin.thirdrailify.com` YET.**
 

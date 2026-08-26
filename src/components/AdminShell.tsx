@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import boltMark from "../../assets/logos/boltv2straight.svg";
 import { adminAreas } from "../config/navigation";
 import { AdminIcon } from "./AdminIcon";
+import { AdminAccountWidget } from "../auth/AdminAccountWidget";
 
 export function AdminShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -39,7 +40,7 @@ export function AdminShell() {
 
         <div className="environment-note">
           <span className="status-dot" aria-hidden="true" />
-          <div><strong>Development scaffold</strong><span>No privileged systems</span></div>
+          <div><strong>Authenticated staging</strong><span>D1 account authority</span></div>
         </div>
 
         <nav className="primary-nav">
@@ -54,7 +55,7 @@ export function AdminShell() {
 
         <div className="sidebar-footer">
           <AdminIcon name="shield" />
-          <p><strong>Read-only by design</strong><span>Auth and writes are deferred.</span></p>
+          <p><strong>Least privilege</strong><span>Account writes require Master Admin.</span></p>
         </div>
       </aside>
 
@@ -66,7 +67,7 @@ export function AdminShell() {
             <AdminIcon name={mobileOpen ? "close" : "menu"} />
           </button>
           <div className="topbar-title"><span>Admin /</span><strong>{currentArea?.shortLabel ?? "Not found"}</strong></div>
-          <div className="topbar-status"><span className="status-dot" aria-hidden="true" /><span>Scaffold only</span></div>
+          <AdminAccountWidget />
         </header>
         <main id="admin-main" className="admin-main" tabIndex={-1}>
           <Outlet />

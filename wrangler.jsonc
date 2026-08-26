@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "thirdrailify-admin",
+  "compatibility_date": "2026-08-11",
+  "pages_build_output_dir": "./dist",
+  "vars": {
+    "AUTH_ENVIRONMENT": "staging",
+    "THIRDRAILIFY_PUBLIC_ORIGIN": "https://thirdrailify.pages.dev",
+    "THIRDRAILIFY_ADMIN_ORIGIN": "https://thirdrailify-admin.pages.dev",
+    "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": ""
+  }
+}

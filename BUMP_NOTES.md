@@ -10,6 +10,11 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Established `ThirdRailify-Admin` as the shared D1 account authority with an idempotent schema for accounts, identities, PBKDF2 credentials, hashed sessions, OAuth transactions, public handoffs, verification/reset tokens, rate limits, and bounded audit events.
+- Added explicit Turnstile validation, Resend verification/reset flows, two locked environment Master Admins, Discord/Google/GitHub/X OAuth with one-time state and PKCE where supported, provider-subject uniqueness, verified-email linking, and immediate token discard.
+- Added fail-closed Admin session/role gates, the real account widget, protected status hydration, and a functional `/access` registry. Full Admins may read; only Master Admins may promote, demote, enable/disable, or revoke sessions.
+- Added exact auth/Admin Function routing, minimal Turnstile/avatar CSP allowances, safe staging origins, sanitized environment examples, and a complete manual Cloudflare/provider setup runbook. The missing real D1 ID remains an explicit activation blocker.
+- Added focused D1 migration and auth integration tests. No live OAuth, Turnstile, Resend, Cloudflare resource, binding, secret, deployment, DNS, Access, or custom-domain change was performed.
 - Added a Vite/React/TypeScript/React Router application with deterministic npm metadata.
 - Added a responsive Third Railify operational shell, centralized route configuration, Overview, eight future-area shells, mobile navigation with Escape handling, visible focus, reduced motion, state examples, and a branded 404.
 - Established the seeded American Captain face as the main display/header font, supported by Blinker and Geist Mono.
@@ -28,10 +33,12 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Human-readable
 
+The Admin surface now has a real shared account foundation and refuses to show the control room until the server confirms an Admin role. Master Admins can manage account access from the new Accounts page; every other operational module remains accurately deferred.
+
 The separate Admin repository now has a real, polished frontend that can be reviewed on an isolated staging URL. It clearly shows where future operational areas will live while refusing to pretend that accounts, orders, products, or integrations are connected. It is a visual and routing foundation, not an administration system.
 
 ### Known deferrals
 
-- Authentication, authorization, sessions, audit trail, Cloudflare access policy, and private-data handling.
+- Creation/binding of the real staging D1 database, encrypted secrets, provider applications, Turnstile widget, Resend sender, deployment, and live acceptance.
 - CMS, catalogue/provider writes, orders, membership operations, users, media uploads, settings persistence, and integrations.
 - Pages project creation, deployment, custom domain, DNS, analytics, and production acceptance.
