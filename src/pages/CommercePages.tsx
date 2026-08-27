@@ -7,6 +7,7 @@ import { AdminIcon } from "../components/AdminIcon";
 import {
   getBusinessProfile,
   getCommerceOverview,
+  getCommerceOrders,
   getCommerceTemplates,
   getMerchandisingProducts,
   saveBusinessProfile,
@@ -15,6 +16,7 @@ import {
   verifyStripeConnection,
   type BusinessPayload,
   type CommerceOverviewPayload,
+  type CommerceOrdersPayload,
   type CommerceStatus,
   type CommerceTemplate,
   type MerchandisingPayload,
@@ -24,7 +26,8 @@ import {
 
 const REQUIRED_POSTURE = [
   ["Commerce environment", "Staging"],
-  ["Checkout", "Disabled"],
+  ["Checkout engine", "Implemented / gated"],
+  ["Public checkout", "Disabled"],
   ["Live payment capture", "Disabled"],
   ["Fulfillment submission", "Disabled"],
 ] as const;
@@ -52,7 +55,7 @@ export function CommerceOverviewPage() {
   const stripeOperational = Boolean(stripe?.status === "connected" && stripe.apiConfigured && stripe.webhookConfigured && stripe.webhookSigningConfigured);
 
   return <>
-    <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary={stripeOperational ? "The dedicated Canadian Stripe test API is connected and a valid signed sandbox event has verified the webhook path. Checkout, live payment, and fulfillment actions remain disabled." : "The dedicated Canadian Stripe account remains fail-closed until its test API and signed webhook path are both verified. Checkout, live payment, and fulfillment actions remain disabled."} status="disabled" />
+    <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary={stripeOperational ? "The sandbox Checkout engine is implemented behind authoritative product and payment gates. The Canadian Stripe TEST API and signed webhook path are verified; Public checkout, live payments, and fulfillment remain disabled." : "The sandbox Checkout engine is implemented but remains fail-closed until its Stripe TEST API and signed webhook path are verified. Public checkout, live payments, and fulfillment remain disabled."} status="disabled" />
     {error && <div className="admin-alert" role="alert">{error}</div>}
     <section className="commerce-section commerce-workspace-section" aria-labelledby="workspace-title">
       <SectionTitle id="workspace-title" eyebrow="Governed workspaces" title="Commerce control rooms" />
@@ -63,7 +66,7 @@ export function CommerceOverviewPage() {
     {!payload && !error ? <CommerceState>Loading truthful commerce status…</CommerceState> : payload ? <>
       <section className="commerce-posture" aria-label="Required safe posture">{REQUIRED_POSTURE.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
       <div className={`commerce-callout ${payload.databaseConfigured ? "is-pending" : "is-unavailable"}`} role="status">
-        <AdminIcon name="shield" /><div><strong>{payload.databaseConfigured ? "Commerce D1 is locally available" : "Commerce D1 is not bound"}</strong><p>{payload.databaseConfigured ? "Persistence is available, but payment and fulfillment gates remain disabled." : "Safe defaults are visible. Private fields and every mutation fail closed until the separate Admin-only database and encryption key are configured."}</p></div>
+        <AdminIcon name="shield" /><div><strong>{payload.databaseConfigured ? "Commerce D1 is available to the Admin runtime" : "Commerce D1 is not bound"}</strong><p>{payload.databaseConfigured ? "Order persistence and signed payment linkage are implemented, but the zero-product catalogue and explicit activation gates keep Public checkout disabled." : "Safe defaults are visible. Private fields and every mutation fail closed until the separate Admin-only database and encryption key are configured."}</p></div>
       </div>
       <section className="commerce-section" aria-labelledby="provider-status-title"><SectionTitle id="provider-status-title" eyebrow="Provider truth" title="Connections" /><div className="provider-card-grid">{payload.providers.map((provider) => <ProviderCard key={provider.provider} provider={provider} />)}</div></section>
       <section className="commerce-section" aria-labelledby="readiness-title"><SectionTitle id="readiness-title" eyebrow="No synthetic metrics" title="Readiness" /><div className="commerce-metric-grid">
@@ -111,7 +114,7 @@ export function PaymentsPayoutsPage() {
     {message && <div className="auth-success" role="status">{message}</div>}
     <section className="provider-detail-grid">
       <DetailCard title="Stripe" status={connected ? "connected" : "setup_required"} statusLabel={connected ? "Test API connected" : undefined} lead="Primary shop processor">
-        <dl><Fact term="Dedicated merchant" value={accountName} /><Fact term="Account ID" value={compactAccountId(stripe?.externalAccountId)} /><Fact term="Country" value={stripe?.countryCode?.toUpperCase() === "CA" ? "Canada" : "Canada — awaiting verification"} /><Fact term="Currency" value={(stripe?.currencyCode || "CAD").toUpperCase()} /><Fact term="Stripe test API" value={connected ? "Connected" : "Verification pending"} /><Fact term="Environment" value="TEST" /><Fact term="Charges (test)" value={connected ? metadataBooleanLabel(stripe, "chargesEnabled") : "Not yet verified"} /><Fact term="Payouts (test)" value={connected ? metadataBooleanLabel(stripe, "payoutsEnabled") : "Not yet verified"} /><Fact term="Details submitted" value={connected ? metadataBooleanLabel(stripe, "detailsSubmitted") : "Not yet verified"} /><Fact term="Last synchronized" value={formatSynchronizedAt(stripe?.lastSynchronizedAt)} /><Fact term="Webhook endpoint" value={webhookOperational ? "Operational / configured" : stripe?.webhookEndpointReady ? "Ready for configuration" : "Unavailable"} /><Fact term="Webhook signing" value={webhookOperational ? "Configured / verified" : stripe?.webhookSigningConfigured ? "Configured — awaiting verified event" : "Not configured"} /><Fact term="Checkout" value="Disabled" /><Fact term="Live payments" value="Disabled" /><Fact term="Live payout readiness" value="Unverified" /><Fact term="Fulfillment" value="Disabled" /></dl>
+        <dl><Fact term="Dedicated merchant" value={accountName} /><Fact term="Account ID" value={compactAccountId(stripe?.externalAccountId)} /><Fact term="Country" value={stripe?.countryCode?.toUpperCase() === "CA" ? "Canada" : "Canada — awaiting verification"} /><Fact term="Currency" value={(stripe?.currencyCode || "CAD").toUpperCase()} /><Fact term="Stripe test API" value={connected ? "Connected" : "Verification pending"} /><Fact term="Environment" value="TEST" /><Fact term="Charges (test)" value={connected ? metadataBooleanLabel(stripe, "chargesEnabled") : "Not yet verified"} /><Fact term="Payouts (test)" value={connected ? metadataBooleanLabel(stripe, "payoutsEnabled") : "Not yet verified"} /><Fact term="Details submitted" value={connected ? metadataBooleanLabel(stripe, "detailsSubmitted") : "Not yet verified"} /><Fact term="Last synchronized" value={formatSynchronizedAt(stripe?.lastSynchronizedAt)} /><Fact term="Webhook endpoint" value={webhookOperational ? "Operational / configured" : stripe?.webhookEndpointReady ? "Ready for configuration" : "Unavailable"} /><Fact term="Webhook signing" value={webhookOperational ? "Configured / verified" : stripe?.webhookSigningConfigured ? "Configured — awaiting verified event" : "Not configured"} /><Fact term="Checkout engine" value="Implemented / gated" /><Fact term="Public checkout" value="Disabled" /><Fact term="Live payments" value="Disabled" /><Fact term="Live payout readiness" value="Unverified" /><Fact term="Fulfillment" value="Disabled" /></dl>
         {canManagePayments && <button type="button" className="secondary-button" onClick={() => void verify()} disabled={!canVerify}>{busy ? "Verifying…" : "Verify Stripe connection"}</button>}
         {canManagePayments && !payload?.databaseConfigured && <p className="commerce-action-note">Commerce D1 is required before verification.</p>}
         {canManagePayments && payload?.databaseConfigured && !payload.stripeSecretConfigured && <p className="commerce-action-note">A valid Stripe test server credential must be configured before verification.</p>}
@@ -340,10 +343,23 @@ export function CommerceProductsPage() {
     </div> : null}
   </>;
 }
-export function CommerceOrdersPage() { return <CommerceDeferredPage kind="Orders" summary="No synthetic orders or revenue are shown. Future orders require authoritative Stripe webhook completion, idempotent persistence, and explicit draft-only fulfillment gates." />; }
-
-function CommerceDeferredPage({ kind, summary }: { kind: string; summary: string }) {
-  return <><CommerceHeading eyebrow="Commerce record authority" title={kind} summary={summary} status="unavailable" /><CommerceState><strong>No records available.</strong><span>The separate commerce database is not bound and no provider call has been made.</span></CommerceState></>;
+export function CommerceOrdersPage() {
+  const { startLoading } = useOutletContext<AdminShellOutletContext>();
+  const [payload, setPayload] = useState<CommerceOrdersPayload | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    const stop = startLoading("Loading authoritative commerce orders"); setError("");
+    try { setPayload(await getCommerceOrders()); }
+    catch (reason) { setError(errorMessage(reason, "Commerce orders are unavailable.")); }
+    finally { stop(); }
+  }, [startLoading]);
+  useEffect(() => { void load(); }, [load]);
+  return <>
+    <CommerceHeading eyebrow="Commerce record authority" title="Orders" summary="Local orders are initialized from authoritative D1 product snapshots, linked to Stripe-hosted TEST Checkout, and marked paid only by a valid signed webhook. Fulfillment remains disabled." status="disabled" />
+    {error && <div className="admin-alert" role="alert">{error}</div>}
+    <section className="commerce-posture" aria-label="Order engine posture"><div><span>Checkout engine</span><strong>Implemented / gated</strong></div><div><span>Public checkout</span><strong>Disabled</strong></div><div><span>Payment mode</span><strong>Stripe TEST</strong></div><div><span>Fulfillment</span><strong>Disabled</strong></div></section>
+    {!payload && !error ? <CommerceState>Loading authoritative orders…</CommerceState> : payload ? payload.orders.length ? <section className="commerce-section" aria-labelledby="orders-list-title"><SectionTitle id="orders-list-title" eyebrow="Bounded payment state" title="Latest orders" /><div className="provider-card-grid">{payload.orders.map((order) => <article className="provider-card" key={order.id}><div><span>{order.id}</span><StatusBadge status={order.paymentStatus === "paid" ? "connected" : order.checkoutStatus === "checkout_failed" ? "error" : "pending"} label={order.paymentStatus === "paid" ? "Payment confirmed" : humanize(order.checkoutStatus)} /></div><dl><Fact term="Expected total" value={formatCad(order.expectedAmount)} /><Fact term="Checkout" value={humanize(order.checkoutStatus)} /><Fact term="Payment" value={humanize(order.paymentStatus)} /><Fact term="Fulfillment" value={humanize(order.fulfillmentStatus)} /><Fact term="Created" value={formatSynchronizedAt(order.createdAt)} /></dl></article>)}</div></section> : <CommerceState><strong>0 authoritative orders.</strong><span>Public checkout is disabled and no synthetic order or revenue record has been created.</span></CommerceState> : null}
+  </>;
 }
 
 function CommerceHeading({ eyebrow, title, summary, status, statusLabel }: { eyebrow: string; title: string; summary: string; status: CommerceStatus; statusLabel?: string }) {
@@ -351,7 +367,7 @@ function CommerceHeading({ eyebrow, title, summary, status, statusLabel }: { eye
 }
 function SectionTitle({ id, eyebrow, title }: { id: string; eyebrow: string; title: string }) { return <div className="section-heading"><div><p className="eyebrow">{eyebrow}</p><h2 id={id}>{title}</h2></div></div>; }
 function StatusBadge({ status, label }: { status: CommerceStatus; label?: string }) { return <span className={`commerce-status commerce-status--${status}`}>{label || labelStatus(status)}</span>; }
-function ProviderCard({ provider }: { provider: ProviderStatus }) { const stripeConnected = provider.provider === "stripe" && provider.status === "connected" && provider.environment === "test" && provider.apiConfigured; const webhookOperational = provider.provider === "stripe" && provider.webhookConfigured && provider.webhookSigningConfigured; return <article className="provider-card"><div><span>{provider.label}</span><StatusBadge status={provider.status} label={stripeConnected ? "Test API connected" : undefined} /></div><dl>{provider.integrationMode && <Fact term="Integration" value={humanize(provider.integrationMode)} />}<Fact term="Custody" value={humanize(provider.credentialCustody)} /><Fact term="Environment" value={provider.environment === "test" ? "TEST" : humanize(provider.environment)} />{provider.countryCode && <Fact term="Country" value={provider.countryCode.toUpperCase() === "CA" ? "Canada" : provider.countryCode} />}{provider.currencyCode && <Fact term="Currency" value={provider.currencyCode.toUpperCase()} />}{provider.provider === "stripe" && <><Fact term="Account" value={metadataText(provider, "accountDisplayName") || (provider.accountCreated ? "Created" : "Not confirmed")} />{provider.externalAccountId && <Fact term="Account ID" value={compactAccountId(provider.externalAccountId)} />}<Fact term="API" value={stripeConnected ? "Test API connected" : "Not configured"} /><Fact term="Webhook endpoint" value={webhookOperational ? "Operational / configured" : provider.webhookEndpointReady ? "Ready for configuration" : "Unavailable"} /><Fact term="Webhook signing" value={webhookOperational ? "Configured / verified" : provider.webhookSigningConfigured ? "Configured — awaiting verified event" : "Not configured"} /><Fact term="Checkout" value={provider.checkoutEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payments" value={provider.livePaymentsEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payouts" value={provider.livePayoutReadiness === "verified" ? "Verified" : "Unverified"} />{provider.lastSynchronizedAt && <Fact term="Last synchronized" value={formatSynchronizedAt(provider.lastSynchronizedAt)} />}</>}</dl></article>; }
+function ProviderCard({ provider }: { provider: ProviderStatus }) { const stripeConnected = provider.provider === "stripe" && provider.status === "connected" && provider.environment === "test" && provider.apiConfigured; const webhookOperational = provider.provider === "stripe" && provider.webhookConfigured && provider.webhookSigningConfigured; return <article className="provider-card"><div><span>{provider.label}</span><StatusBadge status={provider.status} label={stripeConnected ? "Test API connected" : undefined} /></div><dl>{provider.integrationMode && <Fact term="Integration" value={humanize(provider.integrationMode)} />}<Fact term="Custody" value={humanize(provider.credentialCustody)} /><Fact term="Environment" value={provider.environment === "test" ? "TEST" : humanize(provider.environment)} />{provider.countryCode && <Fact term="Country" value={provider.countryCode.toUpperCase() === "CA" ? "Canada" : provider.countryCode} />}{provider.currencyCode && <Fact term="Currency" value={provider.currencyCode.toUpperCase()} />}{provider.provider === "stripe" && <><Fact term="Account" value={metadataText(provider, "accountDisplayName") || (provider.accountCreated ? "Created" : "Not confirmed")} />{provider.externalAccountId && <Fact term="Account ID" value={compactAccountId(provider.externalAccountId)} />}<Fact term="API" value={stripeConnected ? "Test API connected" : "Not configured"} /><Fact term="Webhook endpoint" value={webhookOperational ? "Operational / configured" : provider.webhookEndpointReady ? "Ready for configuration" : "Unavailable"} /><Fact term="Webhook signing" value={webhookOperational ? "Configured / verified" : provider.webhookSigningConfigured ? "Configured — awaiting verified event" : "Not configured"} /><Fact term="Checkout engine" value="Implemented / gated" /><Fact term="Public checkout" value={provider.checkoutEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payments" value={provider.livePaymentsEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payouts" value={provider.livePayoutReadiness === "verified" ? "Verified" : "Unverified"} />{provider.lastSynchronizedAt && <Fact term="Last synchronized" value={formatSynchronizedAt(provider.lastSynchronizedAt)} />}</>}</dl></article>; }
 function DetailCard({ title, status, statusLabel, lead, children }: { title: string; status: CommerceStatus; statusLabel?: string; lead: string; children: ReactNode }) { return <article className="provider-detail"><header><div><p>{lead}</p><h2>{title}</h2></div><StatusBadge status={status} label={statusLabel} /></header>{children}</article>; }
 function Fact({ term, value }: { term: string; value: string }) { return <div><dt>{term}</dt><dd>{value}</dd></div>; }
 function Metric({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
@@ -378,5 +394,6 @@ function metadataText(provider: ProviderStatus | undefined, key: string) { const
 function metadataBooleanLabel(provider: ProviderStatus | undefined, key: string) { return provider?.metadata?.[key] === true ? "Enabled in test mode" : "Disabled in test mode"; }
 function compactAccountId(value: string | null | undefined) { const id = String(value || ""); return /^acct_[A-Za-z0-9]+$/.test(id) ? `${id.slice(0, 9)}…${id.slice(-4)}` : "Awaiting verification"; }
 function formatSynchronizedAt(value: string | null | undefined) { const timestamp = Date.parse(String(value || "")); return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : "Not yet synchronized"; }
+function formatCad(value: number) { return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value / 100); }
 function humanize(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase()); }
 function labelStatus(value: string) { return humanize(value === "setup_required" ? "setup required" : value === "legacy_production" ? "legacy production" : value); }

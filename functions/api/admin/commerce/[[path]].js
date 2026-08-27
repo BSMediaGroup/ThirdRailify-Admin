@@ -25,6 +25,7 @@ import {
   updateTemplate,
   verifyStripeAccount,
 } from "../../../_shared/commerce-core.js";
+import { commerceOrdersPayload } from "../../../_shared/checkout-core.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
 
@@ -57,6 +58,9 @@ async function handleGet(request, env, path) {
   } else if (path === "products") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductsPayload(env, session);
+  } else if (path === "orders") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await commerceOrdersPayload(env, session);
   } else if (path === "permissions") {
     await requireMasterAdmin(env, request);
     payload = await permissionGrantsPayload(env, session);

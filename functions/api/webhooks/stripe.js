@@ -8,6 +8,7 @@ import {
   recordVerifiedStripeWebhookReceipt,
   requireCommerceDb,
 } from "../../_shared/commerce-core.js";
+import { processStripeCheckoutCompleted } from "../../_shared/checkout-core.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -55,10 +56,8 @@ export async function handleStripeWebhook(request, env, now = Date.now()) {
 
   const accepted = STRIPE_WEBHOOK_EVENT_ALLOWLIST.includes(normalized.type);
   const receivedAt = nowIso(now);
-  const processingStatus = accepted ? "accepted_noop" : "ignored";
-  const resultCode = accepted ? "checkout_disabled" : "event_type_ignored";
   const payloadSha256 = await sha256Hex(rawBody);
-  const { duplicate } = await recordVerifiedStripeWebhookReceipt(env, {
+  const receipt = {
     eventId: normalized.id,
     eventType: normalized.type,
     eventCreatedAt: normalized.created,
@@ -66,16 +65,25 @@ export async function handleStripeWebhook(request, env, now = Date.now()) {
     apiVersion: normalized.apiVersion,
     relatedObjectId: normalized.relatedObjectId,
     relatedObjectType: normalized.relatedObjectType,
-    processingStatus,
-    resultCode,
     payloadSha256,
-  });
+  };
+  let stored;
+  if (accepted) {
+    stored = await processStripeCheckoutCompleted(env, normalized, receipt);
+  } else {
+    const result = await recordVerifiedStripeWebhookReceipt(env, {
+      ...receipt,
+      processingStatus: "ignored",
+      resultCode: "event_type_ignored",
+    });
+    stored = { ...result, resultCode: result.duplicate ? "duplicate" : "event_type_ignored" };
+  }
   return jsonResponse({
     ok: true,
     received: true,
-    duplicate,
+    duplicate: stored.duplicate,
     eventId: normalized.id,
-    result: duplicate ? "duplicate" : resultCode,
+    result: stored.resultCode,
   });
 }
 
@@ -186,6 +194,26 @@ function normalizeStripeEvent(value) {
     apiVersion: boundedStripeText(value.api_version, 80) || null,
     relatedObjectId: safeStripeIdentifier(related?.id, 255),
     relatedObjectType: safeStripeObjectType(related?.object),
+    checkoutSession: type === "checkout.session.completed" ? normalizeCheckoutSession(related) : null,
+  };
+}
+
+function normalizeCheckoutSession(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.object !== "checkout.session") return null;
+  const id = safeStripeIdentifier(value.id, 255);
+  if (!id || !id.startsWith("cs_test_")) return null;
+  const amountTotal = Number(value.amount_total);
+  return {
+    id,
+    mode: boundedStripeText(value.mode, 40),
+    currency: boundedStripeText(value.currency, 3).toLowerCase(),
+    amountTotal: Number.isSafeInteger(amountTotal) && amountTotal >= 0 ? amountTotal : null,
+    paymentStatus: boundedStripeText(value.payment_status, 40),
+    livemode: typeof value.livemode === "boolean" ? value.livemode : null,
+    clientReferenceId: safeStripeIdentifier(value.client_reference_id, 255),
+    metadataOrderId: safeStripeIdentifier(value.metadata?.order_id, 255),
+    metadataCheckoutRequestId: safeStripeIdentifier(value.metadata?.checkout_request_id, 255),
+    paymentIntentId: safeStripeIdentifier(typeof value.payment_intent === "string" ? value.payment_intent : value.payment_intent?.id, 255),
   };
 }
 

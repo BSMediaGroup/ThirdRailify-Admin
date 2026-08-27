@@ -5,7 +5,7 @@ import { commerceAccessForSession, updateBusinessProfile, writeCommerceAudit } f
 import { onRequestGet as publicMerchandisingRequest } from "../functions/api/catalogue/merchandising.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
-import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-helpers.mjs";
+import { commerceEnvironment, createCommerceDatabases, insertTestProduct } from "./commerce-test-helpers.mjs";
 
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 
@@ -31,6 +31,10 @@ test("commerce overview is authenticated and missing DB leaves disabled truthful
   assert.equal(stripe.apiConfigured, false); assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false);
   assert.equal(stripe.webhookEndpointReady, true); assert.equal(stripe.webhookSigningConfigured, false);
   assert.doesNotMatch(JSON.stringify(noDbPayload), /secret_key|webhook_secret|credential_ciphertext|acct_[A-Za-z0-9]+/i);
+
+  const ordersRequest = jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/orders`, { method: "GET", origin: ADMIN_ORIGIN, cookie });
+  const ordersResponse = await commerceRequest({ request: ordersRequest, env, data: {} }); const ordersPayload = await ordersResponse.json();
+  assert.equal(ordersResponse.status, 200); assert.equal(ordersPayload.databaseConfigured, true); assert.deepEqual(ordersPayload.orders, []);
 });
 
 test("business mutations require CSRF and encryption, then persist ciphertext only", async (t) => {
@@ -138,9 +142,12 @@ test("business helper rejects a missing commerce DB before any plaintext fallbac
 test("featured merchandising is Master-only, ordered, persisted, audited, and publicly projected", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  await insertTestProduct(harness.commerceDb, { id: "merch-one", slug: "merch-one", title: "Merch One" });
+  await insertTestProduct(harness.commerceDb, { id: "merch-two", slug: "merch-two", title: "Merch Two" });
+  await insertTestProduct(harness.commerceDb, { id: "merch-three", slug: "merch-three", title: "Merch Three" });
   const productsResponse = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products`, { method: "GET", origin: ADMIN_ORIGIN, cookie }), env, data: {} });
-  const initial = await productsResponse.json(); assert.equal(productsResponse.status, 200); assert.equal(initial.products.length, 8); assert.equal(initial.featured.length, 4);
-  const orderedIds = [initial.products[4].id, initial.products[0].id];
+  const initial = await productsResponse.json(); assert.equal(productsResponse.status, 200); assert.equal(initial.products.length, 3); assert.equal(initial.featured.length, 0);
+  const orderedIds = [initial.products[2].id, initial.products[0].id];
   const saveResponse = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/featured`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { featuredIds: orderedIds } }), env, data: {} });
   const saved = await saveResponse.json(); assert.equal(saveResponse.status, 200); assert.deepEqual(saved.featured.map((product) => product.id), orderedIds); assert.deepEqual(saved.featured.map((product) => product.featuredOrder), [10, 20]);
   const duplicate = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/featured`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { featuredIds: [orderedIds[0], orderedIds[0]] } }), env, data: {} });

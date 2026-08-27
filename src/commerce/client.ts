@@ -36,6 +36,12 @@ export type MerchandisingPayload = {
   ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; products: MerchandisingProduct[];
   featured: MerchandisingProduct[]; updatedAt: string | null;
 };
+export type CommerceOrder = {
+  id: string; checkoutStatus: string; paymentStatus: string; fulfillmentStatus: string;
+  currencyCode: string; expectedAmount: number; stripeSessionId: string | null; stripePaymentIntentId: string | null;
+  createdAt: string; updatedAt: string; checkoutCreatedAt: string | null; paymentConfirmedAt: string | null;
+};
+export type CommerceOrdersPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; orders: CommerceOrder[] };
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
 export function verifyStripeConnection(csrfToken: string) {
@@ -50,6 +56,7 @@ export function saveCommerceTemplate(csrfToken: string, template: CommerceTempla
   return adminApi<TemplatesPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(template) });
 }
 export function getMerchandisingProducts() { return adminApi<MerchandisingPayload>("/api/admin/commerce/products"); }
+export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
 export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {
   return adminApi<MerchandisingPayload>("/api/admin/commerce/products/featured", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ featuredIds }) });
 }

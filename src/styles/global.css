@@ -568,7 +568,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .commerce-status--setup_required,
 .commerce-status--pending { color: var(--gold-hot); border-color: rgba(243,201,40,.26); background: rgba(243,201,40,.055); }
 .commerce-status--error { color: #ffc6b9; border-color: rgba(242,141,117,.42); background: rgba(242,141,117,.08); }
-.commerce-posture { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); margin-bottom: 14px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+.commerce-posture { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); margin-bottom: 14px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
 .commerce-posture div { display: grid; min-width: 0; gap: 8px; padding: 18px; border-right: 1px solid var(--line); }
 .commerce-posture div:last-child { border-right: 0; }
 .commerce-posture span,

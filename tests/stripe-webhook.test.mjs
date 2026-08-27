@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
+import { onRequest as checkoutRequest } from "../functions/api/commerce/checkout.js";
 import { onRequest as stripeWebhookRequest, STRIPE_WEBHOOK_MAX_BODY_BYTES } from "../functions/api/webhooks/stripe.js";
-import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-helpers.mjs";
+import { commerceEnvironment, createCommerceDatabases, enableTestCheckout, insertTestProduct } from "./commerce-test-helpers.mjs";
 
 const WEBHOOK_URL = "https://thirdrailify-admin.pages.dev/api/webhooks/stripe";
 const WEBHOOK_SECRET = "whsec_synthetic_test_secret_only";
@@ -35,6 +36,41 @@ function webhookRequest(body, options = {}) {
 
 async function invoke(request, env) {
   return stripeWebhookRequest({ request, env, data: {}, waitUntil() {} });
+}
+
+async function createLinkedOrder(harness, env, checkoutRequestId = "33333333-3333-4333-8333-333333333333") {
+  await enableTestCheckout(harness.commerceDb);
+  await insertTestProduct(harness.commerceDb);
+  const checkoutHttpRequest = new Request("https://thirdrailify-admin.pages.dev/api/commerce/checkout", {
+    method: "POST",
+    headers: { Origin: "https://thirdrailify.pages.dev", "Content-Type": "application/json" },
+    body: JSON.stringify({ checkoutRequestId, items: [{ productId: "product-test-001", quantity: 2 }] }),
+  });
+  const response = await checkoutRequest({ request: checkoutHttpRequest, env, data: { checkoutFetch: async (url, init) => {
+    assert.equal(url, "https://api.stripe.com/v1/checkout/sessions");
+    const params = new URLSearchParams(init.body); const orderId = params.get("metadata[order_id]");
+    return Response.json({ id: "cs_test_linked_001", object: "checkout.session", livemode: false, mode: "payment", currency: "cad", amount_total: 5000, client_reference_id: orderId, metadata: { order_id: orderId, checkout_request_id: checkoutRequestId }, url: "https://checkout.stripe.com/c/pay/cs_test_linked_001" });
+  } } });
+  assert.equal(response.status, 201);
+  return response.json();
+}
+
+function completedSession(order, overrides = {}) {
+  return {
+    id: order.sessionId,
+    object: "checkout.session",
+    livemode: false,
+    mode: "payment",
+    currency: "cad",
+    amount_total: 5000,
+    payment_status: "paid",
+    client_reference_id: order.orderId,
+    metadata: { order_id: order.orderId, checkout_request_id: "33333333-3333-4333-8333-333333333333" },
+    payment_intent: "pi_test_linked_001",
+    customer_email: "not-persisted@example.test",
+    customer_details: { address: { country: "CA" } },
+    ...overrides,
+  };
 }
 
 async function stripeConfiguration(db) {
@@ -171,4 +207,47 @@ test("unknown valid event types are acknowledged once and ignored", async (t) =>
   assert.deepEqual(row, { processing_status: "ignored", result_code: "event_type_ignored", related_object_id: "cus_safe_001", related_object_type: "customer" });
   const configuration = await stripeConfiguration(harness.commerceDb);
   assert.equal(configuration.settings.stripe_webhook_configured, true); assert.equal(configuration.provider.webhook_configured, true);
+});
+
+test("valid paid test completion links to an existing local order exactly once", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "sk_test_notARealCheckoutKey123", STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET });
+  const order = await createLinkedOrder(harness, env);
+  const body = JSON.stringify(eventPayload({ id: "evt_synthetic_paid_001", data: { object: completedSession(order) } }));
+  const first = await invoke(webhookRequest(body), env); const firstPayload = await first.json();
+  assert.equal(first.status, 200); assert.deepEqual(firstPayload, { ok: true, received: true, duplicate: false, eventId: "evt_synthetic_paid_001", result: "payment_confirmed" });
+  const paid = await harness.commerceDb.prepare("SELECT payment_status, payment_confirmed_at, stripe_payment_intent_id, fulfillment_status FROM commerce_orders WHERE id = ?").bind(order.orderId).first();
+  assert.equal(paid.payment_status, "paid"); assert.ok(paid.payment_confirmed_at); assert.equal(paid.stripe_payment_intent_id, "pi_test_linked_001"); assert.equal(paid.fulfillment_status, "disabled");
+  const paidAt = paid.payment_confirmed_at;
+  const duplicate = await invoke(webhookRequest(body), env); assert.equal(duplicate.status, 200); assert.equal((await duplicate.json()).result, "duplicate");
+  const after = await harness.commerceDb.prepare("SELECT payment_status, payment_confirmed_at FROM commerce_orders WHERE id = ?").bind(order.orderId).first();
+  assert.deepEqual(after, { payment_status: "paid", payment_confirmed_at: paidAt });
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first()).count, 1);
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_webhook_events WHERE provider_event_id = 'evt_synthetic_paid_001'").first()).count, 1);
+  const ledger = await harness.commerceDb.prepare("SELECT processing_status, result_code FROM commerce_webhook_events WHERE provider_event_id = 'evt_synthetic_paid_001'").first();
+  assert.deepEqual(ledger, { processing_status: "processed", result_code: "payment_confirmed" });
+  assert.doesNotMatch(JSON.stringify(await harness.commerceDb.prepare("SELECT * FROM commerce_orders").all()), /not-persisted@example|customer_details|address/i);
+});
+
+test("unknown, mismatched, wrong-amount, wrong-currency, and unpaid Sessions never mark an order paid", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "sk_test_notARealCheckoutKey123", STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET });
+  const order = await createLinkedOrder(harness, env);
+  const cases = [
+    ["evt_synthetic_unknown_session", completedSession(order, { id: "cs_test_unknown_999" }), "checkout_order_unlinked"],
+    ["evt_synthetic_reference_mismatch", completedSession(order, { client_reference_id: "ord_other", metadata: { order_id: order.orderId } }), "checkout_order_reference_mismatch"],
+    ["evt_synthetic_amount_mismatch", completedSession(order, { amount_total: 4999 }), "checkout_amount_mismatch"],
+    ["evt_synthetic_currency_mismatch", completedSession(order, { currency: "usd" }), "checkout_currency_mismatch"],
+    ["evt_synthetic_unpaid", completedSession(order, { payment_status: "unpaid" }), "checkout_payment_incomplete"],
+    ["evt_synthetic_live_session", completedSession(order, { livemode: true }), "checkout_environment_mismatch"],
+  ];
+  for (const [eventId, session, resultCode] of cases) {
+    const body = JSON.stringify(eventPayload({ id: eventId, data: { object: session } }));
+    const response = await invoke(webhookRequest(body), env); assert.equal(response.status, 200); assert.equal((await response.json()).result, resultCode);
+    const ledger = await harness.commerceDb.prepare("SELECT processing_status, result_code FROM commerce_webhook_events WHERE provider_event_id = ?").bind(eventId).first();
+    assert.deepEqual(ledger, { processing_status: "accepted_noop", result_code: resultCode });
+    assert.equal((await harness.commerceDb.prepare("SELECT payment_status FROM commerce_orders WHERE id = ?").bind(order.orderId).first()).payment_status, "pending");
+  }
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first()).count, 1);
+  assert.equal((await harness.commerceDb.prepare("SELECT fulfillment_status FROM commerce_orders").first()).fulfillment_status, "disabled");
 });

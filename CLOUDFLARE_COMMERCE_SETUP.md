@@ -5,10 +5,10 @@ This runbook records the completed staging control-plane prerequisites and the s
 ## Current blockers and invariants
 
 - The dedicated Third Railify Official Canadian Stripe account exists and Sandbox/test mode is available.
-- `thirdrailify-commerce` (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`) is bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. `0001_commerce_control_plane.sql` then `0002_stripe_webhook_events.sql` are applied, and the remote migration list is clear.
+- `thirdrailify-commerce` (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`) is bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. The ordered `0001_commerce_control_plane.sql`, `0002_stripe_webhook_events.sql`, and revised seed-free `0003_product_merchandising.sql` migrations are applied; the remote migration list is empty.
 - `THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY` and `STRIPE_SECRET_KEY` are stored as Admin Cloudflare encrypted Secrets. Secret values must never be retrieved, printed, logged, committed, or persisted to D1.
 - The intended staging Stripe credential is the restricted TEST key (`rk_test_...`) under the unchanged `STRIPE_SECRET_KEY` name; `sk_test_...` is compatible and all live key forms fail closed.
-- Read-only Stripe account verification and the signed sandbox receiver at `POST /api/webhooks/stripe` are deployed. The destination and Admin-only signing secret are configured, and one real signed `checkout.session.completed` sandbox Event was accepted as `accepted_noop / checkout_disabled`. Checkout/live-payment/fulfillment gates remain disabled.
+- Read-only Stripe account verification, the signed sandbox receiver at `POST /api/webhooks/stripe`, and the gated server-side Checkout/order engine are deployed to Admin. The destination and Admin-only signing secret are configured, and one real signed `checkout.session.completed` sandbox Event remains preserved as `accepted_noop / checkout_disabled`. Deployment `1a9b7e5b-33fe-4bc5-b186-1f24c7e7ecca` returned `409 checkout_disabled` to the allowed-origin acceptance probe; Public checkout/live-payment/fulfillment gates remain disabled and authoritative products and orders remain zero.
 - Live business verification, payout banking, charges, payouts, wallets, Tax, and live credentials are not verified.
 - The existing auth D1 remains the identity/session/role authority and must not become the main commerce database.
 - Wix remains production authority and all Wix providers stay connected until an approved cutover.
@@ -27,9 +27,9 @@ The D1, encryption-key, restricted TEST credential, read-only account verificati
 7. Completed externally: create the Stripe Sandbox event destination exactly as documented below; do not create it through the Stripe API.
 8. Completed externally: store the generated signing secret only as the Admin Production encrypted secret `STRIPE_WEBHOOK_SECRET`.
 9. Completed: one signed Sandbox test delivery was verified and accepted before treating webhook signing and delivery as operational.
-10. Implement test Checkout Sessions with `mode=payment`, CAD prices, and server-returned Stripe-hosted Checkout URLs.
-11. Implement separately approved webhook transitions into authoritative commerce order/payment state; the current receiver remains receipt-only.
-12. Keep checkout disabled throughout acceptance.
+10. Completed in code: create test Checkout Sessions with `mode=payment`, inline server-authoritative CAD prices, local order snapshots, deterministic idempotency, and server-returned Stripe-hosted Checkout URLs.
+11. Completed in code: signed completed Sessions can transition only a matching existing TEST order after exact reference/Session/amount/currency/payment invariants; unknown webhooks cannot create orders.
+12. Keep checkout disabled throughout deployment acceptance and until authoritative product import/sync has populated `commerce_products`.
 13. Configure the parallel Printful manual/API store while leaving the Wix-connected store active.
 14. Implement Printful draft orders with no automatic confirmation.
 15. Do not disconnect Wix.
@@ -57,7 +57,7 @@ Do not merge an unresolved placeholder into active Wrangler configuration. Gener
 
 The first implementation must use the dedicated account's ordinary merchant API context. It must not send a `Stripe-Account` header or implement connected-account creation, Account Links, onboarding, OAuth, capability polling, application fees, transfer destinations, or inter-account balances.
 
-Persist only safe verified account metadata and bounded status summaries. Never persist secret keys, webhook signing secrets, bank data, card data, identity documents, full private Stripe payloads, or team-member email addresses. Verify webhook signatures and idempotency before any state transition. Do not create a Checkout Session, PaymentIntent, charge, refund, payout, or webhook in this scaffold-correction task.
+Persist only safe verified account metadata, bounded status summaries, opaque order/provider IDs, authoritative integer totals, and immutable product-line snapshots. Never persist secret keys, webhook signing secrets, bank data, card data, identity documents, customer email/address/billing details, full private Stripe payloads, or team-member email addresses. Verify webhook signatures and ledger/order idempotency before any state transition. With the remote gate false and catalogue empty, deployment acceptance must not create a Checkout Session, PaymentIntent, charge, refund, payout, webhook, or order.
 
 Configuration flags are proof-driven. `stripe_api_configured=true` requires a successful server-side `GET /v1/account` with a valid staging credential and returned `CA`/`cad` identity; the existence of `STRIPE_SECRET_KEY` alone is insufficient. `stripe_webhook_configured=true` requires a valid `v1` signature, an in-tolerance timestamp, a valid Stripe Event envelope, `livemode=false`, and acceptance into the duplicate-safe receipt path; the existence of `STRIPE_WEBHOOK_SECRET` alone is insufficient. Neither flag enables Checkout, live payment capture, payout readiness, order mutation, or fulfillment.
 
@@ -79,7 +79,7 @@ The completed Sandbox destination used these values; retain them as the operator
 
 After creation, Stripe displays a signing secret beginning `whsec_`. Save it only as `STRIPE_WEBHOOK_SECRET` in ThirdRailify-Admin → Cloudflare Pages → Production → encrypted Secret. Do not put it in ThirdRailify Public, `wrangler.jsonc`, D1, Git, browser code, logs, responses, or an example file with a real value. Do not retrieve, reveal, rotate, or change `STRIPE_SECRET_KEY` while performing this step.
 
-The staging receiver accepts only `v1` HMAC-SHA256 signatures over the exact raw body, uses a fixed 300-second past/future timestamp tolerance, rejects `livemode=true`, and enforces duplicate Event IDs by provider plus Event ID. Its only recognized event is `checkout.session.completed`, which is recorded as `checkout_disabled` without an order or fulfillment mutation. Other valid signed test event types are acknowledged and recorded as ignored. Checkout, live payments, and fulfillment remain disabled.
+The staging receiver accepts only `v1` HMAC-SHA256 signatures over the exact raw body, uses a fixed 300-second past/future timestamp tolerance, rejects event-envelope `livemode=true`, and enforces duplicate Event IDs by provider plus Event ID. Its only recognized event is `checkout.session.completed`: the existing historical disabled event stays unchanged, while a future linked TEST Session must match local order references, Session ID, mode, CAD amount, paid status, and environment before one `pending` to `paid` transition. Other valid test events are ignored; unknown or invalid Checkout Sessions are bounded no-ops. No webhook submits fulfillment.
 
 ## Printful and PayPal boundaries
 

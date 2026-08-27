@@ -356,50 +356,63 @@ export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
   return commerceOverview(env, session);
 }
 
-export async function recordVerifiedStripeWebhookReceipt(env, receipt) {
+export async function recordVerifiedStripeWebhookReceipt(env, receipt, orderTransition = null) {
   const db = requireCommerceDb(env);
   const provider = await db.prepare("SELECT id FROM commerce_provider_connections WHERE provider = 'stripe' LIMIT 1").first();
   if (!provider) {
     throw new AuthFailure(503, "stripe_provider_unavailable", "The Stripe provider connection is not configured.");
   }
 
+  const statements = [
+    db.prepare(
+      `INSERT OR IGNORE INTO commerce_webhook_events (
+         provider, provider_event_id, event_type, event_created_at, received_at, livemode,
+         api_version, related_object_id, related_object_type, processing_status,
+         processed_at, result_code, payload_sha256
+       ) VALUES ('stripe', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      receipt.eventId,
+      receipt.eventType,
+      receipt.eventCreatedAt,
+      receipt.receivedAt,
+      receipt.apiVersion,
+      receipt.relatedObjectId,
+      receipt.relatedObjectType,
+      receipt.processingStatus,
+      receipt.receivedAt,
+      receipt.resultCode,
+      receipt.payloadSha256,
+    ),
+    db.prepare(
+      `UPDATE commerce_provider_connections
+       SET safe_metadata_json = json_set(safe_metadata_json, '$.webhook_configured', json('true')),
+           last_synchronized_at = ?, updated_at = ?
+       WHERE provider = 'stripe'`,
+    ).bind(receipt.receivedAt, receipt.receivedAt),
+    configuredSettingStatement(db, "stripe_webhook_configured", receipt.receivedAt, null),
+  ];
+  if (orderTransition) {
+    statements.push(db.prepare(
+      `UPDATE commerce_orders
+       SET payment_status = 'paid', stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id),
+           payment_confirmed_at = COALESCE(payment_confirmed_at, ?), updated_at = ?
+       WHERE id = ? AND stripe_checkout_session_id = ? AND environment = 'test'
+         AND checkout_status = 'checkout_created' AND payment_status = 'pending'`,
+    ).bind(orderTransition.paymentIntentId, receipt.receivedAt, receipt.receivedAt, orderTransition.orderId, orderTransition.sessionId));
+  }
   let updates;
   try {
-    updates = await db.batch([
-      db.prepare(
-        `INSERT OR IGNORE INTO commerce_webhook_events (
-           provider, provider_event_id, event_type, event_created_at, received_at, livemode,
-           api_version, related_object_id, related_object_type, processing_status,
-           processed_at, result_code, payload_sha256
-         ) VALUES ('stripe', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        receipt.eventId,
-        receipt.eventType,
-        receipt.eventCreatedAt,
-        receipt.receivedAt,
-        receipt.apiVersion,
-        receipt.relatedObjectId,
-        receipt.relatedObjectType,
-        receipt.processingStatus,
-        receipt.receivedAt,
-        receipt.resultCode,
-        receipt.payloadSha256,
-      ),
-      db.prepare(
-        `UPDATE commerce_provider_connections
-         SET safe_metadata_json = json_set(safe_metadata_json, '$.webhook_configured', json('true')),
-             last_synchronized_at = ?, updated_at = ?
-         WHERE provider = 'stripe'`,
-      ).bind(receipt.receivedAt, receipt.receivedAt),
-      configuredSettingStatement(db, "stripe_webhook_configured", receipt.receivedAt, null),
-    ]);
+    updates = await db.batch(statements);
   } catch {
     throw new AuthFailure(503, "stripe_webhook_storage_unavailable", "Stripe webhook receipt storage is unavailable.");
   }
   if (Number(updates?.[1]?.meta?.changes || 0) !== 1 || Number(updates?.[2]?.meta?.changes || 0) !== 1) {
     throw new AuthFailure(503, "stripe_webhook_storage_unavailable", "Stripe webhook receipt storage is unavailable.");
   }
-  return { duplicate: Number(updates?.[0]?.meta?.changes || 0) === 0 };
+  return {
+    duplicate: Number(updates?.[0]?.meta?.changes || 0) === 0,
+    orderTransitioned: orderTransition ? Number(updates?.[3]?.meta?.changes || 0) === 1 : false,
+  };
 }
 
 export async function businessProfilePayload(env, session) {
