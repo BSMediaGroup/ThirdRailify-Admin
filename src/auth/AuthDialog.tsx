@@ -46,6 +46,11 @@ export function AuthDialog({ initialMode, initialError, resetToken, config, onCl
   const resetChallenge = useCallback(() => { setTurnstileToken(""); setResetKey((value) => value + 1); }, []);
   const acceptToken = useCallback((token: string) => setTurnstileToken(token), []);
   const verificationUnavailable = useCallback((value: string) => setError(value), []);
+  const visibleProviders = useMemo(() => (
+    config?.oauthProviderStates
+    ?? config?.oauthProviders.map((provider) => ({ ...provider, status: "enabled" as const }))
+    ?? []
+  ).filter((provider) => provider.status !== "unavailable"), [config]);
   const switchMode = (nextMode: AuthMode) => { setMode(nextMode); setOauthProvider(null); setError(""); setMessage(""); resetChallenge(); };
   const heading = useMemo(() => oauthProvider ? `Continue with ${oauthProvider.label}` : mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : mode === "reset" ? "Choose a new password" : "Control room sign in", [mode, oauthProvider]);
 
@@ -90,8 +95,8 @@ export function AuthDialog({ initialMode, initialError, resetToken, config, onCl
           <button className="auth-primary" type="button" onClick={startOAuth} disabled={busy || !turnstileToken}>{busy ? "Connecting..." : `Continue with ${oauthProvider.label}`}</button>
         </section>}
         {configured && !message && !oauthProvider && <>
-          {(mode === "signin" || mode === "signup") && config!.oauthProviders.length > 0 && <div className="auth-providers" aria-label="Provider sign in options">{config!.oauthProviders.map((provider) => <button key={provider.id} type="button" className="auth-provider" onClick={() => { setOauthProvider(provider); setError(""); resetChallenge(); }}><img src={providerIcons[provider.id]} alt="" /><span>Continue with {provider.label}</span></button>)}</div>}
-          {(mode === "signin" || mode === "signup") && config!.oauthProviders.length > 0 && <div className="auth-divider"><span>or use email</span></div>}
+          {(mode === "signin" || mode === "signup") && visibleProviders.length > 0 && <div className="auth-providers" aria-label="Provider sign in options">{visibleProviders.map((provider) => <button key={provider.id} type="button" className={`auth-provider${provider.status === "disabled" ? " auth-provider--disabled" : ""}`} disabled={provider.status !== "enabled"} aria-describedby={provider.status === "disabled" ? `auth-provider-${provider.id}-status` : undefined} title={provider.status === "disabled" ? provider.message : undefined} onClick={() => { if (provider.status !== "enabled") return; setOauthProvider(provider); setError(""); resetChallenge(); }}><img src={providerIcons[provider.id]} alt="" /><span className="auth-provider__copy"><span>Continue with {provider.label}</span>{provider.status === "disabled" && <small id={`auth-provider-${provider.id}-status`}>{provider.message || "Currently unavailable"}</small>}</span></button>)}</div>}
+          {(mode === "signin" || mode === "signup") && visibleProviders.length > 0 && <div className="auth-divider"><span>or use email</span></div>}
           <form className="auth-form" onSubmit={submit}>
             {(mode === "signin" || mode === "signup") && <div className="auth-mode-tabs" role="group" aria-label="Account mode"><button type="button" aria-pressed={mode === "signin"} onClick={() => switchMode("signin")}>Sign in</button>{config!.emailSignupConfigured && <button type="button" aria-pressed={mode === "signup"} onClick={() => switchMode("signup")}>Create account</button>}</div>}
             {mode === "signup" && <AuthField ref={initialField} label="Display name" name="displayName" autoComplete="name" minLength={2} />}

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { AdminArea } from "../config/navigation";
 
 type Props = {
-  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "shield" | "signal" | "collapse" | "profile" | "external" | "logout";
+  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "chevron" | "shield" | "signal" | "collapse" | "profile" | "external" | "logout";
   size?: number;
 };
 
@@ -11,6 +11,12 @@ const paths: Record<Props["name"], ReactNode> = {
   content: <><path d="M5 3h10l4 4v14H5z"/><path d="M14 3v5h5M8 12h8M8 16h6"/></>,
   products: <><path d="m4 7 8-4 8 4-8 4z"/><path d="m4 7 8 4 8-4v10l-8 4-8-4zM12 11v10"/></>,
   orders: <><path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/></>,
+  commerce: <><path d="M4 10v10h16V10M3 10l2-6h14l2 6"/><path d="M3 10c0 1.3 1 2 2.3 2s2.3-.7 2.3-2c0 1.3 1 2 2.3 2s2.3-.7 2.3-2c0 1.3 1 2 2.3 2s2.3-.7 2.3-2c0 1.3 1 2 2.3 2s2.3-.7 2.3-2M9 20v-5h6v5"/></>,
+  payments: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></>,
+  business: <><path d="M4 21V6l8-3 8 3v15M9 21v-4h6v4"/><path d="M8 8h2M14 8h2M8 12h2M14 12h2M3 21h18"/></>,
+  tax: <><path d="M6 3h8l4 4v14H6zM14 3v5h4"/><circle cx="10" cy="12" r="1"/><circle cx="14" cy="17" r="1"/><path d="m15 11-6 7"/></>,
+  emails: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></>,
+  fulfillment: <><path d="M3 6h11v11H3zM14 10h4l3 4v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></>,
   media: <><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 17 5-4 3 2 3-3 3 5"/></>,
   vip: <><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></>,
   users: <><circle cx="9" cy="8" r="3"/><path d="M3 20c.5-4 2.5-6 6-6s5.5 2 6 6M16 6h5M18.5 3.5v5"/></>,
@@ -19,6 +25,7 @@ const paths: Record<Props["name"], ReactNode> = {
   menu: <><path d="M4 7h16M4 12h16M4 17h16"/></>,
   close: <><path d="m6 6 12 12M18 6 6 18"/></>,
   arrow: <><path d="M5 12h14M14 7l5 5-5 5"/></>,
+  chevron: <><path d="m9 6 6 6-6 6"/></>,
   shield: <><path d="M12 3 5 6v5c0 4.6 2.8 8.2 7 10 4.2-1.8 7-5.4 7-10V6zM9 12l2 2 4-5"/></>,
   signal: <><path d="M5 18h14M8 18l4-14 4 14M9.5 12h5M7 7 4 4M17 7l3-3"/></>,
   collapse: <><path d="m14 7-5 5 5 5"/><path d="M20 4v16"/></>,

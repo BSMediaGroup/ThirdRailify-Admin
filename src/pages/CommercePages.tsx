@@ -24,6 +24,14 @@ const REQUIRED_POSTURE = [
   ["Fulfillment submission", "Disabled"],
 ] as const;
 
+const COMMERCE_WORKSPACES = [
+  { to: "/commerce/payments", eyebrow: "Processor control", title: "Payments & payouts", text: "Dedicated Stripe merchant ownership, pending test integration, and deferred PayPal posture.", icon: "payments" },
+  { to: "/commerce/business", eyebrow: "Merchant profile", title: "Business information", text: "Public storefront details kept separate from encrypted private Canadian fields.", icon: "business" },
+  { to: "/commerce/tax", eyebrow: "Canadian custody", title: "Tax & documents", text: "BN and GST/HST custody with controlled invoice and receipt presentation.", icon: "tax" },
+  { to: "/commerce/emails", eyebrow: "Lifecycle templates", title: "Customer emails", text: "Structured plain-text templates with delivery intentionally disabled.", icon: "emails" },
+  { to: "/commerce/fulfillment", eyebrow: "Provider bridge", title: "Fulfillment integrations", text: "Printful draft-only migration planning with explicit submission gates.", icon: "fulfillment" },
+] as const;
+
 export function CommerceOverviewPage() {
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
@@ -39,7 +47,13 @@ export function CommerceOverviewPage() {
   return <>
     <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary="The dedicated Third Railify Official Canadian Stripe account exists, while API, webhook, checkout, live payment, and fulfillment actions remain disabled." status="disabled" />
     {error && <div className="admin-alert" role="alert">{error}</div>}
-    {!payload ? <CommerceState>Loading truthful commerce status…</CommerceState> : <>
+    <section className="commerce-section commerce-workspace-section" aria-labelledby="workspace-title">
+      <SectionTitle id="workspace-title" eyebrow="Governed workspaces" title="Commerce control rooms" />
+      <div className="commerce-link-grid">
+        {COMMERCE_WORKSPACES.map((workspace, index) => <WorkspaceLink key={workspace.to} {...workspace} index={index + 1} />)}
+      </div>
+    </section>
+    {!payload && !error ? <CommerceState>Loading truthful commerce status…</CommerceState> : payload ? <>
       <section className="commerce-posture" aria-label="Required safe posture">{REQUIRED_POSTURE.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
       <div className={`commerce-callout ${payload.databaseConfigured ? "is-pending" : "is-unavailable"}`} role="status">
         <AdminIcon name="shield" /><div><strong>{payload.databaseConfigured ? "Commerce D1 is locally available" : "Commerce D1 is not bound"}</strong><p>{payload.databaseConfigured ? "Persistence is available, but payment and fulfillment gates remain disabled." : "Safe defaults are visible. Private fields and every mutation fail closed until the separate Admin-only database and encryption key are configured."}</p></div>
@@ -52,14 +66,7 @@ export function CommerceOverviewPage() {
         <Metric label="Products" value={payload.counts.products === null ? "Unavailable" : String(payload.counts.products)} />
         <Metric label="Orders" value={payload.counts.orders === null ? "Unavailable" : String(payload.counts.orders)} />
       </div></section>
-      <section className="commerce-section" aria-labelledby="workspace-title"><SectionTitle id="workspace-title" eyebrow="Governed workspaces" title="Configure safely" /><div className="commerce-link-grid">
-        <WorkspaceLink to="/commerce/payments" title="Payments & payouts" text="Dedicated Stripe merchant ownership, pending test integration, and deferred PayPal posture." />
-        <WorkspaceLink to="/commerce/business" title="Business information" text="Public details plus encrypted private Canadian fields." />
-        <WorkspaceLink to="/commerce/tax" title="Tax & documents" text="BN/GST/HST custody, invoice and receipt presentation." />
-        <WorkspaceLink to="/commerce/emails" title="Customer emails" text="Structured plain-text templates; sending remains disabled." />
-        <WorkspaceLink to="/commerce/fulfillment" title="Fulfillment" text="Printful draft-only migration plan and Printify uncertainty." />
-      </div></section>
-    </>}
+    </> : null}
   </>;
 }
 
@@ -221,7 +228,15 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) { return <arti
 function DetailCard({ title, status, lead, children }: { title: string; status: CommerceStatus; lead: string; children: ReactNode }) { return <article className="provider-detail"><header><div><p>{lead}</p><h2>{title}</h2></div><StatusBadge status={status} /></header>{children}</article>; }
 function Fact({ term, value }: { term: string; value: string }) { return <div><dt>{term}</dt><dd>{value}</dd></div>; }
 function Metric({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
-function WorkspaceLink({ to, title, text }: { to: string; title: string; text: string }) { return <Link to={to}><strong>{title}</strong><span>{text}</span><AdminIcon name="arrow" size={16} /></Link>; }
+function WorkspaceLink({ to, eyebrow, title, text, icon, index }: { to: string; eyebrow: string; title: string; text: string; icon: "payments" | "business" | "tax" | "emails" | "fulfillment"; index: number }) {
+  return <Link className="commerce-workspace-card" to={to}>
+    <span className="commerce-workspace-card__top"><span className="commerce-workspace-card__icon"><AdminIcon name={icon} size={19} /></span><span className="commerce-workspace-card__index">0{index}</span></span>
+    <span className="commerce-workspace-card__eyebrow">{eyebrow}</span>
+    <strong>{title}</strong>
+    <span className="commerce-workspace-card__copy">{text}</span>
+    <span className="commerce-workspace-card__action">Open workspace <AdminIcon name="arrow" size={16} /></span>
+  </Link>;
+}
 function CommerceState({ children }: { children: ReactNode }) { return <div className="commerce-state" role="status">{children}</div>; }
 function Field({ label, hint, className = "", children }: { label: string; hint?: string; className?: string; children: ReactNode }) { return <label className={`commerce-field ${className}`.trim()}><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>; }
 

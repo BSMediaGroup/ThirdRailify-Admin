@@ -1,8 +1,9 @@
 export type AdminArea = {
   path: string;
+  parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "content" | "products" | "orders" | "media" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "content" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -44,47 +45,52 @@ export const adminAreas: AdminArea[] = [
     path: "/commerce",
     label: "Commerce Overview",
     shortLabel: "Commerce",
-    icon: "overview",
+    icon: "commerce",
     summary: "Stripe-first Canadian commerce posture and readiness.",
     futureScope: ["Separate commerce D1", "Provider truth", "Safe activation gates"],
   },
   {
     path: "/commerce/payments",
+    parentPath: "/commerce",
     label: "Payments & Payouts",
     shortLabel: "Payments",
-    icon: "orders",
+    icon: "payments",
     summary: "Dedicated Stripe merchant account, checkout, and payout posture.",
     futureScope: ["Test API identity", "Checkout Sessions", "Merchant-owned payouts"],
   },
   {
     path: "/commerce/business",
+    parentPath: "/commerce",
     label: "Business Information",
     shortLabel: "Business",
-    icon: "content",
+    icon: "business",
     summary: "Public and encrypted private Canadian business details.",
     futureScope: ["Public storefront profile", "Encrypted legal details", "Controlled projections"],
   },
   {
     path: "/commerce/tax",
+    parentPath: "/commerce",
     label: "Tax & Documents",
     shortLabel: "Tax",
-    icon: "settings",
+    icon: "tax",
     summary: "Tax identifier custody and document presentation.",
     futureScope: ["Encrypted identifiers", "Invoice presentation", "Receipt presentation"],
   },
   {
     path: "/commerce/emails",
+    parentPath: "/commerce",
     label: "Customer Emails",
     shortLabel: "Emails",
-    icon: "content",
+    icon: "emails",
     summary: "Structured customer lifecycle templates without sending.",
     futureScope: ["Bounded plain text", "Safe CTA fields", "Approval before delivery"],
   },
   {
     path: "/commerce/fulfillment",
+    parentPath: "/commerce",
     label: "Fulfillment Integrations",
     shortLabel: "Fulfillment",
-    icon: "integrations",
+    icon: "fulfillment",
     summary: "Printful draft-only planning and adapter boundaries.",
     futureScope: ["Manual/API store", "Draft orders", "Explicit confirmation gates"],
   },
