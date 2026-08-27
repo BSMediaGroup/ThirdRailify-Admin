@@ -7,7 +7,7 @@ import { chromium } from "playwright-core";
 const PREVIEW_ORIGIN = "http://127.0.0.1:4174";
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const VIEWPORTS = [390, 768, 1440];
-const STATES = ["ready", "running", "success", "failure"];
+const STATES = ["ready", "running", "throttled", "resume", "success", "failure"];
 
 test("fulfillment operator states render responsively with deliberate downloads", async (t) => {
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4174"], { stdio: "ignore" });
@@ -26,6 +26,7 @@ test("fulfillment operator states render responsively with deliberate downloads"
       });
       page.on("pageerror", (error) => consoleErrors.push(error.message));
       let releaseRunning;
+      let snapshotCalls = 0;
       const runningGate = new Promise((resolve) => { releaseRunning = resolve; });
       await page.route("**/api/**", async (route) => {
         const url = new URL(route.request().url());
@@ -33,9 +34,11 @@ test("fulfillment operator states render responsively with deliberate downloads"
         if (url.pathname === "/api/auth/session") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(session()) });
         if (url.pathname === "/api/admin/commerce/overview") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(overview()) });
         if (url.pathname === "/api/admin/commerce/printful/catalogue/snapshot") {
+          snapshotCalls += 1;
           const body = JSON.parse(route.request().postData() || "{}");
           if (state === "failure" && body.phase === "begin") return route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ ok: false, error: "printful_source_products_unavailable", message: "Printful legacy source product enumeration failed safely (HTTP 503)." }) });
           if (state === "running" && body.phase === "begin") await runningGate;
+          if ((state === "throttled" || state === "resume") && body.phase === "begin" && !body.checkpoint) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(throttled(state === "throttled" ? 10_000 : 40)) });
           if (body.phase === "begin") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(manifest()) });
           if (body.phase === "assemble") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(snapshot()) });
         }
@@ -65,6 +68,17 @@ test("fulfillment operator states render responsively with deliberate downloads"
         await page.getByText("Catalogue snapshot failed", { exact: true }).waitFor();
         await page.getByText("Printful legacy source product enumeration failed safely (HTTP 503).", { exact: true }).waitFor();
         await page.getByRole("button", { name: "Retry read-only snapshot" }).waitFor();
+      } else if (state === "throttled") {
+        await runButton.click();
+        await page.getByText("PRINTFUL RATE LIMIT — Snapshot safely paused", { exact: true }).waitFor();
+        await page.getByText("Rate-limited / waiting", { exact: true }).waitFor();
+        await page.getByText("Legacy product details", { exact: true }).waitFor();
+        assert.equal(await page.getByText("Catalogue snapshot failed", { exact: true }).count(), 0);
+        assert.equal(await page.getByRole("button", { name: "Waiting to resume automatically…" }).isDisabled(), true);
+      } else if (state === "resume") {
+        await runButton.click();
+        await page.getByText("Snapshot completed", { exact: true }).waitFor();
+        assert.equal(snapshotCalls, 3);
       } else {
         await runButton.click();
         await page.getByText("Snapshot completed", { exact: true }).waitFor();
@@ -115,7 +129,12 @@ function overview() {
 }
 
 function manifest() {
-  return { ok: true, phase: "manifest", schemaVersion: 1, correlationId: "browser-fixture", manifest: { correlationId: "browser-fixture", expiresAt: "2099-01-01T00:00:00.000Z", source: { store: { id: "16847493", name: "Third Railify Official", type: "wix" }, summaries: [] }, target: { store: { id: "18668025", name: "Third Railify API", type: "native" }, summaries: [] } }, signature: "signed-browser-fixture-evidence-value", chunkSizes: { products: 12, files: 20 } };
+  return { ok: true, status: "complete", phase: "manifest", schemaVersion: 1, correlationId: "browser-fixture", manifest: { correlationId: "browser-fixture", expiresAt: "2099-01-01T00:00:00.000Z", source: { store: { id: "16847493", name: "Third Railify Official", type: "wix" }, summaries: [] }, target: { store: { id: "18668025", name: "Third Railify API", type: "native" }, summaries: [] } }, signature: "signed-browser-fixture-evidence-value", rateCheckpoint: { correlationId: "browser-fixture", rate: {} }, rateCheckpointSignature: "signed-rate-evidence", chunkSizes: { products: 12, files: 20 } };
+}
+
+function throttled(delayMs) {
+  const retryAt = new Date(Date.now() + delayMs).toISOString();
+  return { ok: true, status: "throttled", phase: "begin", reason: "printful_rate_limited", providerStatus: 429, retryAt, retryAfterMs: delayMs, cursor: { step: "source_pages", sourceOffset: 100, targetOffset: 0 }, partialResults: { sourceSummaries: [], targetSummaries: [] }, checkpoint: { fixture: true }, checkpointSignature: "signed-throttle-checkpoint", progress: { currentPhase: "Legacy product details", completed: 120, total: 140 } };
 }
 
 function counts(products, variants) {

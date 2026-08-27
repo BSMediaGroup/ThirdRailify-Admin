@@ -40,6 +40,26 @@ test("GOATS navigation and branded email workspace render responsively", async (
     await preview.getByText("THIRD RAILIFY OFFICIAL", { exact: true }).waitFor();
     await preview.getByText("GOATS in the Wild", { exact: true }).waitFor();
     await preview.getByText("Submission received", { exact: true }).first().waitFor();
+    const typography = await preview.locator("html").evaluate(async (root) => {
+      await root.ownerDocument.fonts.ready;
+      const heading = root.ownerDocument.querySelector(".content h1");
+      const body = root.ownerDocument.body;
+      const label = root.ownerDocument.querySelector(".type");
+      return {
+        heading: heading ? getComputedStyle(heading).fontFamily : "",
+        body: getComputedStyle(body).fontFamily,
+        label: label ? getComputedStyle(label).fontFamily : "",
+        captainLoaded: root.ownerDocument.fonts.check('32px "American Captain"'),
+        blinkerLoaded: root.ownerDocument.fonts.check('16px "Blinker"'),
+        geistLoaded: root.ownerDocument.fonts.check('12px "Geist Mono"'),
+      };
+    });
+    assert.match(typography.heading, /American Captain/);
+    assert.match(typography.body, /Blinker/);
+    assert.match(typography.label, /Geist Mono/);
+    assert.equal(typography.captainLoaded, true);
+    assert.equal(typography.blinkerLoaded, true);
+    assert.equal(typography.geistLoaded, true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${viewport.width}px has no horizontal overflow`);
     assert.deepEqual(consoleErrors, [], `${viewport.width}px has no console errors`);
     if (process.env.GOATS_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", `thirdrailify-admin-goats-emails-${viewport.width}.png`), fullPage: true });

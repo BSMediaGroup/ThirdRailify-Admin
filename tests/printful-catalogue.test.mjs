@@ -4,8 +4,11 @@ import test from "node:test";
 
 import { handlePost as handleCommercePost, onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import {
+  beginPrintfulCatalogueSnapshot,
   discoverLegacyPrintfulSource,
   parseCadMinorUnits,
+  readPrintfulCatalogueFileChunk,
+  readPrintfulCatalogueProductChunk,
   snapshotPrintfulCatalogues,
 } from "../functions/_shared/printful-catalogue.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
@@ -25,8 +28,28 @@ function env(overrides = {}) {
     PRINTFUL_API_TOKEN: TARGET_TOKEN,
     PRINTFUL_WIX_SOURCE_STORE_ID: SOURCE_ID,
     PRINTFUL_STORE_ID: TARGET_ID,
+    THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET: "test-rate-limit-secret-that-is-not-deployed",
     ...overrides,
   };
+}
+
+function fakeSchedulerClock(start = Date.now()) {
+  let current = start;
+  return {
+    runtime: { now: () => current, sleep: async (milliseconds) => { current += Math.max(0, milliseconds); }, random: () => 0 },
+    now: () => current,
+    advance: (milliseconds) => { current += milliseconds; },
+  };
+}
+
+async function beginManifest(fetchImpl, clock, sourceCount = 12, targetCount = 0) {
+  let input = { phase: "begin" };
+  for (;;) {
+    const result = await beginPrintfulCatalogueSnapshot(env(), input, fetchImpl || providerFetch({ sourceCount, targetCount }), clock.runtime);
+    if (result.status === "complete") return result;
+    assert.equal(result.status, "continuing");
+    input = { phase: "begin", checkpoint: result.checkpoint, checkpointSignature: result.checkpointSignature };
+  }
 }
 
 function sourceSummary(id) {
@@ -95,36 +118,49 @@ function providerFetch({ sourceCount = 1, targetCount = 1, sourceStore = { id: N
   };
 }
 
-async function runSnapshotRoute(runtime, cookie, csrfToken, fetchImpl, invocationProviderCounts = []) {
+async function runSnapshotRoute(runtime, cookie, csrfToken, fetchImpl, invocationProviderCounts = [], schedulerClock = fakeSchedulerClock()) {
   const url = `${ADMIN_ORIGIN}/api/admin/commerce/printful/catalogue/snapshot`;
   const step = async (body) => {
     let calls = 0;
     const countedFetch = (...args) => { calls += 1; return fetchImpl(...args); };
-    const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken, body }), runtime, "printful/catalogue/snapshot", countedFetch);
+    const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken, body }), runtime, "printful/catalogue/snapshot", countedFetch, schedulerClock.runtime);
     invocationProviderCounts.push(calls);
     return response;
   };
-  const startedResponse = await step({ phase: "begin" });
-  assert.equal(startedResponse.status, 200);
-  const started = await startedResponse.json();
+  const completePhase = async (initial, continuationBase) => {
+    let body = initial;
+    for (;;) {
+      const response = await step(body);
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      if (result.status === "complete") return result;
+      assert.equal(result.status, "continuing");
+      body = { ...continuationBase, checkpoint: result.checkpoint, checkpointSignature: result.checkpointSignature };
+    }
+  };
+  const started = await completePhase({ phase: "begin" }, { phase: "begin" });
+  let rateCheckpoint = started.rateCheckpoint;
+  let rateCheckpointSignature = started.rateCheckpointSignature;
   const productEvidence = [];
   for (const role of ["source", "target"]) {
     const ids = started.manifest[role].summaries.map((summary) => summary.id);
     for (let offset = 0; offset < ids.length; offset += started.chunkSizes.products) {
-      const response = await step({ phase: "products", role, productIds: ids.slice(offset, offset + started.chunkSizes.products), manifest: started.manifest, manifestSignature: started.signature });
-      assert.equal(response.status, 200);
-      const result = await response.json();
+      const base = { phase: "products", manifest: started.manifest, manifestSignature: started.signature };
+      const result = await completePhase({ ...base, role, productIds: ids.slice(offset, offset + started.chunkSizes.products), rateCheckpoint, rateCheckpointSignature }, base);
       productEvidence.push({ chunk: result.chunk, signature: result.signature });
+      rateCheckpoint = result.rateCheckpoint;
+      rateCheckpointSignature = result.rateCheckpointSignature;
     }
   }
   const fileEvidence = [];
   for (const evidence of productEvidence) {
     const ids = evidence.chunk.incompleteFileIds;
     for (let offset = 0; offset < ids.length; offset += started.chunkSizes.files) {
-      const response = await step({ phase: "files", role: evidence.chunk.role, fileIds: ids.slice(offset, offset + started.chunkSizes.files), manifest: started.manifest, manifestSignature: started.signature, productChunk: evidence.chunk, productChunkSignature: evidence.signature });
-      assert.equal(response.status, 200);
-      const result = await response.json();
+      const base = { phase: "files", manifest: started.manifest, manifestSignature: started.signature, productChunk: evidence.chunk, productChunkSignature: evidence.signature };
+      const result = await completePhase({ ...base, role: evidence.chunk.role, fileIds: ids.slice(offset, offset + started.chunkSizes.files), rateCheckpoint, rateCheckpointSignature }, base);
       fileEvidence.push({ chunk: result.chunk, signature: result.signature });
+      rateCheckpoint = result.rateCheckpoint;
+      rateCheckpointSignature = result.rateCheckpointSignature;
     }
   }
   return step({ phase: "assemble", manifest: started.manifest, manifestSignature: started.signature, productEvidence, fileEvidence });
@@ -161,12 +197,13 @@ test("configured legacy Store ID must match the token-resolved source", async ()
 test("source and target configuration cannot collide and the permanent target stays pinned", async () => {
   await assert.rejects(snapshotPrintfulCatalogues(env({ PRINTFUL_WIX_SOURCE_STORE_ID: TARGET_ID }), providerFetch()), (error) => error.code === "printful_source_store_mismatch");
   await assert.rejects(snapshotPrintfulCatalogues(env({ PRINTFUL_STORE_ID: "123" }), providerFetch()), (error) => error.code === "printful_target_store_mismatch");
-  await assert.rejects(snapshotPrintfulCatalogues(env(), providerFetch({ targetStore: { id: Number(TARGET_ID), type: "wix", name: "Third Railify API" } })), (error) => error.code === "printful_target_store_identity_invalid");
+  await assert.rejects(snapshotPrintfulCatalogues(env(), providerFetch({ targetStore: { id: Number(TARGET_ID), type: "wix", name: "Third Railify API" } }), fakeSchedulerClock().runtime), (error) => error.code === "printful_target_store_identity_invalid");
 });
 
 test("catalogue snapshot uses isolated endpoint families, paginates past 100, and fetches every detail", async () => {
   const calls = [];
-  const result = await snapshotPrintfulCatalogues(env(), providerFetch({ sourceCount: 101, targetCount: 101, calls }));
+  const clock = fakeSchedulerClock();
+  const result = await snapshotPrintfulCatalogues(env(), providerFetch({ sourceCount: 101, targetCount: 101, calls }), clock.runtime);
   assert.equal(result.source.counts.products, 101);
   assert.equal(result.source.counts.variants, 101);
   assert.equal(result.target.counts.products, 101);
@@ -182,7 +219,7 @@ test("catalogue snapshot uses isolated endpoint families, paginates past 100, an
   assert.equal(calls.filter((call) => call.path.startsWith("/store/products")).every((call) => call.role === "target"), true);
 });
 
-test("product detail reads use one bounded shared pool and preserve deterministic ordering", async () => {
+test("product detail reads use one globally paced stream and preserve deterministic ordering", async () => {
   const calls = [];
   const baseFetch = providerFetch({ sourceCount: 12, targetCount: 9, calls });
   let activeDetails = 0;
@@ -197,8 +234,9 @@ test("product detail reads use one bounded shared pool and preserve deterministi
     try { return await baseFetch(input, init); }
     finally { activeDetails -= 1; }
   };
-  const result = await snapshotPrintfulCatalogues(env(), delayedFetch);
-  assert.equal(maximumDetails, 4);
+  const clock = fakeSchedulerClock();
+  const result = await snapshotPrintfulCatalogues(env(), delayedFetch, clock.runtime);
+  assert.equal(maximumDetails, 1);
   assert.deepEqual(result.source.products.map((product) => product.id), Array.from({ length: 12 }, (_, index) => String(index + 1)));
   assert.deepEqual(result.target.products.map((product) => product.id), Array.from({ length: 9 }, (_, index) => String(index + 700)));
 });
@@ -213,13 +251,14 @@ test("provider transport failures identify the safe role and operation after a b
     }
     return baseFetch(input, init);
   };
-  await assert.rejects(snapshotPrintfulCatalogues(env(), failingFetch), (error) => {
+  const clock = fakeSchedulerClock();
+  await assert.rejects(snapshotPrintfulCatalogues(env(), failingFetch, clock.runtime), (error) => {
     assert.equal(error.code, "printful_source_products_unavailable");
-    assert.match(error.message, /legacy source product enumeration could not be reached after 2 attempts/i);
+    assert.match(error.message, /legacy source product enumeration could not be reached after 3 attempts/i);
     assert.doesNotMatch(error.message, /unsafe transport detail|Bearer|token/i);
     return true;
   });
-  assert.equal(attempts, 2);
+  assert.equal(attempts, 3);
 });
 
 test("money normalization is exact and malformed prices remain classified", () => {
@@ -232,7 +271,7 @@ test("money normalization is exact and malformed prices remain classified", () =
 });
 
 test("variant-specific prices and safe file, placement, and option fields are preserved", async () => {
-  const result = await snapshotPrintfulCatalogues(env(), providerFetch());
+  const result = await snapshotPrintfulCatalogues(env(), providerFetch(), fakeSchedulerClock().runtime);
   const variant = result.source.products[0].variants[0];
   assert.equal(variant.unitAmountCad, 2999);
   assert.equal(variant.retailPrice, "29.99");
@@ -244,7 +283,7 @@ test("variant-specific prices and safe file, placement, and option fields are pr
 
 test("missing recreation metadata is completed through a GET-only file detail", async () => {
   const calls = [];
-  const result = await snapshotPrintfulCatalogues(env(), providerFetch({ calls, sourceVariantOverrides: { files: [{ id: 9001 }] } }));
+  const result = await snapshotPrintfulCatalogues(env(), providerFetch({ calls, sourceVariantOverrides: { files: [{ id: 9001 }] } }), fakeSchedulerClock().runtime);
   const file = result.source.products[0].variants[0].files[0];
   assert.equal(file.type, "front");
   assert.equal(file.filename, "file-9001.png");
@@ -362,6 +401,272 @@ test("one operator click is split into protected phases below the 50-subrequest 
   assert.ok(invocationProviderCounts.length > 4);
   assert.ok(Math.max(...invocationProviderCounts) < 50);
   assert.equal(invocationProviderCounts.at(-1), 0);
+  const rateRows = await harness.authDb.prepare("SELECT category, attempt_count FROM auth_rate_limits WHERE category IN ('commerce','commerce_snapshot') ORDER BY category").all();
+  assert.deepEqual(rateRows.results.map((row) => row.category), ["commerce", "commerce_snapshot"]);
+  assert.equal(rateRows.results.find((row) => row.category === "commerce").attempt_count, 1);
+  assert.ok(rateRows.results.find((row) => row.category === "commerce_snapshot").attempt_count > 1);
+});
+
+test("a V1-style 120 request rolling-minute provider completes more than 120 reads without loss or duplication", async () => {
+  const clock = fakeSchedulerClock();
+  const calls = [];
+  const rollingStarts = [];
+  const allStarts = [];
+  let provider429s = 0;
+  const baseFetch = providerFetch({ sourceCount: 130, targetCount: 0, calls });
+  const limitedFetch = async (input, init) => {
+    const now = clock.now();
+    while (rollingStarts.length && rollingStarts[0] <= now - 60_000) rollingStarts.shift();
+    if (rollingStarts.length >= 120) {
+      provider429s += 1;
+      return Response.json({ code: 429 }, { status: 429, headers: { "Retry-After": "61", "X-RateLimit-Limit": "120", "X-RateLimit-Remaining": "0" } });
+    }
+    rollingStarts.push(now);
+    allStarts.push(now);
+    return baseFetch(input, init);
+  };
+  const result = await snapshotPrintfulCatalogues(env(), limitedFetch, clock.runtime);
+  const detailIds = result.source.products.map((product) => product.id);
+  assert.equal(result.source.counts.products, 130);
+  assert.equal(provider429s, 0);
+  assert.equal(new Set(detailIds).size, 130);
+  assert.deepEqual(detailIds, Array.from({ length: 130 }, (_, index) => String(index + 1)));
+  assert.ok(calls.length > 120);
+  assert.ok(allStarts.slice(1).every((startedAt, index) => startedAt - allStarts[index] >= 675));
+});
+
+test("forced 429 retains partial products and resumes the exact failed cursor only after Retry-After", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 12, targetCount: 0 });
+  let detailAttempts = 0;
+  let forced = false;
+  const fetchedIds = [];
+  const fetchImpl = async (input, init) => {
+    const match = /^\/sync\/products\/(\d+)$/.exec(new URL(input).pathname);
+    if (match) {
+      detailAttempts += 1;
+      fetchedIds.push(match[1]);
+      if (!forced && detailAttempts === 5) {
+        forced = true;
+        return Response.json({ code: 429 }, { status: 429, headers: { "Retry-After": "2", "X-RateLimit-Limit": "120", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "5", "X-RateLimit-Policy": "120;w=60" } });
+      }
+    }
+    return baseFetch(input, init);
+  };
+  const started = await beginManifest(fetchImpl, clock);
+  const initial = { phase: "products", role: "source", productIds: started.manifest.source.summaries.map((summary) => summary.id), manifest: started.manifest, manifestSignature: started.signature, rateCheckpoint: started.rateCheckpoint, rateCheckpointSignature: started.rateCheckpointSignature };
+  const paused = await readPrintfulCatalogueProductChunk(env(), initial, fetchImpl, clock.runtime);
+  assert.equal(paused.status, "throttled");
+  assert.equal(paused.reason, "printful_rate_limited");
+  assert.equal(paused.providerStatus, 429);
+  assert.deepEqual(paused.cursor, { index: 4, id: "5" });
+  assert.deepEqual(paused.partialResults.map((product) => product.id), ["1", "2", "3", "4"]);
+  assert.ok(paused.retryAfterMs >= 6_000);
+  assert.deepEqual(paused.rateControl, { retryAfter: "2", retryAt: paused.rateControl.retryAt, limit: 120, remaining: 0, reset: paused.rateControl.reset, resetAt: paused.rateControl.resetAt, policy: "120;w=60" });
+  const attemptsBeforeEarlyContinuation = detailAttempts;
+  const continuation = { phase: "products", manifest: started.manifest, manifestSignature: started.signature, checkpoint: paused.checkpoint, checkpointSignature: paused.checkpointSignature };
+  const stillPaused = await readPrintfulCatalogueProductChunk(env(), continuation, fetchImpl, clock.runtime);
+  assert.equal(stillPaused.status, "throttled");
+  assert.equal(detailAttempts, attemptsBeforeEarlyContinuation);
+  clock.advance(stillPaused.retryAfterMs);
+  const completed = await readPrintfulCatalogueProductChunk(env(), { ...continuation, checkpoint: stillPaused.checkpoint, checkpointSignature: stillPaused.checkpointSignature }, fetchImpl, clock.runtime);
+  assert.equal(completed.status, "complete");
+  assert.deepEqual(completed.chunk.products.map((product) => product.id), Array.from({ length: 12 }, (_, index) => String(index + 1)));
+  assert.deepEqual(fetchedIds.filter((id) => Number(id) < 5), ["1", "2", "3", "4"]);
+  assert.equal(fetchedIds.filter((id) => id === "5").length, 2);
+});
+
+test("429 without provider timing uses the safe fallback and preserves the first uncompleted item", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 1, targetCount: 0 });
+  let force429 = true;
+  const fetchImpl = async (input, init) => {
+    if (force429 && /^\/sync\/products\/1$/.test(new URL(input).pathname)) {
+      force429 = false;
+      return Response.json({ code: 429 }, { status: 429 });
+    }
+    return baseFetch(input, init);
+  };
+  const started = await beginManifest(fetchImpl, clock, 1, 0);
+  const paused = await readPrintfulCatalogueProductChunk(env(), { phase: "products", role: "source", productIds: ["1"], manifest: started.manifest, manifestSignature: started.signature, rateCheckpoint: started.rateCheckpoint, rateCheckpointSignature: started.rateCheckpointSignature }, fetchImpl, clock.runtime);
+  assert.equal(paused.status, "throttled");
+  assert.equal(paused.retryAfterMs, 62_000);
+  assert.deepEqual(paused.cursor, { index: 0, id: "1" });
+  assert.deepEqual(paused.partialResults, []);
+});
+
+test("provider throttle cycles are bounded and terminal failure retains the signed cursor", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 1, targetCount: 0 });
+  const fetchImpl = async (input, init) => /^\/sync\/products\/1$/.test(new URL(input).pathname)
+    ? Response.json({ code: 429 }, { status: 429, headers: { "Retry-After": "1" } })
+    : baseFetch(input, init);
+  const started = await beginManifest(fetchImpl, clock, 1, 0);
+  let input = { phase: "products", role: "source", productIds: ["1"], manifest: started.manifest, manifestSignature: started.signature, rateCheckpoint: started.rateCheckpoint, rateCheckpointSignature: started.rateCheckpointSignature };
+  let result;
+  for (let cycle = 0; cycle < 13; cycle += 1) {
+    result = await readPrintfulCatalogueProductChunk(env(), input, fetchImpl, clock.runtime);
+    if (result.status === "failed") break;
+    assert.equal(result.status, "throttled");
+    clock.advance(result.retryAfterMs);
+    input = { phase: "products", manifest: started.manifest, manifestSignature: started.signature, checkpoint: result.checkpoint, checkpointSignature: result.checkpointSignature };
+  }
+  assert.equal(result.status, "failed");
+  assert.equal(result.reason, "printful_rate_limit_recovery_exhausted");
+  assert.deepEqual(result.cursor, { index: 0, id: "1" });
+  assert.deepEqual(result.partialResults, []);
+  assert.match(result.message, /retained safely/i);
+});
+
+test("419 warning pauses safely, retains progress, and resumes without parsing warning content", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 3, targetCount: 0 });
+  let warningSent = false;
+  const fetchedIds = [];
+  const fetchImpl = async (input, init) => {
+    const match = /^\/sync\/products\/(\d+)$/.exec(new URL(input).pathname);
+    if (match) {
+      fetchedIds.push(match[1]);
+      if (match[1] === "2" && !warningSent) {
+        warningSent = true;
+        return Response.json({ result: { unsafe: "not catalogue data" } }, { status: 419, headers: { "Retry-After": "1" } });
+      }
+    }
+    return baseFetch(input, init);
+  };
+  const started = await beginManifest(fetchImpl, clock, 3, 0);
+  const initial = { phase: "products", role: "source", productIds: ["1", "2", "3"], manifest: started.manifest, manifestSignature: started.signature, rateCheckpoint: started.rateCheckpoint, rateCheckpointSignature: started.rateCheckpointSignature };
+  const paused = await readPrintfulCatalogueProductChunk(env(), initial, fetchImpl, clock.runtime);
+  assert.equal(paused.status, "throttled");
+  assert.equal(paused.providerStatus, 419);
+  assert.deepEqual(paused.partialResults.map((product) => product.id), ["1"]);
+  assert.deepEqual(paused.cursor, { index: 1, id: "2" });
+  clock.advance(paused.retryAfterMs);
+  const completed = await readPrintfulCatalogueProductChunk(env(), { phase: "products", manifest: started.manifest, manifestSignature: started.signature, checkpoint: paused.checkpoint, checkpointSignature: paused.checkpointSignature }, fetchImpl, clock.runtime);
+  assert.deepEqual(completed.chunk.products.map((product) => product.id), ["1", "2", "3"]);
+  assert.deepEqual(fetchedIds, ["1", "2", "2", "3"]);
+});
+
+test("successful response with zero remaining pauses proactively at the provider reset", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 2, targetCount: 0 });
+  const fetchedIds = [];
+  const fetchImpl = async (input, init) => {
+    const match = /^\/sync\/products\/(\d+)$/.exec(new URL(input).pathname);
+    if (match) {
+      fetchedIds.push(match[1]);
+      const response = await baseFetch(input, init);
+      if (match[1] === "1") return Response.json(await response.json(), { headers: { "X-RateLimit-Limit": "120", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "2" } });
+      return response;
+    }
+    return baseFetch(input, init);
+  };
+  const started = await beginManifest(fetchImpl, clock, 2, 0);
+  const paused = await readPrintfulCatalogueProductChunk(env(), { phase: "products", role: "source", productIds: ["1", "2"], manifest: started.manifest, manifestSignature: started.signature, rateCheckpoint: started.rateCheckpoint, rateCheckpointSignature: started.rateCheckpointSignature }, fetchImpl, clock.runtime);
+  assert.equal(paused.status, "throttled");
+  assert.deepEqual(paused.partialResults.map((product) => product.id), ["1"]);
+  assert.deepEqual(paused.cursor, { index: 1, id: "2" });
+  assert.deepEqual(fetchedIds, ["1"]);
+  assert.ok(paused.retryAfterMs >= 3_000);
+});
+
+test("pagination checkpoint retains completed pages when the next page is throttled", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 130, targetCount: 0 });
+  let pageThrottle = true;
+  let page100Calls = 0;
+  const fetchImpl = async (input, init) => {
+    const url = new URL(input);
+    if (url.pathname === "/sync/products" && url.searchParams.get("offset") === "100") {
+      page100Calls += 1;
+      if (pageThrottle) {
+        pageThrottle = false;
+        return Response.json({ code: 429 }, { status: 429, headers: { "Retry-After": "1" } });
+      }
+    }
+    return baseFetch(input, init);
+  };
+  const paused = await beginPrintfulCatalogueSnapshot(env(), { phase: "begin" }, fetchImpl, clock.runtime);
+  assert.equal(paused.status, "throttled");
+  assert.equal(paused.cursor.step, "source_pages");
+  assert.equal(paused.cursor.sourceOffset, 100);
+  assert.equal(paused.partialResults.sourceSummaries.length, 100);
+  const pageCallsBeforeEarlyContinuation = page100Calls;
+  const early = await beginPrintfulCatalogueSnapshot(env(), { phase: "begin", checkpoint: paused.checkpoint, checkpointSignature: paused.checkpointSignature }, fetchImpl, clock.runtime);
+  assert.equal(early.status, "throttled");
+  assert.equal(page100Calls, pageCallsBeforeEarlyContinuation);
+  clock.advance(early.retryAfterMs);
+  const complete = await beginPrintfulCatalogueSnapshot(env(), { phase: "begin", checkpoint: early.checkpoint, checkpointSignature: early.checkpointSignature }, fetchImpl, clock.runtime);
+  assert.equal(complete.status, "complete");
+  assert.equal(complete.manifest.source.summaries.length, 130);
+  assert.equal(new Set(complete.manifest.source.summaries.map((summary) => summary.id)).size, 130);
+  assert.equal(page100Calls, 2);
+});
+
+test("file-detail throttle retains completed files and resumes the exact missing file", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 3, targetCount: 0 });
+  let fileThrottle = true;
+  const fetchedFiles = [];
+  const fetchImpl = async (input, init) => {
+    const url = new URL(input);
+    const productMatch = /^\/sync\/products\/(\d+)$/.exec(url.pathname);
+    if (productMatch) {
+      const id = Number(productMatch[1]);
+      return Response.json({ code: 200, result: sourceDetail(id, { files: [{ id: 9000 + id }] }) });
+    }
+    const fileMatch = /^\/files\/(\d+)$/.exec(url.pathname);
+    if (fileMatch) {
+      fetchedFiles.push(fileMatch[1]);
+      if (fileMatch[1] === "9002" && fileThrottle) {
+        fileThrottle = false;
+        return Response.json({ code: 429 }, { status: 429, headers: { "Retry-After": "1" } });
+      }
+    }
+    return baseFetch(input, init);
+  };
+  const started = await beginManifest(fetchImpl, clock, 3, 0);
+  const products = await readPrintfulCatalogueProductChunk(env(), { phase: "products", role: "source", productIds: ["1", "2", "3"], manifest: started.manifest, manifestSignature: started.signature, rateCheckpoint: started.rateCheckpoint, rateCheckpointSignature: started.rateCheckpointSignature }, fetchImpl, clock.runtime);
+  const fileInput = { phase: "files", role: "source", fileIds: products.chunk.incompleteFileIds, manifest: started.manifest, manifestSignature: started.signature, productChunk: products.chunk, productChunkSignature: products.signature, rateCheckpoint: products.rateCheckpoint, rateCheckpointSignature: products.rateCheckpointSignature };
+  const paused = await readPrintfulCatalogueFileChunk(env(), fileInput, fetchImpl, clock.runtime);
+  assert.equal(paused.status, "throttled");
+  assert.deepEqual(paused.cursor, { index: 1, id: "9002" });
+  assert.deepEqual(paused.partialResults.map((file) => file.id), ["9001"]);
+  clock.advance(paused.retryAfterMs);
+  const completed = await readPrintfulCatalogueFileChunk(env(), { phase: "files", manifest: started.manifest, manifestSignature: started.signature, productChunk: products.chunk, productChunkSignature: products.signature, checkpoint: paused.checkpoint, checkpointSignature: paused.checkpointSignature }, fetchImpl, clock.runtime);
+  assert.deepEqual(completed.chunk.files.map((file) => file.id), ["9001", "9002", "9003"]);
+  assert.deepEqual(fetchedFiles, ["9001", "9002", "9002", "9003"]);
+});
+
+test("signed pacing evidence carries the request-start envelope across Pages invocations", async () => {
+  const clock = fakeSchedulerClock();
+  const starts = [];
+  const baseFetch = providerFetch({ sourceCount: 2, targetCount: 0 });
+  const fetchImpl = async (input, init) => {
+    if (/^\/sync\/products\/\d+$/.test(new URL(input).pathname)) starts.push(clock.now());
+    return baseFetch(input, init);
+  };
+  const started = await beginManifest(fetchImpl, clock, 2, 0);
+  const common = { phase: "products", role: "source", manifest: started.manifest, manifestSignature: started.signature };
+  const invocationA = await readPrintfulCatalogueProductChunk(env(), { ...common, productIds: ["1"], rateCheckpoint: started.rateCheckpoint, rateCheckpointSignature: started.rateCheckpointSignature }, fetchImpl, clock.runtime);
+  const invocationB = await readPrintfulCatalogueProductChunk(env(), { ...common, productIds: ["2"], rateCheckpoint: invocationA.rateCheckpoint, rateCheckpointSignature: invocationA.rateCheckpointSignature }, fetchImpl, clock.runtime);
+  assert.equal(invocationA.status, "complete");
+  assert.equal(invocationB.status, "complete");
+  assert.equal(starts.length, 2);
+  assert.ok(starts[1] - starts[0] >= 675);
+  assert.equal(invocationB.rateCheckpoint.rate.providerRequestCount, invocationA.rateCheckpoint.rate.providerRequestCount + 1);
+});
+
+test("caller-modified pacing or cursor evidence is rejected before a provider call", async () => {
+  const clock = fakeSchedulerClock();
+  const baseFetch = providerFetch({ sourceCount: 1, targetCount: 0 });
+  const started = await beginManifest(baseFetch, clock, 1, 0);
+  const tamperedRate = structuredClone(started.rateCheckpoint);
+  tamperedRate.rate.nextProviderRequestAt = 0;
+  let providerCalls = 0;
+  const countedFetch = (...args) => { providerCalls += 1; return baseFetch(...args); };
+  await assert.rejects(readPrintfulCatalogueProductChunk(env(), { phase: "products", role: "source", productIds: ["1"], manifest: started.manifest, manifestSignature: started.signature, rateCheckpoint: tamperedRate, rateCheckpointSignature: started.rateCheckpointSignature }, countedFetch, clock.runtime), (error) => error.code === "printful_snapshot_evidence_invalid");
+  assert.equal(providerCalls, 0);
 });
 
 test("catalogue implementation contains no Printful provider write method or browser token path", async () => {

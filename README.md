@@ -7,7 +7,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Vite 5, React 18, TypeScript, and React Router.
 - Branded responsive sidebar with a discreet topbar-triggered desktop icon-only collapse, a full mobile drawer, a header-aligned authenticated account menu, server-hydrated overview, future-area route shells, and a branded 404.
 - American Captain display typography rendered at its real weight with lightly relaxed heading tracking and line-height.
-- Routes for Overview, Site Content, Shop / Products, Orders, Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.
+- Routes for Overview, Watch / Broadcast, Site Content, Shop / Products, Orders, Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.
 - D1-backed email/password accounts, verification/reset email, Discord/Google/GitHub/X OAuth, explicit Turnstile, hashed sessions, one-time public handoff, rate limiting, and bounded audit records.
 - Fail-closed loading, signed-out, regular-user, Full Admin, and Master Admin gates with no protected dashboard flash.
 - Functional `/access` account registry with self-service display-name editing, avatar upload/URL import, search/filters, and Master-only promotion, demotion, status, and session-revocation controls.
@@ -15,8 +15,9 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Admin-only authority for the bound `thirdrailify-commerce` D1, direct-merchant provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
 - Functional `/products` merchandising workspace backed by `commerce_products`: Master Admins can feature/unfeature displayable snapshot products, set deterministic hero order with accessible move controls, preview warnings, and persist through the established session/origin/CSRF/rate-limit/D1/audit path.
 - Local V2 GOATS authority and Master Admin workspace for submission moderation, coarse map coordinates, private media, approved publication, reactions/comments, and idempotent transactional-email outbox events. Migration `0004` ships no production listings; two synthetic demos are explicit local/test-only fixtures.
+- Master-only `/watch` workspace for reading current/retained Public broadcast state and showing or hiding retained episodes through an exact-origin, CSRF/rate-limited, audited, server-signed Admin-to-Public request. The browser receives no shared secret and cannot create, scrape, edit, or delete episodes.
 - Public read-only `/api/catalogue/merchandising` projection exposes only product ID, slug, featured state, and order; it contains no price, image path, safe metadata, credential, or write capability.
-- Protected read-only catalogue recovery pins the legacy Wix source to `Third Railify Official` / `16847493` / `wix` and the permanent target to `Third Railify API` / `18668025` / `native`. One `/commerce/fulfillment` operator click runs signed, short-lived server phases below the Pages external-subrequest ceiling, assembles one sanitized bundle, and exposes four deliberate download controls; every provider request is GET-only and no catalogue row is imported.
+- Protected read-only catalogue recovery pins the legacy Wix source to `Third Railify Official` / `16847493` / `wix` and the permanent target to `Third Railify API` / `18668025` / `native`. One `/commerce/fulfillment` operator click runs signed server phases below the Pages external-subrequest ceiling and carries one shared 675 ms Printful request-start clock across those invocations (about 88.9/minute, below V1's published 120/minute quota). Signed partial checkpoints turn 419/429 into visible automatic wait/resume states without re-fetching completed records. Final assembly exposes four deliberate download controls; every provider request is GET-only and no catalogue row is imported.
 - Public-origin `POST /api/commerce/checkout` is the Admin-hosted customer Checkout engine: it accepts only a checkout-request UUID plus bounded product IDs and quantities, derives CAD integer prices/names/totals from `commerce_products`, snapshots a local order before Stripe, and creates only Stripe-hosted TEST Checkout Sessions. The remote `checkout_enabled=false` gate and empty authoritative catalogue keep the route safely disabled.
 - Public machine-to-machine `POST /api/webhooks/stripe` receiver code with exact raw-body Web Crypto verification, a five-minute Stripe `v1` timestamp window, test-event enforcement, and D1-backed duplicate receipt protection. A real signed sandbox event has verified the deployed destination and matching Admin-only signing configuration.
 - Stripe-first Canadian operating model using the dedicated Third Railify Official merchant account, server-created Stripe-hosted Checkout Sessions, Admin-only environment secrets, disabled Checkout/live capture, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
@@ -54,6 +55,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | Path | Current purpose |
 | --- | --- |
 | `/` | Authenticated account/configuration posture and deferred-module boundaries |
+| `/watch` | Master-only current broadcast summary and retained-episode visibility controls; no manual archive creation |
 | `/content` | Future site-content shell |
 | `/products` | D1-backed featured-product selection and stable hero ordering for the bounded snapshot catalogue |
 | `/goats` | GOATS moderation overview with pending/approved/rejected/hidden and email state |
@@ -62,6 +64,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/goats/emails` | Additive GOATS template editor with safe fixture preview |
 | `/goats/:id` | Private submission detail, media, correction, coordinates, transitions, email retry, and DEMO-only cleanup |
 | `/api/admin/goats/*` | Master-session, exact-origin, CSRF, and optimistic-version protected GOATS authority |
+| `/api/admin/watch` | Master-session, exact-origin, CSRF, rate-limited and audited bridge to signed Public archive management |
 | `/api/goats/*` | Approved-only public reads plus signed fixed internal ingestion actions |
 | `/api/catalogue/merchandising` | Cacheable public read projection of product ID/slug/featured order only; no write path |
 | `/orders` | Read-only bounded local Checkout/payment/fulfillment states; no synthetic orders or revenue |
@@ -127,11 +130,14 @@ ThirdRailify-Admin/
 └── package.json
 ```
 
+`docs/WATCH_V2.md` documents the Watch management route, signed server boundary, and Public archive ownership.
+
 The display system uses the seeded American Captain asset at its real weight with lightly relaxed tracking for the primary header voice, with seeded Blinker and Geist Mono for readable body and technical roles.
 
 ## Security boundary
 
 - GOATS reuses Master Admin session/role resolution, exact-origin writes, CSRF, privacy-conscious rate limits, and the Admin-only commerce D1/R2 bindings. Public sees only approved/published projections and opaque public media routes; private email, account association, raw object keys, moderator notes, email state, and audit metadata never enter public output. See `docs/GOATS_V2.md` for APIs, binding/secrets, outbox, cleanup, and local fixture operations.
+- Watch visibility reuses the Master Admin session, exact-origin, CSRF, rate-limit, and audit paths. The Admin Function signs a server-to-server request with the existing encrypted `THIRDRAILIFY_COMMUNITY_API_SECRET`; the browser never receives it. The archive remains in Public's existing SQLite Durable Object, Admin receives no Durable Object binding, and no new secret or Cloudflare resource is required. See `docs/WATCH_V2.md`.
 
 - D1 is the only account/session/role authority. Browser state is a hydration cache, never identity authority.
 - Passwords use salted PBKDF2-SHA256; only hashed session, one-time, OAuth-state, rate-limit, and IP-derived values persist.

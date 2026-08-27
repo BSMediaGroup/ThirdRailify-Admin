@@ -7,3 +7,7 @@
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+/email-assets/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable

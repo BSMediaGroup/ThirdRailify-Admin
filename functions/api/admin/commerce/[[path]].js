@@ -80,11 +80,13 @@ async function handleGet(request, env, path) {
   return jsonResponse(payload, { headers: corsHeaders(request, env) });
 }
 
-async function handlePost(request, env, path, fetchImpl = fetch) {
+async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntime = {}) {
   requireAdminOrigin(request, env);
   const session = await requireAdmin(env, request);
   await requireCsrf(request, session);
-  await enforceRateLimit(env, request, "commerce", session.accountId);
+  const snapshotBody = path === "printful/catalogue/snapshot" ? await readSnapshotRequest(request) : null;
+  const isSnapshotStart = snapshotBody?.phase === "begin" && !snapshotBody?.checkpoint;
+  await enforceRateLimit(env, request, path === "printful/catalogue/snapshot" && !isSnapshotStart ? "commerce_snapshot" : "commerce", session.accountId);
   let payload;
   let authEventType;
 
@@ -103,13 +105,13 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
   } else if (path === "printful/catalogue/snapshot") {
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
     requireCommerceDatabase(env);
-    const body = await readSnapshotRequest(request);
+    const body = snapshotBody;
     if (body.phase === "begin") {
-      payload = await beginPrintfulCatalogueSnapshot(env, fetchImpl);
+      payload = await beginPrintfulCatalogueSnapshot(env, body, fetchImpl, schedulerRuntime);
     } else if (body.phase === "products") {
-      payload = await readPrintfulCatalogueProductChunk(env, body, fetchImpl);
+      payload = await readPrintfulCatalogueProductChunk(env, body, fetchImpl, schedulerRuntime);
     } else if (body.phase === "files") {
-      payload = await readPrintfulCatalogueFileChunk(env, body, fetchImpl);
+      payload = await readPrintfulCatalogueFileChunk(env, body, fetchImpl, schedulerRuntime);
     } else if (body.phase === "assemble") {
       const providerSnapshot = await assemblePrintfulCatalogueSnapshot(env, body);
       payload = {

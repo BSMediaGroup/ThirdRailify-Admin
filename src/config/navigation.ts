@@ -3,7 +3,7 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "content" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "content" | "watch" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -16,6 +16,14 @@ export const adminAreas: AdminArea[] = [
     icon: "overview",
     summary: "Scaffold posture and implementation boundaries.",
     futureScope: ["Authenticated system health", "Approval queues", "Owned operational metrics"],
+  },
+  {
+    path: "/watch",
+    label: "Watch / Broadcast",
+    shortLabel: "Watch",
+    icon: "watch",
+    summary: "Current signal visibility and retained episode controls.",
+    futureScope: ["Signed-ingest archive", "24-record retention", "Public visibility controls"],
   },
   {
     path: "/content",

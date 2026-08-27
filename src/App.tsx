@@ -4,6 +4,7 @@ import { adminAreas } from "./config/navigation";
 import { AreaPage } from "./pages/AreaPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { WatchAdminPage } from "./pages/WatchAdminPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import {
   BusinessInformationPage,
@@ -23,7 +24,7 @@ import {
   GoatsQueuePage,
 } from "./pages/GoatsAdminPages";
 
-const implementedPaths = new Set(["/", "/access", "/products", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
+const implementedPaths = new Set(["/", "/watch", "/access", "/products", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
 
 export function App() {
   return (
@@ -31,6 +32,7 @@ export function App() {
       <Route element={<AdminShell />}>
         <Route index element={<OverviewPage />} />
         <Route path="access" element={<AccountsPage />} />
+        <Route path="watch" element={<WatchAdminPage />} />
         <Route path="products" element={<CommerceProductsPage />} />
         <Route path="orders" element={<CommerceOrdersPage />} />
         <Route path="commerce" element={<CommerceOverviewPage />} />

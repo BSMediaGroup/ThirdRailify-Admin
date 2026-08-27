@@ -35,10 +35,16 @@ test("GOATS email workspace uses the branded Commerce-grade editor and sandboxed
   assert.match(page, /className="commerce-form goats-email-form"/);
   assert.match(page, /className="email-template-preview"/);
   assert.match(page, /Sandboxed branded GOATS email preview/);
+  assert.match(page, /sandbox="allow-same-origin"/);
+  for (const font of ["American Captain", "Blinker", "Geist Mono"]) assert.match(page, new RegExp(`font-family:'${font.replace(" ", "\\s")}'`));
   assert.match(page, /View plain-text fallback/);
   assert.doesNotMatch(page, /srcDoc=\{fixturePreview\(draft\.htmlBody\)\}/);
   assert.match(styles, /\.goats-email-preview-frame/);
   assert.match(styles, /\.goats-email-variables code/);
   assert.match(core, /brandedGoatEmailHtml\(renderTemplate/);
+  assert.match(core, /const assets = `\$\{assetOrigin\}\/email-assets`/);
+  assert.match(core, /\$\{assets\}\/american-captain\.ttf/);
+  assert.match(core, /\$\{assets\}\/blinker-regular\.ttf/);
+  assert.match(core, /\$\{assets\}\/geist-mono\.ttf/);
   assert.match(core, /THIRD RAILIFY OFFICIAL/);
 });

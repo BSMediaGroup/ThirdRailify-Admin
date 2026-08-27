@@ -10,13 +10,20 @@ const MAX_PAGES = 1000;
 const MAX_PRODUCTS = 10_000;
 const MAX_FILES = 20_000;
 const MAX_CREDENTIAL_LENGTH = 4096;
-const DETAIL_CONCURRENCY = 4;
 const REQUEST_TIMEOUT_MS = 20_000;
-const REQUEST_ATTEMPTS = 2;
-const MAX_RETRY_DELAY_MS = 2_000;
+const REQUEST_ATTEMPTS = 3;
 const PRODUCT_CHUNK_SIZE = 12;
 const FILE_CHUNK_SIZE = 20;
-const SNAPSHOT_EVIDENCE_TTL_MS = 15 * 60 * 1000;
+const SNAPSHOT_EVIDENCE_TTL_MS = 4 * 60 * 60 * 1000;
+// 675 ms between request starts is at most 88.9 requests/minute, leaving
+// deliberate headroom below Printful V1's published 120 requests/minute.
+export const PRINTFUL_REQUEST_START_INTERVAL_MS = 675;
+const PRINTFUL_429_FALLBACK_MS = 61_000;
+const PRINTFUL_THROTTLE_SAFETY_MS = 1_000;
+const MAX_PROVIDER_THROTTLE_MS = 2 * 60 * 60 * 1000;
+const MAX_PROVIDER_THROTTLE_CYCLES = 12;
+const MAX_PROVIDER_REQUESTS_PER_INVOCATION = 24;
+const MAX_TRANSIENT_RETRY_DELAY_MS = 5_000;
 
 export const PRINTFUL_CATALOGUE_ENDPOINTS = Object.freeze({
   stores: `${PRINTFUL_API_ORIGIN}/stores`,
@@ -35,9 +42,10 @@ export function parseCadMinorUnits(value) {
   return { status: "valid", value: text, minorUnits: Number(minorUnits) };
 }
 
-export async function discoverLegacyPrintfulSource(env, fetchImpl = fetch) {
+export async function discoverLegacyPrintfulSource(env, fetchImpl = fetch, schedulerRuntime = {}) {
   const credential = requiredCredential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable");
-  const payload = await printfulGet(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.stores, credential, "source_stores");
+  const scheduler = createPrintfulRequestScheduler(fetchImpl, null, { ...schedulerRuntime, maxRequestsPerInvocation: Number.POSITIVE_INFINITY });
+  const payload = await completeScheduledGet(scheduler, PRINTFUL_CATALOGUE_ENDPOINTS.stores, credential, "source_stores");
   const store = normalizeSingleStore(payload, "source");
   assertLegacySourceStore(store);
   assertDifferentStoreIds(store.id, TARGET_STORE_ID);
@@ -49,9 +57,10 @@ export async function discoverLegacyPrintfulSource(env, fetchImpl = fetch) {
   };
 }
 
-export async function discoverPermanentPrintfulTarget(env, fetchImpl = fetch) {
+export async function discoverPermanentPrintfulTarget(env, fetchImpl = fetch, schedulerRuntime = {}) {
   const credential = requiredCredential(env?.PRINTFUL_API_TOKEN, "printful_target_token_unavailable");
-  const payload = await printfulGet(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.stores, credential, "target_stores");
+  const scheduler = createPrintfulRequestScheduler(fetchImpl, null, { ...schedulerRuntime, maxRequestsPerInvocation: Number.POSITIVE_INFINITY });
+  const payload = await completeScheduledGet(scheduler, PRINTFUL_CATALOGUE_ENDPOINTS.stores, credential, "target_stores");
   const store = normalizeSingleStore(payload, "target");
   const configuredStoreId = requiredStoreId(env?.PRINTFUL_STORE_ID, "printful_target_store_id_invalid");
   if (store.id !== TARGET_STORE_ID || configuredStoreId !== TARGET_STORE_ID || store.id !== configuredStoreId) {
@@ -63,7 +72,7 @@ export async function discoverPermanentPrintfulTarget(env, fetchImpl = fetch) {
   return { store, configuredStoreId };
 }
 
-export async function snapshotPrintfulCatalogues(env, fetchImpl = fetch) {
+export async function snapshotPrintfulCatalogues(env, fetchImpl = fetch, schedulerRuntime = {}) {
   const correlationId = randomId();
   const configuredSourceId = requiredStoreId(env?.PRINTFUL_WIX_SOURCE_STORE_ID, "printful_wix_source_store_id_required");
   const configuredTargetId = requiredStoreId(env?.PRINTFUL_STORE_ID, "printful_target_store_id_invalid");
@@ -75,25 +84,19 @@ export async function snapshotPrintfulCatalogues(env, fetchImpl = fetch) {
   }
   assertDifferentStoreIds(configuredSourceId, configuredTargetId);
 
-  const [sourceIdentity, targetIdentity] = await Promise.all([
-    discoverLegacyPrintfulSource(env, fetchImpl),
-    discoverPermanentPrintfulTarget(env, fetchImpl),
-  ]);
+  const scheduler = createPrintfulRequestScheduler(fetchImpl, null, { ...schedulerRuntime, maxRequestsPerInvocation: Number.POSITIVE_INFINITY });
+  const sourceIdentity = await discoverIdentityWithScheduler(env, "source", scheduler);
+  const targetIdentity = await discoverIdentityWithScheduler(env, "target", scheduler);
   if (sourceIdentity.store.id !== configuredSourceId) {
     throw new AuthFailure(409, "printful_source_store_mismatch", "The legacy Printful source identity does not match safe configuration.");
   }
 
   const sourceCredential = requiredCredential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable");
   const targetCredential = requiredCredential(env?.PRINTFUL_API_TOKEN, "printful_target_token_unavailable");
-  const detailLimiter = createConcurrencyLimiter(DETAIL_CONCURRENCY);
-  const [sourceProductsRead, targetProductsRead] = await Promise.all([
-    readCompleteCatalogue(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.sourceProducts, sourceCredential, "source", detailLimiter),
-    readCompleteCatalogue(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.targetProducts, targetCredential, "target", detailLimiter),
-  ]);
-  const [sourceProducts, targetProducts] = await Promise.all([
-    enrichIncompleteFileMetadata(fetchImpl, sourceProductsRead, sourceCredential, "source", detailLimiter),
-    enrichIncompleteFileMetadata(fetchImpl, targetProductsRead, targetCredential, "target", detailLimiter),
-  ]);
+  const sourceProductsRead = await readCompleteCatalogue(PRINTFUL_CATALOGUE_ENDPOINTS.sourceProducts, sourceCredential, "source", scheduler);
+  const targetProductsRead = await readCompleteCatalogue(PRINTFUL_CATALOGUE_ENDPOINTS.targetProducts, targetCredential, "target", scheduler);
+  const sourceProducts = await enrichIncompleteFileMetadata(sourceProductsRead, sourceCredential, "source", scheduler);
+  const targetProducts = await enrichIncompleteFileMetadata(targetProductsRead, targetCredential, "target", scheduler);
 
   return {
     schemaVersion: 1,
@@ -118,89 +121,108 @@ export async function snapshotPrintfulCatalogues(env, fetchImpl = fetch) {
   };
 }
 
-export async function beginPrintfulCatalogueSnapshot(env, fetchImpl = fetch) {
+export async function beginPrintfulCatalogueSnapshot(env, input = {}, fetchImpl = fetch, schedulerRuntime = {}) {
   assertSnapshotConfiguration(env);
-  const correlationId = randomId();
-  const expiresAt = new Date(Date.now() + SNAPSHOT_EVIDENCE_TTL_MS).toISOString();
-  const [sourceIdentity, targetIdentity] = await Promise.all([
-    discoverLegacyPrintfulSource(env, fetchImpl),
-    discoverPermanentPrintfulTarget(env, fetchImpl),
-  ]);
-  const [sourceSummaries, targetSummaries] = await Promise.all([
-    readCatalogueSummaries(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.sourceProducts, requiredCredential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable"), "source"),
-    readCatalogueSummaries(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.targetProducts, requiredCredential(env?.PRINTFUL_API_TOKEN, "printful_target_token_unavailable"), "target"),
-  ]);
+  const state = input?.checkpoint
+    ? await verifiedOperationCheckpoint(env, input.checkpoint, input.checkpointSignature, "begin")
+    : newBeginCheckpoint(schedulerRuntime);
+  const scheduler = createPrintfulRequestScheduler(fetchImpl, state.rate, schedulerRuntime);
+  while (scheduler.requestsStarted() < MAX_PROVIDER_REQUESTS_PER_INVOCATION && state.step !== "complete") {
+    const outcome = await runBeginStep(env, state, scheduler);
+    state.rate = scheduler.snapshot();
+    if (outcome?.kind === "throttled") return pausedPhaseResult(env, state, outcome, beginProgress(state));
+    if (outcome?.kind === "yielded") return continuingPhaseResult(env, state, beginProgress(state));
+  }
+  state.rate = scheduler.snapshot();
+  if (state.step !== "complete") return continuingPhaseResult(env, state, beginProgress(state));
   const manifest = {
-    correlationId,
-    expiresAt,
-    source: { store: sourceIdentity.store, summaries: sourceSummaries.map(safeProductSummary) },
-    target: { store: targetIdentity.store, summaries: targetSummaries.map(safeProductSummary) },
+    correlationId: state.correlationId,
+    expiresAt: state.expiresAt,
+    source: { store: state.source.store, summaries: state.source.summaries },
+    target: { store: state.target.store, summaries: state.target.summaries },
   };
+  const rateCheckpoint = rateEvidence(state.correlationId, state.rate);
   return {
     ok: true,
+    status: "complete",
     phase: "manifest",
     schemaVersion: 1,
-    correlationId,
+    correlationId: state.correlationId,
     manifest,
     signature: await signSnapshotEvidence(env, "manifest", manifest),
+    rateCheckpoint,
+    rateCheckpointSignature: await signSnapshotEvidence(env, "rate", rateCheckpoint),
     chunkSizes: { products: PRODUCT_CHUNK_SIZE, files: FILE_CHUNK_SIZE },
     endpointsUsed: snapshotEndpointsUsed(),
     safety: snapshotSafety(),
+    progress: beginProgress(state),
   };
 }
 
-export async function readPrintfulCatalogueProductChunk(env, input, fetchImpl = fetch) {
+export async function readPrintfulCatalogueProductChunk(env, input, fetchImpl = fetch, schedulerRuntime = {}) {
   assertSnapshotConfiguration(env);
   await verifySnapshotEvidence(env, "manifest", input?.manifest, input?.manifestSignature);
-  const role = requireSnapshotRole(input?.role);
+  const state = input?.checkpoint
+    ? await verifiedOperationCheckpoint(env, input.checkpoint, input.checkpointSignature, "products", input.manifest.correlationId)
+    : await newProductCheckpoint(env, input);
+  const role = requireSnapshotRole(state.role);
   const manifestRole = input.manifest[role];
-  await verifyRoleIdentity(env, role, fetchImpl);
-  const ids = requireChunkIds(input?.productIds, PRODUCT_CHUNK_SIZE, "product");
   const summaries = new Map(manifestRole.summaries.map((summary) => [String(summary.id), summary]));
-  if (ids.some((id) => !summaries.has(id))) throw new AuthFailure(400, "printful_snapshot_product_unknown", "A requested snapshot product is not present in the signed manifest.");
+  if (state.requestedIds.some((id) => !summaries.has(id))) throw new AuthFailure(400, "printful_snapshot_product_unknown", "A requested snapshot product is not present in the signed manifest.");
   const baseUrl = role === "source" ? PRINTFUL_CATALOGUE_ENDPOINTS.sourceProducts : PRINTFUL_CATALOGUE_ENDPOINTS.targetProducts;
   const credential = role === "source"
     ? requiredCredential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable")
     : requiredCredential(env?.PRINTFUL_API_TOKEN, "printful_target_token_unavailable");
-  const limiter = createConcurrencyLimiter(DETAIL_CONCURRENCY);
-  const products = await mapWithConcurrency(ids, DETAIL_CONCURRENCY, async (id) => {
-    const payload = await limiter(() => printfulGet(fetchImpl, `${baseUrl}/${encodeURIComponent(id)}`, credential, `${role}_product_detail`));
-    return normalizeProductDetail(payload?.result, summaries.get(id), role);
-  });
-  products.sort((left, right) => compareIds(left.id, right.id));
+  const scheduler = createPrintfulRequestScheduler(fetchImpl, state.rate, schedulerRuntime);
+  while (state.cursor < state.requestedIds.length) {
+    const id = state.requestedIds[state.cursor];
+    const outcome = await scheduler.get(`${baseUrl}/${encodeURIComponent(id)}`, credential, `${role}_product_detail`);
+    state.rate = scheduler.snapshot();
+    if (outcome.kind === "throttled") return pausedPhaseResult(env, state, outcome, itemProgress(state, input.manifest));
+    if (outcome.kind === "yielded") return continuingPhaseResult(env, state, itemProgress(state, input.manifest));
+    state.products.push(normalizeProductDetail(outcome.payload?.result, summaries.get(id), role));
+    state.cursor += 1;
+  }
+  state.products.sort((left, right) => compareIds(left.id, right.id));
   const chunk = {
     correlationId: input.manifest.correlationId,
     role,
-    productIds: ids,
-    products,
-    incompleteFileIds: incompleteFileIds(products),
+    productIds: state.requestedIds,
+    products: state.products,
+    incompleteFileIds: incompleteFileIds(state.products),
   };
-  return { ok: true, phase: "products", chunk, signature: await signSnapshotEvidence(env, "products", chunk) };
+  return completedChunkResult(env, "products", chunk, state.rate, itemProgress(state, input.manifest));
 }
 
-export async function readPrintfulCatalogueFileChunk(env, input, fetchImpl = fetch) {
+export async function readPrintfulCatalogueFileChunk(env, input, fetchImpl = fetch, schedulerRuntime = {}) {
   assertSnapshotConfiguration(env);
   await verifySnapshotEvidence(env, "manifest", input?.manifest, input?.manifestSignature);
   await verifySnapshotEvidence(env, "products", input?.productChunk, input?.productChunkSignature);
-  const role = requireSnapshotRole(input?.role);
+  const state = input?.checkpoint
+    ? await verifiedOperationCheckpoint(env, input.checkpoint, input.checkpointSignature, "files", input.manifest.correlationId)
+    : await newFileCheckpoint(env, input);
+  const role = requireSnapshotRole(state.role);
   if (input.productChunk.role !== role || input.productChunk.correlationId !== input.manifest.correlationId) {
     throw new AuthFailure(400, "printful_snapshot_evidence_mismatch", "Snapshot evidence does not belong to this catalogue run.");
   }
-  await verifyRoleIdentity(env, role, fetchImpl);
-  const ids = requireChunkIds(input?.fileIds, FILE_CHUNK_SIZE, "file");
   const allowed = new Set(input.productChunk.incompleteFileIds.map(String));
-  if (ids.some((id) => !allowed.has(id))) throw new AuthFailure(400, "printful_snapshot_file_unknown", "A requested file is not present in the signed product evidence.");
+  if (state.requestedIds.some((id) => !allowed.has(id))) throw new AuthFailure(400, "printful_snapshot_file_unknown", "A requested file is not present in the signed product evidence.");
   const credential = role === "source"
     ? requiredCredential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable")
     : requiredCredential(env?.PRINTFUL_API_TOKEN, "printful_target_token_unavailable");
-  const limiter = createConcurrencyLimiter(DETAIL_CONCURRENCY);
-  const files = await mapWithConcurrency(ids, DETAIL_CONCURRENCY, async (id) => {
-    const payload = await limiter(() => printfulGet(fetchImpl, `${PRINTFUL_CATALOGUE_ENDPOINTS.files}/${encodeURIComponent(id)}`, credential, `${role}_file_detail`));
-    return normalizeFile(payload?.result);
-  });
-  files.sort((left, right) => compareIds(left.id, right.id));
-  const chunk = { correlationId: input.manifest.correlationId, role, fileIds: ids, files };
-  return { ok: true, phase: "files", chunk, signature: await signSnapshotEvidence(env, "files", chunk) };
+  const scheduler = createPrintfulRequestScheduler(fetchImpl, state.rate, schedulerRuntime);
+  while (state.cursor < state.requestedIds.length) {
+    const id = state.requestedIds[state.cursor];
+    const outcome = await scheduler.get(`${PRINTFUL_CATALOGUE_ENDPOINTS.files}/${encodeURIComponent(id)}`, credential, `${role}_file_detail`);
+    state.rate = scheduler.snapshot();
+    if (outcome.kind === "throttled") return pausedPhaseResult(env, state, outcome, itemProgress(state, input.manifest));
+    if (outcome.kind === "yielded") return continuingPhaseResult(env, state, itemProgress(state, input.manifest));
+    state.files.push(normalizeFile(outcome.payload?.result));
+    state.cursor += 1;
+  }
+  state.files.sort((left, right) => compareIds(left.id, right.id));
+  const chunk = { correlationId: input.manifest.correlationId, role, fileIds: state.requestedIds, files: state.files };
+  return completedChunkResult(env, "files", chunk, state.rate, itemProgress(state, input.manifest));
 }
 
 export async function assemblePrintfulCatalogueSnapshot(env, input) {
@@ -222,23 +244,24 @@ export async function assemblePrintfulCatalogueSnapshot(env, input) {
   };
 }
 
-async function readCompleteCatalogue(fetchImpl, baseUrl, credential, role, detailLimiter) {
-  const summaries = await readCatalogueSummaries(fetchImpl, baseUrl, credential, role);
+async function readCompleteCatalogue(baseUrl, credential, role, scheduler) {
+  const summaries = await readCatalogueSummaries(baseUrl, credential, role, scheduler);
   const orderedSummaries = [...summaries].sort((left, right) => compareIds(left?.id, right?.id));
-  const details = await mapWithConcurrency(orderedSummaries, DETAIL_CONCURRENCY, async (summary) => {
+  const details = [];
+  for (const summary of orderedSummaries) {
     const id = requiredProviderId(summary?.id, `printful_${role}_product_id_invalid`);
-    const detailPayload = await detailLimiter(() => printfulGet(fetchImpl, `${baseUrl}/${encodeURIComponent(id)}`, credential, `${role}_product_detail`));
-    return normalizeProductDetail(detailPayload?.result, summary, role);
-  });
+    const detailPayload = await completeScheduledGet(scheduler, `${baseUrl}/${encodeURIComponent(id)}`, credential, `${role}_product_detail`);
+    details.push(normalizeProductDetail(detailPayload?.result, summary, role));
+  }
   return details.sort((left, right) => compareIds(left.id, right.id));
 }
 
-async function readCatalogueSummaries(fetchImpl, baseUrl, credential, role) {
+async function readCatalogueSummaries(baseUrl, credential, role, scheduler) {
   const summaries = [];
   let offset = 0;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const url = `${baseUrl}?offset=${offset}&limit=${PAGE_LIMIT}`;
-    const payload = await printfulGet(fetchImpl, url, credential, `${role}_products`);
+    const payload = await completeScheduledGet(scheduler, url, credential, `${role}_products`);
     const result = requireArray(payload?.result, `printful_${role}_products_invalid`);
     const paging = normalizePaging(payload?.paging, offset, result.length);
     summaries.push(...result);
@@ -330,7 +353,7 @@ function normalizeVariant(variant, role) {
   };
 }
 
-async function enrichIncompleteFileMetadata(fetchImpl, products, credential, role, detailLimiter) {
+async function enrichIncompleteFileMetadata(products, credential, role, scheduler) {
   const needed = new Map();
   for (const product of products) {
     for (const variant of product.variants) {
@@ -341,10 +364,11 @@ async function enrichIncompleteFileMetadata(fetchImpl, products, credential, rol
   }
   if (needed.size > MAX_FILES) throw new AuthFailure(502, `printful_${role}_file_count_too_large`, "The Printful catalogue exceeds the bounded file-metadata reader limit.");
   const ids = [...needed.keys()].sort(compareIds);
-  const details = await mapWithConcurrency(ids, DETAIL_CONCURRENCY, async (id) => {
-    const payload = await detailLimiter(() => printfulGet(fetchImpl, `${PRINTFUL_CATALOGUE_ENDPOINTS.files}/${encodeURIComponent(id)}`, credential, `${role}_file_detail`));
-    return [id, normalizeFile(payload?.result)];
-  });
+  const details = [];
+  for (const id of ids) {
+    const payload = await completeScheduledGet(scheduler, `${PRINTFUL_CATALOGUE_ENDPOINTS.files}/${encodeURIComponent(id)}`, credential, `${role}_file_detail`);
+    details.push([id, normalizeFile(payload?.result)]);
+  }
   for (const [id, detail] of details) needed.set(id, detail);
   if (!needed.size) return products;
   return products.map((product) => ({
@@ -397,83 +421,178 @@ function normalizeOptions(options) {
   })).filter((option) => option.id).sort((left, right) => left.id.localeCompare(right.id));
 }
 
-async function printfulGet(fetchImpl, url, credential, operation) {
-  const label = operationLabel(operation);
-  for (let attempt = 1; attempt <= REQUEST_ATTEMPTS; attempt += 1) {
-    let response;
-    let timedOut = false;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, REQUEST_TIMEOUT_MS);
-    try {
-      response = await fetchImpl(url, {
-        method: "GET",
-        signal: controller.signal,
-        headers: { Accept: "application/json", Authorization: `Bearer ${credential}` },
-      });
-    } catch {
-      if (attempt < REQUEST_ATTEMPTS) {
-        await boundedDelay(250 * attempt);
-        continue;
-      }
-      const reason = timedOut ? `timed out after ${REQUEST_ATTEMPTS} attempts` : `could not be reached after ${REQUEST_ATTEMPTS} attempts`;
-      throw new AuthFailure(502, `printful_${operation}_unavailable`, `Printful ${label} ${reason}.`);
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (!response?.ok) {
-      if (attempt < REQUEST_ATTEMPTS && isRetriableStatus(response?.status)) {
-        await boundedDelay(retryDelayMs(response, attempt));
-        continue;
-      }
-      const status = Number.isInteger(response?.status) ? response.status : 502;
-      throw new AuthFailure(502, `printful_${operation}_rejected`, `Printful ${label} failed safely (HTTP ${status}).`);
-    }
-    try {
-      return await response.json();
-    } catch {
-      throw new AuthFailure(502, `printful_${operation}_invalid`, `Printful ${label} returned invalid JSON.`);
-    }
-  }
-  throw new AuthFailure(502, `printful_${operation}_unavailable`, `Printful ${label} could not be completed.`);
-}
+export function createPrintfulRequestScheduler(fetchImpl = fetch, initialState = null, runtime = {}) {
+  const now = typeof runtime.now === "function" ? runtime.now : Date.now;
+  const sleep = typeof runtime.sleep === "function" ? runtime.sleep : boundedDelay;
+  const random = typeof runtime.random === "function" ? runtime.random : Math.random;
+  const invocationLimit = runtime.maxRequestsPerInvocation === Number.POSITIVE_INFINITY
+    ? Number.POSITIVE_INFINITY
+    : Number.isSafeInteger(runtime.maxRequestsPerInvocation) && runtime.maxRequestsPerInvocation > 0
+      ? runtime.maxRequestsPerInvocation
+      : MAX_PROVIDER_REQUESTS_PER_INVOCATION;
+  const state = normalizeRateState(initialState, now());
+  let invocationRequestCount = 0;
 
-async function mapWithConcurrency(values, concurrency, mapper) {
-  const results = new Array(values.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-    while (cursor < values.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await mapper(values[index], index);
-    }
+  const throttleOutcome = () => ({
+    kind: "throttled",
+    statusCode: state.throttleStatus || 429,
+    retryAt: state.throttleUntil,
+    retryAfterMs: Math.max(0, state.throttleUntil - now()),
+    exhausted: state.throttleCycles > MAX_PROVIDER_THROTTLE_CYCLES,
+    rateControl: state.rateControl,
   });
-  await Promise.all(workers);
-  return results;
-}
 
-function createConcurrencyLimiter(limit) {
-  let active = 0;
-  const pending = [];
-  const runNext = () => {
-    while (active < limit && pending.length) {
-      const entry = pending.shift();
-      active += 1;
-      Promise.resolve()
-        .then(entry.task)
-        .then(entry.resolve, entry.reject)
-        .finally(() => {
-          active -= 1;
-          runNext();
-        });
-    }
+  return {
+    snapshot: () => ({ ...state, rateControl: state.rateControl ? { ...state.rateControl } : null }),
+    requestsStarted: () => invocationRequestCount,
+    async get(url, credential, operation) {
+      if (state.throttleUntil > now()) return throttleOutcome();
+      if (state.throttleUntil) {
+        state.throttleUntil = 0;
+        state.throttleStatus = null;
+      }
+      for (let attempt = 1; attempt <= REQUEST_ATTEMPTS; attempt += 1) {
+        // Once one logical GET starts, finish its bounded transient attempts in
+        // this invocation so retry counts cannot reset at a phase boundary.
+        if (attempt === 1 && invocationRequestCount >= invocationLimit) return { kind: "yielded" };
+        const waitMs = Math.max(0, state.nextProviderRequestAt - now());
+        if (waitMs) await sleep(waitMs);
+        const startedAt = now();
+        state.lastProviderRequestAt = startedAt;
+        state.nextProviderRequestAt = startedAt + PRINTFUL_REQUEST_START_INTERVAL_MS;
+        state.providerRequestCount += 1;
+        invocationRequestCount += 1;
+        let response;
+        let timedOut = false;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+        try {
+          response = await fetchImpl(url, {
+            method: "GET",
+            signal: controller.signal,
+            headers: { Accept: "application/json", Authorization: `Bearer ${credential}` },
+          });
+        } catch {
+          if (attempt < REQUEST_ATTEMPTS) {
+            state.nextProviderRequestAt = Math.max(state.nextProviderRequestAt, now() + transientRetryDelay(attempt, random));
+            continue;
+          }
+          const reason = timedOut ? `timed out after ${REQUEST_ATTEMPTS} attempts` : `could not be reached after ${REQUEST_ATTEMPTS} attempts`;
+          throw new AuthFailure(502, `printful_${operation}_unavailable`, `Printful ${operationLabel(operation)} ${reason}.`);
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        state.rateControl = normalizeRateControlHeaders(response?.headers, now());
+        const status = Number.isInteger(response?.status) ? response.status : 502;
+        if (status === 419 || status === 429) {
+          applyProviderThrottle(state, status, state.rateControl, now());
+          return throttleOutcome();
+        }
+        if (!response?.ok) {
+          if (attempt < REQUEST_ATTEMPTS && isTransientStatus(status)) {
+            state.nextProviderRequestAt = Math.max(state.nextProviderRequestAt, now() + transientRetryDelay(attempt, random));
+            continue;
+          }
+          throw new AuthFailure(502, `printful_${operation}_rejected`, `Printful ${operationLabel(operation)} failed safely (HTTP ${status}).`);
+        }
+        if (state.rateControl?.remaining === 0 && state.rateControl.resetAt > now()) {
+          state.throttleUntil = Math.min(state.rateControl.resetAt + PRINTFUL_THROTTLE_SAFETY_MS, now() + MAX_PROVIDER_THROTTLE_MS);
+          state.throttleStatus = 429;
+          state.nextProviderRequestAt = Math.max(state.nextProviderRequestAt, state.throttleUntil);
+        }
+        try {
+          return { kind: "success", payload: await response.json(), rateControl: state.rateControl };
+        } catch {
+          throw new AuthFailure(502, `printful_${operation}_invalid`, `Printful ${operationLabel(operation)} returned invalid JSON.`);
+        }
+      }
+      throw new AuthFailure(502, `printful_${operation}_unavailable`, `Printful ${operationLabel(operation)} could not be completed.`);
+    },
+    sleep,
+    now,
   };
-  return (task) => new Promise((resolve, reject) => {
-    pending.push({ task, resolve, reject });
-    runNext();
-  });
+}
+
+async function completeScheduledGet(scheduler, url, credential, operation) {
+  for (;;) {
+    const outcome = await scheduler.get(url, credential, operation);
+    if (outcome.kind === "success") return outcome.payload;
+    if (outcome.kind === "yielded") {
+      await scheduler.sleep(Math.max(0, scheduler.snapshot().nextProviderRequestAt - scheduler.now()));
+      continue;
+    }
+    if (outcome.exhausted) throw new AuthFailure(502, `printful_${operation}_rate_limit_exhausted`, `Printful ${operationLabel(operation)} remained rate limited after bounded recovery.`);
+    await scheduler.sleep(outcome.retryAfterMs);
+  }
+}
+
+function normalizeRateState(value, now) {
+  if (!value) return {
+    nextProviderRequestAt: now,
+    lastProviderRequestAt: null,
+    providerRequestCount: 0,
+    throttleUntil: 0,
+    throttleStatus: null,
+    throttleCycles: 0,
+    rateControl: null,
+  };
+  const nextProviderRequestAt = safeTimestamp(value.nextProviderRequestAt, now);
+  const lastProviderRequestAt = value.lastProviderRequestAt === null ? null : safeTimestamp(value.lastProviderRequestAt, now);
+  const throttleUntil = value.throttleUntil ? safeTimestamp(value.throttleUntil, now) : 0;
+  const providerRequestCount = Number(value.providerRequestCount);
+  const throttleCycles = Number(value.throttleCycles);
+  if (!Number.isSafeInteger(providerRequestCount) || providerRequestCount < 0 || providerRequestCount > 1_000_000
+    || !Number.isSafeInteger(throttleCycles) || throttleCycles < 0 || throttleCycles > MAX_PROVIDER_THROTTLE_CYCLES + 1) {
+    throw new AuthFailure(400, "printful_snapshot_rate_invalid", "Snapshot request pacing evidence is invalid.");
+  }
+  return {
+    nextProviderRequestAt,
+    lastProviderRequestAt,
+    providerRequestCount,
+    throttleUntil,
+    throttleStatus: value.throttleStatus === 419 ? 419 : value.throttleStatus === 429 ? 429 : null,
+    throttleCycles,
+    rateControl: normalizeStoredRateControl(value.rateControl),
+  };
+}
+
+function normalizeRateControlHeaders(headers, now) {
+  const first = (...names) => names.map((name) => headers?.get?.(name)).find((value) => value !== null && value !== undefined && String(value).trim() !== "");
+  const retryAfterRaw = first("Retry-After");
+  const resetRaw = first("X-RateLimit-Reset", "X-Ratelimit-Reset");
+  return {
+    retryAfter: safeHeaderText(retryAfterRaw, 120),
+    retryAt: parseRetryAfter(retryAfterRaw, now),
+    limit: safeHeaderInteger(first("X-RateLimit-Limit", "X-Ratelimit-Limit")),
+    remaining: safeHeaderInteger(first("X-RateLimit-Remaining", "X-Ratelimit-Remaining")),
+    reset: safeHeaderText(resetRaw, 120),
+    resetAt: parseRateReset(resetRaw, now),
+    policy: safeHeaderText(first("X-RateLimit-Policy", "X-Ratelimit-Policy"), 240),
+  };
+}
+
+function normalizeStoredRateControl(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return {
+    retryAfter: safeHeaderText(value.retryAfter, 120),
+    retryAt: safeOptionalTimestamp(value.retryAt),
+    limit: safeHeaderInteger(value.limit),
+    remaining: safeHeaderInteger(value.remaining),
+    reset: safeHeaderText(value.reset, 120),
+    resetAt: safeOptionalTimestamp(value.resetAt),
+    policy: safeHeaderText(value.policy, 240),
+  };
+}
+
+function applyProviderThrottle(state, status, rateControl, now) {
+  const suppliedTimes = [rateControl?.retryAt, rateControl?.resetAt].filter((value) => Number.isFinite(value) && value > now);
+  const baseRetryAt = suppliedTimes.length ? Math.max(...suppliedTimes) : now + PRINTFUL_429_FALLBACK_MS;
+  const retryAt = Math.min(baseRetryAt + PRINTFUL_THROTTLE_SAFETY_MS, now + MAX_PROVIDER_THROTTLE_MS);
+  state.throttleCycles += 1;
+  state.throttleUntil = retryAt;
+  state.throttleStatus = status;
+  state.nextProviderRequestAt = Math.max(state.nextProviderRequestAt, retryAt);
 }
 
 function operationLabel(operation) {
@@ -486,18 +605,269 @@ function operationLabel(operation) {
   return `${role} ${category}`;
 }
 
-function isRetriableStatus(status) {
-  return status === 408 || status === 425 || status === 429 || status >= 500;
+function isTransientStatus(status) {
+  return status === 408 || status === 425 || status >= 500;
 }
 
-function retryDelayMs(response, attempt) {
-  const retryAfter = Number(response?.headers?.get?.("Retry-After"));
-  if (Number.isFinite(retryAfter) && retryAfter >= 0) return Math.min(retryAfter * 1000, MAX_RETRY_DELAY_MS);
-  return Math.min(250 * attempt, MAX_RETRY_DELAY_MS);
+function transientRetryDelay(attempt, random) {
+  const jitter = Math.floor(Math.max(0, Math.min(1, Number(random()) || 0)) * 151);
+  return Math.min(250 * (2 ** (attempt - 1)) + jitter, MAX_TRANSIENT_RETRY_DELAY_MS);
+}
+
+function parseRetryAfter(value, now) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return now + Math.ceil(Number(text) * 1000);
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) && parsed > now ? parsed : null;
+}
+
+function parseRateReset(value, now) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric >= 0) {
+    if (numeric >= 1_000_000_000_000) return Math.floor(numeric);
+    if (numeric >= 1_000_000_000) return Math.floor(numeric * 1000);
+    return now + Math.ceil(numeric * 1000);
+  }
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) && parsed > now ? parsed : null;
+}
+
+function safeHeaderText(value, maximum) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim().replace(/[\u0000-\u001f\u007f]/g, "");
+  return text ? text.slice(0, maximum) : null;
+}
+
+function safeHeaderInteger(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+function safeOptionalTimestamp(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+function safeTimestamp(value, now) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > now + SNAPSHOT_EVIDENCE_TTL_MS + MAX_PROVIDER_THROTTLE_MS) {
+    throw new AuthFailure(400, "printful_snapshot_rate_invalid", "Snapshot request pacing evidence is invalid.");
+  }
+  return Math.floor(number);
 }
 
 function boundedDelay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function newBeginCheckpoint(runtime) {
+  const now = typeof runtime.now === "function" ? runtime.now() : Date.now();
+  return {
+    phase: "begin",
+    correlationId: randomId(),
+    expiresAt: new Date(now + SNAPSHOT_EVIDENCE_TTL_MS).toISOString(),
+    step: "source_identity",
+    source: { store: null, summaries: [], offset: 0, total: null },
+    target: { store: null, summaries: [], offset: 0, total: null },
+    rate: normalizeRateState(null, now),
+  };
+}
+
+async function runBeginStep(env, state, scheduler) {
+  if (state.step === "source_identity" || state.step === "target_identity") {
+    const role = state.step.startsWith("source") ? "source" : "target";
+    const credential = roleCredential(env, role);
+    const outcome = await scheduler.get(PRINTFUL_CATALOGUE_ENDPOINTS.stores, credential, `${role}_stores`);
+    if (outcome.kind !== "success") return outcome;
+    const store = normalizeSingleStore(outcome.payload, role);
+    if (role === "source") {
+      assertLegacySourceStore(store);
+      assertDifferentStoreIds(store.id, TARGET_STORE_ID);
+      if (requiredStoreId(env?.PRINTFUL_WIX_SOURCE_STORE_ID, "printful_wix_source_store_id_required") !== store.id) {
+        throw new AuthFailure(409, "printful_source_store_mismatch", "The legacy Printful source identity does not match safe configuration.");
+      }
+      state.source.store = store;
+      state.step = "target_identity";
+    } else {
+      if (store.id !== TARGET_STORE_ID || store.type !== "native" || normalizeName(store.name) !== normalizeName(TARGET_STORE_NAME)) {
+        throw new AuthFailure(409, "printful_target_store_identity_invalid", "The permanent Printful store is not the expected native Third Railify API store.");
+      }
+      state.target.store = store;
+      state.step = "source_pages";
+    }
+    return outcome;
+  }
+
+  const role = state.step === "source_pages" ? "source" : "target";
+  const roleState = state[role];
+  const baseUrl = role === "source" ? PRINTFUL_CATALOGUE_ENDPOINTS.sourceProducts : PRINTFUL_CATALOGUE_ENDPOINTS.targetProducts;
+  const outcome = await scheduler.get(`${baseUrl}?offset=${roleState.offset}&limit=${PAGE_LIMIT}`, roleCredential(env, role), `${role}_products`);
+  if (outcome.kind !== "success") return outcome;
+  const result = requireArray(outcome.payload?.result, `printful_${role}_products_invalid`);
+  const paging = normalizePaging(outcome.payload?.paging, roleState.offset, result.length);
+  roleState.summaries.push(...result.map(safeProductSummary));
+  roleState.total = paging.total;
+  if (roleState.summaries.length > MAX_PRODUCTS) {
+    throw new AuthFailure(502, `printful_${role}_catalogue_too_large`, "The Printful catalogue exceeds the bounded migration reader limit.");
+  }
+  if (result.length === 0 || roleState.offset + result.length >= paging.total) {
+    roleState.summaries.sort((left, right) => compareIds(left.id, right.id));
+    state.step = role === "source" ? "target_pages" : "complete";
+  } else {
+    roleState.offset += result.length;
+  }
+  return outcome;
+}
+
+async function discoverIdentityWithScheduler(env, role, scheduler) {
+  const payload = await completeScheduledGet(scheduler, PRINTFUL_CATALOGUE_ENDPOINTS.stores, roleCredential(env, role), `${role}_stores`);
+  const store = normalizeSingleStore(payload, role);
+  if (role === "source") {
+    assertLegacySourceStore(store);
+    return { store, configuredStoreId: optionalStoreId(env?.PRINTFUL_WIX_SOURCE_STORE_ID, "printful_wix_source_store_id_invalid"), configurationMatches: String(env?.PRINTFUL_WIX_SOURCE_STORE_ID) === store.id };
+  }
+  if (store.id !== TARGET_STORE_ID || store.type !== "native" || normalizeName(store.name) !== normalizeName(TARGET_STORE_NAME)) {
+    throw new AuthFailure(409, "printful_target_store_identity_invalid", "The permanent Printful store is not the expected native Third Railify API store.");
+  }
+  return { store, configuredStoreId: requiredStoreId(env?.PRINTFUL_STORE_ID, "printful_target_store_id_invalid") };
+}
+
+function roleCredential(env, role) {
+  return role === "source"
+    ? requiredCredential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable")
+    : requiredCredential(env?.PRINTFUL_API_TOKEN, "printful_target_token_unavailable");
+}
+
+async function newProductCheckpoint(env, input) {
+  const role = requireSnapshotRole(input?.role);
+  const requestedIds = requireChunkIds(input?.productIds, PRODUCT_CHUNK_SIZE, "product");
+  const rate = await verifiedRateState(env, input, input.manifest.correlationId);
+  return { phase: "products", correlationId: input.manifest.correlationId, role, requestedIds, cursor: 0, products: [], rate };
+}
+
+async function newFileCheckpoint(env, input) {
+  const role = requireSnapshotRole(input?.role);
+  const requestedIds = requireChunkIds(input?.fileIds, FILE_CHUNK_SIZE, "file");
+  const rate = await verifiedRateState(env, input, input.manifest.correlationId);
+  return { phase: "files", correlationId: input.manifest.correlationId, role, requestedIds, cursor: 0, files: [], rate };
+}
+
+async function verifiedRateState(env, input, correlationId) {
+  await verifySnapshotEvidence(env, "rate", input?.rateCheckpoint, input?.rateCheckpointSignature);
+  if (input.rateCheckpoint.correlationId !== correlationId) throw new AuthFailure(400, "printful_snapshot_evidence_mismatch", "Snapshot pacing evidence does not belong to this catalogue run.");
+  return normalizeRateState(input.rateCheckpoint.rate, Date.now());
+}
+
+async function verifiedOperationCheckpoint(env, checkpoint, signature, phase, correlationId = null) {
+  await verifySnapshotEvidence(env, "checkpoint", checkpoint, signature);
+  if (checkpoint.phase !== phase || (correlationId && checkpoint.correlationId !== correlationId)) {
+    throw new AuthFailure(400, "printful_snapshot_evidence_mismatch", "Snapshot continuation evidence does not belong to this catalogue phase.");
+  }
+  const expiresAt = Date.parse(String(checkpoint.expiresAt || ""));
+  if (phase === "begin" && (!Number.isFinite(expiresAt) || expiresAt <= Date.now())) {
+    throw new AuthFailure(409, "printful_snapshot_expired", "The catalogue snapshot run expired safely. Retry the read-only snapshot.");
+  }
+  if (phase === "begin") {
+    if (!["source_identity", "target_identity", "source_pages", "target_pages", "complete"].includes(checkpoint.step)
+      || !checkpoint.source || !checkpoint.target || !Array.isArray(checkpoint.source.summaries) || !Array.isArray(checkpoint.target.summaries)) {
+      throw new AuthFailure(400, "printful_snapshot_evidence_invalid", "Snapshot continuation evidence is invalid.");
+    }
+  } else {
+    requireSnapshotRole(checkpoint.role);
+    requireChunkIds(checkpoint.requestedIds, phase === "products" ? PRODUCT_CHUNK_SIZE : FILE_CHUNK_SIZE, phase === "products" ? "product" : "file");
+    if (!Number.isSafeInteger(checkpoint.cursor) || checkpoint.cursor < 0 || checkpoint.cursor > checkpoint.requestedIds.length) {
+      throw new AuthFailure(400, "printful_snapshot_cursor_invalid", "Snapshot continuation cursor is invalid.");
+    }
+    const records = phase === "products" ? checkpoint.products : checkpoint.files;
+    if (!Array.isArray(records) || records.length !== checkpoint.cursor) throw new AuthFailure(400, "printful_snapshot_cursor_invalid", "Snapshot continuation records are inconsistent.");
+  }
+  checkpoint.rate = normalizeRateState(checkpoint.rate, Date.now());
+  return checkpoint;
+}
+
+async function pausedPhaseResult(env, state, outcome, progress) {
+  const checkpoint = structuredClone(state);
+  const exhausted = outcome.exhausted || state.rate.throttleCycles > MAX_PROVIDER_THROTTLE_CYCLES;
+  const response = {
+    ok: !exhausted,
+    status: exhausted ? "failed" : "throttled",
+    phase: state.phase,
+    reason: exhausted ? "printful_rate_limit_recovery_exhausted" : "printful_rate_limited",
+    providerStatus: outcome.statusCode,
+    retryAt: new Date(outcome.retryAt).toISOString(),
+    retryAfterMs: outcome.retryAfterMs,
+    cursor: checkpointCursor(state),
+    partialResults: partialCheckpointResults(state),
+    checkpoint,
+    checkpointSignature: await signSnapshotEvidence(env, "checkpoint", checkpoint),
+    rateControl: outcome.rateControl,
+    progress,
+  };
+  if (exhausted) response.message = "Printful remained rate limited after bounded automatic recovery. Completed snapshot progress was retained safely.";
+  return response;
+}
+
+async function continuingPhaseResult(env, state, progress) {
+  const checkpoint = structuredClone(state);
+  return {
+    ok: true,
+    status: "continuing",
+    phase: state.phase,
+    checkpoint,
+    checkpointSignature: await signSnapshotEvidence(env, "checkpoint", checkpoint),
+    progress,
+  };
+}
+
+async function completedChunkResult(env, phase, chunk, rate, progress) {
+  const rateCheckpoint = rateEvidence(chunk.correlationId, rate);
+  return {
+    ok: true,
+    status: "complete",
+    phase,
+    chunk,
+    signature: await signSnapshotEvidence(env, phase, chunk),
+    rateCheckpoint,
+    rateCheckpointSignature: await signSnapshotEvidence(env, "rate", rateCheckpoint),
+    progress,
+  };
+}
+
+function rateEvidence(correlationId, rate) {
+  return { correlationId, rate: normalizeRateState(rate, Date.now()) };
+}
+
+function checkpointCursor(state) {
+  if (state.phase === "begin") return { step: state.step, sourceOffset: state.source.offset, targetOffset: state.target.offset };
+  return { index: state.cursor, id: state.requestedIds[state.cursor] || null };
+}
+
+function partialCheckpointResults(state) {
+  if (state.phase === "products") return state.products;
+  if (state.phase === "files") return state.files;
+  return { sourceSummaries: state.source.summaries, targetSummaries: state.target.summaries };
+}
+
+function beginProgress(state) {
+  const completed = state.source.summaries.length + state.target.summaries.length;
+  const knownTotals = [state.source.total, state.target.total].filter(Number.isSafeInteger);
+  return {
+    currentPhase: state.step.startsWith("source") ? "Legacy catalogue enumeration" : state.step.startsWith("target") ? "Target catalogue enumeration" : "Catalogue manifest",
+    completed,
+    total: knownTotals.length === 2 ? knownTotals[0] + knownTotals[1] : null,
+    providerState: "reading",
+  };
+}
+
+function itemProgress(state, manifest) {
+  const phaseName = state.phase === "products"
+    ? state.role === "source" ? "Legacy product details" : "Target product details"
+    : state.role === "source" ? "Legacy files" : "Target files";
+  return { currentPhase: phaseName, completed: state.cursor, total: state.requestedIds.length, providerState: "reading", catalogueTotal: manifest[state.role].summaries.length };
 }
 
 function assertSnapshotConfiguration(env) {

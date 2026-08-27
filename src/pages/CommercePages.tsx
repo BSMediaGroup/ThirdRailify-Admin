@@ -23,6 +23,7 @@ import {
   type CommerceTemplate,
   type MerchandisingPayload,
   type PrintfulProviderSnapshotPayload,
+  type SnapshotProgress,
   type ProviderStatus,
   type TemplatesPayload,
 } from "../commerce/client";
@@ -290,9 +291,9 @@ export function FulfillmentIntegrationsPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [snapshot, setSnapshot] = useState<PrintfulProviderSnapshotPayload | null>(null);
-  const [snapshotState, setSnapshotState] = useState<"ready" | "running" | "completed" | "failed">("ready");
+  const [snapshotState, setSnapshotState] = useState<"ready" | "running" | "throttled" | "completed" | "failed">("ready");
   const [snapshotError, setSnapshotError] = useState("");
-  const [snapshotProgress, setSnapshotProgress] = useState("");
+  const [snapshotProgress, setSnapshotProgress] = useState<SnapshotProgress | null>(null);
   const load = useCallback(async () => {
     const stop = startLoading("Loading Printful connection status"); setError("");
     try { setPayload(await getCommerceOverview()); }
@@ -316,12 +317,15 @@ export function FulfillmentIntegrationsPage() {
   const captureSnapshot = async () => {
     if (!canRunSnapshot) return;
     const stop = startLoading("Reading both Printful catalogues");
-    setBusy(true); setError(""); setMessage(""); setSnapshotError(""); setSnapshot(null); setSnapshotState("running"); setSnapshotProgress("Starting the protected read-only snapshot…");
+    setBusy(true); setError(""); setMessage(""); setSnapshotError(""); setSnapshot(null); setSnapshotState("running"); setSnapshotProgress({ currentPhase: "Catalogue manifest", completed: 0, total: null, providerState: "reading", message: "Starting the protected read-only snapshot…" });
     try {
-      const next = await capturePrintfulCatalogueSnapshot(csrfToken, setSnapshotProgress);
+      const next = await capturePrintfulCatalogueSnapshot(csrfToken, (progress) => {
+        setSnapshotProgress(progress);
+        setSnapshotState(progress.providerState === "waiting" || progress.providerState === "rate_limited" ? "throttled" : "running");
+      });
       setSnapshot(next);
       setSnapshotState("completed");
-      setSnapshotProgress("");
+      setSnapshotProgress(null);
       setMessage("The complete sanitized read-only snapshot is ready. Download each evidence document below. No Printful write was sent.");
     } catch (reason) {
       setSnapshotState("failed");
@@ -348,12 +352,13 @@ export function FulfillmentIntegrationsPage() {
         {canManageIntegrations && payload?.databaseConfigured && !payload.printfulSecretConfigured && <p className="commerce-action-note">The store-scoped Printful credential must be configured as an Admin Cloudflare secret before verification.</p>}
       </DetailCard>
       <DetailCard title="Legacy source" status="legacy_production" statusLabel="Read-only migration source" lead="Third Railify Official"><dl><Fact term="Store" value="Third Railify Official" /><Fact term="Store ID" value="16847493" /><Fact term="Store type" value="wix" /><Fact term="Credential" value="Temporary encrypted secret" /><Fact term="Access used" value="GET only" /><Fact term="Write access" value="None" /><Fact term="Products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Configuration" value="Verified Store ID bound" /><Fact term="Wix storefront" value="Live / untouched" /></dl></DetailCard>
-      <DetailCard title="Catalogue reconciliation" status={snapshotState === "completed" ? "connected" : snapshotState === "failed" ? "error" : "setup_required"} lead="Read-only migration evidence"><dl><Fact term="Catalogue snapshot" value={snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Running" : snapshotState === "completed" ? "Completed" : "Failed"} /><Fact term="Matched" value={snapshot ? String(snapshot.reconciliation.counts.printfulBackedMatches) : "Awaiting snapshot"} /><Fact term="Unresolved" value={snapshot ? String(snapshot.reconciliation.counts.unresolved) : "Awaiting snapshot"} /><Fact term="Non-Printful" value={snapshot ? String(snapshot.reconciliation.counts.nonPrintful) : "Awaiting snapshot"} /><Fact term="Source products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Source variants" value={snapshot ? String(snapshot.source.counts.variants) : "Awaiting snapshot"} /><Fact term="Target products" value={snapshot ? String(snapshot.target.counts.products) : "Awaiting snapshot"} /><Fact term="Missing / malformed prices" value={snapshot ? String(snapshot.source.counts.malformedOrMissingPrices) : "Awaiting snapshot"} /><Fact term="Missing files" value={snapshot ? String(snapshot.source.counts.missingFiles) : "Awaiting snapshot"} /><Fact term="Provider methods" value="GET only" /><Fact term="Checkout" value="Disabled" /><Fact term="Fulfillment" value="Disabled" /></dl>
+      <DetailCard title="Catalogue reconciliation" status={snapshotState === "completed" ? "connected" : snapshotState === "failed" ? "error" : "setup_required"} lead="Read-only migration evidence"><dl><Fact term="Catalogue snapshot" value={snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Running" : snapshotState === "throttled" ? "Safely paused" : snapshotState === "completed" ? "Completed" : "Failed"} /><Fact term="Matched" value={snapshot ? String(snapshot.reconciliation.counts.printfulBackedMatches) : "Awaiting snapshot"} /><Fact term="Unresolved" value={snapshot ? String(snapshot.reconciliation.counts.unresolved) : "Awaiting snapshot"} /><Fact term="Non-Printful" value={snapshot ? String(snapshot.reconciliation.counts.nonPrintful) : "Awaiting snapshot"} /><Fact term="Source products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Source variants" value={snapshot ? String(snapshot.source.counts.variants) : "Awaiting snapshot"} /><Fact term="Target products" value={snapshot ? String(snapshot.target.counts.products) : "Awaiting snapshot"} /><Fact term="Missing / malformed prices" value={snapshot ? String(snapshot.source.counts.malformedOrMissingPrices) : "Awaiting snapshot"} /><Fact term="Missing files" value={snapshot ? String(snapshot.source.counts.missingFiles) : "Awaiting snapshot"} /><Fact term="Provider methods" value="GET only" /><Fact term="Checkout" value="Disabled" /><Fact term="Fulfillment" value="Disabled" /></dl>
         <div className={`catalogue-snapshot-state is-${snapshotState}`} aria-live="polite">
-          <strong>{snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Reading source and target catalogues…" : snapshotState === "completed" ? "Snapshot completed" : "Catalogue snapshot failed"}</strong>
-          <p>{snapshotState === "ready" ? "No previous snapshot is required. The protected action will return sanitized migration evidence without changing either store." : snapshotState === "running" ? snapshotProgress : snapshotState === "completed" ? "Choose each file below to download the four deterministic evidence documents." : snapshotError}</p>
+          <strong>{snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Reading source and target catalogues…" : snapshotState === "throttled" ? "PRINTFUL RATE LIMIT — Snapshot safely paused" : snapshotState === "completed" ? "Snapshot completed" : "Catalogue snapshot failed"}</strong>
+          <p>{snapshotState === "ready" ? "No previous snapshot is required. The protected action will return sanitized migration evidence without changing either store." : snapshotState === "running" || snapshotState === "throttled" ? snapshotProgress?.message || "The signed checkpoint is progressing through read-only provider records." : snapshotState === "completed" ? "Choose each file below to download the four deterministic evidence documents." : snapshotError}</p>
+          {(snapshotState === "running" || snapshotState === "throttled") && snapshotProgress && <dl className="catalogue-progress"><Fact term="Current phase" value={snapshotProgress.currentPhase} /><Fact term="Completed" value={String(snapshotProgress.completed)} /><Fact term="Total" value={snapshotProgress.total === null ? "Discovering" : String(snapshotProgress.total)} /><Fact term="Provider state" value={snapshotProgress.providerState === "waiting" ? "Rate-limited / waiting" : humanize(snapshotProgress.providerState)} />{snapshotProgress.retryAt && <Fact term="Resume time" value={formatSynchronizedAt(snapshotProgress.retryAt)} />}</dl>}
         </div>
-        {canManageIntegrations && <button type="button" className="secondary-button" onClick={() => void captureSnapshot()} disabled={!canRunSnapshot}>{snapshotState === "running" ? "Reading catalogues…" : snapshotState === "failed" ? "Retry read-only snapshot" : "Run read-only catalogue snapshot"}</button>}
+        {canManageIntegrations && <button type="button" className="secondary-button" onClick={() => void captureSnapshot()} disabled={!canRunSnapshot}>{snapshotState === "running" ? "Reading catalogues…" : snapshotState === "throttled" ? "Waiting to resume automatically…" : snapshotState === "failed" ? "Retry read-only snapshot" : "Run read-only catalogue snapshot"}</button>}
         {canManageIntegrations && payload && !snapshotAvailable && <p className="commerce-action-note">The protected action remains fail-closed until the safe source/target Store-ID configuration, commerce audit storage, and permanent Printful integration are present.</p>}
         {snapshot && <div className="catalogue-downloads" aria-label="Catalogue snapshot downloads">
           <button type="button" className="secondary-button" onClick={() => downloadSnapshot("source")}>Download Wix source snapshot</button>
