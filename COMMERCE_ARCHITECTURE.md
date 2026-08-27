@@ -10,7 +10,8 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Dedicated Stripe account | created; operator-confirmed |
 | Stripe integration mode | `direct_merchant` |
 | Stripe API connection | restricted TEST credential configured; read-only verification implemented |
-| Stripe webhook | not configured |
+| Stripe webhook endpoint code | deployed and ready at `POST /api/webhooks/stripe` |
+| Stripe webhook signing | not configured; `STRIPE_WEBHOOK_SECRET` does not exist yet |
 | Stripe environment | `test`; production readiness not established |
 | Checkout | `disabled` |
 | Live payment capture | `disabled` |
@@ -21,7 +22,7 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Printify | `unavailable`; credential custody undecided |
 | Wix | `legacy production`; remains authoritative and untouched |
 
-The separate Admin-only commerce D1 is bound and migrated, and its encryption key plus Stripe TEST credential remain encrypted Cloudflare Secrets. This milestone creates no payment, webhook, transaction, customer, product, price, refund, payout, or fulfillment order.
+The separate Admin-only commerce D1 is bound and migrated, and its encryption key plus Stripe TEST credential remain encrypted Cloudflare Secrets. This milestone adds a webhook receiver and receipt ledger, but it creates no Stripe event destination, payment, Checkout Session, transaction, customer, product, price, refund, payout, commerce order, or fulfillment order.
 
 ## Authoritative payment flow
 
@@ -73,7 +74,7 @@ The dedicated account's creation and Sandbox/test access are operator-confirmed.
 
 ## Data authority
 
-Authentication remains in the existing auth D1. Commerce state belongs in the separate `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. The applied local schema authority is `commerce-migrations/0001_commerce_control_plane.sql`.
+Authentication remains in the existing auth D1. Commerce state belongs in the separate `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. Schema authority is the ordered `commerce-migrations/0001_commerce_control_plane.sql` then `commerce-migrations/0002_stripe_webhook_events.sql` sequence.
 
 Entities:
 
@@ -86,10 +87,19 @@ Entities:
 - `commerce_products`: future provider-neutral catalogue records.
 - `commerce_orders`: future order records with customer-payment and Printful cost/refund fields kept separate.
 - `commerce_audit`: redacted mutation history.
+- `commerce_webhook_events`: one safe receipt per provider plus provider Event ID, with bounded event/object/status metadata and a raw-payload SHA-256 only. It has no raw payload, signature, secret, credential, customer, address, card, or full-object column.
 
 The Stripe provider row stores only safe, verified values: environment, `direct_merchant`, Stripe account ID retrieved through the API, country, default currency, account/business display name, test charges/payouts/details-submitted flags, account type, last verification time, webhook status, and the existing bounded payment-method summary. It must not store API keys, webhook signing secrets, payout-bank data, card data, identity documents, full private Stripe responses, tax IDs, individual/representative details, or team-member email addresses.
 
 Staging verification is `POST /api/admin/commerce/stripe/verify`, protected by the existing Admin session, exact origin, `commerce.payments.manage`/Master authority, CSRF, rate limit, and audit boundaries. It reads `STRIPE_SECRET_KEY` only in the server runtime and performs exactly `GET https://api.stripe.com/v1/account` in the direct merchant context without `Stripe-Account`. Restricted `rk_test_...` is the intended credential; `sk_test_...` remains compatible. All live credential forms fail closed. A successful response must normalize to `country=CA` and `default_currency=cad`; connection status means only “Test API connected.”
+
+## External Stripe webhook boundary
+
+`POST /api/webhooks/stripe` is an external machine-to-machine Pages Function. It does not require or inspect an Admin session, CSRF token, Turnstile token, Origin header, CORS state, or commerce capability. Non-POST methods return `405`.
+
+The route reads at most 1 MiB of request bytes once and verifies the exact bytes before parsing JSON. `Stripe-Signature` must contain exactly one numeric `t` value and at least one well-formed `v1` value; `v0` and unknown schemes are ignored. The signed input is the ASCII timestamp, a period, then the untouched request bytes. The complete `whsec_...` value is the UTF-8 HMAC-SHA256 key and is never Base64-decoded. Web Crypto verification safely supports multiple `v1` values during rotation. Timestamps older than 300 seconds or more than 300 seconds in the future fail closed.
+
+Only a sane `object=event`, `livemode=false` Stripe envelope can reach D1. The current explicit allowlist contains only `checkout.session.completed`, which is finalized as `accepted_noop` with `checkout_disabled`; it does not create or mutate an order. Other valid signed test event types receive `2xx`, are finalized as `ignored`, and perform no commerce action. `INSERT OR IGNORE` plus the ledger's composite primary key makes duplicate `stripe` plus Event ID deliveries successful no-ops. Delivery ordering is never trusted.
 
 ## Credential custody and encryption
 
@@ -107,7 +117,7 @@ Staging verification is `POST /api/admin/commerce/stripe/verify`, protected by t
 
 ## Authorization and Public boundary
 
-Commerce reuses the existing Admin session, role, origin, CSRF, D1 rate-limit, and audit authority. Master Admins have all five commerce capabilities and are the only accounts allowed to grant or revoke them. Full Admins can view commerce by role and may receive bounded capabilities. Ordinary users cannot receive commerce authority.
+Browser-driven commerce reads and mutations reuse the existing Admin session, role, origin, CSRF, D1 rate-limit, and audit authority. Master Admins have all five commerce capabilities and are the only accounts allowed to grant or revoke them. Full Admins can view commerce by role and may receive bounded capabilities. Ordinary users cannot receive commerce authority. The external Stripe webhook is the deliberate exception to browser authentication and instead uses the signed-delivery controls above.
 
 ThirdRailify Public remains a read-only client. This milestone adds no Public binding, key, Stripe script, payment button, checkout route, fulfillment route, or provider mutation. Future Public payloads must contain only explicitly authorized safe business, availability, product, and customer-order data.
 

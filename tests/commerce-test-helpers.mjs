@@ -3,7 +3,10 @@ import { Miniflare } from "miniflare";
 import { applyMigration, authEnvironment } from "./auth-test-helpers.mjs";
 
 const authMigrationUrl = new URL("../migrations/0001_auth_foundation.sql", import.meta.url);
-const commerceMigrationUrl = new URL("../commerce-migrations/0001_commerce_control_plane.sql", import.meta.url);
+const commerceMigrationUrls = [
+  new URL("../commerce-migrations/0001_commerce_control_plane.sql", import.meta.url),
+  new URL("../commerce-migrations/0002_stripe_webhook_events.sql", import.meta.url),
+];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";
 
@@ -16,10 +19,10 @@ export async function createCommerceDatabases() {
   });
   const authDb = await miniflare.getD1Database("THIRDRAILIFY_AUTH_DB");
   const commerceDb = await miniflare.getD1Database("THIRDRAILIFY_COMMERCE_DB");
-  const [authMigration, commerceMigration] = await Promise.all([readFile(authMigrationUrl, "utf8"), readFile(commerceMigrationUrl, "utf8")]);
+  const [authMigration, ...commerceMigrations] = await Promise.all([readFile(authMigrationUrl, "utf8"), ...commerceMigrationUrls.map((url) => readFile(url, "utf8"))]);
   await applyMigration(authDb, authMigration);
-  await applyMigration(commerceDb, commerceMigration);
-  return { authDb, commerceDb, commerceMigration, dispose: () => miniflare.dispose() };
+  for (const migration of commerceMigrations) await applyMigration(commerceDb, migration);
+  return { authDb, commerceDb, commerceMigrations, dispose: () => miniflare.dispose() };
 }
 
 export function commerceEnvironment(harness, overrides = {}) {

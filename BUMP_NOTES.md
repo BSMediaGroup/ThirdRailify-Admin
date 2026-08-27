@@ -10,6 +10,11 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Added the public machine-to-machine `POST /api/webhooks/stripe` Pages Function without browser auth, CSRF, Turnstile, Origin, CORS, or commerce capability requirements. It instead streams at most 1 MiB of exact request bytes, requires the server-only `STRIPE_WEBHOOK_SECRET`, verifies any valid Stripe `v1` HMAC-SHA256 signature with Web Crypto, and enforces a fixed 300-second past/future timestamp window before JSON parsing.
+- Added `commerce-migrations/0002_stripe_webhook_events.sql` with a composite `provider + provider_event_id` primary key and bounded safe receipt metadata/indexes. Signed Sandbox `checkout.session.completed` deliveries are stored only as `accepted_noop / checkout_disabled`; unknown valid test events are acknowledged as ignored, duplicates are successful no-ops, and raw bodies, signatures, secrets, credentials, customer/card/address data, and full Stripe objects are excluded.
+- Split the Stripe Admin projection into truthful webhook endpoint and signing states. The endpoint is ready for Workbench configuration, signing remains not configured until `STRIPE_WEBHOOK_SECRET` exists, and Checkout/live payment/fulfillment gates remain false. Added synthetic signature, raw-body, replay, envelope, livemode, no-mutation, idempotency, sensitive-data exclusion, migration-order, and existing-verification regression coverage.
+- Documented the exact next Stripe Sandbox Workbench event destination: Your account, Snapshot event, normal/default supported API version, only `checkout.session.completed`, and `https://thirdrailify-admin.pages.dev/api/webhooks/stripe`, followed by Admin Production encrypted-secret custody for the generated `whsec_...` value. No Stripe destination or secret is created by this milestone.
+- Applied only `0002_stripe_webhook_events.sql` to the confirmed `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), verified no migrations remain and the empty ledger exists, then deployed Admin Production/main as `c7fb003a-5bc4-4872-8ee8-30f6fbc15032`. The canonical unsigned route returned `503 stripe_webhook_not_configured`, proving the receiver is live and fails closed before signing-secret provisioning.
 - Corrected the Firefox-only sign-in scrollbar regression caused by an unreliable WebKit-selector support probe: Firefox now explicitly retains its original narrow gold-on-dark `thin` scrollbar, while Chromium/Brave keeps the separate five-pixel treatment.
 - Added the authenticated `POST /api/admin/commerce/stripe/verify` action and `/commerce/payments` control for one read-only direct-merchant `GET https://api.stripe.com/v1/account`. It reuses Admin origin/session, `commerce.payments.manage`/Master authority, CSRF, the bounded commerce rate limit, and redacted auth/commerce audit models.
 - Made staging Stripe server credential validation environment-aware under the unchanged `STRIPE_SECRET_KEY` name: intended restricted `rk_test_...` and compatible `sk_test_...` credentials are accepted, while `rk_live_...`, `sk_live_...`, missing/malformed credentials, missing D1, and non-CA/non-CAD accounts fail closed.
@@ -66,7 +71,9 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Human-readable
 
-Third Railify now has its own dedicated Canadian Stripe account, and the control room says exactly that. It also stays honest about what is still missing: test API credentials, a test webhook, Checkout acceptance, live verification, and payout readiness.
+Third Railify Admin now has a deployed-code path ready to receive signed Stripe Sandbox events, but it refuses all delivery until Stripe Workbench creates the destination and its signing secret is stored server-side. Even a valid test Checkout-completed event can only create one safe receipt today; it cannot create an order, fulfill anything, or enable payment acceptance.
+
+Third Railify now has its own dedicated Canadian Stripe account, and the control room says exactly that. It also stays honest about what is still missing: webhook signing, Checkout acceptance, live verification, and payout readiness.
 
 The control room now has an honest, reviewable commerce foundation for a future Canadian Third Railify store. It explains who owns the merchant account and payouts, keeps Shawn's Stripe identity and bank entry inside Stripe, separates customer income from Printful costs, and provides safe business, tax, and customer-template editors without pretending that checkout or fulfillment is live.
 
@@ -89,7 +96,7 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 ### Known deferrals
 
 - Historical blocker removed: the superseded Stripe Connect platform eligibility check is no longer part of the Third Railify shop architecture.
-- Creation/binding/migration of `thirdrailify-commerce`, generation of its encryption secret, dedicated-account Stripe test-mode credentials/webhook, read-only account identity verification, test Checkout Sessions, wallet eligibility testing, and all live payment activity.
+- Stripe Workbench Sandbox event-destination creation, generated `STRIPE_WEBHOOK_SECRET` provisioning, signed delivery acceptance, test Checkout Sessions, authoritative order transitions, wallet eligibility testing, and all live payment activity.
 - Creation of a parallel Printful manual/API store and scoped token, catalogue connectivity, draft-order API work, explicit confirmation gates, and fulfillment activation. Existing Wix-connected Printful remains untouched.
 - PayPal direct-merchant setup and donations/VIP work; Printify evidence and credential custody; authoritative Wix catalogue/provider/export/policy reconciliation and cutover planning.
 - Creation/binding of the real staging D1 database, remaining encrypted secrets, provider applications, Turnstile widget, deployment, and live Resend acceptance.

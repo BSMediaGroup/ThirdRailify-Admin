@@ -5,10 +5,10 @@ This runbook records the completed staging control-plane prerequisites and the s
 ## Current blockers and invariants
 
 - The dedicated Third Railify Official Canadian Stripe account exists and Sandbox/test mode is available.
-- `thirdrailify-commerce` (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`) is bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`, and `0001_commerce_control_plane.sql` is applied.
+- `thirdrailify-commerce` (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`) is bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. `0001_commerce_control_plane.sql` then `0002_stripe_webhook_events.sql` are applied, and the remote migration list is clear.
 - `THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY` and `STRIPE_SECRET_KEY` are stored as Admin Cloudflare encrypted Secrets. Secret values must never be retrieved, printed, logged, committed, or persisted to D1.
 - The intended staging Stripe credential is the restricted TEST key (`rk_test_...`) under the unchanged `STRIPE_SECRET_KEY` name; `sk_test_...` is compatible and all live key forms fail closed.
-- Read-only Stripe account verification is implemented; no webhook is configured, and Checkout/live-payment gates are disabled.
+- Read-only Stripe account verification and the signed sandbox receiver at `POST /api/webhooks/stripe` are deployed. An unsigned live-route check returns `503 stripe_webhook_not_configured`. No Stripe event destination or signing secret is configured, and Checkout/live-payment gates are disabled.
 - Live business verification, payout banking, charges, payouts, wallets, Tax, and live credentials are not verified.
 - The existing auth D1 remains the identity/session/role authority and must not become the main commerce database.
 - Wix remains production authority and all Wix providers stay connected until an approved cutover.
@@ -16,24 +16,25 @@ This runbook records the completed staging control-plane prerequisites and the s
 
 ## Required future sequence
 
-Items 1–5 and the code portion of item 8 are complete. Every remaining provider or activation mutation requires separate approval at its milestone.
+The D1, encryption-key, restricted TEST credential, read-only account verification, receiver code, and receipt-ledger code portions are complete. Every remaining provider or activation mutation requires separate approval at its milestone.
 
 1. Provision a D1 database named `thirdrailify-commerce` in the intended Cloudflare account.
 2. Bind it only to Admin as `THIRDRAILIFY_COMMERCE_DB`; never add the binding to Public or another client.
 3. Apply `commerce-migrations/0001_commerce_control_plane.sql` and verify its identity, tables, constraints, seeds, and repeat-safe behavior.
 4. Generate and store `THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY` as an Admin-only Cloudflare encrypted secret.
 5. Store the dedicated restricted Stripe TEST key in the Admin encrypted secret `STRIPE_SECRET_KEY` without printing, committing, or inspecting its value in application tooling. Keep this environment variable name even though the credential begins with `rk_test_`.
-6. Create a Stripe TEST webhook endpoint for the implemented event contract.
-7. Store its signing secret as the Admin encrypted secret `STRIPE_WEBHOOK_SECRET`.
-8. Use the implemented authenticated action once to read-only verify the Stripe account identity; retrieve the account ID from Stripe rather than hardcoding it.
-9. Implement test Checkout Sessions with `mode=payment`, CAD prices, and server-returned Stripe-hosted Checkout URLs.
-10. Implement signature-verified, idempotent webhook transitions into authoritative commerce order/payment state.
-11. Keep checkout disabled throughout acceptance.
-12. Configure the parallel Printful manual/API store while leaving the Wix-connected store active.
-13. Implement Printful draft orders with no automatic confirmation.
-14. Do not disconnect Wix.
-15. Complete and verify the live Stripe business and payout setup directly in Stripe Dashboard.
-16. Swap to live credentials only during a later explicitly approved production milestone.
+6. Completed: `commerce-migrations/0002_stripe_webhook_events.sql` was the sole pending migration, was applied to the confirmed D1, and the Admin receiver was deployed.
+7. Create the Stripe Sandbox event destination exactly as documented below; do not create it through the Stripe API.
+8. Store the generated signing secret only as the Admin Production encrypted secret `STRIPE_WEBHOOK_SECRET`.
+9. Send and verify a signed Sandbox test delivery before treating webhook signing or delivery as operational.
+10. Implement test Checkout Sessions with `mode=payment`, CAD prices, and server-returned Stripe-hosted Checkout URLs.
+11. Implement separately approved webhook transitions into authoritative commerce order/payment state; the current receiver remains receipt-only.
+12. Keep checkout disabled throughout acceptance.
+13. Configure the parallel Printful manual/API store while leaving the Wix-connected store active.
+14. Implement Printful draft orders with no automatic confirmation.
+15. Do not disconnect Wix.
+16. Complete and verify the live Stripe business and payout setup directly in Stripe Dashboard.
+17. Swap to live credentials only during a later explicitly approved production milestone.
 
 ## D1 and encryption details
 
@@ -57,6 +58,26 @@ Do not merge an unresolved placeholder into active Wrangler configuration. Gener
 The first implementation must use the dedicated account's ordinary merchant API context. It must not send a `Stripe-Account` header or implement connected-account creation, Account Links, onboarding, OAuth, capability polling, application fees, transfer destinations, or inter-account balances.
 
 Persist only safe verified account metadata and bounded status summaries. Never persist secret keys, webhook signing secrets, bank data, card data, identity documents, full private Stripe payloads, or team-member email addresses. Verify webhook signatures and idempotency before any state transition. Do not create a Checkout Session, PaymentIntent, charge, refund, payout, or webhook in this scaffold-correction task.
+
+### Next operator step: Stripe Workbench event destination
+
+Perform this only after the staging receiver is deployed and its unsigned request returns `503 stripe_webhook_not_configured`:
+
+| Stripe Workbench field | Exact value |
+| --- | --- |
+| Environment | Stripe Sandbox |
+| Workbench area | Webhooks / Event destinations |
+| Events from | Your account |
+| Payload | Snapshot event |
+| Event API version | The account's normal/default supported API version; do not deliberately select preview or beta |
+| Event type | `checkout.session.completed` only |
+| Destination type | Webhook endpoint |
+| Endpoint URL | `https://thirdrailify-admin.pages.dev/api/webhooks/stripe` |
+| Suggested name/description | `Third Railify Admin - Staging` |
+
+After creation, Stripe displays a signing secret beginning `whsec_`. Save it only as `STRIPE_WEBHOOK_SECRET` in ThirdRailify-Admin → Cloudflare Pages → Production → encrypted Secret. Do not put it in ThirdRailify Public, `wrangler.jsonc`, D1, Git, browser code, logs, responses, or an example file with a real value. Do not retrieve, reveal, rotate, or change `STRIPE_SECRET_KEY` while performing this step.
+
+The staging receiver accepts only `v1` HMAC-SHA256 signatures over the exact raw body, uses a fixed 300-second past/future timestamp tolerance, rejects `livemode=true`, and enforces duplicate Event IDs by provider plus Event ID. Its only recognized event is `checkout.session.completed`, which is recorded as `checkout_disabled` without an order or fulfillment mutation. Other valid signed test event types are acknowledged and recorded as ignored. Checkout, live payments, and fulfillment remain disabled.
 
 ## Printful and PayPal boundaries
 

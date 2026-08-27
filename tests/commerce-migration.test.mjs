@@ -3,16 +3,21 @@ import test from "node:test";
 import { applyMigration } from "./auth-test-helpers.mjs";
 import { createCommerceDatabases } from "./commerce-test-helpers.mjs";
 
-test("commerce migration creates the separate control-plane schema and is repeat-safe", async (t) => {
+test("commerce migrations apply 0001 then 0002 on a fresh database and are repeat-safe", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
-  await applyMigration(harness.commerceDb, harness.commerceMigration);
+  for (const migration of harness.commerceMigrations) await applyMigration(harness.commerceDb, migration);
   const result = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all();
   assert.deepEqual(result.results.map((row) => row.name), [
     "commerce_audit", "commerce_business_profiles", "commerce_orders", "commerce_permission_grants", "commerce_products",
-    "commerce_provider_connections", "commerce_settings", "commerce_tax_registrations", "commerce_templates",
+    "commerce_provider_connections", "commerce_settings", "commerce_tax_registrations", "commerce_templates", "commerce_webhook_events",
   ]);
   const profile = await harness.commerceDb.prepare("SELECT trading_name, country_code, province_code, currency_code FROM commerce_business_profiles WHERE id = 'primary'").first();
   assert.deepEqual(profile, { trading_name: "Third Railify Official", country_code: "CA", province_code: "ON", currency_code: "CAD" });
+  const indexes = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'commerce_webhook_events' ORDER BY name").all();
+  assert.deepEqual(indexes.results.map((row) => row.name), [
+    "idx_commerce_webhook_events_event_id", "idx_commerce_webhook_events_received", "idx_commerce_webhook_events_status",
+    "idx_commerce_webhook_events_type_created", "sqlite_autoindex_commerce_webhook_events_1",
+  ]);
 });
 
 test("provider uniqueness, status constraints, and credential custody fail closed", async (t) => {

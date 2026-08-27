@@ -28,6 +28,7 @@ test("commerce overview is authenticated and missing DB leaves disabled truthful
   const stripe = noDbPayload.providers.find((provider) => provider.provider === "stripe");
   assert.equal(stripe.integrationMode, "direct_merchant"); assert.equal(stripe.status, "setup_required"); assert.equal(stripe.accountCreated, true);
   assert.equal(stripe.apiConfigured, false); assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false);
+  assert.equal(stripe.webhookEndpointReady, true); assert.equal(stripe.webhookSigningConfigured, false);
   assert.doesNotMatch(JSON.stringify(noDbPayload), /secret_key|webhook_secret|credential_ciphertext|acct_[A-Za-z0-9]+/i);
 });
 
@@ -88,6 +89,7 @@ test("Stripe verification route enforces auth, payments authority, CSRF, configu
   const stripe = payload.providers.find((provider) => provider.provider === "stripe");
   assert.equal(stripe.status, "connected"); assert.equal(stripe.externalAccountId, "acct_RouteCanadian123"); assert.equal(stripe.apiConfigured, true);
   assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false); assert.equal(stripe.livePayoutReadiness, "unverified");
+  assert.equal(stripe.webhookEndpointReady, true); assert.equal(stripe.webhookSigningConfigured, false);
 });
 
 test("only Master can grant commerce authority and ordinary users are rejected", async (t) => {

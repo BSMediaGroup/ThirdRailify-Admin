@@ -13,10 +13,11 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Functional `/access` account registry with self-service display-name editing, avatar upload/URL import, search/filters, and Master-only promotion, demotion, status, and session-revocation controls.
 - Admin-authoritative avatar ingestion validates JPG/PNG/WebP bytes, stores immutable content-addressed objects under `/u/<opaque-account-key>/avatar/<sha256>.<ext>`, and persists only the resulting HTTPS URL in D1.
 - Admin-only authority for the bound `thirdrailify-commerce` D1, direct-merchant provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
+- Public machine-to-machine `POST /api/webhooks/stripe` receiver code with exact raw-body Web Crypto verification, a five-minute Stripe `v1` timestamp window, test-event enforcement, and D1-backed duplicate receipt protection. The signing secret and Stripe event destination are not configured yet.
 - Stripe-first Canadian operating model using the dedicated Third Railify Official merchant account, server-created Stripe-hosted Checkout Sessions, Admin-only environment secrets, disabled Checkout/live capture, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
 - Cloudflare Pages static output, SPA fallback, document and response-level noindex, restrictive baseline headers, and no custom domain.
 
-Account administration is operational in code. The separate commerce D1 is bound and migrated, its encryption secret and the intended restricted Stripe TEST credential are held as Admin Cloudflare encrypted secrets, and the protected Stripe verification action is implemented. The action performs only `GET /v1/account`, requires Canada and CAD, and stores only safe metadata in the existing Stripe row. Checkout, webhooks, live payments, live payout readiness, and fulfillment remain disabled or unverified. The verified existing `thirdrailify-profile-media` bucket is declared locally through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` binding. Public receives no commerce binding or secret.
+Account administration is operational in code. The separate commerce D1 is bound and migrated, its encryption secret and the intended restricted Stripe TEST credential are held as Admin Cloudflare encrypted secrets, and the protected Stripe verification action is implemented. The action performs only `GET /v1/account`, requires Canada and CAD, and stores only safe metadata in the existing Stripe row. The webhook receiver and idempotent receipt ledger are deployed, but webhook signing remains unconfigured until Stripe Workbench creates the destination and generates `STRIPE_WEBHOOK_SECRET`. Checkout, live payments, live payout readiness, order mutation, and fulfillment remain disabled or unverified. The verified existing `thirdrailify-profile-media` bucket is declared locally through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` binding. Public receives no commerce binding or secret.
 
 ## Local development
 
@@ -49,6 +50,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/orders` | Order authority and separate payment/fulfillment cost model; no synthetic orders |
 | `/commerce` | Truthful commerce readiness and provider status overview |
 | `/commerce/payments` | Dedicated Stripe/PayPal/Wix posture plus the permission-gated, read-only Stripe TEST account verification action |
+| `/api/webhooks/stripe` | External Stripe sandbox delivery route; POST/raw-body/signature/D1 required, with no browser authentication or commerce mutation |
 | `/commerce/business` | Structured public/private business profile; persistence fails closed without commerce D1 and encryption |
 | `/commerce/tax` | Encrypted tax identifiers and document presentation; no custom tax calculation/compliance claim |
 | `/commerce/emails` | Safe structured customer template editor; no send path |
@@ -72,13 +74,13 @@ ThirdRailify-Admin/
 │   └── people/             Seeded host imagery (not used in admin)
 ├── public/
 │   ├── _headers            Noindex and static response safeguards
-│   ├── _routes.json        Auth and Admin Pages Function routing
+│   ├── _routes.json        Auth, Admin, profile-media, and Stripe webhook Pages Function routing
 │   └── _redirects          SPA fallback
 ├── functions/
 │   ├── _shared/            D1 auth/session/OAuth/security, profile-media, and commerce helpers
-│   ├── api/                Shared auth plus signed Admin account/status/commerce APIs
+│   ├── api/                Shared auth, signed Admin APIs, and the external signed Stripe webhook receiver
 │   └── u/                  Immutable R2-backed profile-media delivery
-├── commerce-migrations/    Local authority for the future separate commerce D1
+├── commerce-migrations/    Commerce control-plane and Stripe webhook receipt-ledger migrations
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
 │   ├── auth/               Gate, session provider, modal, Turnstile, and account widget
@@ -110,6 +112,8 @@ The display system uses the seeded American Captain asset at its real weight wit
 - Avatar uploads and URL imports are rate-limited, capped at 5 MB, content-sniffed as JPG/PNG/WebP, and written only to the Admin-owned `THIRDRAILIFY_PROFILE_MEDIA` object binding. Public can proxy a current session proof but cannot own the object binding or update D1 itself.
 - Commerce reuses the same session, role, origin, CSRF, rate-limit, and audit boundary. Master Admins own all commerce capabilities and are the only accounts that can grant/revoke them; Full Admins can view and may receive bounded commerce capabilities; ordinary users cannot.
 - Stripe staging verification accepts only recognizable TEST server credentials under `STRIPE_SECRET_KEY`: restricted `rk_test_...` is intended and `sk_test_...` remains compatible. `rk_live_...`, `sk_live_...`, missing credentials, missing D1, and non-CA/non-CAD accounts fail closed. The browser receives only `stripeSecretConfigured`, never credential material.
+- The Stripe webhook is deliberately external to browser controls: it accepts POST only and does not use an Admin session, CSRF, Turnstile, Origin, CORS, or a commerce capability. It instead requires the exact raw body, a configured server-only `STRIPE_WEBHOOK_SECRET`, at least one valid `v1` HMAC-SHA256 signature, a timestamp within 300 seconds, a test-mode Stripe Event envelope, commerce D1, and a unique `stripe` plus Event ID receipt.
+- Signed `checkout.session.completed` events are receipt-only while Checkout is disabled. Unknown valid event types are acknowledged and recorded as ignored; neither path creates or mutates an order, fulfillment, inventory, email, membership, donation, or provider action. Raw payloads, signature headers, signing/API secrets, customer/card/address data, and full Stripe objects are never persisted.
 - Private business/legal/tax values require the separate commerce D1 and server-only AES-256-GCM key. Missing storage/key, malformed envelopes, wrong keys, and tampering fail closed. The dedicated Stripe account's secret key/webhook secret and the Printful token remain Admin-only Cloudflare encrypted secrets; no browser or Public payload receives them.
 - Structured email/document templates allow bounded fields only and reject scripts or executable HTML. There is no send path in this milestone.
 - `noindex` is not access control. The application gate and signed APIs are mandatory; any outer Cloudflare Access policy must preserve narrowly required public auth/callback routes.

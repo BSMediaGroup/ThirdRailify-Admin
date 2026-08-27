@@ -65,7 +65,7 @@ export const PRINTFUL_TWO_TRANSACTION_MODEL = Object.freeze({
 });
 
 export const PROVIDER_BLUEPRINTS = Object.freeze([
-  Object.freeze({ provider: "stripe", label: "Stripe", status: "setup_required", integrationMode: "direct_merchant", credentialCustody: "environment_secret", environment: "test", countryCode: "CA", currencyCode: "CAD", accountCreated: true, apiConfigured: false, webhookConfigured: false, checkoutEnabled: false, livePaymentsEnabled: false, livePayoutReadiness: "unverified", metadata: Object.freeze({ accountDisplayName: "Third Railify Official", paymentMethods: Object.freeze(["cards", "eligible_apple_pay", "eligible_google_pay"]) }) }),
+  Object.freeze({ provider: "stripe", label: "Stripe", status: "setup_required", integrationMode: "direct_merchant", credentialCustody: "environment_secret", environment: "test", countryCode: "CA", currencyCode: "CAD", accountCreated: true, apiConfigured: false, webhookEndpointReady: true, webhookSigningConfigured: false, webhookConfigured: false, checkoutEnabled: false, livePaymentsEnabled: false, livePayoutReadiness: "unverified", metadata: Object.freeze({ accountDisplayName: "Third Railify Official", paymentMethods: Object.freeze(["cards", "eligible_apple_pay", "eligible_google_pay"]) }) }),
   Object.freeze({ provider: "printful", label: "Printful", status: "setup_required", integrationMode: "fulfillment", credentialCustody: "environment_secret", environment: "staging", currencyCode: "CAD" }),
   Object.freeze({ provider: "paypal", label: "PayPal", status: "deferred", integrationMode: "direct_merchant", credentialCustody: "admin_encrypted", environment: "deferred", countryCode: "CA", currencyCode: "CAD" }),
   Object.freeze({ provider: "printify", label: "Printify", status: "unavailable", credentialCustody: "no_secret", environment: "staging" }),
@@ -104,6 +104,11 @@ export function isStripeTestCredentialConfigured(env) {
   return isStripeVerificationEnvironment(env) && Boolean(stripeTestCredentialKind(env?.STRIPE_SECRET_KEY));
 }
 
+export function isStripeWebhookSigningConfigured(env) {
+  const secret = String(env?.STRIPE_WEBHOOK_SECRET || "");
+  return /^whsec_[^\s]{6,}$/.test(secret) && secret.length <= 512;
+}
+
 export async function commerceAccessForSession(env, session) {
   const isMasterAdmin = session?.account?.adminLevel === "master";
   if (isMasterAdmin) return { isMasterAdmin: true, capabilities: [...COMMERCE_CAPABILITIES] };
@@ -139,7 +144,7 @@ export async function commerceOverview(env, session) {
       stripeSecretConfigured: isStripeTestCredentialConfigured(env),
       access,
       posture: COMMERCE_SAFE_POSTURE,
-      providers: PROVIDER_BLUEPRINTS,
+      providers: providerBlueprints(env),
       business: publicBusinessProjection(defaultBusinessProfile()),
       completeness: { businessProfile: "setup_required", tax: "setup_required", templates: "setup_required" },
       counts: { products: null, orders: null, templates: null },
@@ -156,7 +161,7 @@ export async function commerceOverview(env, session) {
     db.prepare("SELECT COUNT(*) AS count FROM commerce_products").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first(),
   ]);
-  const providers = (providerResult?.results || []).map(serializeProviderConnection);
+  const providers = (providerResult?.results || []).map((row) => serializeProviderConnection(row, env));
   return {
     ok: true,
     databaseConfigured: true,
@@ -164,7 +169,7 @@ export async function commerceOverview(env, session) {
     stripeSecretConfigured: isStripeTestCredentialConfigured(env),
     access,
     posture: COMMERCE_SAFE_POSTURE,
-    providers: providers.length ? providers : PROVIDER_BLUEPRINTS,
+    providers: providers.length ? providers : providerBlueprints(env),
     business: publicBusinessProjection(profile || defaultBusinessProfile()),
     completeness: {
       businessProfile: profile ? businessCompleteness(profile) : "setup_required",
@@ -747,7 +752,7 @@ function businessCompleteness(profile) {
   return required.every(Boolean) ? "pending" : "setup_required";
 }
 
-function serializeProviderConnection(row) {
+function serializeProviderConnection(row, env) {
   const blueprint = PROVIDER_BLUEPRINTS.find((item) => item.provider === row.provider);
   const rawMetadata = safeJson(row.safe_metadata_json, {});
   const metadata = {
@@ -770,6 +775,8 @@ function serializeProviderConnection(row) {
     currencyCode: cleanText(row.currency_code, 3) || null,
     accountCreated: rawMetadata.account_created === true,
     apiConfigured: rawMetadata.api_configured === true,
+    webhookEndpointReady: row.provider === "stripe",
+    webhookSigningConfigured: row.provider === "stripe" && isStripeWebhookSigningConfigured(env),
     webhookConfigured: rawMetadata.webhook_configured === true,
     checkoutEnabled: rawMetadata.checkout_enabled === true,
     livePaymentsEnabled: rawMetadata.live_payments_enabled === true,
@@ -777,6 +784,12 @@ function serializeProviderConnection(row) {
     metadata,
     lastSynchronizedAt: cleanText(row.last_synchronized_at, 80) || null,
   };
+}
+
+function providerBlueprints(env) {
+  return PROVIDER_BLUEPRINTS.map((provider) => provider.provider === "stripe"
+    ? { ...provider, webhookSigningConfigured: isStripeWebhookSigningConfigured(env) }
+    : provider);
 }
 
 function serializeTemplate(row) {
