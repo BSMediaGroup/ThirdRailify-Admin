@@ -53,8 +53,8 @@ export const adminAreas: AdminArea[] = [
     label: "Payments & Payouts",
     shortLabel: "Payments",
     icon: "orders",
-    summary: "Stripe Connect ownership, checkout, and payout posture.",
-    futureScope: ["Hosted onboarding", "Direct charges", "Merchant-owned payouts"],
+    summary: "Dedicated Stripe merchant account, checkout, and payout posture.",
+    futureScope: ["Test API identity", "Checkout Sessions", "Merchant-owned payouts"],
   },
   {
     path: "/commerce/business",

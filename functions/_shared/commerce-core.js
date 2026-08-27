@@ -39,8 +39,10 @@ export const COMMERCE_SAFE_POSTURE = Object.freeze({
   checkout: "disabled",
   livePaymentCapture: "disabled",
   fulfillmentSubmission: "disabled",
-  stripeOnboarding: "disabled",
-  stripeConnectedAccount: "not_created",
+  stripeAccount: "created",
+  stripeApiConnection: "not_configured",
+  stripeWebhook: "not_configured",
+  stripeLivePayoutReadiness: "unverified",
   printfulApi: "disabled",
   paypal: "deferred",
   wix: "legacy_production",
@@ -56,17 +58,17 @@ export const PRINTFUL_TWO_TRANSACTION_MODEL = Object.freeze({
     "printful_product_cost_amount",
     "printful_shipping_cost_amount",
     "printful_tax_amount",
+    "printful_refund_credit_amount",
     "gross_margin_amount",
   ]),
 });
 
 export const PROVIDER_BLUEPRINTS = Object.freeze([
-  Object.freeze({ provider: "stripe_platform", label: "Stripe platform", status: "setup_required", credentialCustody: "environment_secret", environment: "staging" }),
-  Object.freeze({ provider: "stripe_connected_account", label: "Stripe connected merchant", status: "setup_required", credentialCustody: "no_secret", environment: "staging", countryCode: "CA", currencyCode: "CAD" }),
-  Object.freeze({ provider: "printful", label: "Printful", status: "setup_required", credentialCustody: "environment_secret", environment: "staging", currencyCode: "CAD" }),
-  Object.freeze({ provider: "paypal", label: "PayPal", status: "deferred", credentialCustody: "admin_encrypted", environment: "deferred", countryCode: "CA", currencyCode: "CAD" }),
+  Object.freeze({ provider: "stripe", label: "Stripe", status: "setup_required", integrationMode: "direct_merchant", credentialCustody: "environment_secret", environment: "test", countryCode: "CA", currencyCode: "CAD", accountCreated: true, apiConfigured: false, webhookConfigured: false, checkoutEnabled: false, livePaymentsEnabled: false, livePayoutReadiness: "unverified", metadata: Object.freeze({ accountDisplayName: "Third Railify Official", paymentMethods: Object.freeze(["cards", "eligible_apple_pay", "eligible_google_pay"]) }) }),
+  Object.freeze({ provider: "printful", label: "Printful", status: "setup_required", integrationMode: "fulfillment", credentialCustody: "environment_secret", environment: "staging", currencyCode: "CAD" }),
+  Object.freeze({ provider: "paypal", label: "PayPal", status: "deferred", integrationMode: "direct_merchant", credentialCustody: "admin_encrypted", environment: "deferred", countryCode: "CA", currencyCode: "CAD" }),
   Object.freeze({ provider: "printify", label: "Printify", status: "unavailable", credentialCustody: "no_secret", environment: "staging" }),
-  Object.freeze({ provider: "wix", label: "Wix commerce", status: "legacy_production", credentialCustody: "no_secret", environment: "legacy", countryCode: "CA", currencyCode: "CAD" }),
+  Object.freeze({ provider: "wix", label: "Wix commerce", status: "legacy_production", integrationMode: "legacy", credentialCustody: "no_secret", environment: "legacy", countryCode: "CA", currencyCode: "CAD" }),
 ]);
 
 export const TEMPLATE_BLUEPRINTS = Object.freeze([
@@ -134,7 +136,7 @@ export async function commerceOverview(env, session) {
 
   const db = requireCommerceDb(env);
   const [providerResult, profile, taxCount, templateCount, productCount, orderCount] = await Promise.all([
-    db.prepare("SELECT provider, credential_custody, status, environment, external_account_id, country_code, currency_code, safe_metadata_json, last_synchronized_at FROM commerce_provider_connections ORDER BY provider").all(),
+    db.prepare("SELECT provider, integration_mode, credential_custody, status, environment, external_account_id, country_code, currency_code, safe_metadata_json, last_synchronized_at FROM commerce_provider_connections ORDER BY provider").all(),
     db.prepare("SELECT * FROM commerce_business_profiles WHERE id = 'primary'").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_tax_registrations").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_templates").first(),
@@ -583,16 +585,28 @@ function businessCompleteness(profile) {
 
 function serializeProviderConnection(row) {
   const blueprint = PROVIDER_BLUEPRINTS.find((item) => item.provider === row.provider);
+  const rawMetadata = safeJson(row.safe_metadata_json, {});
+  const metadata = {
+    accountDisplayName: cleanText(rawMetadata.account_display_name, 160) || undefined,
+    paymentMethods: Array.isArray(rawMetadata.payment_methods) ? rawMetadata.payment_methods.map((value) => cleanText(value, 40)).filter(Boolean).slice(0, 12) : undefined,
+  };
   return {
     provider: row.provider,
     label: blueprint?.label || row.provider,
     status: COMMERCE_STATUS_VALUES.includes(row.status) ? row.status : "error",
+    integrationMode: cleanText(row.integration_mode, 40) || null,
     credentialCustody: row.credential_custody,
     environment: row.environment,
     externalAccountId: cleanText(row.external_account_id, 160) || null,
     countryCode: cleanText(row.country_code, 2) || null,
     currencyCode: cleanText(row.currency_code, 3) || null,
-    metadata: safeJson(row.safe_metadata_json, {}),
+    accountCreated: rawMetadata.account_created === true,
+    apiConfigured: rawMetadata.api_configured === true,
+    webhookConfigured: rawMetadata.webhook_configured === true,
+    checkoutEnabled: rawMetadata.checkout_enabled === true,
+    livePaymentsEnabled: rawMetadata.live_payments_enabled === true,
+    livePayoutReadiness: cleanText(rawMetadata.live_payout_readiness, 40) || "unverified",
+    metadata,
     lastSynchronizedAt: cleanText(row.last_synchronized_at, 80) || null,
   };
 }

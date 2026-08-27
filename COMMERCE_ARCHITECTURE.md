@@ -7,82 +7,114 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Area | Current state |
 | --- | --- |
 | Commerce environment | `staging` |
+| Dedicated Stripe account | created; operator-confirmed |
+| Stripe integration mode | `direct_merchant` |
+| Stripe API connection | not configured |
+| Stripe webhook | not configured |
+| Stripe environment | Sandbox/test preparation |
 | Checkout | `disabled` |
 | Live payment capture | `disabled` |
+| Live payout readiness | not verified |
 | Fulfillment submission | `disabled` |
-| Stripe onboarding | `not active` |
-| Stripe connected account | `not created` |
-| Printful API connection | `not active`; draft-only design |
+| Printful API connection | not active; draft-only design |
 | PayPal | `deferred` |
 | Printify | `unavailable`; credential custody undecided |
 | Wix | `legacy production`; remains authoritative and untouched |
 
-No Cloudflare resource, provider account, provider credential, transaction, fulfillment order, or deployment is created by this milestone.
+No Cloudflare commerce resource, provider credential, transaction, fulfillment order, or deployment is created by this milestone.
 
-## Ownership and money movement
+## Authoritative payment flow
 
-- Brainstream Media Group operates Daniel's existing Stripe Connect platform and will retain the platform API keys and webhook signing secrets as Admin-only Cloudflare Secrets.
-- Third Railify Official / Shawn is the Canadian merchant. The intended connected account has full Stripe Dashboard access and completes Stripe-hosted onboarding directly.
-- The intended shop model uses direct charges on the connected account. Third Railify is the merchant of record, owns its payouts, and pays ordinary Stripe processing fees. The platform takes no application fee by default.
-- The intended storefront creates Stripe Checkout Sessions server-side. Cards are primary; Apple Pay and Google Pay are presented only when Stripe, the browser/device, domain, and customer payment method are eligible.
-- Stripe does not pay Printful. A customer payment and a Printful fulfillment charge are separate transactions. Printful charges the Third Railify Printful Wallet or configured billing method for product, shipping, and tax costs.
-- PayPal is a later direct-merchant REST integration using Shawn's PayPal Business credentials. It is intended for donations and possible VIP use, not preferred `/shop` checkout. Partner referrals are out of scope.
+```text
+Customer
+  ↓
+Third Railify Public shop
+  ↓
+Admin-authoritative server endpoint
+  ↓
+Stripe Checkout Session created with Third Railify Official's own secret key
+  ↓
+Stripe-hosted Checkout
+  ↓
+Payment owned by the Third Railify Official Stripe account
+  ↓
+Stripe webhook
+  ↓
+Authoritative commerce order/payment state
+  ↓
+Later Printful draft order
+  ↓
+Later explicit Printful confirmation safety gate
+```
 
-The connected account model is not activation-approved until Daniel inspects the real Connect Dashboard and confirms Canadian connected-account availability, direct-charge/full-Dashboard support, the account-fee payer configuration, and Stripe-managed loss liability for the chosen setup.
+### Merchant of record
 
-## Stripe-hosted identity boundary
+Third Railify Official is the merchant of record through its dedicated Canadian Stripe account. That account owns its customers, Checkout Sessions, PaymentIntents, charges, refunds, disputes, balance, payouts, payment-method configuration, verification, payout-bank configuration, and Stripe team access.
 
-The future Admin action creates a one-time Stripe Account Link only after an authenticated, authorized request. Shawn enters identity, representative, business, ownership, bank, and agreement details directly into Stripe-hosted onboarding. Admin stores only non-secret account metadata and requirement/status summaries. It must not collect bank details, identity-document images, or full Stripe KYC payloads.
+### Technical custody
+
+Daniel may manage the dedicated account's API keys and webhooks because he is its owner and technical operator. This technical custody does not redirect payments into Brainstream Media Group or any other project.
+
+### Payment model
+
+- Ordinary charges belong directly to the dedicated Third Railify Official merchant account.
+- The server will create Checkout Sessions with `mode=payment` and CAD prices for shop purchases.
+- The first approved customer surface is Stripe-hosted Checkout. The application redirects to the server-returned Checkout Session URL; Public does not need Stripe.js merely to perform that redirect.
+- Cards are primary. Apple Pay and Google Pay may appear only when eligible and enabled for the account, Checkout, browser/device, customer, domain, and currency.
+- Link is optional and must remain absent unless separately approved and enabled.
+- Third Railify never collects or stores raw card details.
+- There is no application fee, connected account, transfer destination, inter-account transfer, or platform-versus-merchant accounting layer.
+
+## Stripe Dashboard boundary
+
+Authorized Stripe account administrators manage Canadian business verification, representative and owner details, payout banking, tax details, payment-method configuration, and account team access directly in Stripe Dashboard. Third Railify Admin does not reproduce Stripe KYC, identity-document, bank, or team-management forms.
+
+The dedicated account's creation and Sandbox/test access are operator-confirmed. Live verification, live charges, live payouts, payout-bank readiness, Stripe Tax, wallets, live webhooks, and live Cloudflare credentials remain unverified.
 
 ## Data authority
 
-Authentication remains in the existing auth D1. Commerce state belongs in the separate future `thirdrailify-commerce` D1, bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. The local schema authority is `commerce-migrations/0001_commerce_control_plane.sql`; no active binding or database ID is present.
+Authentication remains in the existing auth D1. Commerce state belongs in the separate future `thirdrailify-commerce` D1, bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. The local schema authority is `commerce-migrations/0001_commerce_control_plane.sql`; no active commerce binding or database ID is present.
 
 Entities:
 
 - `commerce_business_profiles`: confirmed public defaults plus encrypted private legal/address data.
 - `commerce_tax_registrations`: encrypted identifiers and safe masked/status metadata; no custom tax engine.
-- `commerce_provider_connections`: provider status, environment, safe metadata, and explicit credential-custody mode.
+- `commerce_provider_connections`: provider, canonical integration mode, environment, safe status metadata, and credential-custody mode.
 - `commerce_templates`: bounded structured email/document content with no scripts or executable HTML.
 - `commerce_settings`: safe activation gates and environment posture.
 - `commerce_permission_grants`: capability grants to existing Admin accounts.
 - `commerce_products`: future provider-neutral catalogue records.
-- `commerce_orders`: future order records with customer-payment and Printful cost fields kept separate.
+- `commerce_orders`: future order records with customer-payment and Printful cost/refund fields kept separate.
 - `commerce_audit`: redacted mutation history.
 
-The migration is idempotent, constrains statuses/custody values, indexes operational lookups, and seeds only confirmed defaults and disabled states.
+The Stripe provider row may later store only safe, verified values: environment, `direct_merchant`, Stripe account ID retrieved through the API, country, default currency, account/business display name, charges/payouts flags, last verification time, webhook status, and a payment-method summary. It must not store API keys, webhook signing secrets, payout-bank data, card data, identity documents, full private Stripe responses, or team-member email addresses.
 
 ## Credential custody and encryption
 
 | Provider/data | Custody |
 | --- | --- |
-| Stripe platform secret/webhook keys | `environment_secret` |
-| Stripe connected account | `no_secret`; metadata only |
+| Stripe secret key and webhook signing secret | `environment_secret` |
+| Stripe publishable key | safe configuration only if a later client-side component needs it |
 | Printful private token | `environment_secret` |
 | PayPal client credentials | `admin_encrypted` when implemented |
 | Printify | `no_secret` for now; custody remains undecided |
 | Wix legacy | `no_secret`; no mutation path |
 | Canadian BN/tax identifiers and private legal details | Admin-encrypted D1 fields |
 
-`functions/_shared/commerce-core.js` provides a server-only AES-256-GCM envelope. It requires a 32-byte base64url key in `THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY`, generates a random 96-bit nonce, authenticates a purpose string as additional data, caps plaintext size, versions the envelope, and rejects missing keys, malformed envelopes, tampering, or wrong keys. There is no plaintext fallback and public projections omit private values.
+`functions/_shared/commerce-core.js` provides a server-only AES-256-GCM envelope for the private D1 fields and future `admin_encrypted` credentials. Stripe and Printful credentials do not use that envelope; they remain Admin-only Cloudflare encrypted secrets. There is no plaintext fallback and public projections omit private values.
 
-## Authorization
+## Authorization and Public boundary
 
-Commerce reuses the existing Admin session, role, origin, CSRF, D1 rate-limit, and audit authority. It adds these capabilities:
+Commerce reuses the existing Admin session, role, origin, CSRF, D1 rate-limit, and audit authority. Master Admins have all five commerce capabilities and are the only accounts allowed to grant or revoke them. Full Admins can view commerce by role and may receive bounded capabilities. Ordinary users cannot receive commerce authority.
 
-- `commerce.view`
-- `commerce.business.manage`
-- `commerce.payments.manage`
-- `commerce.integrations.manage`
-- `commerce.templates.manage`
+ThirdRailify Public remains a read-only client. This milestone adds no Public binding, key, Stripe script, payment button, checkout route, fulfillment route, or provider mutation. Future Public payloads must contain only explicitly authorized safe business, availability, product, and customer-order data.
 
-Master Admins have all capabilities and are the only accounts allowed to grant or revoke them. Full Admins can view commerce by role and may receive bounded capabilities. Ordinary users cannot receive commerce authority. Provider disconnects and credential replacement are not implemented; any future implementation must require an explicit confirmation in addition to the normal mutation controls.
+## Fulfillment and deferred providers
 
-## Public boundary
+Stripe does not pay Printful. Transaction 1 is the customer's payment to Third Railify. Transaction 2 is Printful's separate charge to the Third Railify Printful Wallet or configured billing method for product/printing, shipping, taxes, and other applicable fees. Order accounting keeps customer gross, Stripe fee, customer refund, Printful product cost, shipping, tax, refund/credit, and gross margin separate. Printful remains disconnected and draft-only until later approval.
 
-ThirdRailify Public remains a read-only client. This milestone adds no Public binding, credential, payment button, checkout route, fulfillment route, or provider mutation. Future Public payloads must contain only safe business presentation, safe provider availability, product data, and order/customer data expressly authorized for that session. Private legal fields, tax identifiers, provider credentials, bank data, and audit internals remain Admin-only.
+PayPal remains a later direct-merchant REST integration for `/donate` and possible VIP use. It is not the preferred shop processor, has no partner onboarding, credential form, or API call, and stays deferred until after Stripe and Printful.
 
-## Fulfillment safety
+## Rejected historical architecture
 
-The future Printful integration uses a new parallel manual/API store and leaves the current Wix-connected store active. The token is a store-scoped Cloudflare Secret and the Store ID is safe configuration. Initial API orders are drafts. Confirmation requires authoritative Stripe payment state plus explicit safety gates; fulfillment submission is currently disabled.
-
+The earlier local milestone modeled this shop as a Stripe Connect platform plus a Canadian connected merchant. That unprovisioned design is superseded and retained here only as a rejection record. The authoritative implementation must not create connected accounts, Account Links, Connect onboarding, Connect OAuth, platform or destination charges, application fees, transfer destinations, `Stripe-Account` headers, capability polling, Connect webhook onboarding, or platform-versus-merchant accounting.

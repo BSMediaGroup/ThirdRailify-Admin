@@ -5,7 +5,8 @@ export type CommerceCapability = "commerce.view" | "commerce.business.manage" | 
 export type CommerceAccess = { isMasterAdmin: boolean; capabilities: CommerceCapability[] };
 export type ProviderStatus = {
   provider: string; label: string; status: CommerceStatus; credentialCustody: "environment_secret" | "admin_encrypted" | "no_secret";
-  environment: string; externalAccountId?: string | null; countryCode?: string | null; currencyCode?: string | null;
+  integrationMode?: string | null; environment: string; externalAccountId?: string | null; countryCode?: string | null; currencyCode?: string | null;
+  accountCreated?: boolean; apiConfigured?: boolean; webhookConfigured?: boolean; checkoutEnabled?: boolean; livePaymentsEnabled?: boolean; livePayoutReadiness?: string;
   metadata?: Record<string, unknown>; lastSynchronizedAt?: string | null;
 };
 export type PublicAddress = { line1?: string; line2?: string; city?: string; province?: string; postalCode?: string; country?: string };

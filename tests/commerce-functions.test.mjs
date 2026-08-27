@@ -25,6 +25,10 @@ test("commerce overview is authenticated and missing DB leaves disabled truthful
   const noDbEnv = { ...env, THIRDRAILIFY_COMMERCE_DB: undefined };
   const noDbResponse = await commerceRequest({ request, env: noDbEnv, data: {} }); const noDbPayload = await noDbResponse.json();
   assert.equal(noDbResponse.status, 200); assert.equal(noDbPayload.databaseConfigured, false); assert.equal(noDbPayload.posture.livePaymentCapture, "disabled");
+  const stripe = noDbPayload.providers.find((provider) => provider.provider === "stripe");
+  assert.equal(stripe.integrationMode, "direct_merchant"); assert.equal(stripe.status, "setup_required"); assert.equal(stripe.accountCreated, true);
+  assert.equal(stripe.apiConfigured, false); assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false);
+  assert.doesNotMatch(JSON.stringify(noDbPayload), /secret_key|webhook_secret|credential_ciphertext|acct_[A-Za-z0-9]+/i);
 });
 
 test("business mutations require CSRF and encryption, then persist ciphertext only", async (t) => {

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  PROVIDER_BLUEPRINTS,
   PRINTFUL_TWO_TRANSACTION_MODEL,
   assertNoCommerceSecretsInPublicPayload,
   businessProjection,
@@ -58,7 +60,35 @@ test("provider status remains truthful and the Printful model has two independen
   const env = commerceEnvironment(harness); const session = { accountId: "master", account: { adminLevel: "master" } };
   const overview = await commerceOverview(env, session);
   assert.equal(overview.posture.checkout, "disabled"); assert.equal(overview.posture.livePaymentCapture, "disabled"); assert.equal(overview.posture.fulfillmentSubmission, "disabled");
-  assert.equal(overview.providers.find((provider) => provider.provider === "stripe_connected_account").status, "setup_required");
+  const stripe = overview.providers.find((provider) => provider.provider === "stripe");
+  assert.equal(stripe.integrationMode, "direct_merchant"); assert.equal(stripe.credentialCustody, "environment_secret"); assert.equal(stripe.environment, "test"); assert.equal(stripe.status, "setup_required");
+  assert.equal(stripe.accountCreated, true); assert.equal(stripe.apiConfigured, false); assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false); assert.equal(stripe.livePayoutReadiness, "unverified");
+  assert.equal(stripe.externalAccountId, null); assert.equal(stripe.countryCode, "CA"); assert.equal(stripe.currencyCode, "CAD");
   assert.equal(overview.providers.find((provider) => provider.provider === "paypal").status, "deferred");
+  assert.equal(overview.providers.find((provider) => provider.provider === "paypal").integrationMode, "direct_merchant");
+  assertNoCommerceSecretsInPublicPayload(overview);
   assert.match(PRINTFUL_TWO_TRANSACTION_MODEL.customerTransaction, /Stripe/); assert.match(PRINTFUL_TWO_TRANSACTION_MODEL.fulfillmentTransaction, /Printful separately/);
+  assert.ok(PRINTFUL_TWO_TRANSACTION_MODEL.trackedAmounts.includes("printful_refund_credit_amount"));
+});
+
+test("missing commerce infrastructure does not overstate the dedicated Stripe account", async () => {
+  const overview = await commerceOverview({}, { accountId: "master", account: { adminLevel: "master" } });
+  const stripe = overview.providers.find((provider) => provider.provider === "stripe");
+  assert.equal(overview.databaseConfigured, false); assert.equal(overview.posture.checkout, "disabled"); assert.equal(overview.posture.livePaymentCapture, "disabled");
+  assert.equal(stripe.accountCreated, true); assert.equal(stripe.apiConfigured, false); assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false); assert.equal(stripe.livePayoutReadiness, "unverified");
+  assert.equal(PROVIDER_BLUEPRINTS.some((provider) => provider.provider !== "stripe" && provider.provider.startsWith("stripe")), false);
+});
+
+test("runtime commerce scaffold has no Connect request or secret requirement", async () => {
+  const files = [
+    new URL("../functions/_shared/commerce-core.js", import.meta.url),
+    new URL("../functions/api/admin/commerce/[[path]].js", import.meta.url),
+    new URL("../commerce-migrations/0001_commerce_control_plane.sql", import.meta.url),
+    new URL("../.env.example", import.meta.url),
+  ];
+  const source = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
+  assert.doesNotMatch(source, /STRIPE_CONNECT_CLIENT_ID|STRIPE_CONNECTED_ACCOUNT_ID|STRIPE_PLATFORM_ACCOUNT_ID/i);
+  assert.doesNotMatch(source, /Stripe-Account|application_fee_amount|transfer_data|account\.updated|requirements\.currently_due/i);
+  assert.doesNotMatch(source, /stripe_connected_account|stripe_platform|account_link|onboarding_enabled/i);
+  assert.doesNotMatch(source, /shawndclift@gmail\.com|thirdrailify@gmail\.com/i);
 });

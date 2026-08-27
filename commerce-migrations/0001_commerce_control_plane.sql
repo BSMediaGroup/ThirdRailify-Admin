@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS commerce_tax_registrations (
 
 CREATE TABLE IF NOT EXISTS commerce_provider_connections (
   id TEXT PRIMARY KEY,
-  provider TEXT NOT NULL UNIQUE CHECK (provider IN ('stripe_platform', 'stripe_connected_account', 'printful', 'paypal', 'printify', 'wix')),
+  provider TEXT NOT NULL UNIQUE CHECK (provider IN ('stripe', 'printful', 'paypal', 'printify', 'wix')),
+  integration_mode TEXT CHECK (integration_mode IS NULL OR integration_mode IN ('direct_merchant', 'fulfillment', 'legacy')),
   credential_custody TEXT NOT NULL CHECK (credential_custody IN ('environment_secret', 'admin_encrypted', 'no_secret')),
   credential_ciphertext TEXT,
   status TEXT NOT NULL CHECK (status IN ('unavailable', 'setup_required', 'pending', 'connected', 'restricted', 'disabled', 'error', 'legacy_production', 'deferred')),
@@ -53,7 +54,9 @@ CREATE TABLE IF NOT EXISTS commerce_provider_connections (
   last_synchronized_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  CHECK (credential_ciphertext IS NULL OR credential_custody = 'admin_encrypted')
+  CHECK (credential_ciphertext IS NULL OR credential_custody = 'admin_encrypted'),
+  CHECK (provider <> 'stripe' OR integration_mode = 'direct_merchant'),
+  CHECK (provider <> 'stripe' OR credential_custody = 'environment_secret')
 );
 
 CREATE TABLE IF NOT EXISTS commerce_templates (
@@ -129,6 +132,7 @@ CREATE TABLE IF NOT EXISTS commerce_orders (
   printful_product_cost_amount INTEGER NOT NULL DEFAULT 0 CHECK (printful_product_cost_amount >= 0),
   printful_shipping_cost_amount INTEGER NOT NULL DEFAULT 0 CHECK (printful_shipping_cost_amount >= 0),
   printful_tax_amount INTEGER NOT NULL DEFAULT 0 CHECK (printful_tax_amount >= 0),
+  printful_refund_credit_amount INTEGER NOT NULL DEFAULT 0 CHECK (printful_refund_credit_amount >= 0),
   gross_margin_amount INTEGER NOT NULL DEFAULT 0,
   stripe_checkout_session_id TEXT UNIQUE,
   printful_order_id TEXT UNIQUE,
@@ -169,22 +173,23 @@ INSERT OR IGNORE INTO commerce_business_profiles (
 );
 
 INSERT OR IGNORE INTO commerce_provider_connections (
-  id, provider, credential_custody, status, environment, country_code, currency_code,
+  id, provider, integration_mode, credential_custody, status, environment, country_code, currency_code,
   safe_metadata_json, created_at, updated_at
 ) VALUES
-  ('provider-stripe-platform', 'stripe_platform', 'environment_secret', 'setup_required', 'staging', NULL, NULL, '{"operator":"Brainstream Media Group","live_enabled":false}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
-  ('provider-stripe-connected', 'stripe_connected_account', 'no_secret', 'setup_required', 'staging', 'CA', 'CAD', '{"merchant":"Third Railify Official","account_created":false,"onboarding_active":false,"charge_model":"direct","application_fee_default":0}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
-  ('provider-printful', 'printful', 'environment_secret', 'setup_required', 'staging', NULL, 'CAD', '{"mode":"draft_only","api_active":false,"fulfillment_enabled":false,"parallel_store_planned":true}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
-  ('provider-paypal', 'paypal', 'admin_encrypted', 'deferred', 'deferred', 'CA', 'CAD', '{"credentials_configured":false,"donations_active":false,"vip_active":false,"shop_processor":false}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
-  ('provider-printify', 'printify', 'no_secret', 'unavailable', 'staging', NULL, NULL, '{"connectivity_verified":false,"custody_undecided":true}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
-  ('provider-wix', 'wix', 'no_secret', 'legacy_production', 'legacy', 'CA', 'CAD', '{"must_remain_untouched":true}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z');
+  ('provider-stripe', 'stripe', 'direct_merchant', 'environment_secret', 'setup_required', 'test', 'CA', 'CAD', '{"account_display_name":"Third Railify Official","account_created":true,"api_configured":false,"webhook_configured":false,"checkout_enabled":false,"live_payments_enabled":false,"live_payout_readiness":"unverified","payment_methods":["cards","eligible_apple_pay","eligible_google_pay"]}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
+  ('provider-printful', 'printful', 'fulfillment', 'environment_secret', 'setup_required', 'staging', NULL, 'CAD', '{"mode":"draft_only","api_active":false,"fulfillment_enabled":false,"parallel_store_planned":true}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
+  ('provider-paypal', 'paypal', 'direct_merchant', 'admin_encrypted', 'deferred', 'deferred', 'CA', 'CAD', '{"credentials_configured":false,"donations_active":false,"vip_active":false,"shop_processor":false}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
+  ('provider-printify', 'printify', NULL, 'no_secret', 'unavailable', 'staging', NULL, NULL, '{"connectivity_verified":false,"custody_undecided":true}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z'),
+  ('provider-wix', 'wix', 'legacy', 'no_secret', 'legacy_production', 'legacy', 'CA', 'CAD', '{"must_remain_untouched":true}', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z');
 
 INSERT OR IGNORE INTO commerce_settings (setting_key, value_json, classification, updated_at) VALUES
   ('commerce_environment', '"staging"', 'safe', '2026-08-27T00:00:00.000Z'),
   ('checkout_enabled', 'false', 'safe', '2026-08-27T00:00:00.000Z'),
   ('live_payment_capture_enabled', 'false', 'safe', '2026-08-27T00:00:00.000Z'),
   ('fulfillment_submission_enabled', 'false', 'safe', '2026-08-27T00:00:00.000Z'),
-  ('stripe_onboarding_enabled', 'false', 'safe', '2026-08-27T00:00:00.000Z'),
+  ('stripe_account_created', 'true', 'safe', '2026-08-27T00:00:00.000Z'),
+  ('stripe_api_configured', 'false', 'safe', '2026-08-27T00:00:00.000Z'),
+  ('stripe_webhook_configured', 'false', 'safe', '2026-08-27T00:00:00.000Z'),
   ('printful_order_mode', '"draft_only"', 'safe', '2026-08-27T00:00:00.000Z');
 
 INSERT OR IGNORE INTO commerce_templates (

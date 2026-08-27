@@ -10,12 +10,16 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Corrected the unprovisioned commerce scaffold from an obsolete Stripe Connect platform/connected-account model to the dedicated Third Railify Official Canadian merchant account. Stripe is now a single `stripe` provider with canonical `direct_merchant` mode, `environment_secret` custody, operator-confirmed account creation, Canada/CAD, and truthful setup-required API/webhook/checkout/live-readiness flags.
+- Replaced the two Connect-specific migration seeds and onboarding setting in place because no commerce D1 has been provisioned. Added a constrained generic integration-mode field, rejected legacy Stripe provider identifiers, preserved all commerce permissions/entities, and added the missing separate Printful refund/credit accounting field.
+- Updated Admin commerce overview, Payments & Payouts, Fulfillment, navigation, architecture, feasibility, Cloudflare runbook, README, and focused tests. The dedicated account does not imply API connectivity, live readiness, payout readiness, wallet availability, or enabled checkout; no Stripe/Printful/PayPal request or remote mutation was made.
+- Removed the shared operational mailbox from tracked Wrangler `ADMIN_EMAIL_2` configuration so Stripe team-login context is not persisted by the application. The second environment-backed Master identity is now absent from tracked Wrangler vars and requires separate approved configuration if it remains operationally necessary.
 - Established the Admin-only Stripe-first Canadian commerce control-plane scaffold without activating commerce: added truthful `/commerce` overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, and upgraded Products/Orders surfaces. Checkout, live capture, onboarding, provider connection, and fulfillment submission remain disabled.
 - Added the idempotent local `commerce-migrations/0001_commerce_control_plane.sql` authority for a future separate `thirdrailify-commerce` D1. It models business/tax profiles, constrained provider custody/status, structured templates, settings, capability grants, provider-neutral products, separately accounted Stripe/Printful order economics, and redacted audit history; no D1 was created, bound, or migrated remotely.
-- Added a server-only AES-256-GCM envelope for encrypted private business/legal/tax and future `admin_encrypted` credentials, with a 32-byte base64url key, random nonce, authenticated purpose, bounded plaintext, versioning, tamper/wrong-key rejection, and no plaintext fallback. Stripe platform and Printful tokens remain Cloudflare Secrets.
+- Added a server-only AES-256-GCM envelope for encrypted private business/legal/tax and future `admin_encrypted` credentials, with a 32-byte base64url key, random nonce, authenticated purpose, bounded plaintext, versioning, tamper/wrong-key rejection, and no plaintext fallback. Stripe and Printful tokens remain Cloudflare Secrets.
 - Reused existing auth/session/role/origin/CSRF/rate-limit/audit authority for five commerce capabilities. Master Admins have all capability authority and alone can grant/revoke it; Full Admins can view and receive bounded grants; ordinary users are rejected.
 - Recorded a fresh non-mutating Wix public audit, the existing bounded Public snapshot, owner-confirmed private Wix provider facts, and unresolved dashboard-only facts. Wix remains production authority and no Public/Wix/provider state was changed.
-- Documented the source-supported Canadian Stripe design—full Dashboard, hosted onboarding, direct charges, connected-account fees/payouts, no application fee by default, cards and eligible wallets—and the mandatory real Connect Dashboard check for platform-country availability, fee payer, and Stripe-managed loss liability before account creation.
+- Historical and superseded before provisioning: documented a Canadian Connect account design with hosted onboarding and platform-specific eligibility checks. The dedicated direct merchant account correction above is now authoritative.
 - Documented the separate customer-payment and Printful billing transactions, parallel manual/API Printful store, environment-managed store token, safe Store ID, draft-only orders, and explicit no-confirm posture. PayPal remains a later direct-merchant donations/VIP integration; Printify remains unavailable pending evidence.
 - Added focused commerce migration, constraints, crypto, fail-closed storage, projection/masking, permission, CSRF, audit-redaction, template-safety, provider-truth, and two-transaction tests. No provider APIs or live resources are used.
 - Corrected email sign-in so the browser no longer applies the 12-character new-password policy to existing credentials; signup and password reset retain the 12-character minimum. Added CSRF-protected, rate-limited, audited self-service display-name updates through the Admin D1 authority, including durable custom names for environment Master accounts.
@@ -53,6 +57,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Human-readable
 
+Third Railify now has its own dedicated Canadian Stripe account, and the control room says exactly that. It also stays honest about what is still missing: test API credentials, a test webhook, Checkout acceptance, live verification, and payout readiness.
+
 The control room now has an honest, reviewable commerce foundation for a future Canadian Third Railify store. It explains who owns the merchant account and payouts, keeps Shawn's Stripe identity and bank entry inside Stripe, separates customer income from Printful costs, and provides safe business, tax, and customer-template editors without pretending that checkout or fulfillment is live.
 
 The current Wix shop remains completely in charge. The new Admin pages show exactly what is ready, missing, deferred, or unavailable, and they refuse private persistence when the separate commerce database or encryption key is absent.
@@ -73,8 +79,8 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 
 ### Known deferrals
 
-- Verification in the real Stripe Connect Dashboard that the existing platform permits the exact Canadian full-Dashboard/direct-charge/account-fee-payer/Stripe-managed-loss configuration.
-- Creation/binding/migration of `thirdrailify-commerce`, generation of its encryption secret, Stripe test-mode credentials/webhook, connected-account/onboarding work, wallet-domain setup, and all test/live payment activity.
+- Historical blocker removed: the superseded Stripe Connect platform eligibility check is no longer part of the Third Railify shop architecture.
+- Creation/binding/migration of `thirdrailify-commerce`, generation of its encryption secret, dedicated-account Stripe test-mode credentials/webhook, read-only account identity verification, test Checkout Sessions, wallet eligibility testing, and all live payment activity.
 - Creation of a parallel Printful manual/API store and scoped token, catalogue connectivity, draft-order API work, explicit confirmation gates, and fulfillment activation. Existing Wix-connected Printful remains untouched.
 - PayPal direct-merchant setup and donations/VIP work; Printify evidence and credential custody; authoritative Wix catalogue/provider/export/policy reconciliation and cutover planning.
 - Creation/binding of the real staging D1 database, remaining encrypted secrets, provider applications, Turnstile widget, deployment, and live Resend acceptance.

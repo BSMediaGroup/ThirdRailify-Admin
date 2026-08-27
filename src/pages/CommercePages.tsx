@@ -37,7 +37,7 @@ export function CommerceOverviewPage() {
   useEffect(() => { void load(); }, [load]);
 
   return <>
-    <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary="Stripe-first Canadian commerce foundations with every payment, onboarding, and fulfillment action still disabled." status="disabled" />
+    <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary="The dedicated Third Railify Official Canadian Stripe account exists, while API, webhook, checkout, live payment, and fulfillment actions remain disabled." status="disabled" />
     {error && <div className="admin-alert" role="alert">{error}</div>}
     {!payload ? <CommerceState>Loading truthful commerce status…</CommerceState> : <>
       <section className="commerce-posture" aria-label="Required safe posture">{REQUIRED_POSTURE.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
@@ -53,7 +53,7 @@ export function CommerceOverviewPage() {
         <Metric label="Orders" value={payload.counts.orders === null ? "Unavailable" : String(payload.counts.orders)} />
       </div></section>
       <section className="commerce-section" aria-labelledby="workspace-title"><SectionTitle id="workspace-title" eyebrow="Governed workspaces" title="Configure safely" /><div className="commerce-link-grid">
-        <WorkspaceLink to="/commerce/payments" title="Payments & payouts" text="Stripe direct-charge ownership and deferred PayPal posture." />
+        <WorkspaceLink to="/commerce/payments" title="Payments & payouts" text="Dedicated Stripe merchant ownership, pending test integration, and deferred PayPal posture." />
         <WorkspaceLink to="/commerce/business" title="Business information" text="Public details plus encrypted private Canadian fields." />
         <WorkspaceLink to="/commerce/tax" title="Tax & documents" text="BN/GST/HST custody, invoice and receipt presentation." />
         <WorkspaceLink to="/commerce/emails" title="Customer emails" text="Structured plain-text templates; sending remains disabled." />
@@ -65,11 +65,11 @@ export function CommerceOverviewPage() {
 
 export function PaymentsPayoutsPage() {
   return <>
-    <CommerceHeading eyebrow="Processor ownership" title="Payments & payouts" summary="The future shop uses Stripe Checkout in the connected merchant context. No account, Account Link, Checkout Session, or payment exists yet." status="setup_required" />
+    <CommerceHeading eyebrow="Processor ownership" title="Payments & payouts" summary="The dedicated Third Railify Official Stripe account exists. Test API credentials, webhook verification, Checkout Sessions, live activation, and payout readiness remain unverified or unavailable." status="setup_required" />
     <section className="provider-detail-grid">
       <DetailCard title="Stripe" status="setup_required" lead="Primary shop processor">
-        <dl><Fact term="Platform operator" value="Daniel Clancy / Brainstream Media Group" /><Fact term="Merchant" value="Third Railify Official / Shawn" /><Fact term="Country / currency" value="Canada / CAD" /><Fact term="Onboarding" value="Stripe-hosted; not active" /><Fact term="Account access" value="Full Stripe Dashboard" /><Fact term="Charge model" value="Direct charges" /><Fact term="Payouts" value="Merchant-owned" /><Fact term="Methods" value="Cards; eligible Apple Pay and Google Pay" /><Fact term="Application fee" value="None by default" /></dl>
-        <button type="button" className="secondary-button" disabled>Connection not available in this milestone</button>
+        <dl><Fact term="Account" value="Dedicated Third Railify Official Canadian merchant account" /><Fact term="Country" value="Canada" /><Fact term="Currency" value="CAD" /><Fact term="Current state" value="Account created — API connection pending" /><Fact term="Environment" value="Sandbox/test preparation" /><Fact term="Payment methods" value="Cards; eligible Apple Pay; eligible Google Pay" /><Fact term="Management" value="Business verification, banking, payouts, and account team are managed in Stripe Dashboard" /><Fact term="Checkout" value="Disabled until the later test-mode integration milestone" /><Fact term="Live payment capture" value="Disabled" /><Fact term="Live payout readiness" value="Not yet verified" /></dl>
+        <button type="button" className="secondary-button" disabled>Test integration is not available in this milestone</button>
       </DetailCard>
       <DetailCard title="PayPal" status="deferred" lead="Deferred direct-merchant REST model">
         <p>Later limited to donations and future VIP membership payments with Shawn’s PayPal Business credentials encrypted server-side. It is not the preferred shop processor.</p>
@@ -79,7 +79,7 @@ export function PaymentsPayoutsPage() {
         <p>The live Wix providers remain active and non-portable. Nothing in this Admin milestone disconnects, edits, or migrates them.</p>
       </DetailCard>
     </section>
-    <div className="commerce-callout is-unavailable"><AdminIcon name="shield" /><div><strong>Mandatory off-code Connect preflight</strong><p>Inspect the existing Stripe Connect Dashboard to prove Canada onboarding, direct charges with full Dashboard access, account-paid fee posture, and Stripe-managed loss liability before any connected account is created.</p></div></div>
+    <div className="commerce-callout is-unavailable"><AdminIcon name="shield" /><div><strong>Dedicated account confirmed; integration pending</strong><p>Future acceptance must provision only the dedicated account’s test secret and webhook signing secret, verify the account identity through Stripe’s API, and keep Checkout disabled until the test workflow is approved.</p></div></div>
   </>;
 }
 
@@ -201,7 +201,7 @@ export function FulfillmentIntegrationsPage() {
       <DetailCard title="Printful" status="setup_required" lead="Primary fulfillment provider"><dl><Fact term="Account authority" value="Third Railify Printful account; Daniel is Master Admin" /><Fact term="Migration" value="Separate manual/API store planned" /><Fact term="Credential" value="Environment-managed private token" /><Fact term="Store ID" value="Not configured" /><Fact term="Catalogue" value="Not synchronized" /><Fact term="Order mode" value="Draft only" /><Fact term="Submission" value="Disabled" /><Fact term="Wix integration" value="Remains active" /></dl></DetailCard>
       <DetailCard title="Printify" status="unavailable" lead="Lower-priority adapter"><p>No current public evidence proves a Printify requirement or connection. Credential custody and connectivity remain undecided until a verified audit establishes them.</p></DetailCard>
     </section>
-    <section className="transaction-model" aria-labelledby="transaction-model-title"><p className="eyebrow">Two separate transactions</p><h2 id="transaction-model-title">Stripe does not pay Printful</h2><div><article><span>01</span><strong>Customer payment</strong><p>The customer pays Third Railify through Stripe on the connected merchant account.</p></article><article><span>02</span><strong>Fulfillment billing</strong><p>Printful separately charges the Third Railify Wallet or configured billing method for product, shipping, taxes, and applicable setup costs.</p></article></div></section>
+    <section className="transaction-model" aria-labelledby="transaction-model-title"><p className="eyebrow">Two separate transactions</p><h2 id="transaction-model-title">Stripe does not pay Printful</h2><div><article><span>01</span><strong>Customer payment</strong><p>The customer pays Third Railify through the dedicated Third Railify Official Stripe account.</p></article><article><span>02</span><strong>Fulfillment billing</strong><p>Printful separately charges the Third Railify Wallet or configured billing method for product, shipping, taxes, and applicable setup costs.</p></article></div></section>
   </>;
 }
 
@@ -217,7 +217,7 @@ function CommerceHeading({ eyebrow, title, summary, status }: { eyebrow: string;
 }
 function SectionTitle({ id, eyebrow, title }: { id: string; eyebrow: string; title: string }) { return <div className="section-heading"><div><p className="eyebrow">{eyebrow}</p><h2 id={id}>{title}</h2></div></div>; }
 function StatusBadge({ status }: { status: CommerceStatus }) { return <span className={`commerce-status commerce-status--${status}`}>{labelStatus(status)}</span>; }
-function ProviderCard({ provider }: { provider: ProviderStatus }) { return <article className="provider-card"><div><span>{provider.label}</span><StatusBadge status={provider.status} /></div><dl><Fact term="Custody" value={humanize(provider.credentialCustody)} /><Fact term="Environment" value={humanize(provider.environment)} />{provider.countryCode && <Fact term="Country" value={provider.countryCode} />}{provider.currencyCode && <Fact term="Currency" value={provider.currencyCode} />}</dl></article>; }
+function ProviderCard({ provider }: { provider: ProviderStatus }) { return <article className="provider-card"><div><span>{provider.label}</span><StatusBadge status={provider.status} /></div><dl>{provider.integrationMode && <Fact term="Integration" value={humanize(provider.integrationMode)} />}<Fact term="Custody" value={humanize(provider.credentialCustody)} /><Fact term="Environment" value={humanize(provider.environment)} />{provider.countryCode && <Fact term="Country" value={provider.countryCode} />}{provider.currencyCode && <Fact term="Currency" value={provider.currencyCode} />}{provider.provider === "stripe" && <><Fact term="Account" value={provider.accountCreated ? "Created" : "Not confirmed"} /><Fact term="API" value={provider.apiConfigured ? "Configured" : "Not configured"} /><Fact term="Webhook" value={provider.webhookConfigured ? "Configured" : "Not configured"} /><Fact term="Checkout" value={provider.checkoutEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payments" value={provider.livePaymentsEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payouts" value={provider.livePayoutReadiness === "verified" ? "Verified" : "Not verified"} /></>}</dl></article>; }
 function DetailCard({ title, status, lead, children }: { title: string; status: CommerceStatus; lead: string; children: ReactNode }) { return <article className="provider-detail"><header><div><p>{lead}</p><h2>{title}</h2></div><StatusBadge status={status} /></header>{children}</article>; }
 function Fact({ term, value }: { term: string; value: string }) { return <div><dt>{term}</dt><dd>{value}</dd></div>; }
 function Metric({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
