@@ -396,10 +396,10 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 
 .auth-backdrop { position: fixed; z-index: 100; inset: 0; display: flex; min-height: 0; align-items: center; justify-content: center; overflow: hidden; padding: 20px; background: rgba(5,5,4,.88); backdrop-filter: blur(12px); }
 .auth-dialog { position: relative; width: min(520px, 100%); min-height: 0; max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 28px; border: 1px solid var(--line-strong); border-radius: 8px; background: #11110e; box-shadow: 0 30px 100px rgba(0,0,0,.72); }
-@supports not selector(::-webkit-scrollbar) {
-  .auth-dialog { scrollbar-color: rgba(243,201,40,.62) transparent; scrollbar-width: thin; }
+@supports (-moz-appearance: none) {
+  .auth-dialog { scrollbar-color: var(--gold) #0b0b09; scrollbar-width: thin; }
 }
-@supports selector(::-webkit-scrollbar) {
+@supports not (-moz-appearance: none) {
   .auth-dialog { scrollbar-color: auto; scrollbar-width: auto; }
 }
 .auth-dialog::-webkit-scrollbar { width: 5px; }
@@ -622,6 +622,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .provider-detail h2 { font-size: 2rem; }
 .provider-detail > p { color: var(--muted); font-size: .84rem; line-height: 1.6; }
 .provider-detail .secondary-button { width: 100%; margin-top: 16px; }
+.provider-detail .commerce-action-note { margin: 9px 0 0; color: var(--quiet); font-size: .7rem; line-height: 1.45; }
 .commerce-form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; padding: clamp(18px,3vw,28px); border: 1px solid var(--line); border-radius: 13px; background: var(--panel-soft); }
 .commerce-field { display: grid; min-width: 0; align-content: start; gap: 7px; }
 .commerce-field > span { color: var(--muted); font: 700 .56rem "Geist Mono", monospace; letter-spacing: .07em; text-transform: uppercase; }

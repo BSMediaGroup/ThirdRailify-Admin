@@ -13,7 +13,9 @@ import {
   publicBusinessProjection,
   redactCommerceAuditMetadata,
   requireCommerceDb,
+  stripeTestCredentialKind,
   validateTemplate,
+  verifyStripeAccount,
 } from "../functions/_shared/commerce-core.js";
 import { commerceEnvironment, createCommerceDatabases, TEST_COMMERCE_KEY } from "./commerce-test-helpers.mjs";
 
@@ -53,6 +55,76 @@ test("audit redaction removes credential, tax, bank, and card material", () => {
   const redacted = redactCommerceAuditMetadata({ clientSecret: "secret-value", businessNumber: "123456789", note: "sk_live_not-a-real-key", nested: { bankAccount: "99887766" } });
   const serialized = JSON.stringify(redacted);
   assert.doesNotMatch(serialized, /secret-value|123456789|99887766|sk_live/); assert.match(serialized, /redacted/);
+});
+
+test("staging Stripe credential validation accepts test restricted and secret keys only", () => {
+  assert.equal(stripeTestCredentialKind("rk_test_notARealRestrictedKey123"), "restricted_test");
+  assert.equal(stripeTestCredentialKind("sk_test_notARealSecretKey123"), "secret_test");
+  assert.equal(stripeTestCredentialKind("rk_live_notARealRestrictedKey123"), null);
+  assert.equal(stripeTestCredentialKind("sk_live_notARealSecretKey123"), null);
+  assert.equal(stripeTestCredentialKind("pk_test_notARealPublishableKey123"), null);
+});
+
+test("Stripe account verification uses one direct read and persists only the existing safe provider row", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const credential = "rk_test_notARealRestrictedKey123";
+  const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: credential });
+  const session = { accountId: "master", account: { adminLevel: "master" } };
+  const calls = [];
+  const overview = await verifyStripeAccount(env, session, async (url, init) => {
+    calls.push({ url, init });
+    return Response.json({
+      id: "acct_TestCanadian123",
+      country: "ca",
+      default_currency: "CAD",
+      business_profile: { name: "Third Railify Official", support_email: "private@example.test" },
+      type: "standard",
+      charges_enabled: true,
+      payouts_enabled: false,
+      details_submitted: true,
+      external_accounts: { data: [{ last4: "1234" }] },
+      individual: { email: "private@example.test" },
+    });
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.stripe.com/v1/account");
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${credential}`);
+  assert.equal(Object.keys(calls[0].init.headers).some((name) => name.toLowerCase() === "stripe-account"), false);
+  const rows = await harness.commerceDb.prepare("SELECT * FROM commerce_provider_connections WHERE provider = 'stripe'").all();
+  assert.equal(rows.results.length, 1);
+  const row = rows.results[0]; const metadata = JSON.parse(row.safe_metadata_json);
+  assert.equal(row.status, "connected"); assert.equal(row.integration_mode, "direct_merchant"); assert.equal(row.credential_custody, "environment_secret");
+  assert.equal(row.environment, "test"); assert.equal(row.external_account_id, "acct_TestCanadian123"); assert.equal(row.country_code, "CA"); assert.equal(row.currency_code, "cad");
+  assert.equal(row.credential_ciphertext, null); assert.ok(row.last_synchronized_at);
+  assert.deepEqual(metadata, { account_display_name: "Third Railify Official", account_created: true, api_configured: true, webhook_configured: false, checkout_enabled: false, live_payments_enabled: false, live_payout_readiness: "unverified", charges_enabled: true, payouts_enabled: false, details_submitted: true, account_type: "standard", payment_methods: ["cards", "eligible_apple_pay", "eligible_google_pay"] });
+  assert.doesNotMatch(JSON.stringify(row), /notARealRestrictedKey|support_email|external_accounts|individual|private@example/);
+  const projected = overview.providers.find((provider) => provider.provider === "stripe");
+  assert.equal(overview.stripeSecretConfigured, true); assert.equal(projected.status, "connected"); assert.equal(projected.apiConfigured, true);
+  assert.equal(projected.webhookConfigured, false); assert.equal(projected.checkoutEnabled, false); assert.equal(projected.livePaymentsEnabled, false); assert.equal(projected.livePayoutReadiness, "unverified");
+  assert.equal(projected.metadata.chargesEnabled, true); assert.equal(projected.metadata.payoutsEnabled, false); assert.equal(projected.metadata.detailsSubmitted, true);
+  const audit = await harness.commerceDb.prepare("SELECT action, result, metadata_json FROM commerce_audit WHERE action = 'stripe.account_verified'").first();
+  assert.equal(audit.result, "success"); assert.match(audit.metadata_json, /acct_TestCanadian123/); assert.doesNotMatch(audit.metadata_json, /notARealRestrictedKey|Authorization|business_profile|external_accounts|individual/);
+});
+
+test("Stripe account verification fails closed for missing, live, mismatched, or malformed provider state", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const session = { accountId: "master", account: { adminLevel: "master" } };
+  let called = 0; const shouldNotFetch = async () => { called += 1; throw new Error("unexpected fetch"); };
+  await assert.rejects(verifyStripeAccount(commerceEnvironment(harness, { STRIPE_SECRET_KEY: "" }), session, shouldNotFetch), (error) => error.code === "stripe_credential_unavailable");
+  await assert.rejects(verifyStripeAccount(commerceEnvironment(harness, { STRIPE_SECRET_KEY: "rk_live_notARealKey123" }), session, shouldNotFetch), (error) => error.code === "stripe_test_credential_required");
+  await assert.rejects(verifyStripeAccount(commerceEnvironment(harness, { STRIPE_SECRET_KEY: "sk_live_notARealKey123" }), session, shouldNotFetch), (error) => error.code === "stripe_test_credential_required");
+  await assert.rejects(verifyStripeAccount(commerceEnvironment(harness, { AUTH_ENVIRONMENT: "production", STRIPE_SECRET_KEY: "rk_test_notARealKey123" }), session, shouldNotFetch), (error) => error.code === "stripe_verification_environment_unsupported");
+  assert.equal(called, 0);
+  const testEnv = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "sk_test_notARealKey123" });
+  await assert.rejects(verifyStripeAccount(testEnv, session, async () => Response.json({ id: "acct_WrongCountry", country: "US", default_currency: "cad" })), (error) => error.code === "stripe_account_mismatch");
+  await assert.rejects(verifyStripeAccount(testEnv, session, async () => Response.json({ id: "acct_WrongCurrency", country: "CA", default_currency: "usd" })), (error) => error.code === "stripe_account_mismatch");
+  await assert.rejects(verifyStripeAccount(testEnv, session, async () => Response.json({ id: "not-an-account", country: "CA", default_currency: "cad", raw_secret: "do-not-store" })), (error) => error.code === "stripe_provider_response_invalid");
+  await assert.rejects(verifyStripeAccount({}, session, shouldNotFetch), (error) => error.code === "commerce_database_unavailable");
+  const row = await harness.commerceDb.prepare("SELECT status, external_account_id, safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
+  assert.equal(row.status, "setup_required"); assert.equal(row.external_account_id, null); assert.equal(JSON.parse(row.safe_metadata_json).api_configured, false); assert.doesNotMatch(row.safe_metadata_json, /do-not-store/);
+  const audits = await harness.commerceDb.prepare("SELECT result, metadata_json FROM commerce_audit WHERE action = 'stripe.account_verification_failed'").all();
+  assert.ok(audits.results.length >= 5); assert.match(JSON.stringify(audits.results), /missing_configuration|account_mismatch|provider_error/); assert.doesNotMatch(JSON.stringify(audits.results), /notARealKey|do-not-store/);
 });
 
 test("provider status remains truthful and the Printful model has two independent transactions", async (t) => {

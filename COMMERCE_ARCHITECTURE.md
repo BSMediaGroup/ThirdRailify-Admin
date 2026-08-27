@@ -9,9 +9,9 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Commerce environment | `staging` |
 | Dedicated Stripe account | created; operator-confirmed |
 | Stripe integration mode | `direct_merchant` |
-| Stripe API connection | not configured |
+| Stripe API connection | restricted TEST credential configured; read-only verification implemented |
 | Stripe webhook | not configured |
-| Stripe environment | Sandbox/test preparation |
+| Stripe environment | `test`; production readiness not established |
 | Checkout | `disabled` |
 | Live payment capture | `disabled` |
 | Live payout readiness | not verified |
@@ -21,7 +21,7 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Printify | `unavailable`; credential custody undecided |
 | Wix | `legacy production`; remains authoritative and untouched |
 
-No Cloudflare commerce resource, provider credential, transaction, fulfillment order, or deployment is created by this milestone.
+The separate Admin-only commerce D1 is bound and migrated, and its encryption key plus Stripe TEST credential remain encrypted Cloudflare Secrets. This milestone creates no payment, webhook, transaction, customer, product, price, refund, payout, or fulfillment order.
 
 ## Authoritative payment flow
 
@@ -73,7 +73,7 @@ The dedicated account's creation and Sandbox/test access are operator-confirmed.
 
 ## Data authority
 
-Authentication remains in the existing auth D1. Commerce state belongs in the separate future `thirdrailify-commerce` D1, bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. The local schema authority is `commerce-migrations/0001_commerce_control_plane.sql`; no active commerce binding or database ID is present.
+Authentication remains in the existing auth D1. Commerce state belongs in the separate `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. The applied local schema authority is `commerce-migrations/0001_commerce_control_plane.sql`.
 
 Entities:
 
@@ -87,7 +87,9 @@ Entities:
 - `commerce_orders`: future order records with customer-payment and Printful cost/refund fields kept separate.
 - `commerce_audit`: redacted mutation history.
 
-The Stripe provider row may later store only safe, verified values: environment, `direct_merchant`, Stripe account ID retrieved through the API, country, default currency, account/business display name, charges/payouts flags, last verification time, webhook status, and a payment-method summary. It must not store API keys, webhook signing secrets, payout-bank data, card data, identity documents, full private Stripe responses, or team-member email addresses.
+The Stripe provider row stores only safe, verified values: environment, `direct_merchant`, Stripe account ID retrieved through the API, country, default currency, account/business display name, test charges/payouts/details-submitted flags, account type, last verification time, webhook status, and the existing bounded payment-method summary. It must not store API keys, webhook signing secrets, payout-bank data, card data, identity documents, full private Stripe responses, tax IDs, individual/representative details, or team-member email addresses.
+
+Staging verification is `POST /api/admin/commerce/stripe/verify`, protected by the existing Admin session, exact origin, `commerce.payments.manage`/Master authority, CSRF, rate limit, and audit boundaries. It reads `STRIPE_SECRET_KEY` only in the server runtime and performs exactly `GET https://api.stripe.com/v1/account` in the direct merchant context without `Stripe-Account`. Restricted `rk_test_...` is the intended credential; `sk_test_...` remains compatible. All live credential forms fail closed. A successful response must normalize to `country=CA` and `default_currency=cad`; connection status means only “Test API connected.”
 
 ## Credential custody and encryption
 

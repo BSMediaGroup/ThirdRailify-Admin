@@ -9,6 +9,7 @@ import {
   getCommerceTemplates,
   saveBusinessProfile,
   saveCommerceTemplate,
+  verifyStripeConnection,
   type BusinessPayload,
   type CommerceOverviewPayload,
   type CommerceStatus,
@@ -71,12 +72,42 @@ export function CommerceOverviewPage() {
 }
 
 export function PaymentsPayoutsPage() {
+  const { csrfToken } = useAuth();
+  const { startLoading } = useOutletContext<AdminShellOutletContext>();
+  const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    const stop = startLoading("Loading Stripe connection status"); setError("");
+    try { setPayload(await getCommerceOverview()); }
+    catch (reason) { setError(errorMessage(reason, "Stripe connection status is unavailable.")); }
+    finally { stop(); }
+  }, [startLoading]);
+  useEffect(() => { void load(); }, [load]);
+  const stripe = payload?.providers.find((provider) => provider.provider === "stripe");
+  const canManagePayments = Boolean(payload?.access.capabilities.includes("commerce.payments.manage"));
+  const canVerify = Boolean(canManagePayments && payload?.databaseConfigured && payload.stripeSecretConfigured && csrfToken && !busy);
+  const verify = async () => {
+    if (!canVerify) return;
+    const stop = startLoading("Verifying the Stripe test account"); setBusy(true); setError(""); setMessage("");
+    try {
+      const next = await verifyStripeConnection(csrfToken); setPayload(next); setMessage("Stripe test API connection verified for the Canadian CAD merchant account.");
+    } catch (reason) { setError(errorMessage(reason, "Stripe account verification failed closed.")); }
+    finally { setBusy(false); stop(); }
+  };
+  const connected = Boolean(stripe?.status === "connected" && stripe.apiConfigured && stripe.environment === "test");
+  const accountName = metadataText(stripe, "accountDisplayName") || "Third Railify Official";
   return <>
-    <CommerceHeading eyebrow="Processor ownership" title="Payments & payouts" summary="The dedicated Third Railify Official Stripe account exists. Test API credentials, webhook verification, Checkout Sessions, live activation, and payout readiness remain unverified or unavailable." status="setup_required" />
+    <CommerceHeading eyebrow="Processor ownership" title="Payments & payouts" summary={connected ? "The dedicated Canadian Stripe merchant account is connected to the test API. Checkout, webhooks, live payments, and live payout readiness remain disabled or unverified." : "The dedicated Third Railify Official Stripe account exists. Test API verification is available only through the protected server action; webhooks, Checkout Sessions, live activation, and payout readiness remain unavailable."} status={connected ? "connected" : "setup_required"} statusLabel={connected ? "Test API connected" : undefined} />
+    {error && <div className="admin-alert" role="alert">{error}</div>}
+    {message && <div className="auth-success" role="status">{message}</div>}
     <section className="provider-detail-grid">
-      <DetailCard title="Stripe" status="setup_required" lead="Primary shop processor">
-        <dl><Fact term="Account" value="Dedicated Third Railify Official Canadian merchant account" /><Fact term="Country" value="Canada" /><Fact term="Currency" value="CAD" /><Fact term="Current state" value="Account created — API connection pending" /><Fact term="Environment" value="Sandbox/test preparation" /><Fact term="Payment methods" value="Cards; eligible Apple Pay; eligible Google Pay" /><Fact term="Management" value="Business verification, banking, payouts, and account team are managed in Stripe Dashboard" /><Fact term="Checkout" value="Disabled until the later test-mode integration milestone" /><Fact term="Live payment capture" value="Disabled" /><Fact term="Live payout readiness" value="Not yet verified" /></dl>
-        <button type="button" className="secondary-button" disabled>Test integration is not available in this milestone</button>
+      <DetailCard title="Stripe" status={connected ? "connected" : "setup_required"} statusLabel={connected ? "Test API connected" : undefined} lead="Primary shop processor">
+        <dl><Fact term="Dedicated merchant" value={accountName} /><Fact term="Account ID" value={compactAccountId(stripe?.externalAccountId)} /><Fact term="Country" value={stripe?.countryCode?.toUpperCase() === "CA" ? "Canada" : "Canada — awaiting verification"} /><Fact term="Currency" value={(stripe?.currencyCode || "CAD").toUpperCase()} /><Fact term="Current state" value={connected ? "Test API connected" : "Account created — API verification pending"} /><Fact term="Environment" value="TEST" /><Fact term="Charges (test)" value={connected ? metadataBooleanLabel(stripe, "chargesEnabled") : "Not yet verified"} /><Fact term="Payouts (test)" value={connected ? metadataBooleanLabel(stripe, "payoutsEnabled") : "Not yet verified"} /><Fact term="Details submitted" value={connected ? metadataBooleanLabel(stripe, "detailsSubmitted") : "Not yet verified"} /><Fact term="Last verified" value={formatVerifiedAt(stripe?.lastSynchronizedAt)} /><Fact term="Webhook" value="Not configured" /><Fact term="Checkout" value="Disabled" /><Fact term="Live payments" value="Disabled" /><Fact term="Live payout readiness" value="Not yet verified" /></dl>
+        {canManagePayments && <button type="button" className="secondary-button" onClick={() => void verify()} disabled={!canVerify}>{busy ? "Verifying…" : "Verify Stripe connection"}</button>}
+        {canManagePayments && !payload?.databaseConfigured && <p className="commerce-action-note">Commerce D1 is required before verification.</p>}
+        {canManagePayments && payload?.databaseConfigured && !payload.stripeSecretConfigured && <p className="commerce-action-note">A valid Stripe test server credential must be configured before verification.</p>}
       </DetailCard>
       <DetailCard title="PayPal" status="deferred" lead="Deferred direct-merchant REST model">
         <p>Later limited to donations and future VIP membership payments with Shawn’s PayPal Business credentials encrypted server-side. It is not the preferred shop processor.</p>
@@ -86,7 +117,7 @@ export function PaymentsPayoutsPage() {
         <p>The live Wix providers remain active and non-portable. Nothing in this Admin milestone disconnects, edits, or migrates them.</p>
       </DetailCard>
     </section>
-    <div className="commerce-callout is-unavailable"><AdminIcon name="shield" /><div><strong>Dedicated account confirmed; integration pending</strong><p>Future acceptance must provision only the dedicated account’s test secret and webhook signing secret, verify the account identity through Stripe’s API, and keep Checkout disabled until the test workflow is approved.</p></div></div>
+    <div className={`commerce-callout ${connected ? "is-pending" : "is-unavailable"}`}><AdminIcon name="shield" /><div><strong>{connected ? "Test identity verified; production remains disabled" : "Dedicated account confirmed; test verification pending"}</strong><p>{connected ? "The read-only test API check confirmed Canada and CAD. This does not establish live charges, payout readiness, a webhook, or Checkout." : "The server will verify only the configured test credential against Stripe’s current-account endpoint. Checkout remains disabled."}</p></div></div>
   </>;
 }
 
@@ -219,13 +250,13 @@ function CommerceDeferredPage({ kind, summary }: { kind: string; summary: string
   return <><CommerceHeading eyebrow="Commerce record authority" title={kind} summary={summary} status="unavailable" /><CommerceState><strong>No records available.</strong><span>The separate commerce database is not bound and no provider call has been made.</span></CommerceState></>;
 }
 
-function CommerceHeading({ eyebrow, title, summary, status }: { eyebrow: string; title: string; summary: string; status: CommerceStatus }) {
-  return <section className="area-heading commerce-heading"><div className="area-icon"><AdminIcon name="products" size={28} /></div><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{summary}</p></div><StatusBadge status={status} /></section>;
+function CommerceHeading({ eyebrow, title, summary, status, statusLabel }: { eyebrow: string; title: string; summary: string; status: CommerceStatus; statusLabel?: string }) {
+  return <section className="area-heading commerce-heading"><div className="area-icon"><AdminIcon name="products" size={28} /></div><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{summary}</p></div><StatusBadge status={status} label={statusLabel} /></section>;
 }
 function SectionTitle({ id, eyebrow, title }: { id: string; eyebrow: string; title: string }) { return <div className="section-heading"><div><p className="eyebrow">{eyebrow}</p><h2 id={id}>{title}</h2></div></div>; }
-function StatusBadge({ status }: { status: CommerceStatus }) { return <span className={`commerce-status commerce-status--${status}`}>{labelStatus(status)}</span>; }
-function ProviderCard({ provider }: { provider: ProviderStatus }) { return <article className="provider-card"><div><span>{provider.label}</span><StatusBadge status={provider.status} /></div><dl>{provider.integrationMode && <Fact term="Integration" value={humanize(provider.integrationMode)} />}<Fact term="Custody" value={humanize(provider.credentialCustody)} /><Fact term="Environment" value={humanize(provider.environment)} />{provider.countryCode && <Fact term="Country" value={provider.countryCode} />}{provider.currencyCode && <Fact term="Currency" value={provider.currencyCode} />}{provider.provider === "stripe" && <><Fact term="Account" value={provider.accountCreated ? "Created" : "Not confirmed"} /><Fact term="API" value={provider.apiConfigured ? "Configured" : "Not configured"} /><Fact term="Webhook" value={provider.webhookConfigured ? "Configured" : "Not configured"} /><Fact term="Checkout" value={provider.checkoutEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payments" value={provider.livePaymentsEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payouts" value={provider.livePayoutReadiness === "verified" ? "Verified" : "Not verified"} /></>}</dl></article>; }
-function DetailCard({ title, status, lead, children }: { title: string; status: CommerceStatus; lead: string; children: ReactNode }) { return <article className="provider-detail"><header><div><p>{lead}</p><h2>{title}</h2></div><StatusBadge status={status} /></header>{children}</article>; }
+function StatusBadge({ status, label }: { status: CommerceStatus; label?: string }) { return <span className={`commerce-status commerce-status--${status}`}>{label || labelStatus(status)}</span>; }
+function ProviderCard({ provider }: { provider: ProviderStatus }) { const stripeConnected = provider.provider === "stripe" && provider.status === "connected" && provider.environment === "test" && provider.apiConfigured; return <article className="provider-card"><div><span>{provider.label}</span><StatusBadge status={provider.status} label={stripeConnected ? "Test API connected" : undefined} /></div><dl>{provider.integrationMode && <Fact term="Integration" value={humanize(provider.integrationMode)} />}<Fact term="Custody" value={humanize(provider.credentialCustody)} /><Fact term="Environment" value={provider.environment === "test" ? "TEST" : humanize(provider.environment)} />{provider.countryCode && <Fact term="Country" value={provider.countryCode.toUpperCase() === "CA" ? "Canada" : provider.countryCode} />}{provider.currencyCode && <Fact term="Currency" value={provider.currencyCode.toUpperCase()} />}{provider.provider === "stripe" && <><Fact term="Account" value={metadataText(provider, "accountDisplayName") || (provider.accountCreated ? "Created" : "Not confirmed")} />{provider.externalAccountId && <Fact term="Account ID" value={compactAccountId(provider.externalAccountId)} />}<Fact term="API" value={stripeConnected ? "Test API connected" : "Not configured"} /><Fact term="Webhook" value={provider.webhookConfigured ? "Configured" : "Not configured"} /><Fact term="Checkout" value={provider.checkoutEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payments" value={provider.livePaymentsEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payouts" value={provider.livePayoutReadiness === "verified" ? "Verified" : "Not verified"} />{provider.lastSynchronizedAt && <Fact term="Last verified" value={formatVerifiedAt(provider.lastSynchronizedAt)} />}</>}</dl></article>; }
+function DetailCard({ title, status, statusLabel, lead, children }: { title: string; status: CommerceStatus; statusLabel?: string; lead: string; children: ReactNode }) { return <article className="provider-detail"><header><div><p>{lead}</p><h2>{title}</h2></div><StatusBadge status={status} label={statusLabel} /></header>{children}</article>; }
 function Fact({ term, value }: { term: string; value: string }) { return <div><dt>{term}</dt><dd>{value}</dd></div>; }
 function Metric({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
 function WorkspaceLink({ to, eyebrow, title, text, icon, index }: { to: string; eyebrow: string; title: string; text: string; icon: "payments" | "business" | "tax" | "emails" | "fulfillment"; index: number }) {
@@ -247,5 +278,9 @@ function profileToForm(payload: BusinessPayload) {
 function formToBusinessPayload(form: Record<string, string>) { return { ...form, countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicAddress: { line1: form.publicAddressLine1, line2: form.publicAddressLine2, city: form.publicCity, province: "ON", postalCode: form.publicPostalCode, country: "CA" } }; }
 function maskedRegistration(payload: BusinessPayload | null, type: string) { const match = payload?.profile.private.registrations.find((item) => item.type === type); return match ? `Stored as ${match.maskedIdentifier}; leave blank to preserve.` : "Not confirmed or stored."; }
 function errorMessage(reason: unknown, fallback: string) { return reason instanceof Error ? reason.message : fallback; }
+function metadataText(provider: ProviderStatus | undefined, key: string) { const value = provider?.metadata?.[key]; return typeof value === "string" ? value : ""; }
+function metadataBooleanLabel(provider: ProviderStatus | undefined, key: string) { return provider?.metadata?.[key] === true ? "Enabled in test mode" : "Disabled in test mode"; }
+function compactAccountId(value: string | null | undefined) { const id = String(value || ""); return /^acct_[A-Za-z0-9]+$/.test(id) ? `${id.slice(0, 9)}…${id.slice(-4)}` : "Awaiting verification"; }
+function formatVerifiedAt(value: string | null | undefined) { const timestamp = Date.parse(String(value || "")); return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : "Not yet verified"; }
 function humanize(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase()); }
 function labelStatus(value: string) { return humanize(value === "setup_required" ? "setup required" : value === "legacy_production" ? "legacy production" : value); }

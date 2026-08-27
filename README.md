@@ -12,11 +12,11 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Fail-closed loading, signed-out, regular-user, Full Admin, and Master Admin gates with no protected dashboard flash.
 - Functional `/access` account registry with self-service display-name editing, avatar upload/URL import, search/filters, and Master-only promotion, demotion, status, and session-revocation controls.
 - Admin-authoritative avatar ingestion validates JPG/PNG/WebP bytes, stores immutable content-addressed objects under `/u/<opaque-account-key>/avatar/<sha256>.<ext>`, and persists only the resulting HTTPS URL in D1.
-- Local authority for a future separate `thirdrailify-commerce` D1, direct-merchant provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
+- Admin-only authority for the bound `thirdrailify-commerce` D1, direct-merchant provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
 - Stripe-first Canadian operating model using the dedicated Third Railify Official merchant account, server-created Stripe-hosted Checkout Sessions, Admin-only environment secrets, disabled Checkout/live capture, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
 - Cloudflare Pages static output, SPA fallback, document and response-level noindex, restrictive baseline headers, and no custom domain.
 
-Account administration is operational in code. Commerce pages, local schema, encryption helpers, permissions, API boundaries, forms, and truthful readiness states are implemented, but the commerce database/binding does not exist and every payment/fulfillment activation gate remains off. The verified existing `thirdrailify-profile-media` bucket is declared locally through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` binding. No R2 object mutation, commerce D1 creation, provider call, transaction, fulfillment order, deployment, public `r2.dev` access, or custom media domain is claimed by this repository state; all off-code steps require separate authorization and live acceptance.
+Account administration is operational in code. The separate commerce D1 is bound and migrated, its encryption secret and the intended restricted Stripe TEST credential are held as Admin Cloudflare encrypted secrets, and the protected Stripe verification action is implemented. The action performs only `GET /v1/account`, requires Canada and CAD, and stores only safe metadata in the existing Stripe row. Checkout, webhooks, live payments, live payout readiness, and fulfillment remain disabled or unverified. The verified existing `thirdrailify-profile-media` bucket is declared locally through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` binding. Public receives no commerce binding or secret.
 
 ## Local development
 
@@ -48,7 +48,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/products` | Provider-neutral product authority scaffold; synchronization disabled |
 | `/orders` | Order authority and separate payment/fulfillment cost model; no synthetic orders |
 | `/commerce` | Truthful commerce readiness and provider status overview |
-| `/commerce/payments` | Dedicated Stripe/PayPal/Wix payment and payout posture; no connection action |
+| `/commerce/payments` | Dedicated Stripe/PayPal/Wix posture plus the permission-gated, read-only Stripe TEST account verification action |
 | `/commerce/business` | Structured public/private business profile; persistence fails closed without commerce D1 and encryption |
 | `/commerce/tax` | Encrypted tax identifiers and document presentation; no custom tax calculation/compliance claim |
 | `/commerce/emails` | Safe structured customer template editor; no send path |
@@ -109,10 +109,11 @@ The display system uses the seeded American Captain asset at its real weight wit
 - Display-name changes are self-service, CSRF-protected, rate-limited, audited, and persisted only through the Admin-owned D1 account authority; Master role/email locking does not overwrite a chosen display name.
 - Avatar uploads and URL imports are rate-limited, capped at 5 MB, content-sniffed as JPG/PNG/WebP, and written only to the Admin-owned `THIRDRAILIFY_PROFILE_MEDIA` object binding. Public can proxy a current session proof but cannot own the object binding or update D1 itself.
 - Commerce reuses the same session, role, origin, CSRF, rate-limit, and audit boundary. Master Admins own all commerce capabilities and are the only accounts that can grant/revoke them; Full Admins can view and may receive bounded commerce capabilities; ordinary users cannot.
+- Stripe staging verification accepts only recognizable TEST server credentials under `STRIPE_SECRET_KEY`: restricted `rk_test_...` is intended and `sk_test_...` remains compatible. `rk_live_...`, `sk_live_...`, missing credentials, missing D1, and non-CA/non-CAD accounts fail closed. The browser receives only `stripeSecretConfigured`, never credential material.
 - Private business/legal/tax values require the separate commerce D1 and server-only AES-256-GCM key. Missing storage/key, malformed envelopes, wrong keys, and tampering fail closed. The dedicated Stripe account's secret key/webhook secret and the Printful token remain Admin-only Cloudflare encrypted secrets; no browser or Public payload receives them.
 - Structured email/document templates allow bounded fields only and reject scripts or executable HTML. There is no send path in this milestone.
 - `noindex` is not access control. The application gate and signed APIs are mandatory; any outer Cloudflare Access policy must preserve narrowly required public auth/callback routes.
 
 ## Cloudflare and domain safety
 
-See `CLOUDFLARE_AUTH_SETUP.md` for account infrastructure and `CLOUDFLARE_COMMERCE_SETUP.md` for the deliberately unperformed commerce activation sequence. `COMMERCE_ARCHITECTURE.md`, `WIX_COMMERCE_AUDIT.md`, and `STRIPE_CANADA_FEASIBILITY.md` record the direct dedicated-account design, source evidence, and remaining off-code checks. No Pages deployment is claimed. Do not attach `admin.thirdrailify.com` during staging.
+See `CLOUDFLARE_AUTH_SETUP.md` for account infrastructure and `CLOUDFLARE_COMMERCE_SETUP.md` for the staged commerce setup and remaining disabled activation gates. `COMMERCE_ARCHITECTURE.md`, `WIX_COMMERCE_AUDIT.md`, and `STRIPE_CANADA_FEASIBILITY.md` record the direct dedicated-account design, source evidence, and remaining off-code checks. Do not attach `admin.thirdrailify.com` during staging.

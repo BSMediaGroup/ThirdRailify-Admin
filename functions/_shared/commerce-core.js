@@ -13,6 +13,7 @@ const ENVELOPE_VERSION = 1;
 const ENCRYPTION_ALGORITHM = "A256GCM";
 const MAX_SECRET_BYTES = 16 * 1024;
 const ENCRYPTION_CONTEXT_PREFIX = "thirdrailify-commerce:v1:";
+const STRIPE_ACCOUNT_URL = "https://api.stripe.com/v1/account";
 
 export const COMMERCE_CAPABILITIES = Object.freeze([
   "commerce.view",
@@ -92,6 +93,17 @@ export function requireCommerceDb(env) {
   return env.THIRDRAILIFY_COMMERCE_DB;
 }
 
+export function stripeTestCredentialKind(value) {
+  const credential = String(value || "").trim();
+  if (/^rk_test_[A-Za-z0-9]+$/.test(credential)) return "restricted_test";
+  if (/^sk_test_[A-Za-z0-9]+$/.test(credential)) return "secret_test";
+  return null;
+}
+
+export function isStripeTestCredentialConfigured(env) {
+  return isStripeVerificationEnvironment(env) && Boolean(stripeTestCredentialKind(env?.STRIPE_SECRET_KEY));
+}
+
 export async function commerceAccessForSession(env, session) {
   const isMasterAdmin = session?.account?.adminLevel === "master";
   if (isMasterAdmin) return { isMasterAdmin: true, capabilities: [...COMMERCE_CAPABILITIES] };
@@ -124,6 +136,7 @@ export async function commerceOverview(env, session) {
       ok: true,
       databaseConfigured: false,
       encryptionConfigured: hasValidEncryptionKeyShape(env),
+      stripeSecretConfigured: isStripeTestCredentialConfigured(env),
       access,
       posture: COMMERCE_SAFE_POSTURE,
       providers: PROVIDER_BLUEPRINTS,
@@ -148,6 +161,7 @@ export async function commerceOverview(env, session) {
     ok: true,
     databaseConfigured: true,
     encryptionConfigured: hasValidEncryptionKeyShape(env),
+    stripeSecretConfigured: isStripeTestCredentialConfigured(env),
     access,
     posture: COMMERCE_SAFE_POSTURE,
     providers: providers.length ? providers : PROVIDER_BLUEPRINTS,
@@ -164,6 +178,120 @@ export async function commerceOverview(env, session) {
     },
     checkedAt: nowIso(),
   };
+}
+
+export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
+  const db = requireCommerceDb(env);
+  const correlationId = randomId();
+  const current = await db
+    .prepare("SELECT id, safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe' LIMIT 1")
+    .first();
+  if (!current) {
+    await writeStripeVerificationAudit(env, session, "missing_configuration", "rejected", { correlationId });
+    throw new AuthFailure(503, "stripe_provider_unavailable", "The Stripe provider connection is not configured.");
+  }
+
+  if (!isStripeVerificationEnvironment(env)) {
+    await writeStripeVerificationAudit(env, session, "missing_configuration", "rejected", { correlationId });
+    throw new AuthFailure(503, "stripe_verification_environment_unsupported", "Stripe test verification is unavailable in this environment.");
+  }
+
+  const credential = String(env?.STRIPE_SECRET_KEY || "").trim();
+  if (!credential) {
+    await writeStripeVerificationAudit(env, session, "missing_configuration", "rejected", { correlationId });
+    throw new AuthFailure(503, "stripe_credential_unavailable", "The Stripe test credential is not configured.");
+  }
+  if (!stripeTestCredentialKind(credential)) {
+    await writeStripeVerificationAudit(env, session, "missing_configuration", "rejected", { correlationId });
+    throw new AuthFailure(503, "stripe_test_credential_required", "A valid Stripe test credential is required in this staging environment.");
+  }
+
+  let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    response = await fetchImpl(STRIPE_ACCOUNT_URL, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${credential}`,
+      },
+    });
+  } catch {
+    await writeStripeVerificationAudit(env, session, "provider_error", "error", { correlationId });
+    throw new AuthFailure(502, "stripe_provider_unavailable", "Stripe account verification is temporarily unavailable.");
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response?.ok) {
+    await writeStripeVerificationAudit(env, session, "provider_error", "error", { correlationId, providerStatus: Number(response?.status || 0) });
+    throw new AuthFailure(502, "stripe_provider_error", "Stripe rejected the account verification request.");
+  }
+
+  let providerAccount;
+  try {
+    providerAccount = await response.json();
+  } catch {
+    await writeStripeVerificationAudit(env, session, "provider_error", "error", { correlationId });
+    throw new AuthFailure(502, "stripe_provider_response_invalid", "Stripe returned an invalid account verification response.");
+  }
+
+  const account = normalizeStripeAccount(providerAccount);
+  if (!account) {
+    await writeStripeVerificationAudit(env, session, "provider_error", "error", { correlationId });
+    throw new AuthFailure(502, "stripe_provider_response_invalid", "Stripe returned an invalid account verification response.");
+  }
+  if (account.country !== "CA" || account.defaultCurrency !== "cad") {
+    await writeStripeVerificationAudit(env, session, "account_mismatch", "rejected", {
+      correlationId,
+      accountId: account.id,
+      country: account.country,
+      currency: account.defaultCurrency,
+    });
+    throw new AuthFailure(409, "stripe_account_mismatch", "The configured Stripe account is not the required Canadian CAD merchant account.");
+  }
+
+  const timestamp = nowIso();
+  const existingMetadata = safeJson(current.safe_metadata_json, {});
+  const safeMetadata = {
+    account_display_name: account.displayName || "Third Railify Official",
+    account_created: true,
+    api_configured: true,
+    webhook_configured: false,
+    checkout_enabled: false,
+    live_payments_enabled: false,
+    live_payout_readiness: "unverified",
+    charges_enabled: account.chargesEnabled,
+    payouts_enabled: account.payoutsEnabled,
+    details_submitted: account.detailsSubmitted,
+    ...(account.type ? { account_type: account.type } : {}),
+    ...(Array.isArray(existingMetadata.payment_methods) ? { payment_methods: existingMetadata.payment_methods.slice(0, 12) } : {}),
+  };
+  const update = await db
+    .prepare(
+      `UPDATE commerce_provider_connections
+       SET integration_mode = 'direct_merchant', credential_custody = 'environment_secret',
+           status = 'connected', environment = 'test', external_account_id = ?,
+           country_code = 'CA', currency_code = 'cad', safe_metadata_json = ?,
+           last_synchronized_at = ?, updated_at = ?
+       WHERE provider = 'stripe'`,
+    )
+    .bind(account.id, JSON.stringify(safeMetadata), timestamp, timestamp)
+    .run();
+  if (Number(update?.meta?.changes || 0) !== 1) {
+    await writeStripeVerificationAudit(env, session, "persistence_error", "error", { correlationId, accountId: account.id });
+    throw new AuthFailure(503, "stripe_provider_persistence_failed", "The verified Stripe account could not be saved.");
+  }
+
+  await writeStripeVerificationAudit(env, session, "success", "success", {
+    correlationId,
+    accountId: account.id,
+    country: account.country,
+    currency: account.defaultCurrency,
+  });
+  return commerceOverview(env, session);
 }
 
 export async function businessProfilePayload(env, session) {
@@ -539,6 +667,42 @@ export async function writeCommerceAudit(env, event) {
     .run();
 }
 
+function normalizeStripeAccount(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const id = cleanText(value.id, 160);
+  if (!/^acct_[A-Za-z0-9]+$/.test(id)) return null;
+  const country = cleanText(value.country, 2).toUpperCase();
+  const defaultCurrency = cleanText(value.default_currency, 3).toLowerCase();
+  const displayName = cleanText(value.business_profile?.name || value.settings?.dashboard?.display_name, 160);
+  const type = cleanText(value.type, 40).toLowerCase();
+  return {
+    id,
+    country,
+    defaultCurrency,
+    displayName,
+    chargesEnabled: value.charges_enabled === true,
+    payoutsEnabled: value.payouts_enabled === true,
+    detailsSubmitted: value.details_submitted === true,
+    type: ["standard", "express", "custom"].includes(type) ? type : "",
+  };
+}
+
+async function writeStripeVerificationAudit(env, session, resultCategory, result, safe = {}) {
+  await writeCommerceAudit(env, {
+    actorAccountId: session?.accountId,
+    action: result === "success" ? "stripe.account_verified" : "stripe.account_verification_failed",
+    targetType: "commerce_provider_connection",
+    targetId: "stripe",
+    result,
+    metadata: {
+      provider: "stripe",
+      environment: "test",
+      result: resultCategory,
+      ...safe,
+    },
+  });
+}
+
 function templateBlueprint(templateKey, subject, heading, introduction) {
   return Object.freeze({
     templateKey,
@@ -589,6 +753,10 @@ function serializeProviderConnection(row) {
   const metadata = {
     accountDisplayName: cleanText(rawMetadata.account_display_name, 160) || undefined,
     paymentMethods: Array.isArray(rawMetadata.payment_methods) ? rawMetadata.payment_methods.map((value) => cleanText(value, 40)).filter(Boolean).slice(0, 12) : undefined,
+    chargesEnabled: rawMetadata.charges_enabled === true,
+    payoutsEnabled: rawMetadata.payouts_enabled === true,
+    detailsSubmitted: rawMetadata.details_submitted === true,
+    accountType: cleanText(rawMetadata.account_type, 40) || undefined,
   };
   return {
     provider: row.provider,
@@ -807,6 +975,10 @@ function hasValidEncryptionKeyShape(env) {
   } catch {
     return false;
   }
+}
+
+function isStripeVerificationEnvironment(env) {
+  return ["staging", "test"].includes(cleanText(env?.AUTH_ENVIRONMENT, 20).toLowerCase());
 }
 
 export function assertNoCommerceSecretsInPublicPayload(payload) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
+import { handlePost as handleCommercePost, onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import { commerceAccessForSession, updateBusinessProfile, writeCommerceAudit } from "../functions/_shared/commerce-core.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
@@ -47,6 +47,47 @@ test("business mutations require CSRF and encryption, then persist ciphertext on
   assert.doesNotMatch(stored.legal_business_name_ciphertext, /Private legal name/); assert.doesNotMatch(tax.identifier_ciphertext, /123456789/); assert.equal(tax.masked_identifier, "•••••6789");
   const audits = await harness.commerceDb.prepare("SELECT metadata_json FROM commerce_audit WHERE actor_account_id = ?").bind(master.id).all();
   assert.ok(audits.results.length >= 1); assert.doesNotMatch(JSON.stringify(audits.results), /123456789|Private legal name/);
+});
+
+test("Stripe verification route enforces auth, payments authority, CSRF, configuration, and a read-only provider request", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "rk_test_notARealRestrictedKey123" });
+  const { created, cookie } = await masterSession(env);
+  const url = `${ADMIN_ORIGIN}/api/admin/commerce/stripe/verify`;
+  let providerCalls = 0;
+  const commerceFetch = async (input, init) => {
+    providerCalls += 1;
+    assert.equal(input, "https://api.stripe.com/v1/account"); assert.equal(init.method, "GET");
+    assert.equal(Object.keys(init.headers).some((name) => name.toLowerCase() === "stripe-account"), false);
+    return Response.json({ id: "acct_RouteCanadian123", country: "CA", default_currency: "cad", business_profile: { name: "Third Railify Official" }, charges_enabled: false, payouts_enabled: false, details_submitted: false, type: "standard" });
+  };
+
+  const unauthenticated = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, csrfToken: created.csrfToken }), env, data: { commerceFetch } });
+  assert.equal(unauthenticated.status, 401);
+  const missingCsrf = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie }), env, data: { commerceFetch } });
+  assert.equal(missingCsrf.status, 403); assert.equal((await missingCsrf.json()).error, "csrf_required");
+  const invalidCsrf = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: "invalid" }), env, data: { commerceFetch } });
+  assert.equal(invalidCsrf.status, 403); assert.equal((await invalidCsrf.json()).error, "csrf_invalid");
+
+  const now = new Date().toISOString();
+  await harness.authDb.prepare("INSERT INTO accounts (id, email_normalized, display_name, role, admin_level, status, email_verified_at, created_at, updated_at, source) VALUES ('stripe-full-admin', 'stripe-full@example.test', 'Stripe Full Admin', 'admin', 'full', 'active', ?, ?, ?, 'test')").bind(now, now, now).run();
+  const full = await loadAccountByEmail(env, "stripe-full@example.test");
+  const fullCreated = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), full, ADMIN_ORIGIN);
+  const unauthorized = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie: cookiePair(fullCreated.cookie), csrfToken: fullCreated.csrfToken }), env, data: { commerceFetch } });
+  assert.equal(unauthorized.status, 403); assert.equal((await unauthorized.json()).error, "commerce_capability_required");
+
+  const missingDb = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), env: { ...env, THIRDRAILIFY_COMMERCE_DB: undefined }, data: { commerceFetch } });
+  assert.equal(missingDb.status, 503); assert.equal((await missingDb.json()).error, "commerce_database_unavailable");
+  const missingKey = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), env: { ...env, STRIPE_SECRET_KEY: "" }, data: { commerceFetch } });
+  assert.equal(missingKey.status, 503); assert.equal((await missingKey.json()).error, "stripe_credential_unavailable");
+  assert.equal(providerCalls, 0);
+
+  const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), env, "stripe/verify", commerceFetch);
+  const payload = await response.json();
+  assert.equal(response.status, 200); assert.equal(providerCalls, 1); assert.equal(payload.stripeSecretConfigured, true);
+  const stripe = payload.providers.find((provider) => provider.provider === "stripe");
+  assert.equal(stripe.status, "connected"); assert.equal(stripe.externalAccountId, "acct_RouteCanadian123"); assert.equal(stripe.apiConfigured, true);
+  assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false); assert.equal(stripe.livePayoutReadiness, "unverified");
 });
 
 test("only Master can grant commerce authority and ordinary users are rejected", async (t) => {

@@ -21,6 +21,7 @@ import {
   templatesPayload,
   updateBusinessProfile,
   updateTemplate,
+  verifyStripeAccount,
 } from "../../../_shared/commerce-core.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
@@ -60,30 +61,37 @@ async function handleGet(request, env, path) {
   return jsonResponse(payload, { headers: corsHeaders(request, env) });
 }
 
-async function handlePost(request, env, path) {
+async function handlePost(request, env, path, fetchImpl = fetch) {
   requireAdminOrigin(request, env);
   const session = await requireAdmin(env, request);
   await requireCsrf(request, session);
   await enforceRateLimit(env, request, "commerce", session.accountId);
-  const body = await readJsonBody(request);
   let payload;
   let authEventType;
 
-  if (path === "business") {
+  if (path === "stripe/verify") {
+    await requireCommerceCapability(env, session, "commerce.payments.manage");
+    payload = await verifyStripeAccount(env, session, fetchImpl);
+    authEventType = "stripe_account_verified";
+  } else if (path === "business") {
+    const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
     payload = await updateBusinessProfile(env, session, body);
     authEventType = "commerce_business_updated";
   } else if (path.startsWith("templates/")) {
+    const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.templates.manage");
     const templateKey = decodePathPart(path.slice("templates/".length));
     payload = await updateTemplate(env, session, templateKey, body);
     authEventType = "commerce_template_updated";
   } else if (path === "permissions/grant") {
+    const body = await readJsonBody(request);
     await requireMasterAdmin(env, request);
     await grantCommerceCapability(env, session, body.accountId, body.capability, body.reason);
     payload = await permissionGrantsPayload(env, session);
     authEventType = "commerce_capability_granted";
   } else if (path === "permissions/revoke") {
+    const body = await readJsonBody(request);
     await requireMasterAdmin(env, request);
     await revokeCommerceCapability(env, session, body.accountId, body.capability);
     payload = await permissionGrantsPayload(env, session);
@@ -96,7 +104,8 @@ async function handlePost(request, env, path) {
     actorAccountId: session.accountId,
     eventType: authEventType,
     result: "success",
-    metadata: { commerceAudit: true },
+    provider: path === "stripe/verify" ? "stripe" : undefined,
+    metadata: { commerceAudit: true, ...(path === "stripe/verify" ? { environment: "test" } : {}) },
   });
   return jsonResponse(payload, { headers: corsHeaders(request, env) });
 }
