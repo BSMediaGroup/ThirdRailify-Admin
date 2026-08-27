@@ -14,6 +14,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Admin-authoritative avatar ingestion validates JPG/PNG/WebP bytes, stores immutable content-addressed objects under `/u/<opaque-account-key>/avatar/<sha256>.<ext>`, and persists only the resulting HTTPS URL in D1.
 - Admin-only authority for the bound `thirdrailify-commerce` D1, direct-merchant provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
 - Functional `/products` merchandising workspace backed by `commerce_products`: Master Admins can feature/unfeature displayable snapshot products, set deterministic hero order with accessible move controls, preview warnings, and persist through the established session/origin/CSRF/rate-limit/D1/audit path.
+- Local V2 GOATS authority and Master Admin workspace for submission moderation, coarse map coordinates, private media, approved publication, reactions/comments, and idempotent transactional-email outbox events. Migration `0004` ships no production listings; two synthetic demos are explicit local/test-only fixtures.
 - Public read-only `/api/catalogue/merchandising` projection exposes only product ID, slug, featured state, and order; it contains no price, image path, safe metadata, credential, or write capability.
 - Public-origin `POST /api/commerce/checkout` is the Admin-hosted customer Checkout engine: it accepts only a checkout-request UUID plus bounded product IDs and quantities, derives CAD integer prices/names/totals from `commerce_products`, snapshots a local order before Stripe, and creates only Stripe-hosted TEST Checkout Sessions. The remote `checkout_enabled=false` gate and empty authoritative catalogue keep the route safely disabled.
 - Public machine-to-machine `POST /api/webhooks/stripe` receiver code with exact raw-body Web Crypto verification, a five-minute Stripe `v1` timestamp window, test-event enforcement, and D1-backed duplicate receipt protection. A real signed sandbox event has verified the deployed destination and matching Admin-only signing configuration.
@@ -37,6 +38,7 @@ Quality gates:
 npm run lint
 npm run typecheck
 npm run test:functions
+npm run goats:import:dry-run -- C:\path\to\wix-goats-export.json
 npm run build
 npm run preview
 ```
@@ -50,6 +52,13 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/` | Authenticated account/configuration posture and deferred-module boundaries |
 | `/content` | Future site-content shell |
 | `/products` | D1-backed featured-product selection and stable hero ordering for the bounded snapshot catalogue |
+| `/goats` | GOATS moderation overview with pending/approved/rejected/hidden and email state |
+| `/goats/pending`, `/goats/approved`, `/goats/rejected` | Master-only bounded moderation queues |
+| `/goats/comments` | Visible/hidden comment moderation |
+| `/goats/emails` | Additive GOATS template editor with safe fixture preview |
+| `/goats/:id` | Private submission detail, media, correction, coordinates, transitions, email retry, and DEMO-only cleanup |
+| `/api/admin/goats/*` | Master-session, exact-origin, CSRF, and optimistic-version protected GOATS authority |
+| `/api/goats/*` | Approved-only public reads plus signed fixed internal ingestion actions |
 | `/api/catalogue/merchandising` | Cacheable public read projection of product ID/slug/featured order only; no write path |
 | `/orders` | Read-only bounded local Checkout/payment/fulfillment states; no synthetic orders or revenue |
 | `/commerce` | Truthful commerce readiness and provider status overview |
@@ -82,10 +91,10 @@ ThirdRailify-Admin/
 │   ├── _routes.json        Auth, Admin, profile-media, and Stripe webhook Pages Function routing
 │   └── _redirects          SPA fallback
 ├── functions/
-│   ├── _shared/            D1 auth/session/OAuth/security, profile-media, and commerce helpers
-│   ├── api/                Shared auth, signed Admin APIs, public merchandising projection, and signed Stripe webhook receiver
+│   ├── _shared/            D1 auth/session/OAuth/security, profile-media, commerce, and GOATS helpers
+│   ├── api/                Shared auth, signed Admin/GOATS APIs, public projections, and signed Stripe webhook receiver
 │   └── u/                  Immutable R2-backed profile-media delivery
-├── commerce-migrations/    Commerce control-plane, Stripe ledger, product checkout authority, and local order snapshots
+├── commerce-migrations/    Commerce, Stripe/order/product authority, and additive GOATS community schema
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
 │   ├── auth/               Gate, session provider, modal, Turnstile, and account widget
@@ -95,6 +104,8 @@ ThirdRailify-Admin/
 │   ├── pages/              Live Overview/Accounts, commerce control plane, future areas, and 404
 │   └── styles/             Tokens and responsive admin visual system
 ├── tests/                  Auth/commerce migrations, crypto, API, permissions, and safety coverage
+├── docs/                   GOATS authority/import contracts and operator boundaries
+├── scripts/                GOATS import validator plus opt-in demo seed/cleanup fixtures
 ├── CLOUDFLARE_COMMERCE_SETUP.md
 ├── CLOUDFLARE_AUTH_SETUP.md
 ├── CLOUDFLARE_SETUP.md
@@ -108,6 +119,8 @@ ThirdRailify-Admin/
 The display system uses the seeded American Captain asset at its real weight with lightly relaxed tracking for the primary header voice, with seeded Blinker and Geist Mono for readable body and technical roles.
 
 ## Security boundary
+
+- GOATS reuses Master Admin session/role resolution, exact-origin writes, CSRF, privacy-conscious rate limits, and the Admin-only commerce D1/R2 bindings. Public sees only approved/published projections and opaque public media routes; private email, account association, raw object keys, moderator notes, email state, and audit metadata never enter public output. See `docs/GOATS_V2.md` for APIs, binding/secrets, outbox, cleanup, and local fixture operations.
 
 - D1 is the only account/session/role authority. Browser state is a hydration cache, never identity authority.
 - Passwords use salted PBKDF2-SHA256; only hashed session, one-time, OAuth-state, rate-limit, and IP-derived values persist.

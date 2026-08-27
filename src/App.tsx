@@ -15,8 +15,15 @@ import {
   PaymentsPayoutsPage,
   TaxDocumentsPage,
 } from "./pages/CommercePages";
+import {
+  GoatModerationPage,
+  GoatsCommentsPage,
+  GoatsEmailsPage,
+  GoatsOverviewPage,
+  GoatsQueuePage,
+} from "./pages/GoatsAdminPages";
 
-const implementedPaths = new Set(["/", "/access", "/products", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment"]);
+const implementedPaths = new Set(["/", "/access", "/products", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
 
 export function App() {
   return (
@@ -32,6 +39,13 @@ export function App() {
         <Route path="commerce/tax" element={<TaxDocumentsPage />} />
         <Route path="commerce/emails" element={<CustomerEmailsPage />} />
         <Route path="commerce/fulfillment" element={<FulfillmentIntegrationsPage />} />
+        <Route path="goats" element={<GoatsOverviewPage />} />
+        <Route path="goats/pending" element={<GoatsQueuePage status="pending" />} />
+        <Route path="goats/approved" element={<GoatsQueuePage status="approved" />} />
+        <Route path="goats/rejected" element={<GoatsQueuePage status="rejected" />} />
+        <Route path="goats/comments" element={<GoatsCommentsPage />} />
+        <Route path="goats/emails" element={<GoatsEmailsPage />} />
+        <Route path="goats/:id" element={<GoatModerationPage />} />
         {adminAreas.filter((area) => !implementedPaths.has(area.path)).map((area) => (
           <Route key={area.path} path={area.path.slice(1)} element={<AreaPage area={area} />} />
         ))}

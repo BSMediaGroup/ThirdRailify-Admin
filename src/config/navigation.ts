@@ -103,6 +103,14 @@ export const adminAreas: AdminArea[] = [
     futureScope: ["Asset inventory", "Usage metadata", "Approved upload pipeline"],
   },
   {
+    path: "/goats",
+    label: "GOATS in the Wild",
+    shortLabel: "GOATS",
+    icon: "content",
+    summary: "Community submissions, moderation, comments, media, and email events.",
+    futureScope: ["Approved public projection", "Approximate map locations", "Transactional outbox"],
+  },
+  {
     path: "/membership",
     label: "VIP / Membership",
     shortLabel: "VIP",

@@ -10,6 +10,8 @@ test("commerce migrations apply in order, with the idempotent foundations repeat
   assert.deepEqual(result.results.map((row) => row.name), [
     "commerce_audit", "commerce_business_profiles", "commerce_order_items", "commerce_orders", "commerce_permission_grants", "commerce_products",
     "commerce_provider_connections", "commerce_settings", "commerce_tax_registrations", "commerce_templates", "commerce_webhook_events",
+    "community_comments", "community_email_outbox", "community_email_templates", "community_media", "community_moderation_events",
+    "community_rate_limits", "community_reactions", "community_submissions",
   ]);
   const profile = await harness.commerceDb.prepare("SELECT trading_name, country_code, province_code, currency_code FROM commerce_business_profiles WHERE id = 'primary'").first();
   assert.deepEqual(profile, { trading_name: "Third Railify Official", country_code: "CA", province_code: "ON", currency_code: "CAD" });

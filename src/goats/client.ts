@@ -1,0 +1,23 @@
+export type GoatAdminSummary = { id: string; reference: string; displayName: string; status: "pending" | "approved" | "rejected"; published: boolean; submittedAt: string; updatedAt: string; product: { id: string; slug: string; name: string }; rating: number | null; location: string; mediaCount: number; mainMediaUrl: string | null; emailState: string | null; version: number };
+export type GoatAdminDetail = GoatAdminSummary & { privateEmail: string; submitterAccountId: string | null; description: string; slug: string; city: string; region: string | null; countryCode: string; latitude: number | null; longitude: number | null; consent: { version: string; timestamp: string }; moderatorNote: string | null; rejectionReason: string | null; media: Array<{ id: string; role: "main" | "profile" | "gallery"; sortOrder: number; contentType: string; byteSize: number; width: number; height: number; state: string; error: string | null; url: string }>; events: Array<{ id: string; type: string; actorAccountId: string | null; metadata: Record<string, unknown>; createdAt: string }>; emails: Array<{ id: string; templateKey: string; status: string; attempts: number; lastError: string | null; createdAt: string; updatedAt: string; sentAt: string | null }> };
+export type GoatEmailTemplate = { templateKey: string; subject: string; htmlBody: string; textBody: string; variables: string[]; status: "draft" | "disabled" | "ready"; revision: number };
+
+export async function getGoatsOverview() { return request<{ ok: true; counts: { pending: number; approved: number; rejected: number; hidden: number }; email: Record<string, number>; recent: GoatAdminSummary[] }>("/api/admin/goats/overview"); }
+export async function getGoatsQueue(status: string) { return request<{ ok: true; status: string; items: GoatAdminSummary[] }>(`/api/admin/goats/queue?status=${encodeURIComponent(status)}`); }
+export async function getGoatSubmission(id: string) { return (await request<{ ok: true; item: GoatAdminDetail }>(`/api/admin/goats/submissions/${encodeURIComponent(id)}`)).item; }
+export async function saveGoatSubmission(id: string, csrfToken: string, body: Record<string, unknown>) { return (await request<{ ok: true; item: GoatAdminDetail }>(`/api/admin/goats/submissions/${encodeURIComponent(id)}`, "POST", body, csrfToken)).item; }
+export async function transitionGoat(id: string, action: "approve" | "reject" | "hide" | "restore", csrfToken: string, body: Record<string, unknown>) { return (await request<{ ok: true; item: GoatAdminDetail }>(`/api/admin/goats/submissions/${encodeURIComponent(id)}/${action}`, "POST", body, csrfToken)).item; }
+export async function getGoatComments(status: string) { return request<{ ok: true; status: string; items: Array<{ id: string; submissionId: string; listingSlug: string; listingName: string; displayName: string; body: string; status: string; createdAt: string }> }>(`/api/admin/goats/comments?status=${encodeURIComponent(status)}`); }
+export async function moderateGoatComment(id: string, action: "hide" | "restore", csrfToken: string) { return request<{ ok: true }>(`/api/admin/goats/comments/${encodeURIComponent(id)}/${action}`, "POST", {}, csrfToken); }
+export async function getGoatTemplates() { return (await request<{ ok: true; templates: GoatEmailTemplate[] }>("/api/admin/goats/templates")).templates; }
+export async function saveGoatTemplate(key: string, csrfToken: string, body: GoatEmailTemplate) { return (await request<{ ok: true; templates: GoatEmailTemplate[] }>(`/api/admin/goats/templates/${encodeURIComponent(key)}`, "POST", body, csrfToken)).templates; }
+export async function retryGoatEmail(id: string, csrfToken: string) { return request<{ ok: true; status: string }>(`/api/admin/goats/emails/${encodeURIComponent(id)}/retry`, "POST", {}, csrfToken); }
+export async function deleteDemoGoat(id: string, csrfToken: string, version: number) { return request<{ ok: true }>(`/api/admin/goats/submissions/${encodeURIComponent(id)}/delete-demo`, "POST", { version }, csrfToken); }
+
+async function request<T>(url: string, method = "GET", body?: Record<string, unknown>, csrfToken = "") {
+  const headers: Record<string, string> = { Accept: "application/json" }; if (body) headers["Content-Type"] = "application/json"; if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+  const response = await fetch(url, { method, credentials: "include", headers, body: body ? JSON.stringify(body) : undefined, cache: "no-store" });
+  const payload = await response.json().catch(() => null) as (T & { error?: string; message?: string }) | null;
+  if (!response.ok || !payload) throw new Error(payload?.message || "The GOATS Admin service is unavailable.");
+  return payload;
+}

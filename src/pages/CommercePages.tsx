@@ -226,6 +226,7 @@ export function CustomerEmailsPage() {
   };
   return <>
     <CommerceHeading eyebrow="Structured plain text" title="Customer emails" summary="Edit bounded fields for seven lifecycle templates. JavaScript, executable HTML, and email delivery are not enabled." status={payload?.databaseConfigured ? "pending" : "unavailable"} />
+    <div className="commerce-callout is-pending"><AdminIcon name="emails" /><div><strong>Community lifecycle templates are now first-class</strong><p>GOATS submission, Admin alert, approval, and rejection templates use their own idempotent outbox and documented variables.</p><Link className="text-link" to="/goats/emails">Open GOATS email templates <AdminIcon name="arrow" size={15} /></Link></div></div>
     {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
     {payload && draft ? <div className="template-workspace"><nav aria-label="Email template types">{payload.templates.map((template) => <button type="button" key={template.templateKey} className={template.templateKey === selected ? "is-active" : ""} onClick={() => choose(template.templateKey)}><span>{humanize(template.templateKey)}</span><small>{template.status}</small></button>)}</nav>
       <div className="template-workspace__editor">

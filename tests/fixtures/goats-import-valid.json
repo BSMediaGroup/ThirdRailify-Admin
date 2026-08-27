@@ -1,0 +1,16 @@
+[
+  {
+    "slug": "fixture-approved-goat",
+    "displayName": "Fixture GOAT",
+    "description": "Synthetic validation-only record; never imported or shown in production.",
+    "productId": "fixture-product-id",
+    "city": "Toronto",
+    "region": "Ontario",
+    "countryCode": "CA",
+    "rating": 5,
+    "publishedAt": "2026-08-27T00:00:00.000Z",
+    "media": [
+      { "role": "main", "sourceFile": "fixture-main.jpg" }
+    ]
+  }
+]

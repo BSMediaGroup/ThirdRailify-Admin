@@ -60,7 +60,8 @@ export function AdminShell() {
     return () => document.documentElement.classList.remove("admin-mobile-nav-open");
   }, [mobileOpen]);
 
-  const currentArea = adminAreas.find((area) => area.path === location.pathname);
+  const currentArea = adminAreas.find((area) => area.path === location.pathname)
+    ?? (location.pathname.startsWith("/goats/") ? adminAreas.find((area) => area.path === "/goats") : undefined);
 
   return (
     <div className={`admin-layout${collapsed ? " admin-layout--collapsed" : ""}`}>
