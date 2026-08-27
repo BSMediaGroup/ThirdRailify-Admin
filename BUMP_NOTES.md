@@ -10,6 +10,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Bound the confirmed Cloudflare `thirdrailify-commerce` D1 resource (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`) only to Admin as `THIRDRAILIFY_COMMERCE_DB`; commerce migrations have not been applied, and Public has no commerce D1 binding.
 - Corrected the unprovisioned commerce scaffold from an obsolete Stripe Connect platform/connected-account model to the dedicated Third Railify Official Canadian merchant account. Stripe is now a single `stripe` provider with canonical `direct_merchant` mode, `environment_secret` custody, operator-confirmed account creation, Canada/CAD, and truthful setup-required API/webhook/checkout/live-readiness flags.
 - Replaced the two Connect-specific migration seeds and onboarding setting in place because no commerce D1 has been provisioned. Added a constrained generic integration-mode field, rejected legacy Stripe provider identifiers, preserved all commerce permissions/entities, and added the missing separate Printful refund/credit accounting field.
 - Updated Admin commerce overview, Payments & Payouts, Fulfillment, navigation, architecture, feasibility, Cloudflare runbook, README, and focused tests. The dedicated account does not imply API connectivity, live readiness, payout readiness, wallet availability, or enabled checkout; no Stripe/Printful/PayPal request or remote mutation was made.

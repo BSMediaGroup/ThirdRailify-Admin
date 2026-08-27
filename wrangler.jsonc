@@ -26,6 +26,12 @@
       "database_name": "thirdrailify-accounts",
       "database_id": "b8be3879-7aa1-4d70-af3f-617abce7a929",
       "migrations_dir": "migrations"
+    },
+    {
+      "binding": "THIRDRAILIFY_COMMERCE_DB",
+      "database_name": "thirdrailify-commerce",
+      "database_id": "3dd23a7e-7c64-49cb-a52c-c1540b41db1c",
+      "migrations_dir": "commerce-migrations"
     }
   ],
   "r2_buckets": [
