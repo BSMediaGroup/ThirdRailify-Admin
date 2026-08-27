@@ -11,6 +11,7 @@ import {
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-helpers.mjs";
+import { commerceOverview } from "../functions/_shared/commerce-core.js";
 
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const SOURCE_TOKEN = "opaque-wix-reader-token";
@@ -66,7 +67,7 @@ function targetDetail(id = 700) {
   };
 }
 
-function providerFetch({ sourceCount = 1, sourceStore = { id: Number(SOURCE_ID), type: "wix", name: "Third Railify Official" }, targetStore = { id: Number(TARGET_ID), type: "native", name: "Third Railify API" }, sourceVariantOverrides = {}, calls = [] } = {}) {
+function providerFetch({ sourceCount = 1, targetCount = 1, sourceStore = { id: Number(SOURCE_ID), type: "wix", name: "Third Railify Official" }, targetStore = { id: Number(TARGET_ID), type: "native", name: "Third Railify API" }, sourceVariantOverrides = {}, calls = [] } = {}) {
   return async (input, init = {}) => {
     const url = new URL(input);
     const authorization = new Headers(init.headers).get("Authorization");
@@ -81,13 +82,52 @@ function providerFetch({ sourceCount = 1, sourceStore = { id: Number(SOURCE_ID),
     }
     const sourceMatch = /^\/sync\/products\/(\d+)$/.exec(url.pathname);
     if (sourceMatch) return Response.json({ code: 200, result: sourceDetail(Number(sourceMatch[1]), sourceVariantOverrides) });
-    if (url.pathname === "/store/products") return Response.json({ code: 200, result: [targetSummary()], paging: { total: 1, offset: 0, limit: 100 } });
+    if (url.pathname === "/store/products") {
+      const offset = Number(url.searchParams.get("offset"));
+      const result = Array.from({ length: Math.min(100, Math.max(0, targetCount - offset)) }, (_, index) => targetSummary(offset + index + 700));
+      return Response.json({ code: 200, result, paging: { total: targetCount, offset, limit: 100 } });
+    }
     const targetMatch = /^\/store\/products\/(\d+)$/.exec(url.pathname);
     if (targetMatch) return Response.json({ code: 200, result: targetDetail(Number(targetMatch[1])) });
     const fileMatch = /^\/files\/(\d+)$/.exec(url.pathname);
     if (fileMatch) return Response.json({ code: 200, result: { id: Number(fileMatch[1]), type: "front", url: `https://example.test/file-${fileMatch[1]}.png`, filename: `file-${fileMatch[1]}.png`, preview_url: `https://example.test/file-${fileMatch[1]}-preview.png` } });
     return Response.json({ code: 404 }, { status: 404 });
   };
+}
+
+async function runSnapshotRoute(runtime, cookie, csrfToken, fetchImpl, invocationProviderCounts = []) {
+  const url = `${ADMIN_ORIGIN}/api/admin/commerce/printful/catalogue/snapshot`;
+  const step = async (body) => {
+    let calls = 0;
+    const countedFetch = (...args) => { calls += 1; return fetchImpl(...args); };
+    const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken, body }), runtime, "printful/catalogue/snapshot", countedFetch);
+    invocationProviderCounts.push(calls);
+    return response;
+  };
+  const startedResponse = await step({ phase: "begin" });
+  assert.equal(startedResponse.status, 200);
+  const started = await startedResponse.json();
+  const productEvidence = [];
+  for (const role of ["source", "target"]) {
+    const ids = started.manifest[role].summaries.map((summary) => summary.id);
+    for (let offset = 0; offset < ids.length; offset += started.chunkSizes.products) {
+      const response = await step({ phase: "products", role, productIds: ids.slice(offset, offset + started.chunkSizes.products), manifest: started.manifest, manifestSignature: started.signature });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      productEvidence.push({ chunk: result.chunk, signature: result.signature });
+    }
+  }
+  const fileEvidence = [];
+  for (const evidence of productEvidence) {
+    const ids = evidence.chunk.incompleteFileIds;
+    for (let offset = 0; offset < ids.length; offset += started.chunkSizes.files) {
+      const response = await step({ phase: "files", role: evidence.chunk.role, fileIds: ids.slice(offset, offset + started.chunkSizes.files), manifest: started.manifest, manifestSignature: started.signature, productChunk: evidence.chunk, productChunkSignature: evidence.signature });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      fileEvidence.push({ chunk: result.chunk, signature: result.signature });
+    }
+  }
+  return step({ phase: "assemble", manifest: started.manifest, manifestSignature: started.signature, productEvidence, fileEvidence });
 }
 
 test("legacy source token is mandatory and never falls back to the target token", async () => {
@@ -126,19 +166,60 @@ test("source and target configuration cannot collide and the permanent target st
 
 test("catalogue snapshot uses isolated endpoint families, paginates past 100, and fetches every detail", async () => {
   const calls = [];
-  const result = await snapshotPrintfulCatalogues(env(), providerFetch({ sourceCount: 101, calls }));
+  const result = await snapshotPrintfulCatalogues(env(), providerFetch({ sourceCount: 101, targetCount: 101, calls }));
   assert.equal(result.source.counts.products, 101);
   assert.equal(result.source.counts.variants, 101);
-  assert.equal(result.target.counts.products, 1);
+  assert.equal(result.target.counts.products, 101);
   assert.deepEqual(calls.filter((call) => call.path.startsWith("/sync/products?")).map((call) => call.path), ["/sync/products?offset=0&limit=100", "/sync/products?offset=100&limit=100"]);
+  assert.deepEqual(calls.filter((call) => call.path.startsWith("/store/products?")).map((call) => call.path), ["/store/products?offset=0&limit=100", "/store/products?offset=100&limit=100"]);
   assert.equal(calls.filter((call) => /^\/sync\/products\/\d+$/.test(call.path)).length, 101);
-  assert.equal(calls.filter((call) => /^\/store\/products\/\d+$/.test(call.path)).length, 1);
+  assert.equal(calls.filter((call) => /^\/store\/products\/\d+$/.test(call.path)).length, 101);
   assert.equal(calls.every((call) => call.method === "GET"), true);
   assert.equal(calls.every((call) => !call.headers.has("X-PF-Store-Id")), true);
   assert.equal(calls.filter((call) => call.role === "source").every((call) => call.path === "/stores" || call.path.startsWith("/sync/products")), true);
   assert.equal(calls.filter((call) => call.role === "target").every((call) => call.path === "/stores" || call.path.startsWith("/store/products")), true);
   assert.equal(calls.filter((call) => call.path.startsWith("/sync/products")).every((call) => call.role === "source"), true);
   assert.equal(calls.filter((call) => call.path.startsWith("/store/products")).every((call) => call.role === "target"), true);
+});
+
+test("product detail reads use one bounded shared pool and preserve deterministic ordering", async () => {
+  const calls = [];
+  const baseFetch = providerFetch({ sourceCount: 12, targetCount: 9, calls });
+  let activeDetails = 0;
+  let maximumDetails = 0;
+  const delayedFetch = async (input, init) => {
+    const pathname = new URL(input).pathname;
+    const isDetail = /^\/(?:sync|store)\/products\/\d+$/.test(pathname);
+    if (!isDetail) return baseFetch(input, init);
+    activeDetails += 1;
+    maximumDetails = Math.max(maximumDetails, activeDetails);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    try { return await baseFetch(input, init); }
+    finally { activeDetails -= 1; }
+  };
+  const result = await snapshotPrintfulCatalogues(env(), delayedFetch);
+  assert.equal(maximumDetails, 4);
+  assert.deepEqual(result.source.products.map((product) => product.id), Array.from({ length: 12 }, (_, index) => String(index + 1)));
+  assert.deepEqual(result.target.products.map((product) => product.id), Array.from({ length: 9 }, (_, index) => String(index + 700)));
+});
+
+test("provider transport failures identify the safe role and operation after a bounded retry", async () => {
+  const baseFetch = providerFetch();
+  let attempts = 0;
+  const failingFetch = async (input, init) => {
+    if (new URL(input).pathname === "/sync/products") {
+      attempts += 1;
+      throw new Error("unsafe transport detail");
+    }
+    return baseFetch(input, init);
+  };
+  await assert.rejects(snapshotPrintfulCatalogues(env(), failingFetch), (error) => {
+    assert.equal(error.code, "printful_source_products_unavailable");
+    assert.match(error.message, /legacy source product enumeration could not be reached after 2 attempts/i);
+    assert.doesNotMatch(error.message, /unsafe transport detail|Bearer|token/i);
+    return true;
+  });
+  assert.equal(attempts, 2);
 });
 
 test("money normalization is exact and malformed prices remain classified", () => {
@@ -185,6 +266,60 @@ test("protected source verification enforces auth, exact origin, CSRF, capabilit
   const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), runtime, "printful/catalogue/source/verify", providerFetch());
   assert.equal(response.status, 200);
   assert.equal((await response.json()).store.id, SOURCE_ID);
+
+  await harness.authDb.prepare("INSERT INTO accounts (id, email_normalized, display_name, role, admin_level, status, email_verified_at, created_at, updated_at, source) VALUES ('full-no-capability', 'full-no-capability@example.test', 'Full Admin', 'admin', 'full', 'active', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', 'test')").run();
+  const fullAdmin = await loadAccountByEmail(runtime, "full-no-capability@example.test");
+  const fullSession = await createSession(runtime, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), fullAdmin, ADMIN_ORIGIN);
+  const snapshotRequest = jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/printful/catalogue/snapshot`, { origin: ADMIN_ORIGIN, cookie: cookiePair(fullSession.cookie), csrfToken: fullSession.csrfToken, body: { phase: "begin" } });
+  await assert.rejects(handleCommercePost(snapshotRequest, runtime, "printful/catalogue/snapshot", providerFetch()), (error) => error.code === "commerce_capability_required");
+});
+
+test("verified Store-ID configuration exposes the operator capability without prior snapshot or commerce activation", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const runtime = commerceEnvironment(harness, env({ PRINTFUL_WIX_SOURCE_TOKEN: undefined }));
+  const masterSession = { accountId: "master", account: { adminLevel: "master" } };
+  const master = await commerceOverview(runtime, masterSession);
+  assert.equal(master.printfulCatalogueSnapshot.available, true);
+  assert.equal(master.printfulCatalogueSnapshot.configurationReady, true);
+  assert.equal(master.printfulCatalogueSnapshot.sourceTargetDistinct, true);
+  assert.deepEqual(master.printfulCatalogueSnapshot.source, { id: SOURCE_ID, name: "Third Railify Official", type: "wix" });
+  assert.deepEqual(master.printfulCatalogueSnapshot.target, { id: TARGET_ID, name: "Third Railify API", type: "native" });
+  assert.equal(master.printfulCatalogueSnapshot.actionPath, "/api/admin/commerce/printful/catalogue/snapshot");
+  assert.ok(master.access.capabilities.includes("commerce.integrations.manage"));
+  assert.equal(master.counts.products, 0);
+  assert.equal(master.counts.orders, 0);
+  assert.equal(master.posture.checkout, "disabled");
+  assert.equal(master.posture.fulfillmentSubmission, "disabled");
+
+  const delegatedId = "delegated-admin";
+  await harness.commerceDb.prepare("INSERT INTO commerce_permission_grants (id, account_id, capability, granted_by_account_id, granted_at, reason) VALUES ('grant-integrations', ?, 'commerce.integrations.manage', 'master', '2026-08-28T00:00:00.000Z', 'test')").bind(delegatedId).run();
+  const delegated = await commerceOverview(runtime, { accountId: delegatedId, account: { adminLevel: "admin" } });
+  assert.equal(delegated.printfulCatalogueSnapshot.available, true);
+  assert.ok(delegated.access.capabilities.includes("commerce.integrations.manage"));
+
+  const unauthorized = await commerceOverview(runtime, { accountId: "unauthorized-admin", account: { adminLevel: "admin" } });
+  assert.equal(unauthorized.access.capabilities.includes("commerce.integrations.manage"), false);
+  assert.equal(unauthorized.printfulCatalogueSnapshot.available, true);
+
+  const collision = await commerceOverview({ ...runtime, PRINTFUL_WIX_SOURCE_STORE_ID: TARGET_ID }, masterSession);
+  assert.equal(collision.printfulCatalogueSnapshot.available, false);
+  assert.equal(collision.printfulCatalogueSnapshot.configurationReady, false);
+  assert.equal(collision.printfulCatalogueSnapshot.sourceTargetDistinct, false);
+});
+
+test("a missing source secret fails closed only when the protected snapshot action runs", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const runtime = commerceEnvironment(harness, env({ PRINTFUL_WIX_SOURCE_TOKEN: undefined }));
+  await ensureEnvironmentMasters(runtime);
+  const master = await loadAccountByEmail(runtime, "master-one@example.test");
+  const created = await createSession(runtime, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), master, ADMIN_ORIGIN);
+  const request = jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/printful/catalogue/snapshot`, { origin: ADMIN_ORIGIN, cookie: cookiePair(created.cookie), csrfToken: created.csrfToken });
+  await assert.rejects(handleCommercePost(request, runtime, "printful/catalogue/snapshot", providerFetch()), (error) => {
+    assert.equal(error.status, 503);
+    assert.equal(error.code, "printful_wix_source_token_unavailable");
+    assert.doesNotMatch(JSON.stringify({ code: error.code, message: error.message }), /opaque-|Bearer|Authorization/i);
+    return true;
+  });
 });
 
 test("full snapshot route does not touch commerce products, orders, checkout, or fulfillment", async (t) => {
@@ -194,8 +329,7 @@ test("full snapshot route does not touch commerce products, orders, checkout, or
   const master = await loadAccountByEmail(runtime, "master-one@example.test");
   const created = await createSession(runtime, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), master, ADMIN_ORIGIN);
   const before = await harness.commerceDb.prepare("SELECT (SELECT COUNT(*) FROM commerce_products) AS products, (SELECT COUNT(*) FROM commerce_orders) AS orders, (SELECT value_json FROM commerce_settings WHERE setting_key='checkout_enabled') AS checkout, (SELECT value_json FROM commerce_settings WHERE setting_key='fulfillment_submission_enabled') AS fulfillment").first();
-  const url = `${ADMIN_ORIGIN}/api/admin/commerce/printful/catalogue/snapshot`;
-  const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie: cookiePair(created.cookie), csrfToken: created.csrfToken }), runtime, "printful/catalogue/snapshot", providerFetch());
+  const response = await runSnapshotRoute(runtime, cookiePair(created.cookie), created.csrfToken, providerFetch());
   assert.equal(response.status, 200);
   const payload = await response.json();
   const serialized = JSON.stringify(payload);
@@ -204,7 +338,30 @@ test("full snapshot route does not touch commerce products, orders, checkout, or
   assert.doesNotMatch(serialized, /customer_email|shipping_address|billing_address|payment_method|authorization/i);
   assert.equal(payload.publicCatalogue.source.repository, "ThirdRailify");
   assert.equal(payload.reconciliation.counts.publicProducts, 8);
+  assert.deepEqual(payload.downloadFilenames, {
+    source: "printful-wix-source.snapshot.json",
+    target: "printful-api-target.snapshot.json",
+    publicCatalogue: "public-wix-catalog.snapshot.json",
+    reconciliation: "catalogue-reconciliation.json",
+  });
   assert.deepEqual(await harness.commerceDb.prepare("SELECT (SELECT COUNT(*) FROM commerce_products) AS products, (SELECT COUNT(*) FROM commerce_orders) AS orders, (SELECT value_json FROM commerce_settings WHERE setting_key='checkout_enabled') AS checkout, (SELECT value_json FROM commerce_settings WHERE setting_key='fulfillment_submission_enabled') AS fulfillment").first(), before);
+});
+
+test("one operator click is split into protected phases below the 50-subrequest Pages limit", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const runtime = commerceEnvironment(harness, env());
+  await ensureEnvironmentMasters(runtime);
+  const master = await loadAccountByEmail(runtime, "master-one@example.test");
+  const created = await createSession(runtime, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), master, ADMIN_ORIGIN);
+  const invocationProviderCounts = [];
+  const response = await runSnapshotRoute(runtime, cookiePair(created.cookie), created.csrfToken, providerFetch({ sourceCount: 49, targetCount: 1 }), invocationProviderCounts);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.source.counts.products, 49);
+  assert.equal(payload.target.counts.products, 1);
+  assert.ok(invocationProviderCounts.length > 4);
+  assert.ok(Math.max(...invocationProviderCounts) < 50);
+  assert.equal(invocationProviderCounts.at(-1), 0);
 });
 
 test("catalogue implementation contains no Printful provider write method or browser token path", async () => {
@@ -220,4 +377,12 @@ test("catalogue implementation contains no Printful provider write method or bro
   assert.match(route, /requireAdminOrigin/);
   assert.match(route, /requireCsrf/);
   assert.match(route, /enforceRateLimit/);
+  assert.doesNotMatch(helper, /node:fs|writeFile|readFile|commerce-import/i);
+  assert.match(page, /snapshotState === "ready"/);
+  assert.match(page, /Retry read-only snapshot/);
+  assert.match(page, /Download Wix source snapshot/);
+  assert.match(page, /Download API target snapshot/);
+  assert.match(page, /Download Public catalogue snapshot/);
+  assert.match(page, /Download reconciliation snapshot/);
+  assert.doesNotMatch(page, /downloadJson\([^)]*next\./);
 });

@@ -16,7 +16,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Functional `/products` merchandising workspace backed by `commerce_products`: Master Admins can feature/unfeature displayable snapshot products, set deterministic hero order with accessible move controls, preview warnings, and persist through the established session/origin/CSRF/rate-limit/D1/audit path.
 - Local V2 GOATS authority and Master Admin workspace for submission moderation, coarse map coordinates, private media, approved publication, reactions/comments, and idempotent transactional-email outbox events. Migration `0004` ships no production listings; two synthetic demos are explicit local/test-only fixtures.
 - Public read-only `/api/catalogue/merchandising` projection exposes only product ID, slug, featured state, and order; it contains no price, image path, safe metadata, credential, or write capability.
-- Protected read-only catalogue recovery pins the legacy Wix source to `Third Railify Official` / `16847493` / `wix` and the permanent target to `Third Railify API` / `18668025` / `native`. `/commerce/fulfillment` downloads separate sanitized source, target, Public, and reconciliation JSON artifacts; every provider request is GET-only and no catalogue row is imported.
+- Protected read-only catalogue recovery pins the legacy Wix source to `Third Railify Official` / `16847493` / `wix` and the permanent target to `Third Railify API` / `18668025` / `native`. One `/commerce/fulfillment` operator click runs signed, short-lived server phases below the Pages external-subrequest ceiling, assembles one sanitized bundle, and exposes four deliberate download controls; every provider request is GET-only and no catalogue row is imported.
 - Public-origin `POST /api/commerce/checkout` is the Admin-hosted customer Checkout engine: it accepts only a checkout-request UUID plus bounded product IDs and quantities, derives CAD integer prices/names/totals from `commerce_products`, snapshots a local order before Stripe, and creates only Stripe-hosted TEST Checkout Sessions. The remote `checkout_enabled=false` gate and empty authoritative catalogue keep the route safely disabled.
 - Public machine-to-machine `POST /api/webhooks/stripe` receiver code with exact raw-body Web Crypto verification, a five-minute Stripe `v1` timestamp window, test-event enforcement, and D1-backed duplicate receipt protection. A real signed sandbox event has verified the deployed destination and matching Admin-only signing configuration.
 - Stripe-first Canadian operating model using the dedicated Third Railify Official merchant account, server-created Stripe-hosted Checkout Sessions, Admin-only environment secrets, disabled Checkout/live capture, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
@@ -41,6 +41,7 @@ npm run lint
 npm run typecheck
 npm run test:printful
 npm run test:functions
+npm run test:browser:fulfillment
 npm run goats:import:dry-run -- C:\path\to\wix-goats-export.json
 npm run build
 npm run preview
@@ -71,8 +72,9 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/commerce/business` | Structured public/private business profile; persistence fails closed without commerce D1 and encryption |
 | `/commerce/tax` | Encrypted tax identifiers and document presentation; no custom tax calculation/compliance claim |
 | `/commerce/emails` | Safe structured customer template editor; no send path |
-| `/commerce/fulfillment` | Dedicated Printful API-store identity, read-only verification control, draft-only/fulfillment-disabled gates, and untouched Wix posture |
+| `/commerce/fulfillment` | Dedicated Printful identities, executable read-only catalogue snapshot with progress/retry and four explicit evidence downloads, draft-only/fulfillment-disabled gates, and untouched Wix posture |
 | `/api/admin/commerce/printful/verify` | Admin-session, exact-origin, CSRF, rate-limit, and `commerce.integrations.manage` protected read-only Printful verification |
+| `/api/admin/commerce/printful/catalogue/snapshot` | Protected phased GET-only source/target enumeration, detail/file reads, signed evidence assembly, and deterministic reconciliation |
 | `/media` | Future managed-asset shell |
 | `/membership` | Future VIP/membership shell |
 | `/access` | D1-backed account registry and role/status/session controls |
@@ -111,6 +113,7 @@ ThirdRailify-Admin/
 ├── tests/
 │   ├── printful.test.mjs   Focused single-store, no-write, persistence, and Store-ID invariant coverage
 │   ├── printful-catalogue.test.mjs  Full GET-only source/target snapshot safety coverage
+│   ├── fulfillment-browser.test.mjs  390/768/1440 operator-state and explicit-download regression
 │   └── …                   Auth/commerce migrations, crypto, API, permissions, and safety coverage
 ├── docs/                   GOATS authority/import contracts and operator boundaries
 ├── scripts/                GOATS import validator plus opt-in demo seed/cleanup fixtures
@@ -145,6 +148,7 @@ The display system uses the seeded American Captain asset at its real weight wit
 - `stripe_api_configured=true` means a server-side test credential completed `GET /v1/account` and the returned account passed the `CA`/`cad` checks. `stripe_webhook_configured=true` means a correctly signed, timely, well-formed, `livemode=false` Stripe Event reached the duplicate-safe receipt path. Secret existence alone proves neither state, and neither flag enables Checkout, live payment capture, or fulfillment.
 - Printful uses its real API, not a Stripe-style sandbox. `PRINTFUL_API_TOKEN` is a production-capable, store-scoped Admin Cloudflare encrypted secret; `PRINTFUL_STORE_ID=18668025` is ordinary safe Wrangler configuration. Verification accepts exactly one native store named `Third Railify API`, compares token/configured/persisted IDs whenever configuration exists, performs only the two approved GETs, and leaves order mode `draft_only`, webhooks false, fulfillment false, and the Wix-connected store untouched.
 - `PRINTFUL_WIX_SOURCE_TOKEN` is separate temporary read-only migration authority for only the Wix-connected source. It may read store identity, sync products/details, and strictly necessary file metadata; `PRINTFUL_WIX_SOURCE_STORE_ID=16847493` is safe ordinary configuration. Revoke the token after successful migration and cutover verification. Never copy either Printful token into Wrangler vars, D1, browser requests, downloads, logs, or documentation.
+- Catalogue snapshot phases are same-origin, session/CSRF/capability/rate-limit protected. Short-lived HMAC evidence lets the browser orchestrate bounded Pages invocations without trusting browser-supplied catalogue data; only the final verified assembly is audited as completed. No phase uses repository files or persists provider payloads.
 - Private business/legal/tax values require the separate commerce D1 and server-only AES-256-GCM key. Missing storage/key, malformed envelopes, wrong keys, and tampering fail closed. The dedicated Stripe account's secret key/webhook secret and the Printful token remain Admin-only Cloudflare encrypted secrets; no browser or Public payload receives them.
 - Structured email/document templates allow bounded fields only and reject scripts or executable HTML. There is no send path in this milestone.
 - `noindex` is not access control. The application gate and signed APIs are mandatory; any outer Cloudflare Access policy must preserve narrowly required public auth/callback routes.

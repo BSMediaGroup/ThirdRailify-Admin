@@ -18,6 +18,10 @@ export type BusinessProfile = {
 };
 export type CommerceOverviewPayload = {
   ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; stripeSecretConfigured: boolean; printfulSecretConfigured: boolean; access: CommerceAccess;
+  printfulCatalogueSnapshot: {
+    available: boolean; configurationReady: boolean; actionPath: string; sourceTargetDistinct: boolean;
+    source: PrintfulStoreIdentity; target: PrintfulStoreIdentity;
+  };
   posture: Record<string, string>; providers: ProviderStatus[]; business: Omit<BusinessProfile, "private">;
   completeness: { businessProfile: string; tax: string; templates: string };
   counts: { products: number | null; orders: number | null; templates: number | null }; checkedAt: string;
@@ -65,7 +69,26 @@ export type PrintfulProviderSnapshotPayload = {
   ok: boolean; schemaVersion: number; correlationId: string; endpointsUsed: string[];
   source: PrintfulCatalogueSnapshot; target: PrintfulCatalogueSnapshot;
   publicCatalogue: PublicWixCatalogueSnapshot; reconciliation: CatalogueReconciliation;
+  downloadFilenames: { source: string; target: string; publicCatalogue: string; reconciliation: string };
   safety: { providerMethods: string[]; sourceCredential: string; targetCredential: string; tokensIncluded: boolean; customerOrOrderDataIncluded: boolean };
+};
+type SnapshotRole = "source" | "target";
+type SnapshotManifest = {
+  correlationId: string; expiresAt: string;
+  source: { store: PrintfulStoreIdentity; summaries: Array<{ id: string }> };
+  target: { store: PrintfulStoreIdentity; summaries: Array<{ id: string }> };
+};
+type SnapshotManifestPayload = {
+  ok: boolean; phase: "manifest"; schemaVersion: number; correlationId: string; manifest: SnapshotManifest; signature: string;
+  chunkSizes: { products: number; files: number };
+};
+type SnapshotProductEvidence = {
+  chunk: { correlationId: string; role: SnapshotRole; productIds: string[]; products: unknown[]; incompleteFileIds: string[] };
+  signature: string;
+};
+type SnapshotFileEvidence = {
+  chunk: { correlationId: string; role: SnapshotRole; fileIds: string[]; files: unknown[] };
+  signature: string;
 };
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
@@ -78,8 +101,50 @@ export function verifyPrintfulConnection(csrfToken: string) {
 export function verifyPrintfulCatalogueSource(csrfToken: string) {
   return adminApi<PrintfulSourceVerificationPayload>("/api/admin/commerce/printful/catalogue/source/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
 }
-export function capturePrintfulCatalogueSnapshot(csrfToken: string) {
-  return adminApi<PrintfulProviderSnapshotPayload>("/api/admin/commerce/printful/catalogue/snapshot", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+export async function capturePrintfulCatalogueSnapshot(csrfToken: string, onProgress?: (message: string) => void) {
+  const path = "/api/admin/commerce/printful/catalogue/snapshot";
+  const post = <T>(body: Record<string, unknown>) => adminApi<T>(path, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+  onProgress?.("Verifying both Store IDs and enumerating catalogue pages…");
+  const started = await post<SnapshotManifestPayload>({ phase: "begin" });
+  const productEvidence: SnapshotProductEvidence[] = [];
+  const roles: SnapshotRole[] = ["source", "target"];
+  const totalProducts = roles.reduce((total, role) => total + started.manifest[role].summaries.length, 0);
+  let completedProducts = 0;
+  for (const role of roles) {
+    const ids = started.manifest[role].summaries.map((summary) => String(summary.id));
+    for (const productIds of chunks(ids, started.chunkSizes.products)) {
+      onProgress?.(`Reading ${role === "source" ? "legacy source" : "permanent target"} product details (${completedProducts}/${totalProducts})…`);
+      const evidence = await post<{ ok: boolean; phase: "products" } & SnapshotProductEvidence>({
+        phase: "products", role, productIds, manifest: started.manifest, manifestSignature: started.signature,
+      });
+      productEvidence.push({ chunk: evidence.chunk, signature: evidence.signature });
+      completedProducts += productIds.length;
+    }
+  }
+  const fileEvidence: SnapshotFileEvidence[] = [];
+  for (const evidence of productEvidence) {
+    for (const fileIds of chunks(evidence.chunk.incompleteFileIds, started.chunkSizes.files)) {
+      onProgress?.(`Completing ${evidence.chunk.role === "source" ? "legacy source" : "permanent target"} file metadata…`);
+      const fileResult = await post<{ ok: boolean; phase: "files" } & SnapshotFileEvidence>({
+        phase: "files",
+        role: evidence.chunk.role,
+        fileIds,
+        manifest: started.manifest,
+        manifestSignature: started.signature,
+        productChunk: evidence.chunk,
+        productChunkSignature: evidence.signature,
+      });
+      fileEvidence.push({ chunk: fileResult.chunk, signature: fileResult.signature });
+    }
+  }
+  onProgress?.("Verifying evidence and building the deterministic reconciliation…");
+  return post<PrintfulProviderSnapshotPayload>({
+    phase: "assemble",
+    manifest: started.manifest,
+    manifestSignature: started.signature,
+    productEvidence,
+    fileEvidence,
+  });
 }
 export function getBusinessProfile() { return adminApi<BusinessPayload>("/api/admin/commerce/business"); }
 export function saveBusinessProfile(csrfToken: string, body: Record<string, unknown>) {
@@ -93,4 +158,11 @@ export function getMerchandisingProducts() { return adminApi<MerchandisingPayloa
 export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
 export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {
   return adminApi<MerchandisingPayload>("/api/admin/commerce/products/featured", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ featuredIds }) });
+}
+
+function chunks<T>(values: T[], size: number) {
+  if (!Number.isSafeInteger(size) || size < 1) throw new Error("The catalogue snapshot returned an invalid chunk size.");
+  const result: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += size) result.push(values.slice(offset, offset + size));
+  return result;
 }

@@ -18,6 +18,8 @@ const PRINTFUL_STORES_URL = "https://api.printful.com/stores";
 const PRINTFUL_PRODUCTS_URL = "https://api.printful.com/store/products?limit=1";
 const PRINTFUL_EXPECTED_STORE_NAME = "Third Railify API";
 const MAX_PRINTFUL_CREDENTIAL_LENGTH = 4096;
+const PRINTFUL_WIX_SOURCE_STORE_ID = "16847493";
+const PRINTFUL_API_TARGET_STORE_ID = "18668025";
 
 export const COMMERCE_CAPABILITIES = Object.freeze([
   "commerce.view",
@@ -117,6 +119,22 @@ export function isPrintfulCredentialConfigured(env) {
   return Boolean(printfulCredential(env));
 }
 
+export function printfulCatalogueSnapshotAvailability(env) {
+  const sourceStoreId = safeConfiguredStoreId(env?.PRINTFUL_WIX_SOURCE_STORE_ID);
+  const targetStoreId = safeConfiguredStoreId(env?.PRINTFUL_STORE_ID);
+  const configurationReady = sourceStoreId === PRINTFUL_WIX_SOURCE_STORE_ID
+    && targetStoreId === PRINTFUL_API_TARGET_STORE_ID
+    && sourceStoreId !== targetStoreId;
+  return {
+    available: Boolean(configurationReady && isCommerceDbConfigured(env) && isPrintfulCredentialConfigured(env)),
+    configurationReady,
+    actionPath: "/api/admin/commerce/printful/catalogue/snapshot",
+    source: { id: PRINTFUL_WIX_SOURCE_STORE_ID, name: "Third Railify Official", type: "wix" },
+    target: { id: PRINTFUL_API_TARGET_STORE_ID, name: PRINTFUL_EXPECTED_STORE_NAME, type: "native" },
+    sourceTargetDistinct: sourceStoreId !== null && targetStoreId !== null && sourceStoreId !== targetStoreId,
+  };
+}
+
 export async function commerceAccessForSession(env, session) {
   const isMasterAdmin = session?.account?.adminLevel === "master";
   if (isMasterAdmin) return { isMasterAdmin: true, capabilities: [...COMMERCE_CAPABILITIES] };
@@ -151,6 +169,7 @@ export async function commerceOverview(env, session) {
       encryptionConfigured: hasValidEncryptionKeyShape(env),
       stripeSecretConfigured: isStripeTestCredentialConfigured(env),
       printfulSecretConfigured: isPrintfulCredentialConfigured(env),
+      printfulCatalogueSnapshot: printfulCatalogueSnapshotAvailability(env),
       access,
       posture: COMMERCE_SAFE_POSTURE,
       providers: providerBlueprints(env),
@@ -179,6 +198,7 @@ export async function commerceOverview(env, session) {
     encryptionConfigured: hasValidEncryptionKeyShape(env),
     stripeSecretConfigured: isStripeTestCredentialConfigured(env),
     printfulSecretConfigured: isPrintfulCredentialConfigured(env),
+    printfulCatalogueSnapshot: printfulCatalogueSnapshotAvailability(env),
     access,
     posture: COMMERCE_SAFE_POSTURE,
     providers: providers.length ? providers : providerBlueprints(env),
@@ -919,6 +939,11 @@ function printfulCredential(env) {
   const credential = String(env?.PRINTFUL_API_TOKEN || "").trim();
   if (!credential || credential.length > MAX_PRINTFUL_CREDENTIAL_LENGTH || /[\u0000-\u001F\u007F]/.test(credential)) return "";
   return credential;
+}
+
+function safeConfiguredStoreId(value) {
+  const raw = String(value ?? "").trim();
+  return /^[1-9]\d{0,19}$/.test(raw) ? raw : null;
 }
 
 function configuredPrintfulStoreId(env) {

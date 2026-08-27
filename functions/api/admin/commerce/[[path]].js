@@ -27,8 +27,11 @@ import {
   verifyStripeAccount,
 } from "../../../_shared/commerce-core.js";
 import {
+  assemblePrintfulCatalogueSnapshot,
+  beginPrintfulCatalogueSnapshot,
   discoverLegacyPrintfulSource,
-  snapshotPrintfulCatalogues,
+  readPrintfulCatalogueFileChunk,
+  readPrintfulCatalogueProductChunk,
 } from "../../../_shared/printful-catalogue.js";
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
@@ -100,14 +103,31 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
   } else if (path === "printful/catalogue/snapshot") {
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
     requireCommerceDatabase(env);
-    const providerSnapshot = await snapshotPrintfulCatalogues(env, fetchImpl);
-    payload = {
-      ok: true,
-      ...providerSnapshot,
-      publicCatalogue: PUBLIC_WIX_CATALOGUE,
-      reconciliation: reconcileCatalogues(providerSnapshot, PUBLIC_WIX_CATALOGUE),
-    };
-    authEventType = "printful_catalogue_snapshot_completed";
+    const body = await readSnapshotRequest(request);
+    if (body.phase === "begin") {
+      payload = await beginPrintfulCatalogueSnapshot(env, fetchImpl);
+    } else if (body.phase === "products") {
+      payload = await readPrintfulCatalogueProductChunk(env, body, fetchImpl);
+    } else if (body.phase === "files") {
+      payload = await readPrintfulCatalogueFileChunk(env, body, fetchImpl);
+    } else if (body.phase === "assemble") {
+      const providerSnapshot = await assemblePrintfulCatalogueSnapshot(env, body);
+      payload = {
+        ok: true,
+        ...providerSnapshot,
+        publicCatalogue: PUBLIC_WIX_CATALOGUE,
+        reconciliation: reconcileCatalogues(providerSnapshot, PUBLIC_WIX_CATALOGUE),
+        downloadFilenames: {
+          source: "printful-wix-source.snapshot.json",
+          target: "printful-api-target.snapshot.json",
+          publicCatalogue: "public-wix-catalog.snapshot.json",
+          reconciliation: "catalogue-reconciliation.json",
+        },
+      };
+      authEventType = "printful_catalogue_snapshot_completed";
+    } else {
+      throw new AuthFailure(400, "printful_snapshot_phase_invalid", "The catalogue snapshot phase is invalid.");
+    }
   } else if (path === "business") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
@@ -140,7 +160,7 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     throw new AuthFailure(404, "not_found", "The commerce action was not found.");
   }
 
-  await writeAudit(env, {
+  if (authEventType) await writeAudit(env, {
     actorAccountId: session.accountId,
     eventType: authEventType,
     result: "success",
@@ -171,6 +191,17 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     },
   });
   return jsonResponse(payload, { headers: corsHeaders(request, env) });
+}
+
+async function readSnapshotRequest(request) {
+  const text = await request.text();
+  if (!text) return { phase: "begin" };
+  if (text.length > 8 * 1024 * 1024) throw new AuthFailure(413, "printful_snapshot_body_too_large", "The catalogue snapshot evidence is too large.");
+  let body;
+  try { body = JSON.parse(text); }
+  catch { throw new AuthFailure(400, "invalid_json", "The request body must be valid JSON."); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new AuthFailure(400, "invalid_body", "The request body is invalid.");
+  return body;
 }
 
 function requireCommerceDatabase(env) {

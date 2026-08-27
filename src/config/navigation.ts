@@ -3,7 +3,7 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "content" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "content" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -106,9 +106,54 @@ export const adminAreas: AdminArea[] = [
     path: "/goats",
     label: "GOATS in the Wild",
     shortLabel: "GOATS",
-    icon: "content",
+    icon: "goats",
     summary: "Community submissions, moderation, comments, media, and email events.",
     futureScope: ["Approved public projection", "Approximate map locations", "Transactional outbox"],
+  },
+  {
+    path: "/goats/pending",
+    parentPath: "/goats",
+    label: "Pending Submissions",
+    shortLabel: "Pending",
+    icon: "pending",
+    summary: "Submissions awaiting validation and moderation.",
+    futureScope: ["Product validation", "Private media review", "Approximate location confirmation"],
+  },
+  {
+    path: "/goats/approved",
+    parentPath: "/goats",
+    label: "Approved & Published",
+    shortLabel: "Approved",
+    icon: "approved",
+    summary: "Approved community stories and publication state.",
+    futureScope: ["Published records", "Hidden records", "Public projection review"],
+  },
+  {
+    path: "/goats/rejected",
+    parentPath: "/goats",
+    label: "Rejected Submissions",
+    shortLabel: "Rejected",
+    icon: "rejected",
+    summary: "Rejected submissions and submitter-facing reasons.",
+    futureScope: ["Rejection history", "Corrected resubmission", "Private moderation notes"],
+  },
+  {
+    path: "/goats/comments",
+    parentPath: "/goats",
+    label: "Comment Moderation",
+    shortLabel: "Comments",
+    icon: "comments",
+    summary: "Visible and hidden authenticated community comments.",
+    futureScope: ["Hide and restore", "Listing context", "Moderation audit"],
+  },
+  {
+    path: "/goats/emails",
+    parentPath: "/goats",
+    label: "GOATS Emails",
+    shortLabel: "Emails",
+    icon: "emails",
+    summary: "Branded community lifecycle templates and outbox delivery state.",
+    futureScope: ["Branded HTML", "Plain-text fallback", "Retryable delivery"],
   },
   {
     path: "/membership",

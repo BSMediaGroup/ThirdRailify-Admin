@@ -10,14 +10,13 @@ export type AdminShellOutletContext = {
 };
 
 const topLevelAdminAreas = adminAreas.filter((area) => !area.parentPath);
-const commerceAdminAreas = adminAreas.filter((area) => area.parentPath === "/commerce");
+const childAdminAreas = (parentPath: string) => adminAreas.filter((area) => area.parentPath === parentPath);
 
 export function AdminShell() {
   const location = useLocation();
-  const commerceActive = location.pathname === "/commerce" || location.pathname.startsWith("/commerce/");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarPreference);
-  const [commerceOpen, setCommerceOpen] = useState(commerceActive);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(topLevelAdminAreas.filter((area) => location.pathname === area.path || location.pathname.startsWith(`${area.path}/`)).map((area) => area.path)));
   const [loadingReason, setLoadingReason] = useState("");
   const menuButton = useRef<HTMLButtonElement>(null);
   const loadingTokens = useRef(new Map<symbol, string>());
@@ -35,9 +34,10 @@ export function AdminShell() {
 
   useEffect(() => {
     setMobileOpen(false);
-    if (commerceActive) setCommerceOpen(true);
+    const activeGroup = topLevelAdminAreas.find((area) => childAdminAreas(area.path).length && (location.pathname === area.path || location.pathname.startsWith(`${area.path}/`)));
+    if (activeGroup) setOpenGroups((current) => current.has(activeGroup.path) ? current : new Set([...current, activeGroup.path]));
     window.scrollTo(0, 0);
-  }, [commerceActive, location.pathname]);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -79,32 +79,35 @@ export function AdminShell() {
 
         <nav className="primary-nav">
           <p className="nav-label">Workspace</p>
-          {topLevelAdminAreas.map((area) => area.path !== "/commerce" ? (
-            <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
+          {topLevelAdminAreas.map((area) => {
+            const children = childAdminAreas(area.path);
+            if (!children.length) return <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
               <AdminIcon name={area.icon} />
               <span>{area.label}</span>
-            </NavLink>
-          ) : (
-            <div key={area.path} className={`nav-group${commerceOpen ? " nav-group--open" : ""}${commerceActive ? " nav-group--active" : ""}`}>
+            </NavLink>;
+            const active = location.pathname === area.path || location.pathname.startsWith(`${area.path}/`);
+            const open = openGroups.has(area.path);
+            const controlId = `${area.shortLabel.toLowerCase()}-navigation`;
+            return <div key={area.path} className={`nav-group${open ? " nav-group--open" : ""}${active ? " nav-group--active" : ""}`}>
               <div className="nav-group__row">
                 <NavLink to={area.path} end aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
                   <AdminIcon name={area.icon} />
                   <span>{area.label}</span>
                 </NavLink>
-                <button className="nav-group__toggle" type="button" aria-expanded={commerceOpen} aria-controls="commerce-navigation" aria-label={commerceOpen ? "Collapse commerce navigation" : "Expand commerce navigation"} onClick={() => setCommerceOpen((value) => !value)}>
+                <button className="nav-group__toggle" type="button" aria-expanded={open} aria-controls={controlId} aria-label={`${open ? "Collapse" : "Expand"} ${area.shortLabel} navigation`} onClick={() => setOpenGroups((current) => { const next = new Set(current); if (next.has(area.path)) next.delete(area.path); else next.add(area.path); return next; })}>
                   <AdminIcon name="chevron" size={15} />
                 </button>
               </div>
-              <div id="commerce-navigation" className="nav-group__children" hidden={!commerceOpen}>
-                {commerceAdminAreas.map((child) => (
+              <div id={controlId} className="nav-group__children" hidden={!open}>
+                {children.map((child) => (
                   <NavLink key={child.path} to={child.path} aria-label={child.label} className={({ isActive }) => isActive ? "nav-link nav-link--nested nav-link--active" : "nav-link nav-link--nested"}>
                     <AdminIcon name={child.icon} size={17} />
                     <span>{child.label}</span>
                   </NavLink>
                 ))}
               </div>
-            </div>
-          ))}
+            </div>;
+          })}
         </nav>
 
         <div className="sidebar-footer">

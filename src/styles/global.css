@@ -623,6 +623,14 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .provider-detail > p { color: var(--muted); font-size: .84rem; line-height: 1.6; }
 .provider-detail .secondary-button { width: 100%; margin-top: 16px; }
 .provider-detail .commerce-action-note { margin: 9px 0 0; color: var(--quiet); font-size: .7rem; line-height: 1.45; }
+.catalogue-snapshot-state { margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.025); }
+.catalogue-snapshot-state strong { color: var(--cream); font-size: .8rem; }
+.catalogue-snapshot-state p { margin: 5px 0 0; color: var(--quiet); font-size: .7rem; line-height: 1.5; }
+.catalogue-snapshot-state.is-running { border-color: rgba(243,201,40,.42); background: rgba(243,201,40,.055); }
+.catalogue-snapshot-state.is-completed { border-color: rgba(114,215,165,.4); background: rgba(114,215,165,.06); }
+.catalogue-snapshot-state.is-failed { border-color: rgba(242,141,117,.45); background: rgba(242,141,117,.07); }
+.catalogue-downloads { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 12px; }
+.provider-detail .catalogue-downloads .secondary-button { min-width: 0; margin-top: 0; padding-inline: 10px; font-size: .58rem; white-space: normal; }
 .commerce-form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; padding: clamp(18px,3vw,28px); border: 1px solid var(--line); border-radius: 13px; background: var(--panel-soft); }
 .commerce-field { display: grid; min-width: 0; align-content: start; gap: 7px; }
 .commerce-field > span { color: var(--muted); font: 700 .56rem "Geist Mono", monospace; letter-spacing: .07em; text-transform: uppercase; }
@@ -728,6 +736,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .email-template-preview__message > footer { padding: 16px 18px; }
   .provider-card > div,
   .provider-detail header { align-items: flex-start; flex-direction: column; }
+  .catalogue-downloads { grid-template-columns: 1fr; }
 }
 
 /* GOATS moderation workspace */
@@ -780,7 +789,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .goats-admin-form > header, .goats-admin-form__wide { grid-column: 1 / -1; }
 .goats-admin-form > header h2 { margin: 0; }
 .goats-admin-form label { display: grid; gap: 6px; color: var(--muted); font-size: .7rem; }
-.goats-admin-form input, .goats-admin-form textarea, .goats-email-editor input, .goats-email-editor textarea, .goats-email-editor select { width: 100%; padding: 10px 11px; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; background: #0a0a08; font: inherit; }
+.goats-admin-form input, .goats-admin-form textarea { width: 100%; padding: 10px 11px; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; background: #0a0a08; font: inherit; }
 .goats-admin-form footer { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .goats-event-list { display: grid; gap: 1px; margin: 0; padding: 0; background: var(--line); list-style: none; }
 .goats-event-list li { display: grid; gap: 5px; padding: 12px; background: #0b0b09; }
@@ -794,16 +803,17 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .goats-admin-comments header, .goats-admin-comments footer { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
 .goats-admin-comments header span { color: var(--quiet); font: .58rem "Geist Mono", monospace; }
 .goats-admin-comments p { color: var(--muted); white-space: pre-wrap; }
-.goats-email-editor { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; }
-.goats-email-editor > nav { display: grid; align-content: start; gap: 5px; }
-.goats-email-editor > nav button { display: grid; gap: 5px; padding: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 7px; background: var(--panel); text-align: left; }
-.goats-email-editor > nav button.is-active { color: var(--ink); border-color: var(--line-strong); background: rgba(243,201,40,.05); }
-.goats-email-editor > nav strong { text-transform: capitalize; }
-.goats-email-editor > nav span { color: var(--quiet); font: .56rem "Geist Mono", monospace; text-transform: uppercase; }
-.goats-email-editor form { display: grid; gap: 15px; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-.goats-email-editor label { display: grid; gap: 6px; color: var(--muted); font-size: .7rem; }
-.goats-email-editor form > p { color: var(--quiet); font: .6rem "Geist Mono", monospace; overflow-wrap: anywhere; }
-.goats-email-editor iframe { width: 100%; min-height: 300px; border: 1px solid var(--line); background: white; }
+.goats-email-callout { margin-bottom: 18px; }
+.goats-template-workspace .commerce-form { background: radial-gradient(90% 80% at 100% 0, rgba(243,201,40,.04), transparent 70%), var(--panel-soft); }
+.goats-email-form textarea { font-family: "Geist Mono", monospace; font-size: .72rem; line-height: 1.6; }
+.goats-email-variables { display: grid; gap: 9px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 8px; background: #090907; }
+.goats-email-variables > span { color: var(--muted); font: 700 .56rem "Geist Mono", monospace; letter-spacing: .07em; text-transform: uppercase; }
+.goats-email-variables > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.goats-email-variables code { padding: 6px 8px; border: 1px solid rgba(243,201,40,.2); border-radius: 999px; background: rgba(243,201,40,.045); color: var(--gold-soft); font-size: .58rem; overflow-wrap: anywhere; }
+.goats-email-preview-frame { width: 100%; min-height: 620px; margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; background: #080806; }
+.goats-email-text-preview { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: #090907; }
+.goats-email-text-preview summary { padding: 12px 14px; color: var(--muted); cursor: pointer; font: .61rem "Geist Mono", monospace; letter-spacing: .05em; text-transform: uppercase; }
+.goats-email-text-preview pre { max-height: 320px; margin: 0; padding: 0 14px 16px; overflow: auto; color: var(--quiet); font: .68rem/1.6 "Geist Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 1100px) {
   .goats-admin-metrics { grid-template-columns: repeat(3, 1fr); }
@@ -812,10 +822,11 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 @media (max-width: 760px) {
   .goats-admin-heading { display: grid; }
   .goats-admin-metrics { grid-template-columns: 1fr 1fr; }
-  .goats-moderation-grid, .goats-admin-form, .goats-email-editor { grid-template-columns: 1fr; }
+  .goats-moderation-grid, .goats-admin-form { grid-template-columns: 1fr; }
   .goats-admin-form > header, .goats-admin-form__wide { grid-column: auto; }
   .goats-admin-media { grid-template-columns: 1fr; }
   .goats-private-facts { grid-template-columns: 1fr; }
+  .goats-email-preview-frame { min-height: 560px; }
 }
 
 .merchandising-workspace { display: grid; gap: 18px; }

@@ -2,6 +2,8 @@
 
 This manifest records the read-only recovery boundary. Provider counts and product identities marked **pending authenticated snapshot** must be replaced only from the four sanitized artifacts downloaded by the protected Admin action. No value is inferred from a secret and no write migration is authorized here.
 
+The live operator-flow defect is fixed, but no authenticated snapshot has been run as part of this document update. Every pending value below remains a deliberate placeholder until the Master Admin runs **Run read-only catalogue snapshot** once and supplies the four downloaded files.
+
 ## A. Legacy source
 
 | Field | Value |
