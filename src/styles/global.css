@@ -646,6 +646,36 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .template-workspace > nav button { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); color: var(--muted); cursor: pointer; text-align: left; }
 .template-workspace > nav button.is-active { color: var(--ink); border-color: rgba(243,201,40,.3); background: rgba(243,201,40,.07); }
 .template-workspace > nav small { color: var(--quiet); font: .5rem "Geist Mono", monospace; text-transform: uppercase; }
+.template-workspace__editor { display: grid; min-width: 0; gap: 12px; }
+.email-template-preview { min-width: 0; padding: clamp(18px,3vw,28px); border: 1px solid var(--line); border-radius: 13px; background: radial-gradient(90% 80% at 100% 0, rgba(243,201,40,.055), transparent 70%), var(--panel-soft); }
+.email-template-preview__toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.email-template-preview__toolbar .eyebrow { margin-bottom: 5px; }
+.email-template-preview__toolbar h2 { font-size: clamp(1.55rem,3vw,2rem); }
+.email-template-preview__toolbar > span { padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--gold-soft); font: .52rem "Geist Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.email-template-preview__inbox { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; background: #090907; }
+.email-template-preview__inbox > span { color: var(--quiet); font: .52rem "Geist Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.email-template-preview__inbox strong { color: var(--ink); font-size: .9rem; overflow-wrap: anywhere; }
+.email-template-preview__inbox small { color: var(--muted); font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
+.email-template-preview__message { margin-top: 12px; overflow: hidden; border: 1px solid var(--gold); border-radius: 11px; background: #f3f0e5; color: #17160f; box-shadow: 0 24px 70px rgba(0,0,0,.28); }
+.email-template-preview__brand { display: flex; align-items: center; gap: 12px; padding: 20px 24px; background: #11110e; }
+.email-template-preview__brand img { width: 38px; height: 38px; flex: 0 0 38px; object-fit: contain; }
+.email-template-preview__brand div { display: grid; min-width: 0; gap: 2px; }
+.email-template-preview__brand strong { color: #f5f1e5; font: 1.65rem "American Captain", sans-serif; letter-spacing: .01em; line-height: 1; overflow-wrap: anywhere; }
+.email-template-preview__brand span { color: #b7b19d; font: .51rem "Geist Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
+.email-template-preview__accent { height: 4px; background: var(--gold); }
+.email-template-preview__body { padding: clamp(24px,4vw,38px); }
+.email-template-preview__type { margin: 0 0 9px; font: 700 .58rem "Geist Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
+.email-template-preview__body h3 { margin: 0 0 16px; color: #17160f; font: clamp(2rem,5vw,3.25rem) "American Captain", sans-serif; line-height: .96; overflow-wrap: anywhere; }
+.email-template-preview__body p { margin: 0 0 14px; color: #4d493a; font-size: .84rem; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
+.email-template-preview__body p.is-placeholder { color: #817a65; font-style: italic; }
+.email-template-preview__blocks { display: grid; gap: 2px; margin-top: 18px; }
+.email-template-preview__action { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; margin-top: 24px; }
+.email-template-preview__action > span { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; padding: 10px 18px; border-radius: 6px; color: #090907; font: 700 .65rem "Geist Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+.email-template-preview__action small { color: #736d5a; font: .56rem "Geist Mono", monospace; overflow-wrap: anywhere; }
+.email-template-preview__support { margin-top: 24px !important; padding-top: 16px; border-top: 1px solid rgba(23,22,15,.14); font-size: .74rem !important; }
+.email-template-preview__message > footer { display: grid; gap: 5px; padding: 18px 24px; border-top: 1px solid rgba(23,22,15,.12); background: #e8e3d4; }
+.email-template-preview__message > footer p { margin: 0; color: #4d493a; font-size: .74rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.email-template-preview__message > footer small { color: #756f5c; font: .54rem "Geist Mono", monospace; letter-spacing: .03em; }
 .transaction-model { margin-top: 42px; padding: clamp(24px,4vw,40px); border: 1px solid var(--line); border-radius: 13px; background: var(--panel-soft); }
 .transaction-model > div { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1px; margin-top: 24px; background: var(--line); }
 .transaction-model article { display: grid; grid-template-columns: 42px 1fr; gap: 7px 14px; padding: 22px; background: #0b0b09; }
@@ -689,6 +719,13 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .commerce-posture div:last-child { border-bottom: 0; }
   .commerce-form__actions { align-items: stretch; flex-direction: column; }
   .commerce-form__actions span { text-align: left; }
+  .email-template-preview { padding: 14px; }
+  .email-template-preview__toolbar { align-items: flex-start; flex-direction: column; }
+  .email-template-preview__brand { padding: 17px; }
+  .email-template-preview__brand img { width: 32px; height: 32px; flex-basis: 32px; }
+  .email-template-preview__brand strong { font-size: 1.35rem; }
+  .email-template-preview__body { padding: 24px 18px; }
+  .email-template-preview__message > footer { padding: 16px 18px; }
   .provider-card > div,
   .provider-detail header { align-items: flex-start; flex-direction: column; }
 }

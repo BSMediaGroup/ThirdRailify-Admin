@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useOutletContext } from "react-router-dom";
+import trZapColorIcon from "../../assets/icons/trzapcolorcon.svg";
 import { useAuth } from "../auth/AuthProvider";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { AdminIcon } from "../components/AdminIcon";
@@ -218,18 +219,54 @@ export function CustomerEmailsPage() {
     <CommerceHeading eyebrow="Structured plain text" title="Customer emails" summary="Edit bounded fields for seven lifecycle templates. JavaScript, executable HTML, and email delivery are not enabled." status={payload?.databaseConfigured ? "pending" : "unavailable"} />
     {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
     {payload && draft ? <div className="template-workspace"><nav aria-label="Email template types">{payload.templates.map((template) => <button type="button" key={template.templateKey} className={template.templateKey === selected ? "is-active" : ""} onClick={() => choose(template.templateKey)}><span>{humanize(template.templateKey)}</span><small>{template.status}</small></button>)}</nav>
-      <form className="commerce-form" onSubmit={(event) => void submit(event)}>
-        <Field className="commerce-field--wide" label="Subject"><input value={draft.subject} onChange={(event) => change("subject", event.target.value)} required maxLength={160} /></Field>
-        <Field label="Preheader"><input value={draft.preheader} onChange={(event) => change("preheader", event.target.value)} maxLength={200} /></Field>
-        <Field label="Heading"><input value={draft.heading} onChange={(event) => change("heading", event.target.value)} required maxLength={160} /></Field>
-        <Field className="commerce-field--wide" label="Introduction"><textarea value={draft.introduction} onChange={(event) => change("introduction", event.target.value)} rows={3} maxLength={1000} /></Field>
-        <Field className="commerce-field--wide" label="Body blocks" hint="One plain-text block per line; maximum eight."><textarea value={draft.bodyBlocks.join("\n")} onChange={(event) => change("bodyBlocks", event.target.value.split("\n").slice(0, 8))} rows={6} /></Field>
-        <Field label="CTA label"><input value={draft.ctaLabel} onChange={(event) => change("ctaLabel", event.target.value)} maxLength={80} /></Field><Field label="CTA URL"><input value={draft.ctaUrl} onChange={(event) => change("ctaUrl", event.target.value)} placeholder="HTTPS or /relative" /></Field>
-        <Field label="Support text"><textarea value={draft.supportText} onChange={(event) => change("supportText", event.target.value)} rows={3} /></Field><Field label="Footer"><textarea value={draft.footer} onChange={(event) => change("footer", event.target.value)} rows={3} /></Field>
-        <Field label="Accent"><input type="color" value={draft.accentColor} onChange={(event) => change("accentColor", event.target.value)} /></Field><Field label="State"><select value={draft.status} onChange={(event) => change("status", event.target.value as CommerceTemplate["status"])}><option value="draft">Draft</option><option value="disabled">Disabled</option><option value="ready">Ready for later review</option></select></Field>
-        <div className="commerce-form__actions commerce-field--wide"><button className="secondary-button" type="submit" disabled={!payload.databaseConfigured}>Save draft</button><span>No send, provider call, or raw HTML output occurs.</span></div>
-      </form></div> : !error && <CommerceState>Loading template editor…</CommerceState>}
+      <div className="template-workspace__editor">
+        <form className="commerce-form" onSubmit={(event) => void submit(event)}>
+          <Field className="commerce-field--wide" label="Subject"><input value={draft.subject} onChange={(event) => change("subject", event.target.value)} required maxLength={160} /></Field>
+          <Field label="Preheader"><input value={draft.preheader} onChange={(event) => change("preheader", event.target.value)} maxLength={200} /></Field>
+          <Field label="Heading"><input value={draft.heading} onChange={(event) => change("heading", event.target.value)} required maxLength={160} /></Field>
+          <Field className="commerce-field--wide" label="Introduction"><textarea value={draft.introduction} onChange={(event) => change("introduction", event.target.value)} rows={3} maxLength={1000} /></Field>
+          <Field className="commerce-field--wide" label="Body blocks" hint="One plain-text block per line; maximum eight."><textarea value={draft.bodyBlocks.join("\n")} onChange={(event) => change("bodyBlocks", event.target.value.split("\n").slice(0, 8))} rows={6} /></Field>
+          <Field label="CTA label"><input value={draft.ctaLabel} onChange={(event) => change("ctaLabel", event.target.value)} maxLength={80} /></Field><Field label="CTA URL"><input value={draft.ctaUrl} onChange={(event) => change("ctaUrl", event.target.value)} placeholder="HTTPS or /relative" /></Field>
+          <Field label="Support text"><textarea value={draft.supportText} onChange={(event) => change("supportText", event.target.value)} rows={3} /></Field><Field label="Footer"><textarea value={draft.footer} onChange={(event) => change("footer", event.target.value)} rows={3} /></Field>
+          <Field label="Accent"><input type="color" value={draft.accentColor} onChange={(event) => change("accentColor", event.target.value)} /></Field><Field label="State"><select value={draft.status} onChange={(event) => change("status", event.target.value as CommerceTemplate["status"])}><option value="draft">Draft</option><option value="disabled">Disabled</option><option value="ready">Ready for later review</option></select></Field>
+          <div className="commerce-form__actions commerce-field--wide"><button className="secondary-button" type="submit" disabled={!payload.databaseConfigured}>Save draft</button><span>No send, provider call, or raw HTML output occurs.</span></div>
+        </form>
+        <EmailTemplatePreview template={draft} />
+      </div>
+    </div> : !error && <CommerceState>Loading template editor…</CommerceState>}
   </>;
+}
+
+function EmailTemplatePreview({ template }: { template: CommerceTemplate }) {
+  const bodyBlocks = template.bodyBlocks.filter((block) => block.trim());
+  const titleId = `email-template-preview-${template.templateKey}`;
+  return <section className="email-template-preview" aria-labelledby={titleId}>
+    <header className="email-template-preview__toolbar">
+      <div><p className="eyebrow">Rendered preview</p><h2 id={titleId}>{humanize(template.templateKey)}</h2></div>
+      <span>{humanize(template.status)}</span>
+    </header>
+    <div className="email-template-preview__inbox">
+      <span>Subject</span>
+      <strong>{template.subject || "Untitled customer email"}</strong>
+      <small>{template.preheader || "No preheader configured."}</small>
+    </div>
+    <article className="email-template-preview__message" style={{ borderColor: template.accentColor }}>
+      <header className="email-template-preview__brand">
+        <img src={trZapColorIcon} alt="" />
+        <div><strong>THIRD RAILIFY OFFICIAL</strong><span>Customer notification</span></div>
+      </header>
+      <div className="email-template-preview__accent" style={{ backgroundColor: template.accentColor }} />
+      <div className="email-template-preview__body">
+        <p className="email-template-preview__type" style={{ color: template.accentColor }}>{humanize(template.templateKey)}</p>
+        <h3>{template.heading || "Email heading"}</h3>
+        {template.introduction ? <p>{template.introduction}</p> : <p className="is-placeholder">Introduction not configured.</p>}
+        {bodyBlocks.length ? <div className="email-template-preview__blocks">{bodyBlocks.map((block, index) => <p key={`${index}-${block}`}>{block}</p>)}</div> : <p className="is-placeholder">No body blocks configured.</p>}
+        {template.ctaLabel && <div className="email-template-preview__action"><span style={{ backgroundColor: template.accentColor }}>{template.ctaLabel}</span>{template.ctaUrl && <small>{template.ctaUrl}</small>}</div>}
+        {template.supportText && <p className="email-template-preview__support">{template.supportText}</p>}
+      </div>
+      <footer><p>{template.footer || "Third Railify Official"}</p><small>Rendered preview only — no email has been sent.</small></footer>
+    </article>
+  </section>;
 }
 
 export function FulfillmentIntegrationsPage() {
