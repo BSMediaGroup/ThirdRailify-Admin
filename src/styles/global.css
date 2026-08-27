@@ -942,3 +942,77 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .merchandising-product-list label { grid-template-columns: auto minmax(0,1fr); }
   .merchandising-product-list em { grid-column: 2; }
 }
+
+/* Watch V2 final control-room density pass. */
+.watch-admin-page { gap: 14px; }
+.watch-admin-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 26px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(120deg, rgba(243,201,40,.055), transparent 38%), #0c0c0a; }
+.watch-admin-heading h1 { margin: 3px 0 4px; font-size: clamp(2rem, 3.8vw, 3.35rem); line-height: .92; }
+.watch-admin-heading p:not(.section-kicker) { max-width: 720px; margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.45; }
+.watch-admin-heading__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.watch-admin-heading__actions .secondary-button { display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+.watch-admin-signal-badge { display: inline-flex; min-height: 35px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font: 700 .56rem/1 "Geist Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+.watch-admin-signal-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.watch-admin-signal-badge.is-live { border-color: rgba(243,201,40,.45); color: var(--gold-hot); }
+
+.watch-admin-metrics { grid-template-columns: 1.12fr repeat(3, minmax(0, .72fr)) 1.25fr; gap: 1px; overflow: hidden; padding: 1px; border: 1px solid var(--line); border-radius: 10px; background: var(--line); }
+.watch-admin-metrics article { min-height: 86px; padding: 12px 14px; border: 0; border-radius: 0; }
+.watch-admin-metrics strong { margin-block: 7px 4px; font-size: 2rem; }
+.watch-admin-metrics article.is-compact strong { overflow: hidden; color: var(--ink); font-family: "Blinker", sans-serif; font-size: .92rem; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+
+.watch-admin-current { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, .72fr) auto; align-items: center; gap: 0; overflow: hidden; padding: 0; border-radius: 10px; background: #0c0c0a; }
+.watch-admin-current > div { min-height: 0; padding: 0; background: transparent; }
+.watch-admin-current__main { display: grid !important; grid-template-columns: 43px minmax(0,1fr); align-items: center; gap: 14px; min-height: 112px !important; padding: 16px 18px !important; }
+.watch-admin-current__icon { display: grid; width: 43px; height: 43px; place-items: center; border: 1px solid rgba(243,201,40,.25); border-radius: 50%; color: var(--gold); background: rgba(243,201,40,.04); }
+.watch-admin-current h2 { margin: 4px 0 7px; font-size: clamp(1.45rem, 2.4vw, 2.25rem); line-height: .96; }
+.watch-admin-current__facts { display: grid; grid-template-columns: repeat(3, minmax(82px,1fr)); align-self: stretch; margin: 0; border-inline: 1px solid var(--line); }
+.watch-admin-current__facts div { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 7px; padding: 13px; }
+.watch-admin-current__facts div + div { border-left: 1px solid var(--line); }
+.watch-admin-current__facts dt { color: var(--quiet); font: 700 .55rem/1 "Geist Mono", monospace; letter-spacing: .07em; text-transform: uppercase; }
+.watch-admin-current__facts dd { margin: 0; overflow: hidden; color: var(--ink); font-size: .76rem; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
+.watch-admin-current__link { display: inline-flex; align-items: center; gap: 6px; margin: 0 18px; white-space: nowrap; }
+
+.watch-admin-archive > header { align-items: center; padding: 15px 18px; }
+.watch-admin-archive > header h2 { margin-top: 2px; font-size: clamp(1.55rem, 2.4vw, 2.2rem); }
+.watch-admin-row { grid-template-columns: 112px minmax(0,1fr) auto minmax(178px,.42fr); gap: 14px; padding: 10px 12px; transition: background 140ms ease; }
+.watch-admin-row:hover { background: rgba(243,201,40,.022); }
+.watch-admin-row__main h3 { margin: 5px 0; }
+.watch-admin-row__actions { gap: 8px; }
+.watch-admin-empty { min-height: 210px; }
+
+@media (max-width: 1200px) {
+  .watch-admin-metrics { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .watch-admin-metrics article:nth-child(n+4) { grid-column: span 1; }
+  .watch-admin-current { grid-template-columns: 1fr auto; }
+  .watch-admin-current__facts { grid-column: 1 / -1; grid-row: 2; border-top: 1px solid var(--line); border-right: 0; border-left: 0; }
+  .watch-admin-current__link { grid-column: 2; grid-row: 1; }
+  .watch-admin-row { grid-template-columns: 104px minmax(0,1fr) auto; }
+  .watch-admin-row__actions { grid-column: 2 / -1; justify-content: flex-start; }
+}
+
+@media (max-width: 760px) {
+  .watch-admin-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .watch-admin-heading__actions { width: 100%; justify-content: space-between; }
+  .watch-admin-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .watch-admin-metrics article.is-compact { grid-column: 1 / -1; }
+  .watch-admin-current { grid-template-columns: 1fr; }
+  .watch-admin-current__link { grid-column: 1; grid-row: 3; justify-self: start; margin: 15px 18px 18px; }
+  .watch-admin-current__facts { grid-column: 1; }
+  .watch-admin-archive > header { align-items: stretch; flex-direction: column; }
+  .watch-admin-row { grid-template-columns: 96px minmax(0,1fr); }
+  .watch-admin-status { grid-column: 2; justify-self: start; }
+  .watch-admin-row__actions { grid-column: 1 / -1; }
+}
+
+@media (max-width: 430px) {
+  .watch-admin-heading { padding: 16px; }
+  .watch-admin-heading__actions { align-items: stretch; flex-direction: column; }
+  .watch-admin-heading__actions .secondary-button { justify-content: center; }
+  .watch-admin-metrics article { min-height: 82px; padding: 11px; }
+  .watch-admin-current__main { grid-template-columns: 1fr; }
+  .watch-admin-current__facts { grid-template-columns: 1fr; }
+  .watch-admin-current__facts div + div { border-top: 1px solid var(--line); border-left: 0; }
+  .watch-admin-row { grid-template-columns: 1fr; }
+  .watch-admin-row__thumb { width: 100%; }
+  .watch-admin-status,
+  .watch-admin-row__actions { grid-column: auto; }
+}

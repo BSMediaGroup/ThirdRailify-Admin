@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import path from "node:path";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
 
 const PREVIEW_ORIGIN = "http://127.0.0.1:4195";
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-const VIEWPORTS = [{ width: 1440, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }];
+const VIEWPORTS = [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }];
 
 test("Watch Admin renders the truthful empty archive responsively", async (t) => {
-  const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4195"], { stdio: "ignore" });
+  const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4195"], { stdio: "ignore" });
   t.after(() => server.kill());
   await waitForPreview();
   const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
@@ -36,15 +37,16 @@ test("Watch Admin renders the truthful empty archive responsively", async (t) =>
     });
 
     await page.goto(`${PREVIEW_ORIGIN}/watch`);
-    await page.getByRole("heading", { level: 1, name: "Watch archive" }).waitFor();
+    await page.getByRole("heading", { level: 1, name: "Watch / Broadcast" }).waitFor();
     await page.getByText("No retained episodes yet").waitFor();
     assert.equal(await page.locator("h1").count(), 1);
-    assert.equal(await page.getByText("Retained").locator(".. ").getByText("0", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Retained").locator("..").getByText("0 / 24", { exact: true }).count(), 1);
     await page.getByText("24", { exact: true }).last().waitFor();
     assert.equal(await page.getByRole("button", { name: "Show all" }).isDisabled(), true);
     assert.equal(await page.getByRole("button", { name: "Hide all" }).isDisabled(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${viewport.width}px has no horizontal overflow`);
     assert.deepEqual(consoleErrors, [], `${viewport.width}px has no console errors`);
+    if (process.env.WATCH_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", `thirdrailify-admin-watch-${viewport.width}.png`), fullPage: true });
     await context.close();
   }
 });

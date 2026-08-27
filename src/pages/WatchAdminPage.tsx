@@ -46,22 +46,26 @@ export function WatchAdminPage() {
 
   const summary = data?.summary;
   const archiveUnavailable = !loading && !data;
+  const primary = data?.current?.primary ?? null;
+  const signalState = loading ? "Checking" : archiveUnavailable ? "Unavailable" : primary ? primary.presentationState : "No current signal";
+  const retainedCapacity = summary ? `${summary.retained} / 24` : "— / 24";
   return (
     <section className="watch-admin-page" aria-labelledby="watch-admin-title">
-      <header className="page-heading watch-admin-heading"><div><p className="section-kicker">Broadcast authority</p><h1 id="watch-admin-title">Watch archive</h1><p>Manage visibility for episodes retained naturally from the signed Public broadcast ingest. No manual episode creation or provider lookup is available.</p></div><div className="status-stamp"><AdminIcon name="watch" size={30} /><span>ARCHIVE CAP</span><strong>{summary ? `${summary.retained} / 24` : "— / 24"}</strong></div></header>
+      <header className="watch-admin-heading"><div><p className="section-kicker">Broadcast authority / control room</p><h1 id="watch-admin-title">Watch / Broadcast</h1><p>Monitor the current Public signal and manage visibility for naturally retained episodes.</p></div><div className="watch-admin-heading__actions"><span className={`watch-admin-signal-badge${primary?.presentationState === "live" ? " is-live" : ""}`}><i />{signalState}</span><a className="secondary-button" href="https://thirdrailify.pages.dev/watch" target="_blank" rel="noreferrer">Public Watch <AdminIcon name="external" size={15} /></a></div></header>
       {error && <div className="notice-card notice-card--danger" role="alert"><AdminIcon name="signal" /><div><strong>Watch service unavailable</strong><p>{error}</p></div><button className="button-link" type="button" onClick={() => void load()}>Retry</button></div>}
 
-      <div className="watch-admin-metrics" aria-busy={loading}>
-        <Metric label="Retained" value={summary?.retained ?? "—"} detail="Includes hidden records" />
-        <Metric label="Visible" value={summary?.visible ?? "—"} detail="Publicly enumerable" />
-        <Metric label="Hidden" value={summary?.hidden ?? "—"} detail="Projected as placeholders" />
-        <Metric label="Unfilled" value={summary?.remaining ?? "—"} detail="Until future broadcasts" />
+      <div className="watch-admin-metrics" aria-busy={loading} aria-label={`Archive summary, retained ${retainedCapacity}`}>
+        <Metric label="Retained" value={summary?.retained ?? "—"} suffix="/ 24" detail="Includes hidden" />
+        <Metric label="Visible" value={summary?.visible ?? "—"} detail="Public archive" />
+        <Metric label="Hidden" value={summary?.hidden ?? "—"} detail="Placeholder projection" />
+        <Metric label="Unfilled" value={summary?.remaining ?? "—"} detail="Future capacity" />
+        <Metric label="Current signal" value={signalState} detail={data?.current?.freshness ? `${data.current.freshness} snapshot` : "Authority read"} compact />
       </div>
 
       <section className="watch-admin-current" aria-labelledby="watch-current-title">
-        <div><p className="section-kicker">Current signal</p><h2 id="watch-current-title">{data?.current?.primary?.title || (loading ? "Checking current broadcast…" : archiveUnavailable ? "Current signal unavailable" : "No current broadcast snapshot")}</h2><p>{currentSummary(data, archiveUnavailable)}</p></div>
-        <div><span>Newest retained</span><strong>{archiveUnavailable ? "Unavailable" : summary?.newest?.title || "None yet"}</strong><small>{archiveUnavailable ? "Archive read failed" : summary?.newest ? formatDate(summary.newest.date) : "Archive will fill naturally"}</small></div>
-        <div><span>Oldest retained</span><strong>{archiveUnavailable ? "Unavailable" : summary?.oldest?.title || "None yet"}</strong><small>{archiveUnavailable ? "Archive read failed" : summary?.oldest ? formatDate(summary.oldest.date) : "No retention pruning required"}</small></div>
+        <div className="watch-admin-current__main"><span className="watch-admin-current__icon"><AdminIcon name="signal" size={22} /></span><div><p className="section-kicker">Current signal</p><h2 id="watch-current-title">{primary?.title || (loading ? "Checking current broadcast…" : archiveUnavailable ? "Current signal unavailable" : "No current broadcast snapshot")}</h2><p>{currentSummary(data, archiveUnavailable)}</p></div></div>
+        <dl className="watch-admin-current__facts"><div><dt>Status</dt><dd>{signalState}</dd></div><div><dt>Platform</dt><dd>{primary?.platform ?? "—"}</dd></div><div><dt>Timing</dt><dd>{primary ? currentTime(primary) : "—"}</dd></div></dl>
+        <a className="button-link watch-admin-current__link" href="https://thirdrailify.pages.dev/watch" target="_blank" rel="noreferrer">Open Public Watch <AdminIcon name="external" size={15} /></a>
       </section>
 
       <section className="watch-admin-archive" aria-labelledby="retained-title">
@@ -79,7 +83,7 @@ export function WatchAdminPage() {
   );
 }
 
-function Metric({ label, value, detail }: { label: string; value: string | number; detail: string }) { return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>; }
+function Metric({ label, value, detail, compact = false, suffix = "" }: { label: string; value: string | number; detail: string; compact?: boolean; suffix?: string }) { return <article className={compact ? "is-compact" : ""}><span>{label}</span><strong>{value}{suffix ? ` ${suffix}` : ""}</strong><small>{detail}</small></article>; }
 
 function EpisodeRow({ episode, busy, onChange }: { episode: WatchAdminEpisode; busy: boolean; onChange: (action: "show" | "hide") => void }) {
   const [imageFailed, setImageFailed] = useState(false);
@@ -93,6 +97,11 @@ function currentSummary(data: WatchAdminPayload | null, archiveUnavailable: bool
   if (!primary) return `Snapshot ${data.current.freshness}; no live, upcoming, or latest candidate is selected.`;
   const time = primary.actualStart || primary.scheduledStart || primary.publishedAt;
   return `${primary.presentationState} on ${primary.platform} · ${data.current.freshness} signal${time ? ` · ${formatDate(time)}` : ""}`;
+}
+
+function currentTime(primary: NonNullable<NonNullable<WatchAdminPayload["current"]>["primary"]>) {
+  const time = primary.actualStart || primary.scheduledStart || primary.publishedAt;
+  return time ? formatDate(time) : "Not supplied";
 }
 
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }

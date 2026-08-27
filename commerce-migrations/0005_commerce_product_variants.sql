@@ -1,5 +1,6 @@
 -- Finalized locally from the immutable 2026-08-28 commerce migration evidence.
--- UNAPPLIED: this migration must not be applied remotely in this milestone.
+-- This migration is the durable authority for the permanent catalogue import
+-- and its resumable Printful target migration.
 
 PRAGMA foreign_keys = ON;
 
@@ -8,18 +9,23 @@ PRAGMA foreign_keys = ON;
 -- legacy Wix/Printful identity and the permanent target Printful identity.
 ALTER TABLE commerce_products ADD COLUMN target_printful_product_id TEXT
   CHECK (target_printful_product_id IS NULL OR length(target_printful_product_id) BETWEEN 1 AND 240);
+ALTER TABLE commerce_products ADD COLUMN target_printful_external_id TEXT
+  CHECK (target_printful_external_id IS NULL OR length(target_printful_external_id) BETWEEN 1 AND 240);
 ALTER TABLE commerce_products ADD COLUMN legacy_printful_source_product_id TEXT
   CHECK (legacy_printful_source_product_id IS NULL OR length(legacy_printful_source_product_id) BETWEEN 1 AND 240);
 ALTER TABLE commerce_products ADD COLUMN legacy_wix_external_product_id TEXT
   CHECK (legacy_wix_external_product_id IS NULL OR length(legacy_wix_external_product_id) BETWEEN 1 AND 240);
 ALTER TABLE commerce_products ADD COLUMN migration_status TEXT NOT NULL DEFAULT 'not_started'
-  CHECK (migration_status IN ('not_started', 'selected', 'target_created', 'imported', 'manual_review', 'excluded', 'target_native'));
+  CHECK (migration_status IN ('not_started', 'selected', 'resolving_files', 'target_created', 'provider_processing', 'target_verified', 'blocked', 'manual_review', 'excluded', 'target_native'));
 ALTER TABLE commerce_products ADD COLUMN migration_provenance_json TEXT NOT NULL DEFAULT '{}'
   CHECK (json_valid(migration_provenance_json) AND json_type(migration_provenance_json) = 'object' AND length(migration_provenance_json) <= 16384);
 
 CREATE UNIQUE INDEX idx_commerce_products_target_printful
   ON commerce_products(target_printful_product_id)
   WHERE target_printful_product_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_commerce_products_target_printful_external
+  ON commerce_products(target_printful_external_id)
+  WHERE target_printful_external_id IS NOT NULL;
 CREATE UNIQUE INDEX idx_commerce_products_legacy_printful
   ON commerce_products(legacy_printful_source_product_id)
   WHERE legacy_printful_source_product_id IS NOT NULL;
@@ -48,6 +54,8 @@ CREATE TABLE commerce_product_variants (
     CHECK (json_valid(option_values_json) AND json_type(option_values_json) = 'object' AND length(option_values_json) <= 4096),
   target_printful_product_id TEXT
     CHECK (target_printful_product_id IS NULL OR length(target_printful_product_id) BETWEEN 1 AND 240),
+  target_printful_external_id TEXT
+    CHECK (target_printful_external_id IS NULL OR length(target_printful_external_id) BETWEEN 1 AND 240),
   target_printful_sync_variant_id TEXT
     CHECK (target_printful_sync_variant_id IS NULL OR length(target_printful_sync_variant_id) BETWEEN 1 AND 240),
   target_catalogue_product_id TEXT
@@ -65,9 +73,9 @@ CREATE TABLE commerce_product_variants (
   fulfillment_provider TEXT NOT NULL DEFAULT 'printful'
     CHECK (fulfillment_provider IN ('printful', 'printify', 'manual', 'none')),
   fulfillment_mapping_status TEXT NOT NULL DEFAULT 'unmapped'
-    CHECK (fulfillment_mapping_status IN ('unmapped', 'planned', 'mapped', 'conflict', 'manual_review')),
+    CHECK (fulfillment_mapping_status IN ('unmapped', 'planned', 'provider_processing', 'mapped', 'conflict', 'manual_review')),
   migration_status TEXT NOT NULL DEFAULT 'selected'
-    CHECK (migration_status IN ('selected', 'target_created', 'imported', 'blocked', 'excluded', 'target_native')),
+    CHECK (migration_status IN ('selected', 'deferred', 'target_created', 'provider_processing', 'target_verified', 'blocked', 'excluded', 'target_native')),
   migration_provenance_json TEXT NOT NULL DEFAULT '{}'
     CHECK (json_valid(migration_provenance_json) AND json_type(migration_provenance_json) = 'object' AND length(migration_provenance_json) <= 16384),
   file_mapping_json TEXT NOT NULL DEFAULT '[]'
@@ -78,6 +86,7 @@ CREATE TABLE commerce_product_variants (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (product_id) REFERENCES commerce_products(id) ON DELETE RESTRICT,
   UNIQUE (product_id, local_variant_key),
+  UNIQUE (target_printful_external_id),
   UNIQUE (target_printful_sync_variant_id),
   UNIQUE (legacy_source_variant_id),
   UNIQUE (legacy_wix_external_product_id, legacy_wix_external_variant_id)
@@ -88,7 +97,7 @@ CREATE INDEX idx_commerce_product_variants_product
 CREATE INDEX idx_commerce_product_variants_sellable
   ON commerce_product_variants(is_sellable, availability_status, product_id);
 CREATE INDEX idx_commerce_product_variants_target_printful
-  ON commerce_product_variants(target_printful_product_id, target_printful_sync_variant_id);
+  ON commerce_product_variants(target_printful_product_id, target_printful_external_id, target_printful_sync_variant_id);
 CREATE INDEX idx_commerce_product_variants_target_catalogue
   ON commerce_product_variants(target_catalogue_product_id, target_catalogue_variant_id);
 CREATE INDEX idx_commerce_product_variants_legacy_printful
@@ -99,6 +108,56 @@ CREATE INDEX idx_commerce_product_variants_legacy_wix
 -- source evidence contains duplicate legacy SKUs.
 CREATE INDEX idx_commerce_product_variants_sku
   ON commerce_product_variants(sku) WHERE sku IS NOT NULL;
+
+-- Resolved legacy file URLs are checkpointed by source identity. They are
+-- server-derived from GET /files/{id}; the browser never supplies them.
+CREATE TABLE commerce_printful_file_mappings (
+  source_store_id TEXT NOT NULL CHECK (length(source_store_id) BETWEEN 1 AND 40),
+  source_file_id TEXT NOT NULL CHECK (length(source_file_id) BETWEEN 1 AND 240),
+  source_url TEXT NOT NULL CHECK (length(source_url) BETWEEN 9 AND 4096 AND source_url LIKE 'https://%'),
+  filename TEXT NOT NULL CHECK (length(filename) BETWEEN 1 AND 500),
+  file_status TEXT NOT NULL CHECK (file_status IN ('ok', 'accepted')),
+  safe_metadata_json TEXT NOT NULL DEFAULT '{}'
+    CHECK (json_valid(safe_metadata_json) AND json_type(safe_metadata_json) = 'object' AND length(safe_metadata_json) <= 8192),
+  resolved_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (source_store_id, source_file_id)
+);
+
+-- A singleton durable job carries only safe pacing/checkpoint data. Product
+-- and variant state remains authoritative in the catalogue tables.
+CREATE TABLE commerce_catalogue_migrations (
+  id TEXT PRIMARY KEY CHECK (id = 'permanent-printful-2026-08'),
+  status TEXT NOT NULL DEFAULT 'ready'
+    CHECK (status IN ('ready', 'running', 'waiting', 'completed', 'blocked')),
+  phase TEXT NOT NULL DEFAULT 'preflight'
+    CHECK (phase IN ('preflight', 'source_product', 'source_files', 'target_lookup', 'target_create', 'target_verify', 'd1_mapping', 'completed', 'blocked')),
+  current_product_id TEXT,
+  provider_request_count INTEGER NOT NULL DEFAULT 0 CHECK (provider_request_count >= 0),
+  products_created INTEGER NOT NULL DEFAULT 0 CHECK (products_created >= 0),
+  products_adopted INTEGER NOT NULL DEFAULT 0 CHECK (products_adopted >= 0),
+  products_verified INTEGER NOT NULL DEFAULT 0 CHECK (products_verified >= 0),
+  variants_mapped INTEGER NOT NULL DEFAULT 0 CHECK (variants_mapped >= 0),
+  provider_failures INTEGER NOT NULL DEFAULT 0 CHECK (provider_failures >= 0),
+  last_provider_request_at INTEGER CHECK (last_provider_request_at IS NULL OR last_provider_request_at >= 0),
+  next_provider_request_at INTEGER CHECK (next_provider_request_at IS NULL OR next_provider_request_at >= 0),
+  throttle_until INTEGER CHECK (throttle_until IS NULL OR throttle_until >= 0),
+  last_http_status INTEGER CHECK (last_http_status IS NULL OR last_http_status BETWEEN 100 AND 599),
+  safe_state_json TEXT NOT NULL DEFAULT '{}'
+    CHECK (json_valid(safe_state_json) AND json_type(safe_state_json) = 'object' AND length(safe_state_json) <= 65536),
+  step_lease_token TEXT CHECK (step_lease_token IS NULL OR length(step_lease_token) BETWEEN 16 AND 80),
+  step_lease_expires_at INTEGER CHECK (step_lease_expires_at IS NULL OR step_lease_expires_at >= 0),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  started_at TEXT,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  FOREIGN KEY (current_product_id) REFERENCES commerce_products(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX idx_commerce_products_migration_queue
+  ON commerce_products(migration_status, legacy_printful_source_product_id, id);
+CREATE INDEX idx_commerce_product_variants_migration_queue
+  ON commerce_product_variants(product_id, migration_status, availability_status, id);
 
 -- Rebuild order items so the future checkout contract can snapshot an exact
 -- authoritative variant. Existing product-only order rows remain valid.

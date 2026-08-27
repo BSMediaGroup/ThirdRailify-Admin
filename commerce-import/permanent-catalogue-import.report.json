@@ -1,0 +1,31 @@
+{
+  "legacyProducts": 119,
+  "legacyVariants": 2456,
+  "publishedWixProducts": 49,
+  "migrateProducts": 49,
+  "targetNativeKeeps": 1,
+  "excludedNotPublished": 69,
+  "manualReview": 1,
+  "eligibleVariants": 1317,
+  "deferredVariants": 5,
+  "selectedDiscontinuedVariants": 90,
+  "maximumVariantsPerProduct": 96,
+  "sourceFileReferences": 3620,
+  "liveWixSha256": "f5b52f51b6932b98e6f1b790b4d1eb55e8b68d8c0bcb8f34686e31cf360d772a",
+  "d1Products": 50,
+  "d1Variants": 1323,
+  "activeVariants": 1317,
+  "targetNativeProducts": 1,
+  "targetNativeVariants": 1,
+  "checkoutEnabled": false,
+  "fulfillmentEnabled": false,
+  "generatedFrom": {
+    "sourceStoreId": "16847493",
+    "targetStoreId": "18668025",
+    "publicationAuthority": "CURRENT_LIVE_WIX_PUBLIC_GET_CENSUS",
+    "immutableSourceSnapshot": "printful-wix-source.snapshot.json",
+    "immutableTargetSnapshot": "printful-api-target.snapshot.json",
+    "liveWixSnapshotSha256": "f5b52f51b6932b98e6f1b790b4d1eb55e8b68d8c0bcb8f34686e31cf360d772a"
+  },
+  "acceptedEvidenceGeneratedAt": "2026-08-27T21:38:14.785Z"
+}
