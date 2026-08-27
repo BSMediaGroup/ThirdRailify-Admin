@@ -13,6 +13,8 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Functional `/access` account registry with self-service display-name editing, avatar upload/URL import, search/filters, and Master-only promotion, demotion, status, and session-revocation controls.
 - Admin-authoritative avatar ingestion validates JPG/PNG/WebP bytes, stores immutable content-addressed objects under `/u/<opaque-account-key>/avatar/<sha256>.<ext>`, and persists only the resulting HTTPS URL in D1.
 - Admin-only authority for the bound `thirdrailify-commerce` D1, direct-merchant provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
+- Functional `/products` merchandising workspace backed by `commerce_products`: Master Admins can feature/unfeature displayable snapshot products, set deterministic hero order with accessible move controls, preview warnings, and persist through the established session/origin/CSRF/rate-limit/D1/audit path.
+- Public read-only `/api/catalogue/merchandising` projection exposes only product ID, slug, featured state, and order; it contains no price, image path, safe metadata, credential, or write capability.
 - Public machine-to-machine `POST /api/webhooks/stripe` receiver code with exact raw-body Web Crypto verification, a five-minute Stripe `v1` timestamp window, test-event enforcement, and D1-backed duplicate receipt protection. A real signed sandbox event has verified the deployed destination and matching Admin-only signing configuration.
 - Stripe-first Canadian operating model using the dedicated Third Railify Official merchant account, server-created Stripe-hosted Checkout Sessions, Admin-only environment secrets, disabled Checkout/live capture, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
 - Cloudflare Pages static output, SPA fallback, document and response-level noindex, restrictive baseline headers, and no custom domain.
@@ -46,7 +48,8 @@ The production output is `dist/`. The local development server uses port 5174 an
 | --- | --- |
 | `/` | Authenticated account/configuration posture and deferred-module boundaries |
 | `/content` | Future site-content shell |
-| `/products` | Provider-neutral product authority scaffold; synchronization disabled |
+| `/products` | D1-backed featured-product selection and stable hero ordering for the bounded snapshot catalogue |
+| `/api/catalogue/merchandising` | Cacheable public read projection of product ID/slug/featured order only; no write path |
 | `/orders` | Order authority and separate payment/fulfillment cost model; no synthetic orders |
 | `/commerce` | Truthful commerce readiness and provider status overview |
 | `/commerce/payments` | Dedicated Stripe/PayPal/Wix posture plus the permission-gated, read-only Stripe TEST account verification action |
@@ -78,9 +81,9 @@ ThirdRailify-Admin/
 │   └── _redirects          SPA fallback
 ├── functions/
 │   ├── _shared/            D1 auth/session/OAuth/security, profile-media, and commerce helpers
-│   ├── api/                Shared auth, signed Admin APIs, and the external signed Stripe webhook receiver
+│   ├── api/                Shared auth, signed Admin APIs, public merchandising projection, and signed Stripe webhook receiver
 │   └── u/                  Immutable R2-backed profile-media delivery
-├── commerce-migrations/    Commerce control-plane and Stripe webhook receipt-ledger migrations
+├── commerce-migrations/    Commerce control-plane, Stripe receipt ledger, and product merchandising migration
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
 │   ├── auth/               Gate, session provider, modal, Turnstile, and account widget
@@ -111,6 +114,7 @@ The display system uses the seeded American Captain asset at its real weight wit
 - Display-name changes are self-service, CSRF-protected, rate-limited, audited, and persisted only through the Admin-owned D1 account authority; Master role/email locking does not overwrite a chosen display name.
 - Avatar uploads and URL imports are rate-limited, capped at 5 MB, content-sniffed as JPG/PNG/WebP, and written only to the Admin-owned `THIRDRAILIFY_PROFILE_MEDIA` object binding. Public can proxy a current session proof but cannot own the object binding or update D1 itself.
 - Commerce reuses the same session, role, origin, CSRF, rate-limit, and audit boundary. Master Admins own all commerce capabilities and are the only accounts that can grant/revoke them; Full Admins can view and may receive bounded commerce capabilities; ordinary users cannot.
+- Featured-product changes are Master-only and validate a bounded, duplicate-free list of existing displayable product IDs server-side before one D1 batch updates the full order. The public projection is GET-only and excludes titles, prices, images, metadata, accounts, permissions, and audit records.
 - Stripe staging verification accepts only recognizable TEST server credentials under `STRIPE_SECRET_KEY`: restricted `rk_test_...` is intended and `sk_test_...` remains compatible. `rk_live_...`, `sk_live_...`, missing credentials, missing D1, and non-CA/non-CAD accounts fail closed. The browser receives only `stripeSecretConfigured`, never credential material.
 - The Stripe webhook is deliberately external to browser controls: it accepts POST only and does not use an Admin session, CSRF, Turnstile, Origin, CORS, or a commerce capability. It instead requires the exact raw body, a configured server-only `STRIPE_WEBHOOK_SECRET`, at least one valid `v1` HMAC-SHA256 signature, a timestamp within 300 seconds, a test-mode Stripe Event envelope, commerce D1, and a unique `stripe` plus Event ID receipt.
 - Signed `checkout.session.completed` events are receipt-only while Checkout is disabled. Unknown valid event types are acknowledged and recorded as ignored; neither path creates or mutates an order, fulfillment, inventory, email, membership, donation, or provider action. Raw payloads, signature headers, signing/API secrets, customer/card/address data, and full Stripe objects are never persisted.

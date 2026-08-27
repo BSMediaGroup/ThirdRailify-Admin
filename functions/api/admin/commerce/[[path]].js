@@ -15,11 +15,13 @@ import {
   businessProfilePayload,
   commerceOverview,
   grantCommerceCapability,
+  merchandisingProductsPayload,
   permissionGrantsPayload,
   requireCommerceCapability,
   revokeCommerceCapability,
   templatesPayload,
   updateBusinessProfile,
+  updateFeaturedProducts,
   updateTemplate,
   verifyStripeAccount,
 } from "../../../_shared/commerce-core.js";
@@ -52,6 +54,9 @@ async function handleGet(request, env, path) {
   } else if (path === "templates") {
     await requireCommerceCapability(env, session, "commerce.templates.manage");
     payload = await templatesPayload(env, session);
+  } else if (path === "products") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await merchandisingProductsPayload(env, session);
   } else if (path === "permissions") {
     await requireMasterAdmin(env, request);
     payload = await permissionGrantsPayload(env, session);
@@ -84,6 +89,11 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     const templateKey = decodePathPart(path.slice("templates/".length));
     payload = await updateTemplate(env, session, templateKey, body);
     authEventType = "commerce_template_updated";
+  } else if (path === "products/featured") {
+    const body = await readJsonBody(request);
+    await requireMasterAdmin(env, request);
+    payload = await updateFeaturedProducts(env, session, body);
+    authEventType = "commerce_featured_products_updated";
   } else if (path === "permissions/grant") {
     const body = await readJsonBody(request);
     await requireMasterAdmin(env, request);

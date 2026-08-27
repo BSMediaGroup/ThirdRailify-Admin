@@ -729,3 +729,48 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .provider-card > div,
   .provider-detail header { align-items: flex-start; flex-direction: column; }
 }
+
+.merchandising-workspace { display: grid; gap: 18px; }
+.merchandising-preview,
+.merchandising-products { padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, rgba(255,255,255,.025), rgba(255,255,255,.006)); }
+.merchandising-preview h2,
+.merchandising-products h2 { margin: 4px 0 20px; font-size: clamp(1.7rem, 3vw, 2.8rem); }
+.merchandising-preview ol { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.merchandising-preview li { display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: 12px; min-height: 64px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #0b0b09; }
+.merchandising-preview li > span { color: var(--gold); font: .65rem "Geist Mono", monospace; }
+.merchandising-preview li strong,
+.merchandising-preview li small { display: block; }
+.merchandising-preview li small { margin-top: 4px; color: var(--quiet); font-size: .68rem; }
+.merchandising-preview li.has-warning { border-color: rgba(242,141,117,.4); }
+.merchandising-order-actions { display: flex; gap: 5px; }
+.merchandising-order-actions button { width: 38px; height: 38px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--gold); background: transparent; cursor: pointer; }
+.merchandising-order-actions button:hover:not(:disabled),
+.merchandising-order-actions button:focus-visible { border-color: var(--gold); background: rgba(243,201,40,.08); outline: none; }
+.merchandising-order-actions button:disabled { opacity: .3; cursor: default; }
+.merchandising-empty { color: var(--muted); }
+.merchandising-product-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.merchandising-product-list label { display: grid; min-width: 0; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 12px; min-height: 68px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: #0b0b09; cursor: pointer; }
+.merchandising-product-list label.is-featured { border-color: rgba(243,201,40,.5); background: rgba(243,201,40,.055); }
+.merchandising-product-list input { width: 18px; height: 18px; accent-color: var(--gold); }
+.merchandising-product-list strong,
+.merchandising-product-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merchandising-product-list small { margin-top: 4px; color: var(--quiet); font: .58rem "Geist Mono", monospace; }
+.merchandising-product-list em { color: var(--gold); font: normal .55rem "Geist Mono", monospace; letter-spacing: .05em; text-transform: uppercase; }
+.merchandising-savebar { position: sticky; z-index: 4; bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 18px; border: 1px solid rgba(243,201,40,.35); border-radius: 10px; background: rgba(8,8,7,.96); box-shadow: 0 14px 44px rgba(0,0,0,.45); }
+.merchandising-savebar p { max-width: 690px; margin: 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+.merchandising-savebar .button-link { margin: 0; border: 0; cursor: pointer; }
+.merchandising-savebar .button-link:disabled { opacity: .45; cursor: default; }
+
+@media (max-width: 760px) {
+  .merchandising-product-list { grid-template-columns: 1fr; }
+  .merchandising-savebar { position: static; align-items: stretch; flex-direction: column; }
+}
+
+@media (max-width: 520px) {
+  .merchandising-preview,
+  .merchandising-products { padding: 16px; }
+  .merchandising-preview li { grid-template-columns: 28px minmax(0,1fr); }
+  .merchandising-order-actions { grid-column: 2; }
+  .merchandising-product-list label { grid-template-columns: auto minmax(0,1fr); }
+  .merchandising-product-list em { grid-column: 2; }
+}

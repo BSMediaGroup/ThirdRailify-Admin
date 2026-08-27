@@ -8,13 +8,16 @@ import {
   getBusinessProfile,
   getCommerceOverview,
   getCommerceTemplates,
+  getMerchandisingProducts,
   saveBusinessProfile,
   saveCommerceTemplate,
+  saveFeaturedProducts,
   verifyStripeConnection,
   type BusinessPayload,
   type CommerceOverviewPayload,
   type CommerceStatus,
   type CommerceTemplate,
+  type MerchandisingPayload,
   type ProviderStatus,
   type TemplatesPayload,
 } from "../commerce/client";
@@ -283,7 +286,60 @@ export function FulfillmentIntegrationsPage() {
   </>;
 }
 
-export function CommerceProductsPage() { return <CommerceDeferredPage kind="Products" summary="The existing route is reserved for a provider-neutral catalogue. No Wix snapshot was copied into commerce D1 and no Printful or Printify synchronization ran." />; }
+export function CommerceProductsPage() {
+  const { csrfToken, access } = useAuth();
+  const { startLoading } = useOutletContext<AdminShellOutletContext>();
+  const [payload, setPayload] = useState<MerchandisingPayload | null>(null);
+  const [featuredIds, setFeaturedIds] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const load = useCallback(async () => {
+    const stop = startLoading("Loading product merchandising"); setError("");
+    try { const next = await getMerchandisingProducts(); setPayload(next); setFeaturedIds(next.featured.map((product) => product.id)); }
+    catch (reason) { setError(errorMessage(reason, "Product merchandising is unavailable.")); }
+    finally { stop(); }
+  }, [startLoading]);
+  useEffect(() => { void load(); }, [load]);
+
+  const toggle = (id: string) => setFeaturedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  const move = (id: string, offset: -1 | 1) => setFeaturedIds((current) => {
+    const index = current.indexOf(id); const target = index + offset;
+    if (index < 0 || target < 0 || target >= current.length) return current;
+    const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; return next;
+  });
+  const save = async () => {
+    if (!csrfToken || !access.isMasterAdmin) return;
+    setSaving(true); setError(""); setMessage("");
+    try { const next = await saveFeaturedProducts(csrfToken, featuredIds); setPayload(next); setFeaturedIds(next.featured.map((product) => product.id)); setMessage("Featured product order saved to commerce D1."); }
+    catch (reason) { setError(errorMessage(reason, "Featured products could not be saved.")); }
+    finally { setSaving(false); }
+  };
+
+  const ordered = featuredIds.map((id) => payload?.products.find((product) => product.id === id)).filter((product): product is NonNullable<typeof product> => Boolean(product));
+  return <>
+    <CommerceHeading eyebrow="Merchandising authority" title="Shop / Products" summary="Choose the displayable catalogue products that lead the public shop hero and define their stable order. Product prices, imagery, options, cart values, and checkout remain owned by the public snapshot and current Wix store." status={payload?.databaseConfigured ? "pending" : "unavailable"} />
+    {error && <div className="admin-alert" role="alert">{error}</div>}
+    {message && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Merchandising saved</strong><p>{message}</p></div></div>}
+    {!payload && !error ? <CommerceState>Loading catalogue merchandising…</CommerceState> : payload ? <div className="merchandising-workspace">
+      <section className="merchandising-preview" aria-labelledby="featured-preview-title">
+        <div><p className="eyebrow">Public hero order</p><h2 id="featured-preview-title">Featured rail</h2></div>
+        {ordered.length ? <ol>{ordered.map((product, index) => <li key={product.id} className={!product.displayData.ready ? "has-warning" : ""}>
+          <span>{String(index + 1).padStart(2, "0")}</span><div><strong>{product.title}</strong><small>{product.displayData.ready ? "Image and CAD price captured" : "Warning: public image or price is missing"}</small></div>
+          <div className="merchandising-order-actions"><button type="button" onClick={() => move(product.id, -1)} disabled={index === 0} aria-label={`Move ${product.title} up`}>↑</button><button type="button" onClick={() => move(product.id, 1)} disabled={index === ordered.length - 1} aria-label={`Move ${product.title} down`}>↓</button></div>
+        </li>)}</ol> : <p className="merchandising-empty">No products are explicitly featured. The public shop will use its deterministic displayable-product fallback.</p>}
+      </section>
+      <section className="merchandising-products" aria-labelledby="catalogue-products-title">
+        <div><p className="eyebrow">Current bounded catalogue</p><h2 id="catalogue-products-title">Displayable products</h2></div>
+        <div className="merchandising-product-list">{payload.products.map((product) => <label key={product.id} className={featuredIds.includes(product.id) ? "is-featured" : ""}>
+          <input type="checkbox" checked={featuredIds.includes(product.id)} onChange={() => toggle(product.id)} disabled={!access.isMasterAdmin} />
+          <span><strong>{product.title}</strong><small>/{product.slug}</small></span><em>{featuredIds.includes(product.id) ? `Featured ${featuredIds.indexOf(product.id) + 1}` : "Catalogue"}</em>
+        </label>)}</div>
+      </section>
+      <div className="merchandising-savebar"><p>{access.isMasterAdmin ? "Changes use the existing authenticated Master Admin, CSRF, rate-limit, D1, and audit path." : "Only a Master Admin can change featured products."}</p><button className="button-link" type="button" onClick={() => void save()} disabled={saving || !access.isMasterAdmin || !payload.databaseConfigured}>{saving ? "Saving…" : "Save featured order"}</button></div>
+    </div> : null}
+  </>;
+}
 export function CommerceOrdersPage() { return <CommerceDeferredPage kind="Orders" summary="No synthetic orders or revenue are shown. Future orders require authoritative Stripe webhook completion, idempotent persistence, and explicit draft-only fulfillment gates." />; }
 
 function CommerceDeferredPage({ kind, summary }: { kind: string; summary: string }) {

@@ -10,6 +10,11 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Added `commerce-migrations/0003_product_merchandising.sql`, extending the existing `commerce_products` authority with backward-compatible featured state/order and the eight already-authoritative Wix snapshot identities. It stores no cart/checkout values, inventory, variants, shipping, tax, reviews, discounts, or provider credentials; the migration was validated locally but was not applied remotely.
+- Replaced the deferred `/products` shell with a real accessible merchandising workspace: Master-only feature toggles, stable move-up/down order, hero preview, missing-image/price warnings, and a single save action backed by the existing Admin session, exact origin, CSRF, D1 rate limit, transactional batch, and redacted commerce/auth audits.
+- Added authenticated product-management GET/POST routes plus a separate cacheable GET-only `/api/catalogue/merchandising` projection exposing only product ID, slug, featured state, and numeric order. Public receives no commerce binding, metadata, price, image, credential, account, or write authority; duplicate/unknown/non-displayable product submissions fail closed.
+- Added focused migration and Function coverage for seeded product identity, featured constraints/order, Master authority, CSRF path, persistence, audit, projection field exclusion, and deterministic public ordering. Updated Function routing, README structure/security, and version notes; no D1 migration, deployment, secret, provider, DNS, domain, or Wix mutation occurred.
+- Validated with Node 22.16.0 lint/typecheck, 38 auth/profile/commerce/webhook tests, and production build. Fixture-backed authenticated Edge checks exercised eight products, four featured entries, keyboard-accessible reordering, the protected save flow, one page heading, and zero horizontal overflow or console errors at 1440×900, 768×1024, and 390×844.
 - Reconciled Stripe configuration proof semantics without a schema migration: successful CA/CAD `GET /v1/account` verification now atomically updates provider `api_configured` plus canonical `stripe_api_configured`, preserves earlier webhook proof, and never sets the flag from secret presence or a failed verification.
 - Valid signed, timely, well-formed sandbox Stripe Events now atomically persist/reuse the safe receipt and set canonical/provider webhook configuration proof. Valid duplicates reassert proof without another ledger row; unsigned, invalid, stale, malformed, or live-mode deliveries cannot set it, and Checkout/live-payment/fulfillment gates remain false.
 - Updated `/commerce` and `/commerce/payments` to distinguish connected test API, operational/verified webhook signing, disabled Checkout/live payments/fulfillment, and unverified live payout readiness without exposing secret or event material.
@@ -75,6 +80,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Wired the confirmed X OAuth 2.0 Client ID into safe Admin configuration. The X application is configured externally as a confidential Web App with both staging and production callbacks; its separate numeric X App ID is not used by website authentication, and X becomes operational once `X_OAUTH_CLIENT_SECRET` is provisioned as an encrypted Admin secret.
 
 ### Human-readable
+
+The control room can now choose which real preview products headline the public shop and arrange their order with clear, keyboard-friendly controls. Those choices save through the real protected Admin database path; the public site receives only the tiny safe ordering projection and continues gracefully if Admin is unavailable.
 
 The control room now remembers what Stripe has actually proved: the Canadian CAD test API is connected and a real signed sandbox event verified the webhook path. Those configuration checks remain separate from taking payments or fulfilling orders, which are still disabled.
 

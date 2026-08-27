@@ -6,6 +6,7 @@ const authMigrationUrl = new URL("../migrations/0001_auth_foundation.sql", impor
 const commerceMigrationUrls = [
   new URL("../commerce-migrations/0001_commerce_control_plane.sql", import.meta.url),
   new URL("../commerce-migrations/0002_stripe_webhook_events.sql", import.meta.url),
+  new URL("../commerce-migrations/0003_product_merchandising.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

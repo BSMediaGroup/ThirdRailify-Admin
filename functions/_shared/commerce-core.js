@@ -187,6 +187,55 @@ export async function commerceOverview(env, session) {
   };
 }
 
+export async function merchandisingProductsPayload(env, session) {
+  const access = session ? await commerceAccessForSession(env, session) : null;
+  if (!isCommerceDbConfigured(env)) {
+    return { ok: true, databaseConfigured: false, access, products: [], featured: [], updatedAt: null };
+  }
+  const result = await requireCommerceDb(env)
+    .prepare("SELECT id, slug, title, status, safe_metadata_json, is_featured, featured_order, updated_at FROM commerce_products ORDER BY is_featured DESC, featured_order ASC, slug ASC")
+    .all();
+  const products = (result?.results || []).map(serializeMerchandisingProduct);
+  return {
+    ok: true,
+    databaseConfigured: true,
+    access,
+    products,
+    featured: products.filter((product) => product.featured),
+    updatedAt: products.reduce((latest, product) => !latest || product.updatedAt > latest ? product.updatedAt : latest, "" ) || null,
+  };
+}
+
+export async function updateFeaturedProducts(env, session, input) {
+  const db = requireCommerceDb(env);
+  const featuredIds = Array.isArray(input?.featuredIds) ? input.featuredIds.map((value) => cleanText(value, 160)) : null;
+  if (!featuredIds || featuredIds.length > 100 || featuredIds.some((value) => !value)) {
+    throw new AuthFailure(400, "featured_products_invalid", "Featured products must be a bounded ordered product list.");
+  }
+  if (new Set(featuredIds).size !== featuredIds.length) {
+    throw new AuthFailure(400, "featured_products_duplicate", "A product can appear only once in the featured order.");
+  }
+  if (featuredIds.length) {
+    const placeholders = featuredIds.map(() => "?").join(",");
+    const found = await db.prepare(`SELECT id FROM commerce_products WHERE id IN (${placeholders}) AND status IN ('active', 'legacy_production')`).bind(...featuredIds).all();
+    if ((found?.results || []).length !== featuredIds.length) {
+      throw new AuthFailure(400, "featured_product_unknown", "Every featured product must be a displayable catalogue product.");
+    }
+  }
+  const timestamp = nowIso();
+  const statements = [db.prepare("UPDATE commerce_products SET is_featured = 0, featured_order = NULL, updated_at = ? WHERE is_featured = 1").bind(timestamp)];
+  featuredIds.forEach((id, index) => statements.push(db.prepare("UPDATE commerce_products SET is_featured = 1, featured_order = ?, updated_at = ? WHERE id = ?").bind((index + 1) * 10, timestamp, id)));
+  await db.batch(statements);
+  await writeCommerceAudit(env, {
+    actorAccountId: session?.accountId,
+    action: "products.featured_updated",
+    targetType: "commerce_products",
+    result: "success",
+    metadata: { featuredCount: featuredIds.length, productIds: featuredIds },
+  });
+  return merchandisingProductsPayload(env, session);
+}
+
 export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
   const db = requireCommerceDb(env);
   const correlationId = randomId();
@@ -873,6 +922,22 @@ function serializeTemplate(row) {
     accentColor: row.accent_color,
     status: row.status,
     revision: Number(row.revision || 1),
+  };
+}
+
+function serializeMerchandisingProduct(row) {
+  const metadata = safeJson(row.safe_metadata_json, {});
+  const hasImage = metadata.public_image_captured === true;
+  const hasPrice = metadata.public_price_captured === true;
+  return {
+    id: cleanText(row.id, 160),
+    slug: cleanText(row.slug, 180),
+    title: cleanText(row.title, 240),
+    status: cleanText(row.status, 40),
+    featured: row.is_featured === 1,
+    featuredOrder: row.is_featured === 1 && Number.isInteger(Number(row.featured_order)) ? Number(row.featured_order) : null,
+    displayData: { hasImage, hasPrice, ready: hasImage && hasPrice },
+    updatedAt: cleanText(row.updated_at, 80),
   };
 }
 

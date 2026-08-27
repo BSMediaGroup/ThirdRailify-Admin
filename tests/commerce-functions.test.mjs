@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { handlePost as handleCommercePost, onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import { commerceAccessForSession, updateBusinessProfile, writeCommerceAudit } from "../functions/_shared/commerce-core.js";
+import { onRequestGet as publicMerchandisingRequest } from "../functions/api/catalogue/merchandising.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-helpers.mjs";
@@ -132,4 +133,19 @@ test("commerce audit stores redacted metadata and public payloads receive no pri
 
 test("business helper rejects a missing commerce DB before any plaintext fallback", async () => {
   await assert.rejects(updateBusinessProfile({ THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY: "unused" }, { accountId: "master" }, {}), /not configured/i);
+});
+
+test("featured merchandising is Master-only, ordered, persisted, audited, and publicly projected", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  const productsResponse = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products`, { method: "GET", origin: ADMIN_ORIGIN, cookie }), env, data: {} });
+  const initial = await productsResponse.json(); assert.equal(productsResponse.status, 200); assert.equal(initial.products.length, 8); assert.equal(initial.featured.length, 4);
+  const orderedIds = [initial.products[4].id, initial.products[0].id];
+  const saveResponse = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/featured`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { featuredIds: orderedIds } }), env, data: {} });
+  const saved = await saveResponse.json(); assert.equal(saveResponse.status, 200); assert.deepEqual(saved.featured.map((product) => product.id), orderedIds); assert.deepEqual(saved.featured.map((product) => product.featuredOrder), [10, 20]);
+  const duplicate = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/featured`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { featuredIds: [orderedIds[0], orderedIds[0]] } }), env, data: {} });
+  assert.equal(duplicate.status, 400); assert.equal((await duplicate.json()).error, "featured_products_duplicate");
+  const publicResponse = await publicMerchandisingRequest({ request: new Request(`${ADMIN_ORIGIN}/api/catalogue/merchandising`), env });
+  const projection = await publicResponse.json(); assert.equal(publicResponse.status, 200); assert.deepEqual(Object.keys(projection.products[0]).sort(), ["featured", "featuredOrder", "id", "slug"]); assert.doesNotMatch(JSON.stringify(projection), /price|image|safe_metadata|credential/i);
+  const audit = await harness.commerceDb.prepare("SELECT metadata_json FROM commerce_audit WHERE action = 'products.featured_updated'").first(); assert.ok(audit); assert.match(audit.metadata_json, /featuredCount/);
 });

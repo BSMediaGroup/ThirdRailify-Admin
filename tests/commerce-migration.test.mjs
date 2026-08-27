@@ -3,9 +3,9 @@ import test from "node:test";
 import { applyMigration } from "./auth-test-helpers.mjs";
 import { createCommerceDatabases } from "./commerce-test-helpers.mjs";
 
-test("commerce migrations apply 0001 then 0002 on a fresh database and are repeat-safe", async (t) => {
+test("commerce migrations apply in order, with the idempotent foundations repeat-safe", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
-  for (const migration of harness.commerceMigrations) await applyMigration(harness.commerceDb, migration);
+  for (const migration of harness.commerceMigrations.slice(0, 2)) await applyMigration(harness.commerceDb, migration);
   const result = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all();
   assert.deepEqual(result.results.map((row) => row.name), [
     "commerce_audit", "commerce_business_profiles", "commerce_orders", "commerce_permission_grants", "commerce_products",
@@ -18,6 +18,10 @@ test("commerce migrations apply 0001 then 0002 on a fresh database and are repea
     "idx_commerce_webhook_events_event_id", "idx_commerce_webhook_events_received", "idx_commerce_webhook_events_status",
     "idx_commerce_webhook_events_type_created", "sqlite_autoindex_commerce_webhook_events_1",
   ]);
+  const products = await harness.commerceDb.prepare("SELECT id, is_featured, featured_order FROM commerce_products ORDER BY slug").all();
+  assert.equal(products.results.length, 8);
+  assert.equal(products.results.filter((row) => row.is_featured === 1).length, 4);
+  assert.deepEqual(products.results.filter((row) => row.is_featured === 1).map((row) => row.featured_order).sort((a, b) => a - b), [10, 20, 30, 40]);
 });
 
 test("provider uniqueness, status constraints, and credential custody fail closed", async (t) => {

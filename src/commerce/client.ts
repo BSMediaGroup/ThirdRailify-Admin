@@ -28,6 +28,14 @@ export type CommerceTemplate = {
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; revision: number;
 };
 export type TemplatesPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; templates: CommerceTemplate[] };
+export type MerchandisingProduct = {
+  id: string; slug: string; title: string; status: string; featured: boolean; featuredOrder: number | null;
+  displayData: { hasImage: boolean; hasPrice: boolean; ready: boolean }; updatedAt: string;
+};
+export type MerchandisingPayload = {
+  ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; products: MerchandisingProduct[];
+  featured: MerchandisingProduct[]; updatedAt: string | null;
+};
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
 export function verifyStripeConnection(csrfToken: string) {
@@ -40,4 +48,8 @@ export function saveBusinessProfile(csrfToken: string, body: Record<string, unkn
 export function getCommerceTemplates() { return adminApi<TemplatesPayload>("/api/admin/commerce/templates"); }
 export function saveCommerceTemplate(csrfToken: string, template: CommerceTemplate) {
   return adminApi<TemplatesPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(template) });
+}
+export function getMerchandisingProducts() { return adminApi<MerchandisingPayload>("/api/admin/commerce/products"); }
+export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {
+  return adminApi<MerchandisingPayload>("/api/admin/commerce/products/featured", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ featuredIds }) });
 }
