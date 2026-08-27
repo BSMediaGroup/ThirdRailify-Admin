@@ -1,20 +1,22 @@
 # Third Railify Admin
 
-Independent authenticated control-room foundation for Third Railify operations. This milestone establishes the shared D1 account authority, real session/role enforcement, and bounded account administration; content, commerce, editorial media, membership, and integration operations remain deferred.
+Independent authenticated control room for Third Railify operations. The shared D1 account authority, real session/role enforcement, bounded account administration, and an Admin-only Canadian commerce control-plane scaffold are implemented; live commerce and provider activation remain disabled.
 
 ## Current state
 
 - Vite 5, React 18, TypeScript, and React Router.
 - Branded responsive sidebar with a discreet topbar-triggered desktop icon-only collapse, a full mobile drawer, a header-aligned authenticated account menu, server-hydrated overview, future-area route shells, and a branded 404.
 - American Captain display typography rendered at its real weight with lightly relaxed heading tracking and line-height.
-- Routes for Overview, Site Content, Shop / Products, Orders, Media, VIP / Membership, Users / Access, Integrations, and Settings.
+- Routes for Overview, Site Content, Shop / Products, Orders, Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.
 - D1-backed email/password accounts, verification/reset email, Discord/Google/GitHub/X OAuth, explicit Turnstile, hashed sessions, one-time public handoff, rate limiting, and bounded audit records.
 - Fail-closed loading, signed-out, regular-user, Full Admin, and Master Admin gates with no protected dashboard flash.
 - Functional `/access` account registry with self-service display-name editing, avatar upload/URL import, search/filters, and Master-only promotion, demotion, status, and session-revocation controls.
 - Admin-authoritative avatar ingestion validates JPG/PNG/WebP bytes, stores immutable content-addressed objects under `/u/<opaque-account-key>/avatar/<sha256>.<ext>`, and persists only the resulting HTTPS URL in D1.
+- Local authority for a future separate `thirdrailify-commerce` D1, provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
+- Stripe-first Canadian operating model with direct connected-account charges, Stripe-hosted KYC, merchant-owned payouts, disabled Checkout, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
 - Cloudflare Pages static output, SPA fallback, document and response-level noindex, restrictive baseline headers, and no custom domain.
 
-Only account administration is operational in code. The verified existing `thirdrailify-profile-media` bucket is declared locally through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` binding. No R2 object mutation, deployment, public `r2.dev` access, or custom media domain is claimed by this repository state; those remaining off-code steps require separate authorization and live acceptance.
+Account administration is operational in code. Commerce pages, local schema, encryption helpers, permissions, API boundaries, forms, and truthful readiness states are implemented, but the commerce database/binding does not exist and every payment/fulfillment activation gate remains off. The verified existing `thirdrailify-profile-media` bucket is declared locally through the Admin-only `THIRDRAILIFY_PROFILE_MEDIA` binding. No R2 object mutation, commerce D1 creation, provider call, transaction, fulfillment order, deployment, public `r2.dev` access, or custom media domain is claimed by this repository state; all off-code steps require separate authorization and live acceptance.
 
 ## Local development
 
@@ -43,8 +45,14 @@ The production output is `dist/`. The local development server uses port 5174 an
 | --- | --- |
 | `/` | Authenticated account/configuration posture and deferred-module boundaries |
 | `/content` | Future site-content shell |
-| `/products` | Future provider-neutral catalogue shell |
-| `/orders` | Future order-operations shell |
+| `/products` | Provider-neutral product authority scaffold; synchronization disabled |
+| `/orders` | Order authority and separate payment/fulfillment cost model; no synthetic orders |
+| `/commerce` | Truthful commerce readiness and provider status overview |
+| `/commerce/payments` | Stripe/PayPal/Wix payment and payout model; no connection action |
+| `/commerce/business` | Structured public/private business profile; persistence fails closed without commerce D1 and encryption |
+| `/commerce/tax` | Encrypted tax identifiers and document presentation; no custom tax calculation/compliance claim |
+| `/commerce/emails` | Safe structured customer template editor; no send path |
+| `/commerce/fulfillment` | Printful draft-only and Printify unavailable posture; no provider call |
 | `/media` | Future managed-asset shell |
 | `/membership` | Future VIP/membership shell |
 | `/access` | D1-backed account registry and role/status/session controls |
@@ -67,19 +75,25 @@ ThirdRailify-Admin/
 │   ├── _routes.json        Auth and Admin Pages Function routing
 │   └── _redirects          SPA fallback
 ├── functions/
-│   ├── _shared/            D1 auth/session/OAuth/security and profile-media authority
-│   ├── api/                Shared auth plus signed Admin account/status APIs
+│   ├── _shared/            D1 auth/session/OAuth/security, profile-media, and commerce helpers
+│   ├── api/                Shared auth plus signed Admin account/status/commerce APIs
 │   └── u/                  Immutable R2-backed profile-media delivery
+├── commerce-migrations/    Local authority for the future separate commerce D1
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
 │   ├── auth/               Gate, session provider, modal, Turnstile, and account widget
+│   ├── commerce/           Typed Admin commerce API client
 │   ├── components/         Shell, icons, and state examples
 │   ├── config/             Route/navigation definitions
-│   ├── pages/              Live Overview/Accounts plus future-area and 404 pages
+│   ├── pages/              Live Overview/Accounts, commerce control plane, future areas, and 404
 │   └── styles/             Tokens and responsive admin visual system
-├── tests/                  D1 migration and auth/API integration coverage
+├── tests/                  Auth/commerce migrations, crypto, API, permissions, and safety coverage
+├── CLOUDFLARE_COMMERCE_SETUP.md
 ├── CLOUDFLARE_AUTH_SETUP.md
 ├── CLOUDFLARE_SETUP.md
+├── COMMERCE_ARCHITECTURE.md
+├── STRIPE_CANADA_FEASIBILITY.md
+├── WIX_COMMERCE_AUDIT.md
 ├── BUMP_NOTES.md
 └── package.json
 ```
@@ -94,8 +108,11 @@ The display system uses the seeded American Captain asset at its real weight wit
 - All mutations require the exact Admin origin, a current server-resolved role, and CSRF proof. Environment Master accounts remain locked and their passwords stay environment-only.
 - Display-name changes are self-service, CSRF-protected, rate-limited, audited, and persisted only through the Admin-owned D1 account authority; Master role/email locking does not overwrite a chosen display name.
 - Avatar uploads and URL imports are rate-limited, capped at 5 MB, content-sniffed as JPG/PNG/WebP, and written only to the Admin-owned `THIRDRAILIFY_PROFILE_MEDIA` object binding. Public can proxy a current session proof but cannot own the object binding or update D1 itself.
+- Commerce reuses the same session, role, origin, CSRF, rate-limit, and audit boundary. Master Admins own all commerce capabilities and are the only accounts that can grant/revoke them; Full Admins can view and may receive bounded commerce capabilities; ordinary users cannot.
+- Private business/legal/tax values require the separate commerce D1 and server-only AES-256-GCM key. Missing storage/key, malformed envelopes, wrong keys, and tampering fail closed. Stripe and Printful secrets remain Cloudflare Secrets; no browser or Public payload receives them.
+- Structured email/document templates allow bounded fields only and reject scripts or executable HTML. There is no send path in this milestone.
 - `noindex` is not access control. The application gate and signed APIs are mandatory; any outer Cloudflare Access policy must preserve narrowly required public auth/callback routes.
 
 ## Cloudflare and domain safety
 
-See `CLOUDFLARE_AUTH_SETUP.md` for the shared D1 binding, Admin-only profile-media R2 binding, secrets, Turnstile, Resend, exact OAuth callbacks, Access caveat, deployment order, and production transition. No Pages deployment is claimed. Do not attach `admin.thirdrailify.com` during staging.
+See `CLOUDFLARE_AUTH_SETUP.md` for account infrastructure and `CLOUDFLARE_COMMERCE_SETUP.md` for the deliberately unperformed commerce activation sequence. `COMMERCE_ARCHITECTURE.md`, `WIX_COMMERCE_AUDIT.md`, and `STRIPE_CANADA_FEASIBILITY.md` record the design, source evidence, and exact off-code blocker. No Pages deployment is claimed. Do not attach `admin.thirdrailify.com` during staging.

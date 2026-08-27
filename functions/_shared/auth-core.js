@@ -30,6 +30,7 @@ const RATE_RULES = {
   handoff: { limit: 10, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   profile: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   avatar: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
+  commerce: { limit: 30, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
 };
 
 const ONE_TIME_TABLES = new Set(["email_verification_tokens", "password_reset_tokens"]);
