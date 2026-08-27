@@ -10,6 +10,7 @@
   "products": [
     {
       "id": "c2cb6ed3-d090-48a9-a742-3d3ed7cfe5c4",
+      "wixExternalProductId": "c2cb6ed3-d090-48a9-a742-3d3ed7cfe5c4",
       "title": "BLEH | Unisex classic tee",
       "slug": "bleh-unisex-classic-tee",
       "publicUrl": "https://www.thirdrailify.com/product-page/bleh-unisex-classic-tee",
@@ -21,6 +22,7 @@
       "image": "assets/catalogue/bleh-unisex-classic-tee.png",
       "availability": "listed_at_audit",
       "productType": "tee",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     },
@@ -37,6 +39,7 @@
       "image": "assets/catalogue/just-gina-icon-short-sleeve-t-shirt.png",
       "availability": "listed_at_audit",
       "productType": "tee",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     },
@@ -53,6 +56,7 @@
       "image": "assets/catalogue/just-gina-icon-unisex-tee.png",
       "availability": "listed_at_audit",
       "productType": "tee",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     },
@@ -69,6 +73,7 @@
       "image": "assets/catalogue/just-gina-wordmark-dad-hat.png",
       "availability": "listed_at_audit",
       "productType": "hat",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     },
@@ -85,6 +90,7 @@
       "image": "assets/catalogue/third-railify-wordmark-dad-hat.png",
       "availability": "listed_at_audit",
       "productType": "hat",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     },
@@ -101,6 +107,7 @@
       "image": "assets/catalogue/third-railify-icon-dad-hat.png",
       "availability": "listed_at_audit",
       "productType": "hat",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     },
@@ -117,6 +124,7 @@
       "image": "assets/catalogue/third-railify-logo-short-sleeve-t-shirt.png",
       "availability": "listed_at_audit",
       "productType": "tee",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     },
@@ -133,6 +141,7 @@
       "image": "assets/catalogue/third-railify-logo-v2-unisex-classic-tee.png",
       "availability": "listed_at_audit",
       "productType": "tee",
+      "classification": "PRINTFUL_MERCH",
       "fulfillmentClass": "printful_merchandise",
       "printfulAssociation": "requires_live_reconciliation"
     }

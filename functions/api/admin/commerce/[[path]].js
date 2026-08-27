@@ -30,6 +30,8 @@ import {
   discoverLegacyPrintfulSource,
   snapshotPrintfulCatalogues,
 } from "../../../_shared/printful-catalogue.js";
+import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
+import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrdersPayload } from "../../../_shared/checkout-core.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
@@ -97,7 +99,14 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     authEventType = "printful_catalogue_source_verified";
   } else if (path === "printful/catalogue/snapshot") {
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
-    payload = { ok: true, ...(await snapshotPrintfulCatalogues(env, fetchImpl)) };
+    requireCommerceDatabase(env);
+    const providerSnapshot = await snapshotPrintfulCatalogues(env, fetchImpl);
+    payload = {
+      ok: true,
+      ...providerSnapshot,
+      publicCatalogue: PUBLIC_WIX_CATALOGUE,
+      reconciliation: reconcileCatalogues(providerSnapshot, PUBLIC_WIX_CATALOGUE),
+    };
     authEventType = "printful_catalogue_snapshot_completed";
   } else if (path === "business") {
     const body = await readJsonBody(request);
@@ -154,11 +163,20 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
         sourceVariantCount: payload.source.counts.variants,
         targetProductCount: payload.target.counts.products,
         targetVariantCount: payload.target.counts.variants,
+        matchedCount: payload.reconciliation.counts.printfulBackedMatches,
+        unresolvedCount: payload.reconciliation.counts.unresolved,
+        nonPrintfulCount: payload.reconciliation.counts.nonPrintful,
         correlationId: payload.correlationId,
       } : {}),
     },
   });
   return jsonResponse(payload, { headers: corsHeaders(request, env) });
+}
+
+function requireCommerceDatabase(env) {
+  if (!env?.THIRDRAILIFY_COMMERCE_DB || typeof env.THIRDRAILIFY_COMMERCE_DB.prepare !== "function") {
+    throw new AuthFailure(503, "commerce_database_unavailable", "Commerce storage is required for this audited action.");
+  }
 }
 
 function requireAdminOriginWhenPresent(request, env) {

@@ -8,6 +8,7 @@ CREATE TABLE commerce_product_variants (
   id TEXT PRIMARY KEY CHECK (length(id) = 36),
   product_id TEXT NOT NULL,
   local_variant_key TEXT NOT NULL CHECK (length(local_variant_key) BETWEEN 1 AND 180),
+  printful_target_sync_product_id TEXT CHECK (printful_target_sync_product_id IS NULL OR length(printful_target_sync_product_id) BETWEEN 1 AND 240),
   printful_target_sync_variant_id TEXT UNIQUE CHECK (printful_target_sync_variant_id IS NULL OR length(printful_target_sync_variant_id) BETWEEN 1 AND 240),
   printful_catalogue_variant_id TEXT CHECK (printful_catalogue_variant_id IS NULL OR length(printful_catalogue_variant_id) BETWEEN 1 AND 240),
   legacy_printful_sync_product_id TEXT CHECK (legacy_printful_sync_product_id IS NULL OR length(legacy_printful_sync_product_id) BETWEEN 1 AND 240),
@@ -30,6 +31,10 @@ CREATE TABLE commerce_product_variants (
   fulfillment_provider TEXT NOT NULL DEFAULT 'printful' CHECK (fulfillment_provider IN ('printful', 'printify', 'manual', 'none')),
   fulfillment_mapping_status TEXT NOT NULL DEFAULT 'unmapped'
     CHECK (fulfillment_mapping_status IN ('unmapped', 'planned', 'mapped', 'conflict', 'manual_review')),
+  migration_status TEXT NOT NULL DEFAULT 'planned'
+    CHECK (migration_status IN ('planned', 'verified', 'imported', 'blocked', 'rolled_back')),
+  migration_provenance_json TEXT NOT NULL DEFAULT '{}'
+    CHECK (json_valid(migration_provenance_json) AND length(migration_provenance_json) <= 16384 AND json_type(migration_provenance_json) = 'object'),
   safe_metadata_json TEXT NOT NULL DEFAULT '{}'
     CHECK (json_valid(safe_metadata_json) AND length(safe_metadata_json) <= 16384 AND json_type(safe_metadata_json) = 'object'),
   created_at TEXT NOT NULL,
@@ -43,6 +48,8 @@ CREATE INDEX idx_commerce_product_variants_product
   ON commerce_product_variants(product_id, is_active DESC, is_sellable DESC, local_variant_key);
 CREATE INDEX idx_commerce_product_variants_catalogue
   ON commerce_product_variants(printful_catalogue_variant_id);
+CREATE INDEX idx_commerce_product_variants_printful_target
+  ON commerce_product_variants(printful_target_sync_product_id, printful_target_sync_variant_id);
 CREATE INDEX idx_commerce_product_variants_sku
   ON commerce_product_variants(sku) WHERE sku IS NOT NULL;
 CREATE INDEX idx_commerce_product_variants_sellable

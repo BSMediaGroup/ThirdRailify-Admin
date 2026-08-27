@@ -15,7 +15,7 @@ import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-he
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const SOURCE_TOKEN = "opaque-wix-reader-token";
 const TARGET_TOKEN = "opaque-target-token";
-const SOURCE_ID = "9876543";
+const SOURCE_ID = "16847493";
 const TARGET_ID = "18668025";
 
 function env(overrides = {}) {
@@ -66,7 +66,7 @@ function targetDetail(id = 700) {
   };
 }
 
-function providerFetch({ sourceCount = 1, sourceStore = { id: Number(SOURCE_ID), type: "wix", name: "Third Railify Wix" }, targetStore = { id: Number(TARGET_ID), type: "native", name: "Third Railify API" }, sourceVariantOverrides = {}, calls = [] } = {}) {
+function providerFetch({ sourceCount = 1, sourceStore = { id: Number(SOURCE_ID), type: "wix", name: "Third Railify Official" }, targetStore = { id: Number(TARGET_ID), type: "native", name: "Third Railify API" }, sourceVariantOverrides = {}, calls = [] } = {}) {
   return async (input, init = {}) => {
     const url = new URL(input);
     const authorization = new Headers(init.headers).get("Authorization");
@@ -84,6 +84,8 @@ function providerFetch({ sourceCount = 1, sourceStore = { id: Number(SOURCE_ID),
     if (url.pathname === "/store/products") return Response.json({ code: 200, result: [targetSummary()], paging: { total: 1, offset: 0, limit: 100 } });
     const targetMatch = /^\/store\/products\/(\d+)$/.exec(url.pathname);
     if (targetMatch) return Response.json({ code: 200, result: targetDetail(Number(targetMatch[1])) });
+    const fileMatch = /^\/files\/(\d+)$/.exec(url.pathname);
+    if (fileMatch) return Response.json({ code: 200, result: { id: Number(fileMatch[1]), type: "front", url: `https://example.test/file-${fileMatch[1]}.png`, filename: `file-${fileMatch[1]}.png`, preview_url: `https://example.test/file-${fileMatch[1]}-preview.png` } });
     return Response.json({ code: 404 }, { status: 404 });
   };
 }
@@ -94,26 +96,32 @@ test("legacy source token is mandatory and never falls back to the target token"
   assert.equal(calls, 0);
 });
 
-test("legacy discovery requires exactly one non-native Wix store distinct from the target", async () => {
+test("legacy discovery pins the exact verified Wix source identity", async () => {
   const cases = [
     [{ code: 200, result: [] }, "printful_source_store_count_invalid"],
     [{ code: 200, result: [{ id: 1, type: "wix", name: "One" }, { id: 2, type: "wix", name: "Two" }] }, "printful_source_store_count_invalid"],
-    [{ code: 200, result: [{ id: Number(TARGET_ID), type: "native", name: "Third Railify API" }] }, "printful_wix_source_is_target"],
-    [{ code: 200, result: [{ id: 991, type: "native", name: "Other" }] }, "printful_wix_source_is_target"],
-    [{ code: 200, result: [{ id: 992, type: "shopify", name: "Third Railify" }] }, "printful_wix_source_identity_ambiguous"],
+    [{ code: 200, result: [{ id: Number(TARGET_ID), type: "native", name: "Third Railify API" }] }, "printful_source_store_mismatch"],
+    [{ code: 200, result: [{ id: Number(SOURCE_ID), type: "native", name: "Third Railify Official" }] }, "printful_source_store_identity_invalid"],
+    [{ code: 200, result: [{ id: Number(SOURCE_ID), type: "wix", name: "Wrong Wix store" }] }, "printful_source_store_identity_invalid"],
   ];
   for (const [payload, code] of cases) {
     const fetchImpl = async () => Response.json(payload);
     await assert.rejects(discoverLegacyPrintfulSource(env(), fetchImpl), (error) => error.code === code);
   }
   const discovered = await discoverLegacyPrintfulSource(env(), providerFetch());
-  assert.deepEqual(discovered, { store: { id: SOURCE_ID, name: "Third Railify Wix", type: "wix" }, configuredStoreId: SOURCE_ID, configurationMatches: true });
+  assert.deepEqual(discovered, { store: { id: SOURCE_ID, name: "Third Railify Official", type: "wix" }, configuredStoreId: SOURCE_ID, configurationMatches: true });
 });
 
 test("configured legacy Store ID must match the token-resolved source", async () => {
   const discovered = await discoverLegacyPrintfulSource(env({ PRINTFUL_WIX_SOURCE_STORE_ID: "123" }), providerFetch());
   assert.equal(discovered.configurationMatches, false);
-  await assert.rejects(snapshotPrintfulCatalogues(env({ PRINTFUL_WIX_SOURCE_STORE_ID: "123" }), providerFetch()), (error) => error.code === "printful_wix_source_store_mismatch");
+  await assert.rejects(snapshotPrintfulCatalogues(env({ PRINTFUL_WIX_SOURCE_STORE_ID: "123" }), providerFetch()), (error) => error.code === "printful_source_store_mismatch");
+});
+
+test("source and target configuration cannot collide and the permanent target stays pinned", async () => {
+  await assert.rejects(snapshotPrintfulCatalogues(env({ PRINTFUL_WIX_SOURCE_STORE_ID: TARGET_ID }), providerFetch()), (error) => error.code === "printful_source_store_mismatch");
+  await assert.rejects(snapshotPrintfulCatalogues(env({ PRINTFUL_STORE_ID: "123" }), providerFetch()), (error) => error.code === "printful_target_store_mismatch");
+  await assert.rejects(snapshotPrintfulCatalogues(env(), providerFetch({ targetStore: { id: Number(TARGET_ID), type: "wix", name: "Third Railify API" } })), (error) => error.code === "printful_target_store_identity_invalid");
 });
 
 test("catalogue snapshot uses isolated endpoint families, paginates past 100, and fetches every detail", async () => {
@@ -129,6 +137,8 @@ test("catalogue snapshot uses isolated endpoint families, paginates past 100, an
   assert.equal(calls.every((call) => !call.headers.has("X-PF-Store-Id")), true);
   assert.equal(calls.filter((call) => call.role === "source").every((call) => call.path === "/stores" || call.path.startsWith("/sync/products")), true);
   assert.equal(calls.filter((call) => call.role === "target").every((call) => call.path === "/stores" || call.path.startsWith("/store/products")), true);
+  assert.equal(calls.filter((call) => call.path.startsWith("/sync/products")).every((call) => call.role === "source"), true);
+  assert.equal(calls.filter((call) => call.path.startsWith("/store/products")).every((call) => call.role === "target"), true);
 });
 
 test("money normalization is exact and malformed prices remain classified", () => {
@@ -149,6 +159,16 @@ test("variant-specific prices and safe file, placement, and option fields are pr
   assert.equal(variant.files[0].type, "front");
   assert.deepEqual(variant.files[0].options, [{ id: "template_type", value: "native" }]);
   assert.deepEqual(variant.options, [{ id: "embroidery_type", value: "flat" }]);
+});
+
+test("missing recreation metadata is completed through a GET-only file detail", async () => {
+  const calls = [];
+  const result = await snapshotPrintfulCatalogues(env(), providerFetch({ calls, sourceVariantOverrides: { files: [{ id: 9001 }] } }));
+  const file = result.source.products[0].variants[0].files[0];
+  assert.equal(file.type, "front");
+  assert.equal(file.filename, "file-9001.png");
+  assert.equal(file.previewUrl, "https://example.test/file-9001-preview.png");
+  assert.deepEqual(calls.filter((call) => call.path === "/files/9001").map((call) => [call.method, call.role]), [["GET", "source"]]);
 });
 
 test("protected source verification enforces auth, exact origin, CSRF, capability, and rate conventions", async (t) => {
@@ -182,6 +202,8 @@ test("full snapshot route does not touch commerce products, orders, checkout, or
   assert.doesNotMatch(serialized, new RegExp(SOURCE_TOKEN));
   assert.doesNotMatch(serialized, new RegExp(TARGET_TOKEN));
   assert.doesNotMatch(serialized, /customer_email|shipping_address|billing_address|payment_method|authorization/i);
+  assert.equal(payload.publicCatalogue.source.repository, "ThirdRailify");
+  assert.equal(payload.reconciliation.counts.publicProducts, 8);
   assert.deepEqual(await harness.commerceDb.prepare("SELECT (SELECT COUNT(*) FROM commerce_products) AS products, (SELECT COUNT(*) FROM commerce_orders) AS orders, (SELECT value_json FROM commerce_settings WHERE setting_key='checkout_enabled') AS checkout, (SELECT value_json FROM commerce_settings WHERE setting_key='fulfillment_submission_enabled') AS fulfillment").first(), before);
 });
 

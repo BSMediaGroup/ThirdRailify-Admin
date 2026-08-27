@@ -48,12 +48,23 @@ export type PrintfulSourceVerificationPayload = {
 };
 export type PrintfulCatalogueSnapshot = {
   role: string; store: PrintfulStoreIdentity;
-  counts: { products: number; variants: number; synced: number; ignored: number; unavailable: number; malformedOrMissingPrices: number; variantsWithoutFiles: number };
+  counts: { products: number; variants: number; synced: number; ignored: number; ignoredProducts: number; unavailable: number; missingPrices: number; malformedPrices: number; malformedOrMissingPrices: number; missingFiles: number; variantsWithoutFiles: number };
   products: unknown[];
+};
+export type PublicWixCatalogueSnapshot = {
+  schemaVersion: number;
+  source: { repository: string; file: string; totalProductsReportedByLegacyAudit: number; productsRepresentedInCurrentPublicSnapshot: number };
+  products: unknown[];
+};
+export type CatalogueReconciliation = {
+  schemaVersion: number;
+  counts: { publicProducts: number; printfulBackedMatches: number; nonPrintful: number; unresolved: number; sourceOnly: number; priceConflicts: number; variantConflicts: number; fileConflicts: number; plannedTargetCreates: number; manualDecisions: number };
+  matrix: unknown[]; targetDispositions: unknown[]; plannedTargetPayloads: unknown[];
 };
 export type PrintfulProviderSnapshotPayload = {
   ok: boolean; schemaVersion: number; correlationId: string; endpointsUsed: string[];
   source: PrintfulCatalogueSnapshot; target: PrintfulCatalogueSnapshot;
+  publicCatalogue: PublicWixCatalogueSnapshot; reconciliation: CatalogueReconciliation;
   safety: { providerMethods: string[]; sourceCredential: string; targetCredential: string; tokensIncluded: boolean; customerOrOrderDataIncluded: boolean };
 };
 

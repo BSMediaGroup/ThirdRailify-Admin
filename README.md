@@ -16,6 +16,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Functional `/products` merchandising workspace backed by `commerce_products`: Master Admins can feature/unfeature displayable snapshot products, set deterministic hero order with accessible move controls, preview warnings, and persist through the established session/origin/CSRF/rate-limit/D1/audit path.
 - Local V2 GOATS authority and Master Admin workspace for submission moderation, coarse map coordinates, private media, approved publication, reactions/comments, and idempotent transactional-email outbox events. Migration `0004` ships no production listings; two synthetic demos are explicit local/test-only fixtures.
 - Public read-only `/api/catalogue/merchandising` projection exposes only product ID, slug, featured state, and order; it contains no price, image path, safe metadata, credential, or write capability.
+- Protected read-only catalogue recovery pins the legacy Wix source to `Third Railify Official` / `16847493` / `wix` and the permanent target to `Third Railify API` / `18668025` / `native`. `/commerce/fulfillment` downloads separate sanitized source, target, Public, and reconciliation JSON artifacts; every provider request is GET-only and no catalogue row is imported.
 - Public-origin `POST /api/commerce/checkout` is the Admin-hosted customer Checkout engine: it accepts only a checkout-request UUID plus bounded product IDs and quantities, derives CAD integer prices/names/totals from `commerce_products`, snapshots a local order before Stripe, and creates only Stripe-hosted TEST Checkout Sessions. The remote `checkout_enabled=false` gate and empty authoritative catalogue keep the route safely disabled.
 - Public machine-to-machine `POST /api/webhooks/stripe` receiver code with exact raw-body Web Crypto verification, a five-minute Stripe `v1` timestamp window, test-event enforcement, and D1-backed duplicate receipt protection. A real signed sandbox event has verified the deployed destination and matching Admin-only signing configuration.
 - Stripe-first Canadian operating model using the dedicated Third Railify Official merchant account, server-created Stripe-hosted Checkout Sessions, Admin-only environment secrets, disabled Checkout/live capture, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
@@ -97,6 +98,7 @@ ThirdRailify-Admin/
 │   ├── _shared/            D1 auth/session/OAuth/security, profile-media, commerce, and GOATS helpers
 │   ├── api/                Shared auth, signed Admin/GOATS APIs, public projections, and signed Stripe webhook receiver
 │   └── u/                  Immutable R2-backed profile-media delivery
+├── commerce-import/        Sanitized catalogue evidence and design-only variant schema
 ├── commerce-migrations/    Commerce, Stripe/order/product authority, and additive GOATS community schema
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
@@ -108,6 +110,7 @@ ThirdRailify-Admin/
 │   └── styles/             Tokens and responsive admin visual system
 ├── tests/
 │   ├── printful.test.mjs   Focused single-store, no-write, persistence, and Store-ID invariant coverage
+│   ├── printful-catalogue.test.mjs  Full GET-only source/target snapshot safety coverage
 │   └── …                   Auth/commerce migrations, crypto, API, permissions, and safety coverage
 ├── docs/                   GOATS authority/import contracts and operator boundaries
 ├── scripts/                GOATS import validator plus opt-in demo seed/cleanup fixtures
@@ -141,6 +144,7 @@ The display system uses the seeded American Captain asset at its real weight wit
 - Checkout is not an Admin mutation: it requires the exact configured Public origin, narrow POST/OPTIONS CORS, commerce D1, disabled/live/provider/API/webhook gates, a test-only server credential, bounded JSON, and the anonymous checkout rate limit. It requires Turnstile only if the future `checkout_turnstile_required` safe setting is explicitly enabled. It never accepts browser price, name, currency, total, Stripe Price ID, tax, shipping, or discount authority.
 - `stripe_api_configured=true` means a server-side test credential completed `GET /v1/account` and the returned account passed the `CA`/`cad` checks. `stripe_webhook_configured=true` means a correctly signed, timely, well-formed, `livemode=false` Stripe Event reached the duplicate-safe receipt path. Secret existence alone proves neither state, and neither flag enables Checkout, live payment capture, or fulfillment.
 - Printful uses its real API, not a Stripe-style sandbox. `PRINTFUL_API_TOKEN` is a production-capable, store-scoped Admin Cloudflare encrypted secret; `PRINTFUL_STORE_ID=18668025` is ordinary safe Wrangler configuration. Verification accepts exactly one native store named `Third Railify API`, compares token/configured/persisted IDs whenever configuration exists, performs only the two approved GETs, and leaves order mode `draft_only`, webhooks false, fulfillment false, and the Wix-connected store untouched.
+- `PRINTFUL_WIX_SOURCE_TOKEN` is separate temporary read-only migration authority for only the Wix-connected source. It may read store identity, sync products/details, and strictly necessary file metadata; `PRINTFUL_WIX_SOURCE_STORE_ID=16847493` is safe ordinary configuration. Revoke the token after successful migration and cutover verification. Never copy either Printful token into Wrangler vars, D1, browser requests, downloads, logs, or documentation.
 - Private business/legal/tax values require the separate commerce D1 and server-only AES-256-GCM key. Missing storage/key, malformed envelopes, wrong keys, and tampering fail closed. The dedicated Stripe account's secret key/webhook secret and the Printful token remain Admin-only Cloudflare encrypted secrets; no browser or Public payload receives them.
 - Structured email/document templates allow bounded fields only and reject scripts or executable HTML. There is no send path in this milestone.
 - `noindex` is not access control. The application gate and signed APIs are mandatory; any outer Cloudflare Access policy must preserve narrowly required public auth/callback routes.

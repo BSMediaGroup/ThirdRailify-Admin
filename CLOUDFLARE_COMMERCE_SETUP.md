@@ -13,6 +13,7 @@ This runbook records the completed staging control-plane prerequisites and the s
 - The existing auth D1 remains the identity/session/role authority and must not become the main commerce database.
 - Wix remains production authority and all Wix providers stay connected until an approved cutover.
 - The permanent `Third Railify API` Printful Manual Order/API store and its store-scoped production-capable Private Token exist separately from Wix. The token belongs only in the Admin Production encrypted secret `PRINTFUL_API_TOKEN`; its numeric Store ID belongs in the ordinary Wrangler variable `PRINTFUL_STORE_ID` after read-only discovery.
+- The temporary source reader is the separate encrypted secret `PRINTFUL_WIX_SOURCE_TOKEN`; only its safe verified ID is ordinary configuration as `PRINTFUL_WIX_SOURCE_STORE_ID=16847493`. It resolves to `Third Railify Official` of type `wix` and must be revoked after successful migration/cutover verification.
 - PayPal remains deferred.
 
 ## Required future sequence
@@ -89,6 +90,8 @@ The permanent Printful store is `Third Railify API`, safe Store ID `18668025`, c
 Store the Private Token only as the Admin Production encrypted secret `PRINTFUL_API_TOKEN`; never retrieve or expose its value. The protected read-only `/stores` action established the numeric ID, now stored only as the safe Wrangler-owned `PRINTFUL_STORE_ID=18668025` variable. Verification must see exactly one native `Third Railify API` store and require token-resolved, configured, and persisted IDs to agree after configuration. It may call only `GET /stores` and `GET /store/products?limit=1`; it must never send `X-PF-Store-Id` during initial store-scoped discovery or perform a Printful POST, PUT, PATCH, or DELETE.
 
 Keep `printful_order_mode=draft_only`, fulfillment submission disabled, webhooks unconfigured, and explicit confirmation required after authoritative payment reconciliation. The existing Wix store is a future catalogue migration source only and must not be accessed or modified by this token. Stripe never pays Printful directly.
+
+The catalogue action is `POST /api/admin/commerce/printful/catalogue/snapshot`, exposed as **Run read-only catalogue snapshot** on `/commerce/fulfillment`. It requires an authenticated operator and downloads `printful-wix-source.snapshot.json`, `printful-api-target.snapshot.json`, `public-wix-catalog.snapshot.json`, and `catalogue-reconciliation.json`. Do not weaken authentication or create a token-bearing local substitute. The action may send only source `GET /stores`, paginated `GET /sync/products`, product-detail GETs and necessary file-detail GETs, plus the equivalent target `GET /stores`, paginated `GET /store/products`, product-detail GETs and necessary file-detail GETs.
 
 Do not configure PayPal credentials yet. Its future direct-merchant REST credentials are `admin_encrypted`, and it remains limited to later `/donate` and possible VIP work rather than preferred shop checkout. Do not design partner onboarding.
 

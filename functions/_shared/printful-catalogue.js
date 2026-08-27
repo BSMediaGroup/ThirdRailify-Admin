@@ -1,17 +1,21 @@
 import { AuthFailure, cleanText, randomId } from "./auth-core.js";
 
 const PRINTFUL_API_ORIGIN = "https://api.printful.com";
+const SOURCE_STORE_ID = "16847493";
+const SOURCE_STORE_NAME = "Third Railify Official";
 const TARGET_STORE_ID = "18668025";
 const TARGET_STORE_NAME = "Third Railify API";
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 1000;
 const MAX_PRODUCTS = 10_000;
+const MAX_FILES = 20_000;
 const MAX_CREDENTIAL_LENGTH = 4096;
 
 export const PRINTFUL_CATALOGUE_ENDPOINTS = Object.freeze({
   stores: `${PRINTFUL_API_ORIGIN}/stores`,
   sourceProducts: `${PRINTFUL_API_ORIGIN}/sync/products`,
   targetProducts: `${PRINTFUL_API_ORIGIN}/store/products`,
+  files: `${PRINTFUL_API_ORIGIN}/files`,
 });
 
 export function parseCadMinorUnits(value) {
@@ -56,17 +60,21 @@ export async function snapshotPrintfulCatalogues(env, fetchImpl = fetch) {
   const correlationId = randomId();
   const sourceIdentity = await discoverLegacyPrintfulSource(env, fetchImpl);
   const configuredSourceId = requiredStoreId(env?.PRINTFUL_WIX_SOURCE_STORE_ID, "printful_wix_source_store_id_required");
-  if (sourceIdentity.store.id !== configuredSourceId) {
-    throw new AuthFailure(409, "printful_wix_source_store_mismatch", "The token-resolved legacy Printful Store ID does not match safe configuration.");
+  if (sourceIdentity.store.id !== SOURCE_STORE_ID || configuredSourceId !== SOURCE_STORE_ID || sourceIdentity.store.id !== configuredSourceId) {
+    throw new AuthFailure(409, "printful_source_store_mismatch", "The legacy Printful source identity does not match safe configuration.");
   }
   assertDifferentStoreIds(configuredSourceId, requiredStoreId(env?.PRINTFUL_STORE_ID, "printful_target_store_id_invalid"));
   const targetIdentity = await discoverPermanentPrintfulTarget(env, fetchImpl);
 
   const sourceCredential = requiredCredential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable");
   const targetCredential = requiredCredential(env?.PRINTFUL_API_TOKEN, "printful_target_token_unavailable");
-  const [sourceProducts, targetProducts] = await Promise.all([
+  const [sourceProductsRead, targetProductsRead] = await Promise.all([
     readCompleteCatalogue(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.sourceProducts, sourceCredential, "source"),
     readCompleteCatalogue(fetchImpl, PRINTFUL_CATALOGUE_ENDPOINTS.targetProducts, targetCredential, "target"),
+  ]);
+  const [sourceProducts, targetProducts] = await Promise.all([
+    enrichIncompleteFileMetadata(fetchImpl, sourceProductsRead, sourceCredential, "source"),
+    enrichIncompleteFileMetadata(fetchImpl, targetProductsRead, targetCredential, "target"),
   ]);
 
   return {
@@ -78,6 +86,7 @@ export async function snapshotPrintfulCatalogues(env, fetchImpl = fetch) {
       "GET /sync/products/{id}",
       "GET /store/products?offset={offset}&limit=100",
       "GET /store/products/{id}",
+      "GET /files/{id} only when product detail omits required file metadata",
     ],
     source: buildCatalogueSnapshot(sourceIdentity.store, sourceProducts, "legacy_wix_source"),
     target: buildCatalogueSnapshot(targetIdentity.store, targetProducts, "permanent_api_target"),
@@ -120,6 +129,8 @@ async function readCompleteCatalogue(fetchImpl, baseUrl, credential, role) {
 
 function buildCatalogueSnapshot(store, products, role) {
   const variants = products.flatMap((product) => product.variants);
+  const missingPrices = variants.filter((variant) => variant.price.status === "malformed" && variant.price.value === null).length;
+  const malformedPrices = variants.filter((variant) => variant.price.status === "malformed" && variant.price.value !== null).length;
   return {
     role,
     store,
@@ -128,8 +139,12 @@ function buildCatalogueSnapshot(store, products, role) {
       variants: variants.length,
       synced: variants.filter((variant) => variant.synced === true).length,
       ignored: variants.filter((variant) => variant.isIgnored === true).length,
+      ignoredProducts: products.filter((product) => product.isIgnored === true).length,
       unavailable: variants.filter((variant) => variant.availabilityStatus && variant.availabilityStatus !== "active").length,
-      malformedOrMissingPrices: variants.filter((variant) => variant.price.status !== "valid").length,
+      missingPrices,
+      malformedPrices,
+      malformedOrMissingPrices: missingPrices + malformedPrices,
+      missingFiles: variants.filter((variant) => variant.files.length === 0).length,
       variantsWithoutFiles: variants.filter((variant) => variant.files.length === 0).length,
     },
     products,
@@ -175,19 +190,51 @@ function normalizeVariant(variant, role) {
     retailPrice: price.value,
     unitAmountCad: price.minorUnits,
     price,
+    currency: optionalText(variant.currency, 12),
     size: optionalText(variant.size, 120),
     color: optionalText(variant.color, 120),
     synced: booleanOrNull(variant.synced),
     isIgnored: booleanOrNull(variant.is_ignored),
     availabilityStatus: optionalText(variant.availability_status, 80),
+    catalogueProductName: optionalText(variant.product?.name, 300),
+    catalogueVariantName: optionalText(variant.product?.variant_name, 300),
+    catalogueImageUrl: safeUrl(variant.product?.image),
     options: normalizeOptions(variant.options),
     files: normalizeFiles(variant.files),
   };
 }
 
+async function enrichIncompleteFileMetadata(fetchImpl, products, credential, role) {
+  const needed = new Map();
+  for (const product of products) {
+    for (const variant of product.variants) {
+      for (const file of variant.files) {
+        if (file.id && (!file.type || (!file.url && !file.filename))) needed.set(file.id, null);
+      }
+    }
+  }
+  if (needed.size > MAX_FILES) throw new AuthFailure(502, `printful_${role}_file_count_too_large`, "The Printful catalogue exceeds the bounded file-metadata reader limit.");
+  for (const id of [...needed.keys()].sort(compareIds)) {
+    const payload = await printfulGet(fetchImpl, `${PRINTFUL_CATALOGUE_ENDPOINTS.files}/${encodeURIComponent(id)}`, credential, `${role}_file_detail`);
+    needed.set(id, normalizeFile(payload?.result));
+  }
+  if (!needed.size) return products;
+  return products.map((product) => ({
+    ...product,
+    variants: product.variants.map((variant) => ({
+      ...variant,
+      files: variant.files.map((file) => file.id && needed.get(file.id) ? mergeFile(file, needed.get(file.id)) : file),
+    })),
+  }));
+}
+
 function normalizeFiles(files) {
   if (!Array.isArray(files)) return [];
-  return files.map((file) => ({
+  return files.map(normalizeFile).sort((left, right) => `${left.type || ""}:${left.id || ""}:${left.filename || ""}`.localeCompare(`${right.type || ""}:${right.id || ""}:${right.filename || ""}`));
+}
+
+function normalizeFile(file) {
+  return {
     id: providerIdOrNull(file?.id),
     type: optionalText(file?.type, 120),
     url: safeUrl(file?.url),
@@ -197,7 +244,21 @@ function normalizeFiles(files) {
     status: optionalText(file?.status, 80),
     visible: booleanOrNull(file?.visible),
     options: normalizeOptions(file?.options),
-  })).sort((left, right) => `${left.type || ""}:${left.id || ""}:${left.filename || ""}`.localeCompare(`${right.type || ""}:${right.id || ""}:${right.filename || ""}`));
+  };
+}
+
+function mergeFile(primary, detail) {
+  return {
+    id: primary.id || detail.id,
+    type: primary.type || detail.type,
+    url: primary.url || detail.url,
+    filename: primary.filename || detail.filename,
+    previewUrl: primary.previewUrl || detail.previewUrl,
+    thumbnailUrl: primary.thumbnailUrl || detail.thumbnailUrl,
+    status: primary.status || detail.status,
+    visible: primary.visible ?? detail.visible,
+    options: primary.options.length ? primary.options : detail.options,
+  };
 }
 
 function normalizeOptions(options) {
@@ -247,12 +308,11 @@ function normalizeSingleStore(payload, role) {
 }
 
 function assertLegacySourceStore(store) {
-  const type = store.type.toLowerCase();
-  if (store.id === TARGET_STORE_ID || type === "native" || normalizeName(store.name) === normalizeName(TARGET_STORE_NAME)) {
-    throw new AuthFailure(409, "printful_wix_source_is_target", "The legacy source credential resolves to the permanent native target and was rejected.");
+  if (store.id !== SOURCE_STORE_ID) {
+    throw new AuthFailure(409, "printful_source_store_mismatch", "The source credential does not resolve to the verified legacy Wix Store ID.");
   }
-  if (!type.includes("wix")) {
-    throw new AuthFailure(409, "printful_wix_source_identity_ambiguous", "The source credential does not resolve unambiguously to a Wix-connected Printful store.");
+  if (store.type !== "wix" || normalizeName(store.name) !== normalizeName(SOURCE_STORE_NAME)) {
+    throw new AuthFailure(409, "printful_source_store_identity_invalid", "The source credential does not resolve to the verified legacy Wix store identity.");
   }
 }
 

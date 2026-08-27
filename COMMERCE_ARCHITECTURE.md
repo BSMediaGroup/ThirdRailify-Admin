@@ -142,6 +142,16 @@ Only the existing unique Printful provider row is updated. Live read-only verifi
 
 Stripe does not pay Printful. Transaction 1 is the customer's payment to Third Railify. Transaction 2 is Printful's separate charge to the Third Railify Printful Wallet or configured billing method for product/printing, shipping, taxes, and other applicable fees. Order accounting keeps customer gross, Stripe fee, customer refund, Printful product cost, shipping, tax, refund/credit, and gross margin separate. No Printful order creation, confirmation, file/product mutation, or webhook configuration exists in this milestone.
 
+### Read-only catalogue recovery
+
+The migration source is permanently separated from the target. `PRINTFUL_WIX_SOURCE_TOKEN` must resolve to exactly `Third Railify Official` / Store `16847493` / type `wix`, its ordinary configured ID must be `PRINTFUL_WIX_SOURCE_STORE_ID=16847493`, and it must never equal `PRINTFUL_STORE_ID=18668025`. The permanent credential must independently resolve to exactly `Third Railify API` / Store `18668025` / type `native`. Any identity, type, name, configuration, or collision mismatch fails closed before catalogue enumeration.
+
+`POST /api/admin/commerce/printful/catalogue/snapshot` is protected by the exact Admin origin, authenticated Admin session, CSRF, the existing commerce rate limiter, Master or `commerce.integrations.manage`, commerce D1 availability, and a bounded audit. It uses only `GET /stores`, fully paginated source `GET /sync/products`, fully paginated target `GET /store/products`, every corresponding product-detail GET, and file-detail GETs only when a detail lacks enough print-file mapping. It does not read orders, customers, addresses, billing, payments, teams, or account data.
+
+The response contains deterministic canonical source, target, Public projection, and reconciliation sections plus a non-canonical correlation ID. The browser downloads them separately without credentials or headers. Reconciliation orders evidence as external IDs, Printful sync IDs, variant IDs, SKU, catalogue variant IDs, variant structure, integer-CAD price, file correlation, then normalized exact name. A weaker name cannot override conflicting stable identity. Planned `POST /store/products` objects are inert `send=false` evidence only; no transport accepts or sends them.
+
+Concrete variants remain a design only. Applied commerce migration `0004` belongs to GOATS, so the repository-consistent next filename is `commerce-import/0005_commerce_product_variants.proposed.sql`; it is deliberately outside `commerce-migrations`. It adds opaque local variant IDs, parent products, permanent target product/variant mapping, catalogue variant IDs, legacy source/Wix provenance, SKU/size/color/bounded options, exact CAD cents, availability/sellable gates, fulfillment/file mapping, and migration provenance. Checkout continues accepting only `{ productId, quantity }` until a separately authorized schema/import milestone.
+
 PayPal remains a later direct-merchant REST integration for `/donate` and possible VIP use. It is not the preferred shop processor, has no partner onboarding, credential form, or API call, and stays deferred until after Stripe and Printful.
 
 ## Rejected historical architecture
