@@ -62,7 +62,7 @@ export type PublicWixCatalogueSnapshot = {
 };
 export type CatalogueReconciliation = {
   schemaVersion: number;
-  counts: { publicProducts: number; printfulBackedMatches: number; nonPrintful: number; unresolved: number; sourceOnly: number; priceConflicts: number; variantConflicts: number; fileConflicts: number; plannedTargetCreates: number; manualDecisions: number };
+  counts: { publicProducts: number; printfulBackedMatches: number; nonPrintful: number; unresolved: number; sourceOnly: number; priceConflicts: number; variantConflicts: number; fileConflicts: number; plannedTargetCreates: number; manualDecisions: number; targetNativeKeeps?: number; migrationEligibleVariants?: number; discontinuedVariantsExcluded?: number; temporarilyOutOfStockVariantsDeferred?: number };
   matrix: unknown[]; targetDispositions: unknown[]; plannedTargetPayloads: unknown[];
 };
 export type PrintfulProviderSnapshotPayload = {

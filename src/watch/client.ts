@@ -6,11 +6,12 @@ export type WatchAdminEpisode = {
   title: string;
   description: string | null;
   thumbnailUrl: string | null;
+  thumbnailState: "remote" | "proxy" | "fallback";
   watchUrl: string;
   archiveDate: string;
   visible: boolean;
   archiveOrder: number;
-  publicRoute: string;
+  publicRoute: string | null;
 };
 
 export type WatchAdminPayload = {

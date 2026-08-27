@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "role": "permanent_api_target",
+  "store": {
+    "id": "18668025",
+    "name": "Third Railify API",
+    "type": "native"
+  },
+  "counts": {
+    "products": 1,
+    "variants": 1,
+    "synced": 1,
+    "ignored": 0,
+    "ignoredProducts": 0,
+    "unavailable": 0,
+    "missingPrices": 0,
+    "malformedPrices": 0,
+    "malformedOrMissingPrices": 0,
+    "missingFiles": 0,
+    "variantsWithoutFiles": 0
+  },
+  "products": [
+    {
+      "id": "459991347",
+      "externalId": "6a9046a95193e2",
+      "name": "My Balloon | classic tee",
+      "variantCount": 1,
+      "syncedCount": 1,
+      "thumbnailUrl": "https://files.cdn.printful.com/files/223/22382a8e23824695677fcd1f99e2720b_preview.png",
+      "isIgnored": false,
+      "status": null,
+      "catalogueProductId": null,
+      "variants": [
+        {
+          "id": "5463409939",
+          "externalId": "6a9046a9519442",
+          "syncProductId": "459991347",
+          "catalogueProductId": "438",
+          "catalogueVariantId": "11576",
+          "name": "My Balloon | classic tee",
+          "sku": "6A9046A951249",
+          "retailPrice": "12.50",
+          "unitAmountCad": 1250,
+          "price": {
+            "status": "valid",
+            "value": "12.50",
+            "minorUnits": 1250
+          },
+          "currency": "CAD",
+          "size": "S",
+          "color": "White",
+          "synced": true,
+          "isIgnored": false,
+          "availabilityStatus": "active",
+          "catalogueProductName": "Unisex Classic Tee | Gildan 5000 (White / S)",
+          "catalogueVariantName": null,
+          "catalogueImageUrl": "https://files.cdn.printful.com/products/438/11576_1785824309.jpg",
+          "options": [
+            {
+              "id": "embroidery_type",
+              "value": "flat"
+            },
+            {
+              "id": "lifelike",
+              "value": false
+            },
+            {
+              "id": "text_thread_colors",
+              "value": null
+            },
+            {
+              "id": "text_thread_colors_chest_center",
+              "value": null
+            },
+            {
+              "id": "text_thread_colors_chest_left",
+              "value": null
+            },
+            {
+              "id": "text_thread_colors_large_center",
+              "value": null
+            },
+            {
+              "id": "text_thread_colors_sleeve_left_top",
+              "value": null
+            },
+            {
+              "id": "text_thread_colors_sleeve_right_top",
+              "value": null
+            },
+            {
+              "id": "thread_colors",
+              "value": null
+            },
+            {
+              "id": "thread_colors_3d",
+              "value": null
+            },
+            {
+              "id": "thread_colors_chest_center",
+              "value": null
+            },
+            {
+              "id": "thread_colors_chest_left",
+              "value": null
+            },
+            {
+              "id": "thread_colors_large_center",
+              "value": null
+            },
+            {
+              "id": "thread_colors_sleeve_left_top",
+              "value": null
+            },
+            {
+              "id": "thread_colors_sleeve_right_top",
+              "value": null
+            }
+          ],
+          "files": [
+            {
+              "id": "1001700323",
+              "type": "front_large",
+              "url": null,
+              "filename": "baLLOON2.pdf",
+              "previewUrl": "https://files.cdn.printful.com/files/27e/27e910fb55428f0d59cbad1e56b63559_preview.png",
+              "thumbnailUrl": "https://files.cdn.printful.com/files/27e/27e910fb55428f0d59cbad1e56b63559_thumb.png",
+              "status": "ok",
+              "visible": false,
+              "options": []
+            },
+            {
+              "id": "1046198661",
+              "type": "preview",
+              "url": null,
+              "filename": "unisex-classic-tee-white-front-and-back-6a9046a4ea178.png",
+              "previewUrl": "https://files.cdn.printful.com/files/223/22382a8e23824695677fcd1f99e2720b_preview.png",
+              "thumbnailUrl": "https://files.cdn.printful.com/files/223/22382a8e23824695677fcd1f99e2720b_thumb.png",
+              "status": "ok",
+              "visible": false,
+              "options": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

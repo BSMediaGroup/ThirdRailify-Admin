@@ -48,3 +48,15 @@ test("GOATS email workspace uses the branded Commerce-grade editor and sandboxed
   assert.match(core, /\$\{assets\}\/geist-mono\.ttf/);
   assert.match(core, /THIRD RAILIFY OFFICIAL/);
 });
+
+test("Watch authority failures render unknown archive state instead of false zero counts", async () => {
+  const page = await read("src/pages/WatchAdminPage.tsx");
+  assert.match(page, /summary \? `\$\{summary\.retained\} \/ 24` : "— \/ 24"/);
+  for (const field of ["retained", "visible", "hidden", "remaining"]) {
+    assert.match(page, new RegExp(`summary\\?\\.${field} \\?\\? "—"`));
+  }
+  assert.match(page, /archiveUnavailable && <div className="watch-admin-empty">[\s\S]*Retained archive unavailable/);
+  assert.match(page, /No zero counts are being inferred/);
+  assert.doesNotMatch(page, /summary\?\.retained \?\? 0/);
+  assert.doesNotMatch(page, /summary\?\.remaining \?\? 24/);
+});

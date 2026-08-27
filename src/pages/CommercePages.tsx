@@ -44,6 +44,17 @@ const COMMERCE_WORKSPACES = [
   { to: "/commerce/fulfillment", eyebrow: "Provider bridge", title: "Fulfillment integrations", text: "Printful draft-only migration planning with explicit submission gates.", icon: "fulfillment" },
 ] as const;
 
+const FINALIZED_PRINTFUL_MIGRATION = {
+  legacyProducts: 119,
+  publishedWixProducts: 49,
+  plannedTargetCreates: 49,
+  targetNativeKeeps: 1,
+  excludedNotPublished: 69,
+  manualReview: 1,
+  migrationEligibleVariants: 1317,
+  discontinuedVariantsExcluded: 163,
+} as const;
+
 export function CommerceOverviewPage() {
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
@@ -352,6 +363,7 @@ export function FulfillmentIntegrationsPage() {
         {canManageIntegrations && payload?.databaseConfigured && !payload.printfulSecretConfigured && <p className="commerce-action-note">The store-scoped Printful credential must be configured as an Admin Cloudflare secret before verification.</p>}
       </DetailCard>
       <DetailCard title="Legacy source" status="legacy_production" statusLabel="Read-only migration source" lead="Third Railify Official"><dl><Fact term="Store" value="Third Railify Official" /><Fact term="Store ID" value="16847493" /><Fact term="Store type" value="wix" /><Fact term="Credential" value="Temporary encrypted secret" /><Fact term="Access used" value="GET only" /><Fact term="Write access" value="None" /><Fact term="Products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Configuration" value="Verified Store ID bound" /><Fact term="Wix storefront" value="Live / untouched" /></dl></DetailCard>
+      <DetailCard title="Finalized migration selection" status="pending" statusLabel="Ready for next write task" lead="Immutable evidence / 2026-08-28"><dl><Fact term="Legacy Printful products" value={String(FINALIZED_PRINTFUL_MIGRATION.legacyProducts)} /><Fact term="Currently published Wix products" value={String(FINALIZED_PRINTFUL_MIGRATION.publishedWixProducts)} /><Fact term="Planned target creates" value={String(FINALIZED_PRINTFUL_MIGRATION.plannedTargetCreates)} /><Fact term="Existing target-native products" value={String(FINALIZED_PRINTFUL_MIGRATION.targetNativeKeeps)} /><Fact term="Excluded not-published legacy" value={String(FINALIZED_PRINTFUL_MIGRATION.excludedNotPublished)} /><Fact term="Manual review" value={String(FINALIZED_PRINTFUL_MIGRATION.manualReview)} /><Fact term="Migration-eligible variants" value={String(FINALIZED_PRINTFUL_MIGRATION.migrationEligibleVariants)} /><Fact term="Discontinued variants excluded" value={String(FINALIZED_PRINTFUL_MIGRATION.discontinuedVariantsExcluded)} /><Fact term="Provider writes" value="None" /><Fact term="Checkout / fulfillment" value="Disabled / disabled" /></dl></DetailCard>
       <DetailCard title="Catalogue reconciliation" status={snapshotState === "completed" ? "connected" : snapshotState === "failed" ? "error" : "setup_required"} lead="Read-only migration evidence"><dl><Fact term="Catalogue snapshot" value={snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Running" : snapshotState === "throttled" ? "Safely paused" : snapshotState === "completed" ? "Completed" : "Failed"} /><Fact term="Matched" value={snapshot ? String(snapshot.reconciliation.counts.printfulBackedMatches) : "Awaiting snapshot"} /><Fact term="Unresolved" value={snapshot ? String(snapshot.reconciliation.counts.unresolved) : "Awaiting snapshot"} /><Fact term="Non-Printful" value={snapshot ? String(snapshot.reconciliation.counts.nonPrintful) : "Awaiting snapshot"} /><Fact term="Source products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Source variants" value={snapshot ? String(snapshot.source.counts.variants) : "Awaiting snapshot"} /><Fact term="Target products" value={snapshot ? String(snapshot.target.counts.products) : "Awaiting snapshot"} /><Fact term="Missing / malformed prices" value={snapshot ? String(snapshot.source.counts.malformedOrMissingPrices) : "Awaiting snapshot"} /><Fact term="Missing files" value={snapshot ? String(snapshot.source.counts.missingFiles) : "Awaiting snapshot"} /><Fact term="Provider methods" value="GET only" /><Fact term="Checkout" value="Disabled" /><Fact term="Fulfillment" value="Disabled" /></dl>
         <div className={`catalogue-snapshot-state is-${snapshotState}`} aria-live="polite">
           <strong>{snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Reading source and target catalogues…" : snapshotState === "throttled" ? "PRINTFUL RATE LIMIT — Snapshot safely paused" : snapshotState === "completed" ? "Snapshot completed" : "Catalogue snapshot failed"}</strong>

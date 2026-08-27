@@ -3,7 +3,7 @@ import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
 
 import { onRequest as authRequest } from "../functions/api/auth/[[path]].js";
-import { onRequest as watchRequest } from "../functions/api/admin/watch.js";
+import { callPublicWatch, configuredPublicOrigin, onRequest as watchRequest } from "../functions/api/admin/watch.js";
 import { createSession } from "../functions/_shared/auth-core.js";
 import { authEnvironment, cookiePair, createAuthDatabase, jsonRequest, makeAuthFetch } from "./auth-test-helpers.mjs";
 
@@ -40,12 +40,20 @@ test("Watch Admin signs only server-to-server, performs show/hide and bulk actio
   const captured = [];
   const fetchImpl = async (input, init) => {
     captured.push({ input: String(input), init });
-    const raw = String(init.body);
-    const timestamp = init.headers["X-ThirdRailify-Timestamp"];
+    const raw = String(init.body || "");
+    const headers = new Headers(init.headers);
+    const timestamp = headers.get("X-ThirdRailify-Timestamp");
     const digest = createHash("sha256").update(raw).digest("hex");
-    const expected = createHmac("sha256", SHARED_SECRET).update(`${timestamp}\nPOST\n/api/watch/manage\n${digest}`).digest("base64url");
-    assert.equal(init.headers["X-ThirdRailify-Signature"], expected);
-    assert.equal(init.headers.Origin, ADMIN_ORIGIN);
+    const expected = createHmac("sha256", SHARED_SECRET).update(`${timestamp}\n${init.method}\n/api/watch/manage\n${digest}`).digest("base64url");
+    assert.equal(headers.get("X-ThirdRailify-Signature"), expected);
+    assert.equal(headers.has("Origin"), false);
+    assert.equal("redirect" in init, false, "Pages cross-subrequest uses the normal fetch redirect mode");
+    if (init.method === "GET") {
+      assert.equal(init.body, undefined);
+      assert.equal(headers.has("Content-Type"), false);
+      return Response.json(payload());
+    }
+    assert.equal(init.method, "POST");
     return Response.json(payload(JSON.parse(raw).action));
   };
 
@@ -61,6 +69,21 @@ test("Watch Admin signs only server-to-server, performs show/hide and bulk actio
   const rate = await harness.db.prepare("SELECT category, key_hash FROM auth_rate_limits WHERE category = 'watch'").first();
   assert.equal(rate.category, "watch");
   assert.equal(rate.key_hash.includes("unknown"), false);
+});
+
+test("Watch upstream handling is bounded, sanitized, and rejects unsafe Public origins", async () => {
+  const env = { THIRDRAILIFY_COMMUNITY_API_SECRET: SHARED_SECRET, THIRDRAILIFY_PUBLIC_ORIGIN: PUBLIC_ORIGIN };
+  assert.equal(configuredPublicOrigin(env), PUBLIC_ORIGIN);
+  for (const origin of ["http://thirdrailify.pages.dev", "https://user@example.test", "https://thirdrailify.pages.dev/path", "https://thirdrailify.pages.dev?x=1", "not-a-url"]) {
+    assert.throws(() => configuredPublicOrigin({ THIRDRAILIFY_PUBLIC_ORIGIN: origin }), (error) => error.code === "watch_management_not_configured");
+  }
+  assert.equal((await callPublicWatch(env, { action: "read" }, async () => Response.json(payload()))).summary.retained, 1);
+  for (const status of [401, 403]) {
+    await assert.rejects(callPublicWatch(env, { action: "read" }, async () => Response.json({ error: "invalid_signature" }, { status })), (error) => error.status === 502 && error.code === "watch_management_unavailable");
+  }
+  await assert.rejects(callPublicWatch(env, { action: "read" }, async () => Response.json({ error: "unavailable" }, { status: 503 })), (error) => error.status === 503);
+  await assert.rejects(callPublicWatch(env, { action: "read" }, async () => new Response("not-json")), (error) => error.status === 502);
+  await assert.rejects(callPublicWatch(env, { action: "read" }, async (_input, init) => { assert.ok(init.signal); throw new DOMException("Aborted", "AbortError"); }), (error) => error.status === 503);
 });
 
 async function masterSession(env) {
@@ -87,6 +110,6 @@ function payload(action = "read") {
   return {
     ok: true, current: null,
     summary: { retained: 1, visible: visible ? 1 : 0, hidden: visible ? 0 : 1, remaining: 23, newest: null, oldest: null },
-    episodes: [{ id: EPISODE_ID, identityKey: "youtube:abc123DEF45", platform: "youtube", contentId: "abc123DEF45", title: "Real episode", description: null, thumbnailUrl: null, watchUrl: "https://www.youtube.com/watch?v=abc123DEF45", archiveDate: "2026-08-28T00:00:00.000Z", visible, archiveOrder: 1, publicRoute: `${PUBLIC_ORIGIN}/watch/v/${EPISODE_ID}` }],
+    episodes: [{ id: EPISODE_ID, identityKey: "youtube:abc123DEF45", platform: "youtube", contentId: "abc123DEF45", title: "Real episode", description: null, thumbnailUrl: null, thumbnailState: "fallback", watchUrl: "https://www.youtube.com/watch?v=abc123DEF45", archiveDate: "2026-08-28T00:00:00.000Z", visible, archiveOrder: 1, publicRoute: visible ? `${PUBLIC_ORIGIN}/watch/v/${EPISODE_ID}` : null }],
   };
 }

@@ -45,27 +45,31 @@ export function WatchAdminPage() {
   }
 
   const summary = data?.summary;
+  const archiveUnavailable = !loading && !data;
   return (
     <section className="watch-admin-page" aria-labelledby="watch-admin-title">
-      <header className="page-heading watch-admin-heading"><div><p className="section-kicker">Broadcast authority</p><h1 id="watch-admin-title">Watch archive</h1><p>Manage visibility for episodes retained naturally from the signed Public broadcast ingest. No manual episode creation or provider lookup is available.</p></div><div className="status-stamp"><AdminIcon name="watch" size={30} /><span>ARCHIVE CAP</span><strong>{summary?.retained ?? 0} / 24</strong></div></header>
+      <header className="page-heading watch-admin-heading"><div><p className="section-kicker">Broadcast authority</p><h1 id="watch-admin-title">Watch archive</h1><p>Manage visibility for episodes retained naturally from the signed Public broadcast ingest. No manual episode creation or provider lookup is available.</p></div><div className="status-stamp"><AdminIcon name="watch" size={30} /><span>ARCHIVE CAP</span><strong>{summary ? `${summary.retained} / 24` : "— / 24"}</strong></div></header>
       {error && <div className="notice-card notice-card--danger" role="alert"><AdminIcon name="signal" /><div><strong>Watch service unavailable</strong><p>{error}</p></div><button className="button-link" type="button" onClick={() => void load()}>Retry</button></div>}
 
       <div className="watch-admin-metrics" aria-busy={loading}>
-        <Metric label="Retained" value={loading ? "—" : summary?.retained ?? 0} detail="Includes hidden records" />
-        <Metric label="Visible" value={loading ? "—" : summary?.visible ?? 0} detail="Publicly enumerable" />
-        <Metric label="Hidden" value={loading ? "—" : summary?.hidden ?? 0} detail="Projected as placeholders" />
-        <Metric label="Unfilled" value={loading ? "—" : summary?.remaining ?? 24} detail="Until future broadcasts" />
+        <Metric label="Retained" value={summary?.retained ?? "—"} detail="Includes hidden records" />
+        <Metric label="Visible" value={summary?.visible ?? "—"} detail="Publicly enumerable" />
+        <Metric label="Hidden" value={summary?.hidden ?? "—"} detail="Projected as placeholders" />
+        <Metric label="Unfilled" value={summary?.remaining ?? "—"} detail="Until future broadcasts" />
       </div>
 
       <section className="watch-admin-current" aria-labelledby="watch-current-title">
-        <div><p className="section-kicker">Current signal</p><h2 id="watch-current-title">{data?.current?.primary?.title || (loading ? "Checking current broadcast…" : "No current broadcast snapshot")}</h2><p>{currentSummary(data)}</p></div>
-        <div><span>Newest retained</span><strong>{summary?.newest?.title || "None yet"}</strong><small>{summary?.newest ? formatDate(summary.newest.date) : "Archive will fill naturally"}</small></div>
-        <div><span>Oldest retained</span><strong>{summary?.oldest?.title || "None yet"}</strong><small>{summary?.oldest ? formatDate(summary.oldest.date) : "No retention pruning required"}</small></div>
+        <div><p className="section-kicker">Current signal</p><h2 id="watch-current-title">{data?.current?.primary?.title || (loading ? "Checking current broadcast…" : archiveUnavailable ? "Current signal unavailable" : "No current broadcast snapshot")}</h2><p>{currentSummary(data, archiveUnavailable)}</p></div>
+        <div><span>Newest retained</span><strong>{archiveUnavailable ? "Unavailable" : summary?.newest?.title || "None yet"}</strong><small>{archiveUnavailable ? "Archive read failed" : summary?.newest ? formatDate(summary.newest.date) : "Archive will fill naturally"}</small></div>
+        <div><span>Oldest retained</span><strong>{archiveUnavailable ? "Unavailable" : summary?.oldest?.title || "None yet"}</strong><small>{archiveUnavailable ? "Archive read failed" : summary?.oldest ? formatDate(summary.oldest.date) : "No retention pruning required"}</small></div>
       </section>
 
       <section className="watch-admin-archive" aria-labelledby="retained-title">
         <header><div><p className="section-kicker">Visibility controls</p><h2 id="retained-title">Retained episodes</h2></div><div><button className="secondary-button" type="button" disabled={!data?.episodes.length || Boolean(busy)} onClick={() => void mutate("show_all")}>Show all</button><button className="danger-button" type="button" disabled={!data?.episodes.length || Boolean(busy)} onClick={openBulkHide}>Hide all</button></div></header>
-        {loading ? <div className="watch-admin-empty">Loading retained archive…</div> : !data?.episodes.length ? <div className="watch-admin-empty"><AdminIcon name="watch" size={36} /><strong>No retained episodes yet</strong><p>The first eligible completed broadcast will arrive through the existing signed ingest. Bulk actions are disabled.</p></div> : <div className="watch-admin-list">{data.episodes.map((episode) => <EpisodeRow key={episode.id} episode={episode} busy={busy === episode.id} onChange={(action) => void mutate(action, episode.id)} />)}</div>}
+        {loading && <div className="watch-admin-empty">Loading retained archive…</div>}
+        {archiveUnavailable && <div className="watch-admin-empty"><AdminIcon name="signal" size={36} /><strong>Retained archive unavailable</strong><p>The authoritative archive could not be read. No zero counts are being inferred; retry when the service is available.</p></div>}
+        {!loading && data && !data.episodes.length && <div className="watch-admin-empty"><AdminIcon name="watch" size={36} /><strong>No retained episodes yet</strong><p>The first eligible completed broadcast will arrive through the existing signed ingest. Bulk actions are disabled.</p></div>}
+        {!loading && data && data.episodes.length > 0 && <div className="watch-admin-list">{data.episodes.map((episode) => <EpisodeRow key={episode.id} episode={episode} busy={busy === episode.id} onChange={(action) => void mutate(action, episode.id)} />)}</div>}
       </section>
 
       <dialog ref={confirmDialog} className="admin-confirm" onClose={() => window.requestAnimationFrame(() => previousFocus.current?.focus())}>
@@ -79,11 +83,12 @@ function Metric({ label, value, detail }: { label: string; value: string | numbe
 
 function EpisodeRow({ episode, busy, onChange }: { episode: WatchAdminEpisode; busy: boolean; onChange: (action: "show" | "hide") => void }) {
   const [imageFailed, setImageFailed] = useState(false);
-  return <article className="watch-admin-row"><div className="watch-admin-row__thumb">{episode.thumbnailUrl && !imageFailed ? <img src={episode.thumbnailUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} /> : <AdminIcon name="watch" size={34} />}</div><div className="watch-admin-row__main"><span>#{String(episode.archiveOrder).padStart(2, "0")} · {episode.platform}</span><h3>{episode.title}</h3><p>{formatDate(episode.archiveDate)} · <code>{episode.identityKey}</code></p></div><span className={`watch-admin-status${episode.visible ? " is-visible" : ""}`}>{episode.visible ? "Visible" : "Hidden"}</span><div className="watch-admin-row__actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => onChange(episode.visible ? "hide" : "show")}>{busy ? "Saving…" : episode.visible ? "Hide" : "Show"}</button>{episode.visible ? <a className="button-link" href={episode.publicRoute} target="_blank" rel="noreferrer">Preview <AdminIcon name="external" size={15} /></a> : <span>Preview unavailable while hidden</span>}</div></article>;
+  return <article className="watch-admin-row"><div className="watch-admin-row__thumb">{episode.thumbnailUrl && !imageFailed ? <img src={episode.thumbnailUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} /> : <AdminIcon name="watch" size={34} />}</div><div className="watch-admin-row__main"><span>#{String(episode.archiveOrder).padStart(2, "0")} · {episode.platform}</span><h3>{episode.title}</h3><p>{formatDate(episode.archiveDate)} · <code>{episode.identityKey}</code></p></div><span className={`watch-admin-status${episode.visible ? " is-visible" : ""}`}>{episode.visible ? "Visible" : "Hidden"}</span><div className="watch-admin-row__actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => onChange(episode.visible ? "hide" : "show")}>{busy ? "Saving…" : episode.visible ? "Hide" : "Show"}</button>{episode.visible && episode.publicRoute ? <a className="button-link" href={episode.publicRoute} target="_blank" rel="noreferrer">Preview <AdminIcon name="external" size={15} /></a> : <span>Preview unavailable while hidden</span>}</div></article>;
 }
 
-function currentSummary(data: WatchAdminPayload | null) {
-  if (!data?.current) return "The current-state service is unavailable or has not received a snapshot.";
+function currentSummary(data: WatchAdminPayload | null, archiveUnavailable: boolean) {
+  if (archiveUnavailable) return "The current signal could not be read from the Watch authority.";
+  if (!data?.current) return "The archive is available, but no current broadcast snapshot is available.";
   const primary = data.current.primary;
   if (!primary) return `Snapshot ${data.current.freshness}; no live, upcoming, or latest candidate is selected.`;
   const time = primary.actualStart || primary.scheduledStart || primary.publishedAt;

@@ -8,6 +8,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0002_stripe_webhook_events.sql", import.meta.url),
   new URL("../commerce-migrations/0003_product_merchandising.sql", import.meta.url),
   new URL("../commerce-migrations/0004_goats_community.sql", import.meta.url),
+  new URL("../commerce-migrations/0005_commerce_product_variants.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";
@@ -63,6 +64,46 @@ export async function insertTestProduct(db, overrides = {}) {
     product.visibility, product.maxCheckoutQuantity, product.requiresShipping,
   ).run();
   return product;
+}
+
+export async function insertTestVariant(db, overrides = {}) {
+  const variant = {
+    id: "variant-test-001",
+    productId: "product-test-001",
+    localVariantKey: "black-m",
+    status: "active",
+    visibility: "public",
+    isSellable: 1,
+    availabilityStatus: "active",
+    unitAmount: 2750,
+    sku: "TEST-SKU-001",
+    sizeLabel: "M",
+    colorLabel: "Black",
+    optionValuesJson: '{"Size":"M","Color":"Black"}',
+    targetPrintfulProductId: "target-product-001",
+    targetPrintfulSyncVariantId: "target-variant-001",
+    targetCatalogueProductId: "438",
+    targetCatalogueVariantId: "11576",
+    fulfillmentMappingStatus: "mapped",
+    ...overrides,
+  };
+  await db.prepare(
+    `INSERT INTO commerce_product_variants (
+       id, product_id, local_variant_key, status, visibility, is_sellable,
+       availability_status, unit_amount, currency_code, sku, size_label, color_label,
+       option_values_json, target_printful_product_id, target_printful_sync_variant_id,
+       target_catalogue_product_id, target_catalogue_variant_id,
+       fulfillment_provider, fulfillment_mapping_status, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CAD', ?, ?, ?, ?, ?, ?, ?, ?, 'printful', ?, 'now', 'now')`,
+  ).bind(
+    variant.id, variant.productId, variant.localVariantKey, variant.status, variant.visibility,
+    variant.isSellable, variant.availabilityStatus, variant.unitAmount, variant.sku,
+    variant.sizeLabel, variant.colorLabel, variant.optionValuesJson,
+    variant.targetPrintfulProductId, variant.targetPrintfulSyncVariantId,
+    variant.targetCatalogueProductId, variant.targetCatalogueVariantId,
+    variant.fulfillmentMappingStatus,
+  ).run();
+  return variant;
 }
 
 export async function enableTestCheckout(db) {

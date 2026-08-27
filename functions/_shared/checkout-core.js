@@ -61,10 +61,16 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
       ).bind(orderId, expectedAmount, cartRequest.checkoutRequestId, checkoutRequestDigest, cartDigest, timestamp, timestamp),
       ...lines.map((line, index) => db.prepare(
         `INSERT INTO commerce_order_items (
-           id, order_id, line_number, product_id, product_name, currency_code,
-           unit_amount, quantity, line_total_amount, requires_shipping, created_at
-         ) VALUES (?, ?, ?, ?, ?, 'CAD', ?, ?, ?, ?, ?)`,
-      ).bind(randomId(), orderId, index + 1, line.productId, line.productName, line.unitAmount, line.quantity, line.lineTotalAmount, line.requiresShipping ? 1 : 0, timestamp)),
+           id, order_id, line_number, product_id, variant_id, product_name, variant_name,
+           sku, option_values_json, currency_code, unit_amount, quantity, line_total_amount,
+           requires_shipping, fulfillment_provider, fulfillment_variant_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CAD', ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        randomId(), orderId, index + 1, line.productId, line.variantId, line.productName,
+        line.variantName, line.sku, JSON.stringify(line.optionValues), line.unitAmount,
+        line.quantity, line.lineTotalAmount, line.requiresShipping ? 1 : 0,
+        line.fulfillmentProvider, line.fulfillmentVariantId, timestamp,
+      )),
     ];
     try {
       await db.batch(statements);
@@ -265,8 +271,8 @@ function validateCheckoutRequest(input) {
     throw new AuthFailure(400, "checkout_cart_too_large", "The cart contains too many lines.");
   }
   const items = input.items.map((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some((key) => !new Set(["productId", "quantity"]).has(key))) {
-      throw new AuthFailure(400, "checkout_line_invalid", "Each cart line may contain only productId and quantity.");
+    if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some((key) => !new Set(["productId", "variantId", "quantity"]).has(key))) {
+      throw new AuthFailure(400, "checkout_line_invalid", "Each cart line may contain only productId, variantId, and quantity.");
     }
     const productId = cleanText(item.productId, 160);
     if (!productId || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(productId)) {
@@ -275,10 +281,14 @@ function validateCheckoutRequest(input) {
     if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > CHECKOUT_MAX_QUANTITY) {
       throw new AuthFailure(400, "checkout_quantity_invalid", "Cart quantities must be bounded positive integers.");
     }
-    return { productId, quantity: item.quantity };
-  }).sort((left, right) => left.productId.localeCompare(right.productId));
-  if (new Set(items.map((item) => item.productId)).size !== items.length) {
-    throw new AuthFailure(400, "checkout_line_duplicate", "A product may appear only once in a checkout request.");
+    const variantId = item.variantId === undefined || item.variantId === null ? null : cleanText(item.variantId, 160);
+    if (variantId !== null && (!variantId || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(variantId))) {
+      throw new AuthFailure(400, "checkout_variant_id_invalid", "A cart line contains an invalid variant identifier.");
+    }
+    return { productId, variantId, quantity: item.quantity };
+  }).sort((left, right) => `${left.productId}:${left.variantId || ""}`.localeCompare(`${right.productId}:${right.variantId || ""}`));
+  if (new Set(items.map((item) => `${item.productId}:${item.variantId || ""}`)).size !== items.length) {
+    throw new AuthFailure(400, "checkout_line_duplicate", "A product variant may appear only once in a checkout request.");
   }
   return { checkoutRequestId, items };
 }
@@ -291,6 +301,19 @@ async function authoritativeCartLines(db, items) {
      FROM commerce_products WHERE id IN (${placeholders})`,
   ).bind(...items.map((item) => item.productId)).all();
   const rows = new Map((result?.results || []).map((row) => [row.id, row]));
+  const variantIds = items.map((item) => item.variantId).filter(Boolean);
+  const variantResult = variantIds.length ? await db.prepare(
+    `SELECT id, product_id, status, visibility, is_sellable, availability_status,
+            unit_amount, currency_code, sku, size_label, color_label, option_values_json,
+            fulfillment_provider, fulfillment_mapping_status, target_printful_sync_variant_id
+     FROM commerce_product_variants WHERE id IN (${variantIds.map(() => "?").join(",")})`,
+  ).bind(...variantIds).all() : { results: [] };
+  const variants = new Map((variantResult?.results || []).map((row) => [row.id, row]));
+  const variantCountResult = await db.prepare(
+    `SELECT product_id, COUNT(*) AS variant_count FROM commerce_product_variants
+     WHERE product_id IN (${placeholders}) GROUP BY product_id`,
+  ).bind(...items.map((item) => item.productId)).all();
+  const variantCounts = new Map((variantCountResult?.results || []).map((row) => [row.product_id, Number(row.variant_count)]));
   return items.map((item) => {
     const product = rows.get(item.productId);
     if (!product) throw new AuthFailure(400, "checkout_product_unknown", "A requested product does not exist.");
@@ -300,7 +323,19 @@ async function authoritativeCartLines(db, items) {
     if (String(product.currency_code || "").toUpperCase() !== "CAD") {
       throw new AuthFailure(409, "checkout_product_currency_invalid", "A requested product is not priced in CAD.");
     }
-    const unitAmount = Number(product.unit_amount);
+    const hasVariants = (variantCounts.get(item.productId) || 0) > 0;
+    if (hasVariants && !item.variantId) throw new AuthFailure(400, "checkout_variant_required", "A concrete product variant is required.");
+    if (!hasVariants && item.variantId) throw new AuthFailure(400, "checkout_variant_unknown", "The requested product does not have variants.");
+    const variant = item.variantId ? variants.get(item.variantId) : null;
+    if (item.variantId && (!variant || variant.product_id !== item.productId)) throw new AuthFailure(400, "checkout_variant_unknown", "The requested product variant does not exist.");
+    if (variant && (variant.status !== "active" || variant.visibility !== "public" || variant.is_sellable !== 1 || variant.availability_status !== "active")) {
+      throw new AuthFailure(409, "checkout_variant_unavailable", "The requested product variant is not sellable and available.");
+    }
+    if (variant && (variant.fulfillment_provider !== "printful" || variant.fulfillment_mapping_status !== "mapped" || !variant.target_printful_sync_variant_id)) {
+      throw new AuthFailure(409, "checkout_variant_fulfillment_unavailable", "The requested product variant has no authoritative fulfillment mapping.");
+    }
+    if (variant && String(variant.currency_code || "").toUpperCase() !== "CAD") throw new AuthFailure(409, "checkout_variant_currency_invalid", "The requested product variant is not priced in CAD.");
+    const unitAmount = Number(variant ? variant.unit_amount : product.unit_amount);
     const maxQuantity = Number(product.max_checkout_quantity);
     if (!Number.isSafeInteger(unitAmount) || unitAmount <= 0 || unitAmount > 100_000_000) {
       throw new AuthFailure(409, "checkout_product_price_invalid", "A requested product has no valid authoritative price.");
@@ -312,29 +347,43 @@ async function authoritativeCartLines(db, items) {
     if (!productName) throw new AuthFailure(409, "checkout_product_name_invalid", "A requested product has no valid authoritative name.");
     return {
       productId: item.productId,
+      variantId: variant?.id || null,
       productName,
+      variantName: variant ? [cleanText(variant.size_label, 120), cleanText(variant.color_label, 120)].filter(Boolean).join(" / ") || null : null,
+      sku: variant ? cleanText(variant.sku, 240) || null : null,
+      optionValues: variant ? parseJson(variant.option_values_json, {}) : {},
       currencyCode: "CAD",
       unitAmount,
       quantity: item.quantity,
       lineTotalAmount: unitAmount * item.quantity,
       requiresShipping: product.requires_shipping === 1,
+      fulfillmentProvider: variant?.fulfillment_provider || null,
+      fulfillmentVariantId: variant?.target_printful_sync_variant_id || null,
     };
   });
 }
 
 async function loadOrderItems(db, orderId) {
   const result = await db.prepare(
-    `SELECT product_id, product_name, currency_code, unit_amount, quantity, line_total_amount, requires_shipping
+    `SELECT product_id, variant_id, product_name, variant_name, sku, option_values_json,
+            currency_code, unit_amount, quantity, line_total_amount, requires_shipping,
+            fulfillment_provider, fulfillment_variant_id
      FROM commerce_order_items WHERE order_id = ? ORDER BY line_number`,
   ).bind(orderId).all();
   return (result?.results || []).map((row) => ({
     productId: row.product_id,
+    variantId: row.variant_id || null,
     productName: row.product_name,
+    variantName: row.variant_name || null,
+    sku: row.sku || null,
+    optionValues: parseJson(row.option_values_json, {}),
     currencyCode: row.currency_code,
     unitAmount: Number(row.unit_amount),
     quantity: Number(row.quantity),
     lineTotalAmount: Number(row.line_total_amount),
     requiresShipping: row.requires_shipping === 1,
+    fulfillmentProvider: row.fulfillment_provider || null,
+    fulfillmentVariantId: row.fulfillment_variant_id || null,
   }));
 }
 
@@ -362,7 +411,7 @@ function stripeCheckoutBody(order, lines, publicOrigin) {
   lines.forEach((line, index) => {
     form.set(`line_items[${index}][price_data][currency]`, "cad");
     form.set(`line_items[${index}][price_data][unit_amount]`, String(line.unitAmount));
-    form.set(`line_items[${index}][price_data][product_data][name]`, line.productName);
+    form.set(`line_items[${index}][price_data][product_data][name]`, line.variantName ? `${line.productName} — ${line.variantName}` : line.productName);
     form.set(`line_items[${index}][quantity]`, String(line.quantity));
   });
   return form.toString();
@@ -432,12 +481,15 @@ function totalAmount(lines) {
 async function authoritativeCartDigest(lines) {
   return sha256Hex(JSON.stringify(lines.map((line) => ({
     productId: line.productId,
+    variantId: line.variantId,
     productName: line.productName,
     currencyCode: line.currencyCode,
     unitAmount: line.unitAmount,
     quantity: line.quantity,
     lineTotalAmount: line.lineTotalAmount,
     requiresShipping: line.requiresShipping,
+    fulfillmentProvider: line.fulfillmentProvider,
+    fulfillmentVariantId: line.fulfillmentVariantId,
   }))));
 }
 

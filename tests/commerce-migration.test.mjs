@@ -8,7 +8,7 @@ test("commerce migrations apply in order, with the idempotent foundations repeat
   for (const migration of harness.commerceMigrations.slice(0, 2)) await applyMigration(harness.commerceDb, migration);
   const result = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all();
   assert.deepEqual(result.results.map((row) => row.name), [
-    "commerce_audit", "commerce_business_profiles", "commerce_order_items", "commerce_orders", "commerce_permission_grants", "commerce_products",
+    "commerce_audit", "commerce_business_profiles", "commerce_order_items", "commerce_orders", "commerce_permission_grants", "commerce_product_variants", "commerce_products",
     "commerce_provider_connections", "commerce_settings", "commerce_tax_registrations", "commerce_templates", "commerce_webhook_events",
     "community_comments", "community_email_outbox", "community_email_templates", "community_media", "community_moderation_events",
     "community_rate_limits", "community_reactions", "community_submissions",
@@ -58,6 +58,9 @@ test("order records keep customer payment and Printful costs separate", async (t
 
 test("checkout schema enforces request uniqueness, integer money, line snapshots, and foreign keys", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  await harness.commerceDb.prepare(`INSERT INTO commerce_products (
+    id, source_provider, slug, title, currency_code, status, safe_metadata_json, created_at, updated_at
+  ) VALUES ('product-one', 'manual', 'product-one', 'Product one', 'CAD', 'active', '{}', 'now', 'now')`).run();
   await harness.commerceDb.prepare(`INSERT INTO commerce_orders (
     id, customer_payment_provider, payment_status, fulfillment_status, currency_code, customer_gross_amount,
     checkout_request_id, checkout_request_digest, cart_digest, environment, checkout_status, created_at, updated_at
@@ -86,6 +89,31 @@ test("checkout schema enforces request uniqueness, integer money, line snapshots
   ) VALUES ('bad-price', 'manual', 'bad-price', 'Bad price', 'CAD', 'active', '{}', 'now', 'now', -1)`).run());
   const line = await harness.commerceDb.prepare("SELECT product_id, product_name, unit_amount, quantity, line_total_amount, requires_shipping FROM commerce_order_items WHERE id = 'item_one'").first();
   assert.deepEqual(line, { product_id: "product-one", product_name: "Snapshot name", unit_amount: 2500, quantity: 2, line_total_amount: 5000, requires_shipping: 1 });
+});
+
+test("0005 enforces stable variant identities while keeping SKU nullable and non-unique", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  await harness.commerceDb.prepare(`INSERT INTO commerce_products (
+    id, source_provider, slug, title, currency_code, status, safe_metadata_json, created_at, updated_at
+  ) VALUES ('product-variant', 'printful', 'product-variant', 'Variant product', 'CAD', 'active', '{}', 'now', 'now')`).run();
+  const insert = (id, localKey, targetVariant, legacyVariant) => harness.commerceDb.prepare(`INSERT INTO commerce_product_variants (
+    id, product_id, local_variant_key, status, visibility, is_sellable, availability_status,
+    unit_amount, currency_code, sku, target_printful_sync_variant_id, legacy_source_variant_id,
+    option_values_json, migration_provenance_json, created_at, updated_at
+  ) VALUES (?, 'product-variant', ?, 'active', 'public', 1, 'active', 2500, 'CAD',
+    'DUPLICATE-SKU', ?, ?, '{}', '{}', 'now', 'now')`).bind(id, localKey, targetVariant, legacyVariant).run();
+  await insert("variant-one", "one", "target-one", "legacy-one");
+  await insert("variant-two", "two", "target-two", "legacy-two");
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_product_variants WHERE sku = 'DUPLICATE-SKU'").first()).count, 2);
+  await assert.rejects(insert("variant-three", "three", "target-one", "legacy-three"));
+  await assert.rejects(insert("variant-four", "four", "target-four", "legacy-one"));
+  await assert.rejects(harness.commerceDb.prepare(`INSERT INTO commerce_product_variants (
+    id, product_id, local_variant_key, unit_amount, currency_code, availability_status, created_at, updated_at
+  ) VALUES ('bad-currency', 'product-variant', 'bad', 1, 'USD', 'active', 'now', 'now')`).run());
+  const indexes = await harness.commerceDb.prepare("PRAGMA index_list('commerce_product_variants')").all();
+  assert.equal(indexes.results.find((row) => row.name === "idx_commerce_product_variants_sku").unique, 0);
+  const settings = await harness.commerceDb.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled', 'fulfillment_submission_enabled') ORDER BY setting_key").all();
+  assert.deepEqual(settings.results, [{ setting_key: "checkout_enabled", value_json: "false" }, { setting_key: "fulfillment_submission_enabled", value_json: "false" }]);
 });
 
 test("pending 0003 preserves the historical accepted-noop webhook row exactly while adding processed status", async (t) => {

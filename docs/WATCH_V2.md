@@ -8,11 +8,11 @@ The only mutations are show/hide one retained episode and show/hide all retained
 
 1. The authenticated browser sends `POST /api/admin/watch` to the Admin origin with its session cookie and CSRF token.
 2. The Admin Function requires a Master Admin session, exact origin, valid CSRF, bounded JSON/action/episode ID, and the existing `watch` rate limit.
-3. The Function signs the exact Public `/api/watch/manage` request using the already-configured encrypted `THIRDRAILIFY_COMMUNITY_API_SECRET` and existing HMAC format.
+3. The Function signs a bodyless `GET /api/watch/manage` for reads and the existing JSON `POST /api/watch/manage` for mutations using the already-configured encrypted `THIRDRAILIFY_COMMUNITY_API_SECRET` and existing HMAC format.
 4. Public verifies timestamp, digest, and signature, then invokes the existing `THIRDRAILIFY_PUBLIC_STATE` Durable Object binding.
 5. The Durable Object serializes visibility and ingest changes and mutates the distinct SQLite archive record atomically.
 6. Successful visibility actions are written through the existing Admin audit path.
 
 The browser never receives the shared secret and cannot call the Durable Object directly. Admin has no Durable Object binding. Public has no commerce D1 or R2 binding. No new secret or Cloudflare resource is required.
 
-Hidden episodes remain retained and consume one of the 24 slots, but Public list/detail/navigation/featured projections omit them. The Public gallery represents hidden and unfilled positions as truthful, non-clickable placeholders.
+Hidden episodes remain retained and consume one of the 24 slots, but Public list/detail/navigation/featured projections omit them. Hidden records have no public route in the Admin projection. A current-snapshot read failure is represented as an absent current signal without discarding the authoritative archive response. The Public gallery represents hidden and unfilled positions as truthful, non-clickable placeholders.

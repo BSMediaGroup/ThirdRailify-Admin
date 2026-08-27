@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest as checkoutRequest } from "../functions/api/commerce/checkout.js";
-import { commerceEnvironment, createCommerceDatabases, enableTestCheckout, insertTestProduct } from "./commerce-test-helpers.mjs";
+import { commerceEnvironment, createCommerceDatabases, enableTestCheckout, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
 
 const PUBLIC_ORIGIN = "https://thirdrailify.pages.dev";
 const CHECKOUT_URL = "https://thirdrailify-admin.pages.dev/api/commerce/checkout";
@@ -76,7 +76,6 @@ test("checkout rejects malformed, empty, excessive, duplicate, unsupported, and 
     [{ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", quantity: 1.5 }] }, "checkout_quantity_invalid"],
     [{ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", quantity: 0 }] }, "checkout_quantity_invalid"],
     [{ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", quantity: 1 }, { productId: "product-test-001", quantity: 2 }] }, "checkout_line_duplicate"],
-    [{ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", variantId: "invented", quantity: 1 }] }, "checkout_line_invalid"],
     [{ checkoutRequestId: REQUEST_ID, subtotal: 1, items: [{ productId: "product-test-001", quantity: 1 }] }, "checkout_request_fields_invalid"],
     [{ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", quantity: 1, unitPrice: 1 }] }, "checkout_line_invalid"],
   ];
@@ -133,6 +132,28 @@ test("checkout creates one authoritative local order and inline Stripe test Sess
   assert.equal(order.customer_gross_amount, 5000); assert.equal(order.currency_code, "CAD"); assert.equal(order.environment, "test"); assert.equal(order.checkout_status, "checkout_created"); assert.equal(order.payment_status, "pending"); assert.equal(order.fulfillment_status, "disabled"); assert.equal(order.stripe_checkout_session_id, payload.sessionId); assert.ok(order.checkout_created_at);
   const lines = await harness.commerceDb.prepare("SELECT * FROM commerce_order_items WHERE order_id = ?").bind(payload.orderId).all();
   assert.equal(lines.results.length, 1); assert.equal(lines.results[0].product_name, "Canonical Rail Shirt"); assert.equal(lines.results[0].unit_amount, 2500); assert.equal(lines.results[0].quantity, 2); assert.equal(lines.results[0].line_total_amount, 5000); assert.equal(lines.results[0].requires_shipping, 1);
+});
+
+test("variant products require variantId and use D1 variant price, availability, and Printful mapping", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); await enableTestCheckout(harness.commerceDb);
+  await insertTestProduct(harness.commerceDb, { unitAmount: 9999, title: "Variant Authority Shirt" });
+  await insertTestVariant(harness.commerceDb, { unitAmount: 2750 });
+  const env = testEnv(harness); const shouldNotFetch = async () => { throw new Error("unexpected Stripe request"); };
+  const missing = await invoke(request(), env, shouldNotFetch);
+  assert.equal(missing.status, 400); assert.equal((await missing.json()).error, "checkout_variant_required");
+  const unknown = await invoke(request({ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", variantId: "invented", quantity: 1 }] }), env, shouldNotFetch);
+  assert.equal(unknown.status, 400); assert.equal((await unknown.json()).error, "checkout_variant_unknown");
+  await harness.commerceDb.prepare("UPDATE commerce_product_variants SET availability_status = 'temporarily_out_of_stock'").run();
+  const unavailable = await invoke(request({ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", variantId: "variant-test-001", quantity: 1 }] }), env, shouldNotFetch);
+  assert.equal(unavailable.status, 409); assert.equal((await unavailable.json()).error, "checkout_variant_unavailable");
+  await harness.commerceDb.prepare("UPDATE commerce_product_variants SET availability_status = 'active'").run();
+  const calls = [];
+  const response = await invoke(request({ checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", variantId: "variant-test-001", quantity: 2 }] }), env, successfulStripe(calls, { amount_total: 5500 }));
+  assert.equal(response.status, 201);
+  assert.equal(calls[0].params.get("line_items[0][price_data][unit_amount]"), "2750");
+  assert.equal(calls[0].params.get("line_items[0][price_data][product_data][name]"), "Variant Authority Shirt — M / Black");
+  const line = await harness.commerceDb.prepare("SELECT variant_id, sku, option_values_json, fulfillment_provider, fulfillment_variant_id, unit_amount FROM commerce_order_items").first();
+  assert.deepEqual(line, { variant_id: "variant-test-001", sku: "TEST-SKU-001", option_values_json: '{"Size":"M","Color":"Black"}', fulfillment_provider: "printful", fulfillment_variant_id: "target-variant-001", unit_amount: 2750 });
 });
 
 test("duplicate and retry checkout requests reuse one order and one deterministic Stripe idempotency key", async (t) => {

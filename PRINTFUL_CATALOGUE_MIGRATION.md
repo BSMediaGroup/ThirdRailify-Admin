@@ -1,82 +1,99 @@
 # Printful catalogue migration manifest
 
-This manifest records the read-only recovery boundary. Provider counts and product identities marked **pending authenticated snapshot** must be replaced only from the four sanitized artifacts downloaded by the protected Admin action. No value is inferred from a secret and no write migration is authorized here.
+This manifest records the finalized read-only selection milestone captured on 2026-08-28. It authorizes no provider or D1 writes. The four downloaded Printful/Public/reconciliation files in `commerce-import/live/` are immutable evidence and must not be regenerated or rewritten.
 
-The operator flow is implemented with two independent envelopes: bounded Cloudflare external subrequests per invocation and a signed 675 ms Printful request-start schedule across invocations. Recoverable 419/429 responses retain partial page/product/file results and the exact cursor, wait until provider timing (or the 62-second fallback), and resume automatically. No authenticated snapshot has been run as part of this document update. Every pending value below remains a deliberate placeholder until the Master Admin runs **Retry read-only snapshot** once and supplies the four downloaded files.
+## Authoritative evidence
 
-## A. Legacy source
+| Evidence | Result |
+| --- | ---: |
+| Total legacy Printful source products | 119 |
+| Total legacy variants | 2,456 |
+| Synced variants | 2,293 |
+| Active variants | 2,287 |
+| Temporarily out-of-stock variants | 6 |
+| Discontinued variants | 163 |
+| Ignored variants / products | 157 / 1 |
+| Valid CAD prices | 2,456 |
+| Missing or malformed prices | 0 |
+| Fileless active / temporary / discontinued variants | 0 / 0 / 163 |
+| Current live Wix product pages | 49 |
+| Strong Printful-backed live matches | 49 |
+| Non-Printful product pages | 0 |
+| Final target creates | 49 |
+| Target-native keeps | 1 |
+| Not-currently-published legacy products | 69 |
+| Ignored source manual review | 1 |
+| Active variants in target-create payloads | 1,317 |
+| Discontinued variants excluded globally / from live payloads | 163 / 90 |
+| Temporarily out-of-stock variants globally / in live selection | 6 / 5 |
 
-| Field | Value |
-| --- | --- |
-| Store ID | `16847493` |
-| Name | `Third Railify Official` |
-| Type | `wix` |
-| Authority | temporary read-only `PRINTFUL_WIX_SOURCE_TOKEN` |
-| Product count | pending authenticated snapshot |
-| Variant count | pending authenticated snapshot |
-| Synced / ignored / unavailable | pending authenticated snapshot |
-| Missing or malformed prices | pending authenticated snapshot |
-| Missing files | pending authenticated snapshot |
+The current publication authority is `commerce-import/live/live-wix-published.snapshot.json`. It was built from the live `robots.txt`, sitemap index, discovered `store-products-sitemap.xml`, and one public Wix Stores GraphQL GET per sitemap product slug. The census made GET requests only and persisted no anonymous token, session, or customer data.
 
-The source token is limited to store products/files and must be revoked after successful migration and cutover verification. It must never perform a Printful write.
+## Corrected identity hierarchy
 
-## B. Permanent target
+Matching is tiered, not additive:
 
-| Field | Value |
-| --- | --- |
-| Store ID | `18668025` |
-| Name | `Third Railify API` |
-| Type | `native` |
-| Last verified visible product count | `1` |
-| Current complete product count | pending authenticated snapshot |
-| Order mode | `draft_only` |
-| Fulfillment | disabled |
+1. exact stable Printful source product ID;
+2. exact known Wix external product ID;
+3. exact normalized product name where unambiguous;
+4. exact stable provider variant ID or SKU set;
+5. catalogue variant structure;
+6. artwork identity;
+7. price;
+8. fuzzy name similarity only as a weak aid.
 
-The exact safe identity and disposition (`KEEP`, `MAP`, `RECREATE`, `DELETE_LATER`, or `MANUAL_REVIEW`) of every pre-existing target product is pending the authenticated target snapshot. Nothing may be updated, deleted, or recreated in this milestone.
+Weaker evidence can never add up to outrank a stronger tier. This fixes the prior invalid price-plus-variant-shape mapping of **Just Gina™ Icon | Short Sleeve T-shirt** to source `399113926` (**Third Railify™ | Leggings**). The product now maps to source `393315779` by exact Wix external ID and exact normalized name.
 
-## C. Current Public Wix projection
+## Availability and artwork semantics
 
-The read-only Public repository currently exposes eight verified CAD product records from its bounded Wix snapshot. All eight are classified `PRINTFUL_MERCH` candidates, none is classified as non-Printful in the current bounded data, and all eight remain unresolved until compared with the live source and target artifacts. The older audit reported 49 total Wix products but intentionally represented only these eight records; 49 must not be treated as a current complete Public catalogue count.
+Only active, non-ignored variants enter the current target-create payloads. Temporarily out-of-stock variants are recorded separately and deferred until target catalogue support is explicitly verified. Discontinued variants never enter a target payload.
 
-## D. Migration matrix
+The former `fileConflicts = 24` result was over-broad because it treated every fileless discontinued legacy variant as a migration blocker. All 163 fileless variants are discontinued. Active fileless variants are zero and temporarily out-of-stock fileless variants are zero, so the finalized write set has no real artwork blockers.
 
-| Public name / slug | Visible CAD | Source Printful ID | Source Wix external ID | Variants | Files | Target match | Recommended action | Blocker |
-| --- | ---: | --- | --- | --- | --- | --- | --- | --- |
-| BLEH / `bleh-unisex-classic-tee` | 30.50 | pending | `c2cb6ed3-d090-48a9-a742-3d3ed7cfe5c4` | pending | pending | pending | reconcile | authenticated snapshot |
-| Just Gina Icon Short Sleeve / `just-gina-icon-basic-short-sleeve-t-shirt` | 43.00 | pending | pending | pending | pending | pending | reconcile | authenticated snapshot |
-| Just Gina Icon Unisex / `just-gina-icon-classic-unisex-tee` | 30.50 | pending | pending | pending | pending | pending | reconcile | authenticated snapshot |
-| Just Gina Wordmark Dad Hat / `just-gina-wordmark-basic-dad-hat` | 45.00 | pending | pending | pending | pending | pending | reconcile | authenticated snapshot |
-| Third Railify Wordmark Dad Hat / `third-rail-wordmark-basic-dad-hat` | 45.00 | pending | pending | pending | pending | pending | reconcile | authenticated snapshot |
-| Third Railify Icon Dad Hat / `third-railify-icon-dad-hat` | 39.00 | pending | pending | pending | pending | pending | reconcile | authenticated snapshot |
-| Third Railify Logo Short Sleeve / `third-railify-logo-short-sleeve-t-shirt` | 43.50 | pending | pending | pending | pending | pending | reconcile | authenticated snapshot |
-| Third Railify Logo V2 Unisex / `third-railify-logo-v2-unisex-classic-tee` | 30.50 | pending | pending | pending | pending | pending | reconcile | authenticated snapshot |
+Ignored is independent of availability. The ignored source product `454885552` (**Raider's Goblet | Black Glossy Mug**) has two active variants and remains `MANUAL_REVIEW`; it is not migrated merely because it exists in Printful.
 
-The generated reconciliation extends this table with every unmatched source product and uses only: `MATCHED_PRINTFUL_SOURCE`, `TARGET_ALREADY_PRESENT`, `PRINTFUL_SOURCE_ONLY`, `PUBLIC_ONLY`, `NON_PRINTFUL`, `AMBIGUOUS`, `PRICE_CONFLICT`, `VARIANT_CONFLICT`, or `FILE_CONFLICT`.
+## Duplicate SKU evidence
 
-## E. Variant schema requirements
+The source contains two duplicate SKU groups, each with two active variants:
 
-The requested logical variant design follows commerce product migration 0003. Because applied `0004_goats_community.sql` already owns number 0004, its safe repository-consistent filename is [`commerce-import/0005_commerce_product_variants.proposed.sql`](commerce-import/0005_commerce_product_variants.proposed.sql). It is design-only and must not be applied in this task.
+- `68F047EC4A5F5_20487` on source product `396323008` variants `5014326919` and `5014327851`;
+- `68F04A457A1A9_20487` on source product `396324489` variants `5014334286` and `5014337752`.
 
-`commerce_product_variants` contains:
+SKU is therefore nullable, searchable, and non-unique in migration `0005`. Stable local/provider identities carry uniqueness instead.
 
-- opaque UUID `id`, parent `product_id`, and stable parent-scoped `local_variant_key`;
-- permanent `printful_target_sync_product_id` and unique `printful_target_sync_variant_id`;
-- Printful catalogue `variant_id`;
-- legacy source sync product/variant IDs and Wix external product/variant IDs;
-- SKU, size, color, bounded option JSON, and bounded print-file mapping JSON;
-- `currency_code='CAD'` and exact positive integer `unit_amount` cents;
-- bounded availability, active/sellable, fulfillment-provider, and mapping-status gates;
-- explicit migration status and bounded provenance JSON.
+## Permanent target-native product
 
-The same design rebuilds `commerce_order_items` to reference the concrete variant and immutably snapshot its name, SKU, options, exact price, and fulfillment mapping. Only after a separately approved migration may checkout change from `{ productId, quantity }` to `{ productId, variantId, quantity }`.
+Target product `459991347`, **My Balloon | classic tee**, and variant `5463409939` remain user-owned target-native data under `KEEP_EXISTING_TARGET_RELATED_LEGACY`. They are not deleted, overwritten, remapped, or recreated.
 
-## F. Write migration plan — not authorized now
+Legacy source product `439028668` shares the artwork filename `baLLOON2.pdf`, but it is not the same product identity: the target uses catalogue product `438` / variant `11576` (Gildan 5000, one variant, CAD 12.50), while the legacy product uses catalogue product `960` (Cotton Heritage, six variants). Both may coexist. Shared artwork is relationship metadata only.
 
-1. Review the four sanitized snapshot artifacts; resolve every ambiguous stable ID, duplicate SKU/ID, price, variant, and file conflict.
-2. For each approved missing source product, review the generated `send=false` conceptual target payload, Third Railify-owned external ID, catalogue variant IDs, exact CAD decimal prices, SKUs, placements, options, and files.
-3. Under separate authorization, create only approved permanent-target products, record each returned target product/variant ID, and do not touch the Wix source.
-4. Re-read the target with GET only and verify product identity, every variant, SKU, exact price, availability, placement, and artwork before any local import.
-5. Apply the reviewed variant migration only after renumbering remains valid; import parent `commerce_products` inactive/non-public with checkout still disabled.
-6. Import concrete variants inactive/non-sellable with complete target mapping and legacy provenance; independently validate artwork previews and print placements.
-7. Enable no checkout until product/variant authority, Stripe TEST configuration/webhook proof, shipping/tax behavior, inventory/availability, rollback, and operator acceptance all pass.
-8. Roll back by keeping checkout and fulfillment disabled, deactivating imported local products/variants, and preserving target objects for manual review; never restore by mutating the Wix source.
+## Final write plan
+
+The exact bounded artifacts are:
+
+- `commerce-import/live/catalogue-reconciliation.corrected.json`;
+- `commerce-import/live/catalogue-write-selection.json`;
+- `commerce-import/live/printful-target-create-payloads.json`;
+- `commerce-import/live/migration-evidence-report.json`.
+
+The payload plan contains 49 unsent `POST /store/products` plans and 1,317 active variants. Every payload has `send: false`; no discontinued or temporarily out-of-stock variant is included.
+
+## Migration 0005 and checkout contract
+
+`commerce-migrations/0005_commerce_product_variants.sql` is the finalized real migration and remains unapplied. It adds explicit product provenance, creates authoritative variants with exact CAD cents and stable target/legacy mappings, keeps SKU non-unique, and extends order-line snapshots with variant identity/options/fulfillment mapping.
+
+Checkout remains disabled. The future variant-product request contract is:
+
+```json
+{
+  "productId": "opaque-product-id",
+  "variantId": "opaque-variant-id",
+  "quantity": 1
+}
+```
+
+For products with variants, the server requires `variantId` and reads price, currency, sellability, availability, and Printful mapping from D1. Browser-supplied prices and fulfillment identities are rejected.
+
+## Next write milestone gates
+
+The next task may write only after separately authorizing application of migration `0005`, target product creation, and local import. Checkout and fulfillment must remain disabled until target IDs are returned and verified, D1 import is complete, Stripe TEST checkout/webhook behavior passes, and the operator accepts the final catalogue.
