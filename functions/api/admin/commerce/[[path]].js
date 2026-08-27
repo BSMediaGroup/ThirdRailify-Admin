@@ -26,6 +26,10 @@ import {
   verifyPrintfulStore,
   verifyStripeAccount,
 } from "../../../_shared/commerce-core.js";
+import {
+  discoverLegacyPrintfulSource,
+  snapshotPrintfulCatalogues,
+} from "../../../_shared/printful-catalogue.js";
 import { commerceOrdersPayload } from "../../../_shared/checkout-core.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
@@ -87,6 +91,14 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
     payload = await verifyPrintfulStore(env, session, fetchImpl);
     authEventType = "printful_store_verified";
+  } else if (path === "printful/catalogue/source/verify") {
+    await requireCommerceCapability(env, session, "commerce.integrations.manage");
+    payload = { ok: true, ...(await discoverLegacyPrintfulSource(env, fetchImpl)) };
+    authEventType = "printful_catalogue_source_verified";
+  } else if (path === "printful/catalogue/snapshot") {
+    await requireCommerceCapability(env, session, "commerce.integrations.manage");
+    payload = { ok: true, ...(await snapshotPrintfulCatalogues(env, fetchImpl)) };
+    authEventType = "printful_catalogue_snapshot_completed";
   } else if (path === "business") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
@@ -123,11 +135,27 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     actorAccountId: session.accountId,
     eventType: authEventType,
     result: "success",
-    provider: path === "stripe/verify" ? "stripe" : path === "printful/verify" ? "printful" : undefined,
+    provider: path === "stripe/verify" ? "stripe" : path.startsWith("printful/") ? "printful" : undefined,
     metadata: {
       commerceAudit: true,
       ...(path === "stripe/verify" ? { environment: "test" } : {}),
       ...(path === "printful/verify" ? { access: "single_store", providerApi: "real", orderMode: "draft_only" } : {}),
+      ...(path === "printful/catalogue/source/verify" ? {
+        access: "read_only_migration_source",
+        sourceStoreId: payload.store.id,
+        sourceStoreType: payload.store.type,
+        configuredSourceIdMatches: payload.configurationMatches,
+      } : {}),
+      ...(path === "printful/catalogue/snapshot" ? {
+        access: "read_only_catalogue_snapshot",
+        sourceStoreId: payload.source.store.id,
+        targetStoreId: payload.target.store.id,
+        sourceProductCount: payload.source.counts.products,
+        sourceVariantCount: payload.source.counts.variants,
+        targetProductCount: payload.target.counts.products,
+        targetVariantCount: payload.target.counts.variants,
+        correlationId: payload.correlationId,
+      } : {}),
     },
   });
   return jsonResponse(payload, { headers: corsHeaders(request, env) });

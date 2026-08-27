@@ -10,10 +10,12 @@ import {
   getCommerceOrders,
   getCommerceTemplates,
   getMerchandisingProducts,
+  capturePrintfulCatalogueSnapshot,
   saveBusinessProfile,
   saveCommerceTemplate,
   saveFeaturedProducts,
   verifyPrintfulConnection,
+  verifyPrintfulCatalogueSource,
   verifyStripeConnection,
   type BusinessPayload,
   type CommerceOverviewPayload,
@@ -21,6 +23,8 @@ import {
   type CommerceStatus,
   type CommerceTemplate,
   type MerchandisingPayload,
+  type PrintfulProviderSnapshotPayload,
+  type PrintfulSourceVerificationPayload,
   type ProviderStatus,
   type TemplatesPayload,
 } from "../commerce/client";
@@ -287,6 +291,8 @@ export function FulfillmentIntegrationsPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [source, setSource] = useState<PrintfulSourceVerificationPayload | null>(null);
+  const [snapshot, setSnapshot] = useState<PrintfulProviderSnapshotPayload | null>(null);
   const load = useCallback(async () => {
     const stop = startLoading("Loading Printful connection status"); setError("");
     try { setPayload(await getCommerceOverview()); }
@@ -305,16 +311,43 @@ export function FulfillmentIntegrationsPage() {
     catch (reason) { setError(errorMessage(reason, "Printful store verification failed closed.")); }
     finally { setBusy(false); stop(); }
   };
+  const verifySource = async () => {
+    if (!canVerify) return;
+    const stop = startLoading("Verifying the read-only Wix migration source"); setBusy(true); setError(""); setMessage("");
+    try {
+      const next = await verifyPrintfulCatalogueSource(csrfToken);
+      setSource(next);
+      downloadJson("printful-wix-source.identity.json", next);
+      setMessage(next.configurationMatches ? "The legacy Wix source identity matches safe configuration." : "The legacy Wix source identity is verified. Its safe Store ID must now be bound before catalogue capture.");
+    } catch (reason) { setError(errorMessage(reason, "Legacy Printful source verification failed closed.")); }
+    finally { setBusy(false); stop(); }
+  };
+  const captureSnapshot = async () => {
+    if (!canVerify || !source?.configurationMatches) return;
+    const stop = startLoading("Reading both Printful catalogues"); setBusy(true); setError(""); setMessage("");
+    try {
+      const next = await capturePrintfulCatalogueSnapshot(csrfToken);
+      setSnapshot(next);
+      downloadJson("thirdrailify-printful-provider-snapshot.json", next);
+      setMessage("The sanitized read-only provider snapshot is complete and has been downloaded. No Printful write was sent.");
+    } catch (reason) { setError(errorMessage(reason, "Printful catalogue capture failed closed.")); }
+    finally { setBusy(false); stop(); }
+  };
   return <>
     <CommerceHeading eyebrow="Provider adapter boundary" title="Fulfillment integrations" summary={connected ? "The real Printful API is connected only to the dedicated Third Railify API store. Order mode remains draft only, all fulfillment submission is disabled, and the existing Wix store remains active and untouched." : "The permanent Printful credential is production-capable but isolated to a dedicated API store. Read-only verification is available; order creation, confirmation, webhooks, and fulfillment remain disabled."} status={connected ? "connected" : "setup_required"} statusLabel={connected ? "API connected" : undefined} />
     {error && <div className="admin-alert" role="alert">{error}</div>}
     {message && <div className="auth-success" role="status">{message}</div>}
     <section className="provider-detail-grid">
-      <DetailCard title="Printful" status={connected ? "connected" : "setup_required"} statusLabel={connected ? "API connected" : undefined} lead="Dedicated single-store connection"><dl><Fact term="Printful API" value={connected ? "Connected" : "Verification pending"} /><Fact term="Store" value={metadataText(printful, "storeName") || "Third Railify API — awaiting verification"} /><Fact term="Store ID" value={printful?.externalAccountId || "Awaiting verification"} /><Fact term="Store type" value={metadataText(printful, "storeType") || "Awaiting verification"} /><Fact term="Credential" value={payload?.printfulSecretConfigured ? "Configured" : "Not configured"} /><Fact term="Access" value="Single store" /><Fact term="Products" value={metadataNumberText(printful, "productCount")} /><Fact term="Provider API" value="Real / production-capable" /><Fact term="Application rollout" value="Pre-cutover" /><Fact term="Order mode" value="Draft only" /><Fact term="Automatic fulfillment" value="Disabled" /><Fact term="Printful webhooks" value="Not configured" /><Fact term="Existing Wix store" value="Unaffected; migration source remains active" /></dl>
+      <DetailCard title="Permanent target" status={connected ? "connected" : "setup_required"} statusLabel={connected ? "API connected" : undefined} lead="Third Railify API"><dl><Fact term="Printful API" value={connected ? "Connected" : "Verification pending"} /><Fact term="Store" value={metadataText(printful, "storeName") || "Third Railify API — awaiting verification"} /><Fact term="Store ID" value={printful?.externalAccountId || "Awaiting verification"} /><Fact term="Store type" value={metadataText(printful, "storeType") || "Awaiting verification"} /><Fact term="Credential" value={payload?.printfulSecretConfigured ? "Configured" : "Not configured"} /><Fact term="Access" value="Single store" /><Fact term="Products" value={snapshot ? String(snapshot.target.counts.products) : metadataNumberText(printful, "productCount")} /><Fact term="Provider API" value="Real / production-capable" /><Fact term="Application rollout" value="Pre-cutover" /><Fact term="Order mode" value="Draft only" /><Fact term="Automatic fulfillment" value="Disabled" /><Fact term="Printful webhooks" value="Not configured" /></dl>
         {canManageIntegrations && <button type="button" className="secondary-button" onClick={() => void verify()} disabled={!canVerify}>{busy ? "Verifying…" : "Verify Printful connection"}</button>}
         {canManageIntegrations && !payload?.databaseConfigured && <p className="commerce-action-note">Commerce D1 is required before verification.</p>}
         {canManageIntegrations && payload?.databaseConfigured && !payload.printfulSecretConfigured && <p className="commerce-action-note">The store-scoped Printful credential must be configured as an Admin Cloudflare secret before verification.</p>}
       </DetailCard>
+      <DetailCard title="Legacy source" status={source ? "legacy_production" : "setup_required"} statusLabel={source ? "Read-only source" : "Verification required"} lead={source?.store.name || "Wix-connected Printful store"}><dl><Fact term="Store" value={source?.store.name || "Awaiting protected verification"} /><Fact term="Store ID" value={source?.store.id || "Awaiting verification"} /><Fact term="Store type" value={source?.store.type || "Awaiting verification"} /><Fact term="Credential" value="Temporary encrypted secret" /><Fact term="Access used" value="GET only" /><Fact term="Write access used" value="None" /><Fact term="Products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Configuration" value={source?.configurationMatches ? "Identity bound and matched" : source ? "Safe Store ID not yet bound" : "Awaiting verification"} /><Fact term="Wix storefront" value="Live / untouched" /></dl>
+        {canManageIntegrations && <button type="button" className="secondary-button" onClick={() => void verifySource()} disabled={!canVerify}>{busy ? "Reading…" : "Verify read-only source"}</button>}
+        {canManageIntegrations && source?.configurationMatches && <button type="button" className="secondary-button" onClick={() => void captureSnapshot()} disabled={!canVerify}>{busy ? "Reading catalogues…" : "Download catalogue snapshot"}</button>}
+      </DetailCard>
+      <DetailCard title="Catalogue reconciliation" status={snapshot ? "pending" : "setup_required"} lead="Read-only migration evidence"><dl><Fact term="Source products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Source variants" value={snapshot ? String(snapshot.source.counts.variants) : "Awaiting snapshot"} /><Fact term="Target products" value={snapshot ? String(snapshot.target.counts.products) : "Awaiting snapshot"} /><Fact term="Missing prices" value={snapshot ? String(snapshot.source.counts.malformedOrMissingPrices) : "Awaiting snapshot"} /><Fact term="Missing files" value={snapshot ? String(snapshot.source.counts.variantsWithoutFiles) : "Awaiting snapshot"} /><Fact term="Provider methods" value="GET only" /><Fact term="Checkout" value="Disabled" /><Fact term="Fulfillment" value="Disabled" /></dl></DetailCard>
       <DetailCard title="Printify" status="unavailable" lead="Lower-priority adapter"><p>No current public evidence proves a Printify requirement or connection. Credential custody and connectivity remain undecided until a verified audit establishes them.</p></DetailCard>
     </section>
     {!payload && !error && <CommerceState>Loading truthful Printful status…</CommerceState>}
@@ -423,6 +456,12 @@ function profileToForm(payload: BusinessPayload) {
 function formToBusinessPayload(form: Record<string, string>) { return { ...form, countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicAddress: { line1: form.publicAddressLine1, line2: form.publicAddressLine2, city: form.publicCity, province: "ON", postalCode: form.publicPostalCode, country: "CA" } }; }
 function maskedRegistration(payload: BusinessPayload | null, type: string) { const match = payload?.profile.private.registrations.find((item) => item.type === type); return match ? `Stored as ${match.maskedIdentifier}; leave blank to preserve.` : "Not confirmed or stored."; }
 function errorMessage(reason: unknown, fallback: string) { return reason instanceof Error ? reason.message : fallback; }
+function downloadJson(filename: string, value: unknown) {
+  const url = URL.createObjectURL(new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: "application/json" }));
+  const anchor = document.createElement("a");
+  anchor.href = url; anchor.download = filename; anchor.click();
+  URL.revokeObjectURL(url);
+}
 function metadataText(provider: ProviderStatus | undefined, key: string) { const value = provider?.metadata?.[key]; return typeof value === "string" ? value : ""; }
 function metadataNumberText(provider: ProviderStatus | undefined, key: string) { const value = provider?.metadata?.[key]; return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : "Awaiting verification"; }
 function metadataBooleanLabel(provider: ProviderStatus | undefined, key: string) { return provider?.metadata?.[key] === true ? "Enabled in test mode" : "Disabled in test mode"; }

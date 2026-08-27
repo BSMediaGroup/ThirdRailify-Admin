@@ -42,6 +42,20 @@ export type CommerceOrder = {
   createdAt: string; updatedAt: string; checkoutCreatedAt: string | null; paymentConfirmedAt: string | null;
 };
 export type CommerceOrdersPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; orders: CommerceOrder[] };
+export type PrintfulStoreIdentity = { id: string; name: string; type: string };
+export type PrintfulSourceVerificationPayload = {
+  ok: boolean; store: PrintfulStoreIdentity; configuredStoreId: string | null; configurationMatches: boolean;
+};
+export type PrintfulCatalogueSnapshot = {
+  role: string; store: PrintfulStoreIdentity;
+  counts: { products: number; variants: number; synced: number; ignored: number; unavailable: number; malformedOrMissingPrices: number; variantsWithoutFiles: number };
+  products: unknown[];
+};
+export type PrintfulProviderSnapshotPayload = {
+  ok: boolean; schemaVersion: number; correlationId: string; endpointsUsed: string[];
+  source: PrintfulCatalogueSnapshot; target: PrintfulCatalogueSnapshot;
+  safety: { providerMethods: string[]; sourceCredential: string; targetCredential: string; tokensIncluded: boolean; customerOrOrderDataIncluded: boolean };
+};
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
 export function verifyStripeConnection(csrfToken: string) {
@@ -49,6 +63,12 @@ export function verifyStripeConnection(csrfToken: string) {
 }
 export function verifyPrintfulConnection(csrfToken: string) {
   return adminApi<CommerceOverviewPayload>("/api/admin/commerce/printful/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+}
+export function verifyPrintfulCatalogueSource(csrfToken: string) {
+  return adminApi<PrintfulSourceVerificationPayload>("/api/admin/commerce/printful/catalogue/source/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+}
+export function capturePrintfulCatalogueSnapshot(csrfToken: string) {
+  return adminApi<PrintfulProviderSnapshotPayload>("/api/admin/commerce/printful/catalogue/snapshot", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
 }
 export function getBusinessProfile() { return adminApi<BusinessPayload>("/api/admin/commerce/business"); }
 export function saveBusinessProfile(csrfToken: string, body: Record<string, unknown>) {
