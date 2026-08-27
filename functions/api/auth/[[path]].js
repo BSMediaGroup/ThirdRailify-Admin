@@ -5,6 +5,7 @@ import {
   authenticateEnvironmentMaster,
   burnPasswordAttempt,
   clearSessionCookie,
+  cleanText,
   configuredOrigins,
   consumeHandoff,
   consumeOAuthTransaction,
@@ -33,10 +34,12 @@ import {
   requireAllowedOrigin,
   requireAuthDb,
   requireCsrf,
+  requireSession,
   resolveSession,
   revokeSession,
   safeReturnPath,
   sendAccountEmail,
+  serializeAccount,
   sessionEnvelope,
   verifyPassword,
   verifyTurnstile,
@@ -81,6 +84,7 @@ export async function onRequest(context) {
     if (path === "signup") return await handleSignup(request, env, fetchImpl);
     if (path === "logout") return await handleLogout(request, env);
     if (path === "handoff") return await handleHandoff(request, env);
+    if (path === "profile") return await handleProfileUpdate(request, env);
     if (path === "avatar") {
       requireAllowedOrigin(request, env);
       return jsonResponse(await updateAvatar(request, env, fetchImpl), { headers: corsHeaders(request, env) });
@@ -146,6 +150,35 @@ async function handleSession(request, env) {
   if (origin) requireAllowedOrigin(request, env);
   const session = await resolveSession(env, request);
   return jsonResponse(await sessionEnvelope(env, session), { headers: corsHeaders(request, env) });
+}
+
+async function handleProfileUpdate(request, env) {
+  requireAllowedOrigin(request, env);
+  const session = await requireSession(env, request);
+  await requireCsrf(request, session);
+  await enforceRateLimit(env, request, "profile", session.accountId);
+  const body = await readJsonBody(request);
+  const displayName = cleanText(body.displayName, 81);
+  if (displayName.length < 2 || displayName.length > 80) {
+    throw new AuthFailure(400, "display_name_invalid", "Enter a display name between 2 and 80 characters.");
+  }
+
+  const timestamp = nowIso();
+  const result = await requireAuthDb(env)
+    .prepare("UPDATE accounts SET display_name = ?, updated_at = ? WHERE id = ? AND status = 'active'")
+    .bind(displayName, timestamp, session.accountId)
+    .run();
+  if (Number(result?.meta?.changes || 0) !== 1) {
+    throw new AuthFailure(409, "account_unavailable", "This account cannot update its display name.");
+  }
+  await writeAudit(env, {
+    actorAccountId: session.accountId,
+    targetAccountId: session.accountId,
+    eventType: "profile_display_name_updated",
+    result: "success",
+  });
+  const account = await serializeAccount(env, await loadAccountById(env, session.accountId));
+  return jsonResponse(await sessionEnvelope(env, { ...session, account }), { headers: corsHeaders(request, env) });
 }
 
 async function handleLogin(request, env, fetchImpl) {

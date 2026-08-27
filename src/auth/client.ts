@@ -18,6 +18,11 @@ export async function endSession(csrfToken: string) {
     method: "POST", credentials: "include", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: "{}",
   });
 }
+export async function updateDisplayName(csrfToken: string, displayName: string) {
+  return adminApi<SessionPayload>("/api/auth/profile", {
+    method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ displayName }),
+  });
+}
 export async function uploadAvatar(csrfToken: string, file: File) {
   const body = new FormData();
   body.set("avatar", file);

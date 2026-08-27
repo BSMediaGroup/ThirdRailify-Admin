@@ -28,6 +28,7 @@ const RATE_RULES = {
   resend: { limit: 5, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   oauth: { limit: 20, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   handoff: { limit: 10, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
+  profile: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   avatar: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
 };
 
@@ -380,7 +381,7 @@ export async function ensureEnvironmentMasters(env) {
            ) VALUES (?, ?, ?, NULL, 'admin', 'master', 'active', ?, ?, ?, NULL, 'env_master', NULL)
            ON CONFLICT(id) DO UPDATE SET
              email_normalized = excluded.email_normalized,
-             display_name = excluded.display_name,
+             display_name = COALESCE(NULLIF(accounts.display_name, ''), excluded.display_name),
              role = 'admin', admin_level = 'master', status = 'active',
              email_verified_at = COALESCE(accounts.email_verified_at, excluded.email_verified_at),
              updated_at = excluded.updated_at, source = 'env_master'`,

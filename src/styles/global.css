@@ -454,6 +454,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .avatar-settings__intro p:last-child { max-width: 760px; margin: 6px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.5; }
 .avatar-settings__forms { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
 .avatar-settings__forms form { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(8,8,6,.58); }
+.avatar-settings__forms .avatar-settings__name-form { grid-column: 1 / -1; }
 .avatar-settings__forms label { display: grid; min-width: 0; gap: 6px; }
 .avatar-settings__forms label > span { color: var(--quiet); font: .55rem "Geist Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
 .avatar-settings__forms input { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: #0b0b09; color: var(--ink); }

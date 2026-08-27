@@ -10,6 +10,7 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Corrected email sign-in so the browser no longer applies the 12-character new-password policy to existing credentials; signup and password reset retain the 12-character minimum. Added CSRF-protected, rate-limited, audited self-service display-name updates through the Admin D1 authority, including durable custom names for environment Master accounts.
 - Moved the oversized sidebar collapse control into the desktop top bar as a discreet icon-only action pinned 12px from the sidebar/workspace boundary before the breadcrumb; mobile continues using only its established drawer button.
 - Restored the Admin account trigger from an unrequested pill treatment to the shell's existing 9px squared control radius without changing its identity content or dropdown.
 - Upgraded the Admin shell with a persistent desktop icon-only sidebar state, full-width mobile drawer behavior, and a StreamSuites-reference account menu adapted to Third Railify with an identity header, details matrix, icon-prefixed actions, keyboard navigation, and separated sign-out treatment.
@@ -43,6 +44,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Wired the confirmed X OAuth 2.0 Client ID into safe Admin configuration. The X application is configured externally as a confidential Web App with both staging and production callbacks; its separate numeric X App ID is not used by website authentication, and X becomes operational once `X_OAUTH_CLIENT_SECRET` is provisioned as an encrypted Admin secret.
 
 ### Human-readable
+
+Existing Master credentials can now sign in without being blocked by a password rule intended only for new passwords. Signed-in accounts can also change their display name alongside their avatar, and Master names remain customized after refresh.
 
 The control room sidebar can now tuck down to its icons without losing navigation, while phones continue to receive a full readable drawer. The account menu now carries the same level of identity detail and action polish as the supplied StreamSuites examples, in Third Railify’s own black-and-gold treatment.
 

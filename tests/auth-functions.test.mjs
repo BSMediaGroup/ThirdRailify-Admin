@@ -143,6 +143,23 @@ test("Google OAuth is ineligible and server-blocked until its explicit migration
   }
 });
 
+test("existing Master secrets are verified without applying the new-password length policy", async (t) => {
+  const harness = await createAuthDatabase();
+  t.after(harness.dispose);
+  const env = authEnvironment(harness.db, { ADMIN_SECRET_1: "eight888" });
+  const login = await callAuth(
+    "login",
+    {
+      origin: ADMIN_ORIGIN,
+      body: { email: env.ADMIN_EMAIL_1, password: env.ADMIN_SECRET_1, turnstileToken: "valid-login" },
+    },
+    env,
+    makeAuthFetch(),
+  );
+  assert.equal(login.status, 200);
+  assert.equal((await login.json()).account.id, "env-master-1");
+});
+
 test("auth API covers masters, signup, verification, reset, OAuth, handoff, and Admin account controls", async (t) => {
   const harness = await createAuthDatabase();
   t.after(harness.dispose);
@@ -179,6 +196,35 @@ test("auth API covers masters, signup, verification, reset, OAuth, handoff, and 
   assert.equal(masterPayload.account.locked, true);
   assert.ok(masterPayload.csrfToken);
   assert.equal(JSON.stringify(masterPayload).includes(env.ADMIN_SECRET_1), false);
+
+  const profileWithoutCsrf = await callAuth(
+    "profile",
+    { origin: ADMIN_ORIGIN, body: { displayName: "Rail Master" }, cookie: masterCookie },
+    env,
+    authFetch,
+  );
+  assert.equal(profileWithoutCsrf.status, 403);
+
+  const profileUpdate = await callAuth(
+    "profile",
+    {
+      origin: ADMIN_ORIGIN,
+      body: { displayName: "  Rail   Master  " },
+      cookie: masterCookie,
+      csrfToken: masterPayload.csrfToken,
+    },
+    env,
+    authFetch,
+  );
+  assert.equal(profileUpdate.status, 200);
+  assert.equal((await profileUpdate.json()).account.displayName, "Rail Master");
+  const refreshedMaster = await callAuth(
+    "session",
+    { method: "GET", origin: ADMIN_ORIGIN, cookie: masterCookie },
+    env,
+    authFetch,
+  );
+  assert.equal((await refreshedMaster.json()).account.displayName, "Rail Master", "Master bootstrap preserves the chosen display name");
 
   const wrongMaster = await callAuth(
     "login",

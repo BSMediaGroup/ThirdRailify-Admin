@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useOutletContext } from "react-router-dom";
 import { AdminAvatar } from "../auth/AdminAccountWidget";
 import { useAuth } from "../auth/AuthProvider";
-import { adminApi, importAvatarUrl, uploadAvatar } from "../auth/client";
+import { adminApi, importAvatarUrl, updateDisplayName, uploadAvatar } from "../auth/client";
 import type { AuthAccount } from "../auth/types";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 
@@ -78,12 +78,27 @@ export function AccountsPage() {
 }
 
 function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccount; csrfToken: string; onUpdated: () => Promise<void> }) {
+  const [displayName, setDisplayName] = useState(account.displayName);
   const [file, setFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState("");
-  const [busy, setBusy] = useState<"file" | "url" | "">("");
+  const [busy, setBusy] = useState<"name" | "file" | "url" | "">("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => setDisplayName(account.displayName), [account.displayName]);
+
+  const saveDisplayName = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextName = displayName.replace(/\s+/g, " ").trim();
+    if (!csrfToken || nextName.length < 2 || nextName.length > 80) {
+      setError("Enter a display name between 2 and 80 characters."); return;
+    }
+    setBusy("name"); setError(""); setMessage("");
+    try { await updateDisplayName(csrfToken, nextName); await onUpdated(); setDisplayName(nextName); setMessage("Display name updated."); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "The display name could not be updated."); }
+    finally { setBusy(""); }
+  };
 
   const saveFile = async (event: FormEvent) => {
     event.preventDefault();
@@ -108,8 +123,9 @@ function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccoun
   };
 
   return <section className="avatar-settings" aria-labelledby="admin-avatar-settings-title">
-    <div className="avatar-settings__intro"><AdminAvatar account={account} /><div><p className="eyebrow">Profile image</p><h2 id="admin-avatar-settings-title">Your avatar</h2><p>Upload a JPG, PNG, or WebP up to 5 MB, or import a public HTTPS image URL. The Admin service stores a validated immutable media object; browser data URLs are never persisted.</p></div></div>
+    <div className="avatar-settings__intro"><AdminAvatar account={account} /><div><p className="eyebrow">Account settings</p><h2 id="admin-avatar-settings-title">Your account profile</h2><p>Change your display name or avatar. Profile changes are verified by the Admin account service and persisted to the shared account authority.</p></div></div>
     <div className="avatar-settings__forms">
+      <form className="avatar-settings__name-form" onSubmit={saveDisplayName}><label><span>Display name</span><input type="text" autoComplete="name" minLength={2} maxLength={80} value={displayName} onChange={(event) => { setDisplayName(event.target.value); setError(""); setMessage(""); }} /></label><button className="secondary-button" type="submit" disabled={displayName.replace(/\s+/g, " ").trim() === account.displayName || Boolean(busy)}>{busy === "name" ? "Saving..." : "Save display name"}</button></form>
       <form onSubmit={saveFile}><label><span>Upload image</span><input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={(event) => { setFile(event.target.files?.[0] || null); setError(""); setMessage(""); }} /></label><button className="secondary-button" type="submit" disabled={!file || Boolean(busy)}>{busy === "file" ? "Uploading..." : "Upload avatar"}</button></form>
       <form onSubmit={saveUrl}><label><span>Direct image URL</span><input type="url" inputMode="url" value={imageUrl} onChange={(event) => { setImageUrl(event.target.value); setError(""); setMessage(""); }} placeholder="https://example.com/avatar.webp" /></label><button className="secondary-button" type="submit" disabled={!imageUrl.trim() || Boolean(busy)}>{busy === "url" ? "Importing..." : "Use image URL"}</button></form>
     </div>
