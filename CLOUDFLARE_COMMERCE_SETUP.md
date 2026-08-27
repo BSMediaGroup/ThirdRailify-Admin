@@ -8,7 +8,7 @@ This runbook records the completed staging control-plane prerequisites and the s
 - `thirdrailify-commerce` (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`) is bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. `0001_commerce_control_plane.sql` then `0002_stripe_webhook_events.sql` are applied, and the remote migration list is clear.
 - `THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY` and `STRIPE_SECRET_KEY` are stored as Admin Cloudflare encrypted Secrets. Secret values must never be retrieved, printed, logged, committed, or persisted to D1.
 - The intended staging Stripe credential is the restricted TEST key (`rk_test_...`) under the unchanged `STRIPE_SECRET_KEY` name; `sk_test_...` is compatible and all live key forms fail closed.
-- Read-only Stripe account verification and the signed sandbox receiver at `POST /api/webhooks/stripe` are deployed. An unsigned live-route check returns `503 stripe_webhook_not_configured`. No Stripe event destination or signing secret is configured, and Checkout/live-payment gates are disabled.
+- Read-only Stripe account verification and the signed sandbox receiver at `POST /api/webhooks/stripe` are deployed. The destination and Admin-only signing secret are configured, and one real signed `checkout.session.completed` sandbox Event was accepted as `accepted_noop / checkout_disabled`. Checkout/live-payment/fulfillment gates remain disabled.
 - Live business verification, payout banking, charges, payouts, wallets, Tax, and live credentials are not verified.
 - The existing auth D1 remains the identity/session/role authority and must not become the main commerce database.
 - Wix remains production authority and all Wix providers stay connected until an approved cutover.
@@ -24,9 +24,9 @@ The D1, encryption-key, restricted TEST credential, read-only account verificati
 4. Generate and store `THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY` as an Admin-only Cloudflare encrypted secret.
 5. Store the dedicated restricted Stripe TEST key in the Admin encrypted secret `STRIPE_SECRET_KEY` without printing, committing, or inspecting its value in application tooling. Keep this environment variable name even though the credential begins with `rk_test_`.
 6. Completed: `commerce-migrations/0002_stripe_webhook_events.sql` was the sole pending migration, was applied to the confirmed D1, and the Admin receiver was deployed.
-7. Create the Stripe Sandbox event destination exactly as documented below; do not create it through the Stripe API.
-8. Store the generated signing secret only as the Admin Production encrypted secret `STRIPE_WEBHOOK_SECRET`.
-9. Send and verify a signed Sandbox test delivery before treating webhook signing or delivery as operational.
+7. Completed externally: create the Stripe Sandbox event destination exactly as documented below; do not create it through the Stripe API.
+8. Completed externally: store the generated signing secret only as the Admin Production encrypted secret `STRIPE_WEBHOOK_SECRET`.
+9. Completed: one signed Sandbox test delivery was verified and accepted before treating webhook signing and delivery as operational.
 10. Implement test Checkout Sessions with `mode=payment`, CAD prices, and server-returned Stripe-hosted Checkout URLs.
 11. Implement separately approved webhook transitions into authoritative commerce order/payment state; the current receiver remains receipt-only.
 12. Keep checkout disabled throughout acceptance.
@@ -59,9 +59,11 @@ The first implementation must use the dedicated account's ordinary merchant API 
 
 Persist only safe verified account metadata and bounded status summaries. Never persist secret keys, webhook signing secrets, bank data, card data, identity documents, full private Stripe payloads, or team-member email addresses. Verify webhook signatures and idempotency before any state transition. Do not create a Checkout Session, PaymentIntent, charge, refund, payout, or webhook in this scaffold-correction task.
 
-### Next operator step: Stripe Workbench event destination
+Configuration flags are proof-driven. `stripe_api_configured=true` requires a successful server-side `GET /v1/account` with a valid staging credential and returned `CA`/`cad` identity; the existence of `STRIPE_SECRET_KEY` alone is insufficient. `stripe_webhook_configured=true` requires a valid `v1` signature, an in-tolerance timestamp, a valid Stripe Event envelope, `livemode=false`, and acceptance into the duplicate-safe receipt path; the existence of `STRIPE_WEBHOOK_SECRET` alone is insufficient. Neither flag enables Checkout, live payment capture, payout readiness, order mutation, or fulfillment.
 
-Perform this only after the staging receiver is deployed and its unsigned request returns `503 stripe_webhook_not_configured`:
+### Completed Stripe Workbench event destination
+
+The completed Sandbox destination used these values; retain them as the operator reference and do not recreate or mutate it during configuration reconciliation:
 
 | Stripe Workbench field | Exact value |
 | --- | --- |

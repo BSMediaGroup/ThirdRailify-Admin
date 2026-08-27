@@ -103,6 +103,8 @@ test("Stripe account verification uses one direct read and persists only the exi
   assert.equal(overview.stripeSecretConfigured, true); assert.equal(projected.status, "connected"); assert.equal(projected.apiConfigured, true);
   assert.equal(projected.webhookConfigured, false); assert.equal(projected.checkoutEnabled, false); assert.equal(projected.livePaymentsEnabled, false); assert.equal(projected.livePayoutReadiness, "unverified");
   assert.equal(projected.metadata.chargesEnabled, true); assert.equal(projected.metadata.payoutsEnabled, false); assert.equal(projected.metadata.detailsSubmitted, true);
+  const apiSetting = await harness.commerceDb.prepare("SELECT value_json, updated_by_account_id FROM commerce_settings WHERE setting_key = 'stripe_api_configured'").first();
+  assert.deepEqual(apiSetting, { value_json: "true", updated_by_account_id: "master" });
   const audit = await harness.commerceDb.prepare("SELECT action, result, metadata_json FROM commerce_audit WHERE action = 'stripe.account_verified'").first();
   assert.equal(audit.result, "success"); assert.match(audit.metadata_json, /acct_TestCanadian123/); assert.doesNotMatch(audit.metadata_json, /notARealRestrictedKey|Authorization|business_profile|external_accounts|individual/);
 });
@@ -123,8 +125,26 @@ test("Stripe account verification fails closed for missing, live, mismatched, or
   await assert.rejects(verifyStripeAccount({}, session, shouldNotFetch), (error) => error.code === "commerce_database_unavailable");
   const row = await harness.commerceDb.prepare("SELECT status, external_account_id, safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
   assert.equal(row.status, "setup_required"); assert.equal(row.external_account_id, null); assert.equal(JSON.parse(row.safe_metadata_json).api_configured, false); assert.doesNotMatch(row.safe_metadata_json, /do-not-store/);
+  const apiSetting = await harness.commerceDb.prepare("SELECT value_json FROM commerce_settings WHERE setting_key = 'stripe_api_configured'").first();
+  assert.equal(apiSetting.value_json, "false");
   const audits = await harness.commerceDb.prepare("SELECT result, metadata_json FROM commerce_audit WHERE action = 'stripe.account_verification_failed'").all();
   assert.ok(audits.results.length >= 5); assert.match(JSON.stringify(audits.results), /missing_configuration|account_mismatch|provider_error/); assert.doesNotMatch(JSON.stringify(audits.results), /notARealKey|do-not-store/);
+});
+
+test("later successful Stripe account verification preserves verified webhook configuration", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "rk_test_notARealRestrictedKey123" });
+  const session = { accountId: "master", account: { adminLevel: "master" } };
+  const row = await harness.commerceDb.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
+  const metadata = { ...JSON.parse(row.safe_metadata_json), webhook_configured: true };
+  await harness.commerceDb.batch([
+    harness.commerceDb.prepare("UPDATE commerce_provider_connections SET safe_metadata_json = ? WHERE provider = 'stripe'").bind(JSON.stringify(metadata)),
+    harness.commerceDb.prepare("UPDATE commerce_settings SET value_json = 'true' WHERE setting_key = 'stripe_webhook_configured'"),
+  ]);
+  const overview = await verifyStripeAccount(env, session, async () => Response.json({ id: "acct_TestCanadian123", country: "CA", default_currency: "cad" }));
+  assert.equal(overview.providers.find((provider) => provider.provider === "stripe").webhookConfigured, true);
+  const stored = await harness.commerceDb.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
+  assert.equal(JSON.parse(stored.safe_metadata_json).webhook_configured, true);
 });
 
 test("provider status remains truthful and the Printful model has two independent transactions", async (t) => {

@@ -153,15 +153,17 @@ export async function commerceOverview(env, session) {
   }
 
   const db = requireCommerceDb(env);
-  const [providerResult, profile, taxCount, templateCount, productCount, orderCount] = await Promise.all([
+  const [providerResult, settingResult, profile, taxCount, templateCount, productCount, orderCount] = await Promise.all([
     db.prepare("SELECT provider, integration_mode, credential_custody, status, environment, external_account_id, country_code, currency_code, safe_metadata_json, last_synchronized_at FROM commerce_provider_connections ORDER BY provider").all(),
+    db.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('stripe_api_configured', 'stripe_webhook_configured')").all(),
     db.prepare("SELECT * FROM commerce_business_profiles WHERE id = 'primary'").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_tax_registrations").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_templates").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_products").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first(),
   ]);
-  const providers = (providerResult?.results || []).map((row) => serializeProviderConnection(row, env));
+  const settings = Object.fromEntries((settingResult?.results || []).map((row) => [row.setting_key, safeJson(row.value_json, false)]));
+  const providers = (providerResult?.results || []).map((row) => serializeProviderConnection(row, env, settings));
   return {
     ok: true,
     databaseConfigured: true,
@@ -264,7 +266,7 @@ export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
     account_display_name: account.displayName || "Third Railify Official",
     account_created: true,
     api_configured: true,
-    webhook_configured: false,
+    webhook_configured: existingMetadata.webhook_configured === true,
     checkout_enabled: false,
     live_payments_enabled: false,
     live_payout_readiness: "unverified",
@@ -274,18 +276,24 @@ export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
     ...(account.type ? { account_type: account.type } : {}),
     ...(Array.isArray(existingMetadata.payment_methods) ? { payment_methods: existingMetadata.payment_methods.slice(0, 12) } : {}),
   };
-  const update = await db
-    .prepare(
+  let updates;
+  try {
+    updates = await db.batch([
+      db.prepare(
       `UPDATE commerce_provider_connections
        SET integration_mode = 'direct_merchant', credential_custody = 'environment_secret',
            status = 'connected', environment = 'test', external_account_id = ?,
            country_code = 'CA', currency_code = 'cad', safe_metadata_json = ?,
            last_synchronized_at = ?, updated_at = ?
        WHERE provider = 'stripe'`,
-    )
-    .bind(account.id, JSON.stringify(safeMetadata), timestamp, timestamp)
-    .run();
-  if (Number(update?.meta?.changes || 0) !== 1) {
+      ).bind(account.id, JSON.stringify(safeMetadata), timestamp, timestamp),
+      configuredSettingStatement(db, "stripe_api_configured", timestamp, session?.accountId),
+    ]);
+  } catch {
+    await writeStripeVerificationAudit(env, session, "persistence_error", "error", { correlationId, accountId: account.id });
+    throw new AuthFailure(503, "stripe_provider_persistence_failed", "The verified Stripe account could not be saved.");
+  }
+  if (Number(updates?.[0]?.meta?.changes || 0) !== 1 || Number(updates?.[1]?.meta?.changes || 0) !== 1) {
     await writeStripeVerificationAudit(env, session, "persistence_error", "error", { correlationId, accountId: account.id });
     throw new AuthFailure(503, "stripe_provider_persistence_failed", "The verified Stripe account could not be saved.");
   }
@@ -297,6 +305,52 @@ export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
     currency: account.defaultCurrency,
   });
   return commerceOverview(env, session);
+}
+
+export async function recordVerifiedStripeWebhookReceipt(env, receipt) {
+  const db = requireCommerceDb(env);
+  const provider = await db.prepare("SELECT id FROM commerce_provider_connections WHERE provider = 'stripe' LIMIT 1").first();
+  if (!provider) {
+    throw new AuthFailure(503, "stripe_provider_unavailable", "The Stripe provider connection is not configured.");
+  }
+
+  let updates;
+  try {
+    updates = await db.batch([
+      db.prepare(
+        `INSERT OR IGNORE INTO commerce_webhook_events (
+           provider, provider_event_id, event_type, event_created_at, received_at, livemode,
+           api_version, related_object_id, related_object_type, processing_status,
+           processed_at, result_code, payload_sha256
+         ) VALUES ('stripe', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        receipt.eventId,
+        receipt.eventType,
+        receipt.eventCreatedAt,
+        receipt.receivedAt,
+        receipt.apiVersion,
+        receipt.relatedObjectId,
+        receipt.relatedObjectType,
+        receipt.processingStatus,
+        receipt.receivedAt,
+        receipt.resultCode,
+        receipt.payloadSha256,
+      ),
+      db.prepare(
+        `UPDATE commerce_provider_connections
+         SET safe_metadata_json = json_set(safe_metadata_json, '$.webhook_configured', json('true')),
+             last_synchronized_at = ?, updated_at = ?
+         WHERE provider = 'stripe'`,
+      ).bind(receipt.receivedAt, receipt.receivedAt),
+      configuredSettingStatement(db, "stripe_webhook_configured", receipt.receivedAt, null),
+    ]);
+  } catch {
+    throw new AuthFailure(503, "stripe_webhook_storage_unavailable", "Stripe webhook receipt storage is unavailable.");
+  }
+  if (Number(updates?.[1]?.meta?.changes || 0) !== 1 || Number(updates?.[2]?.meta?.changes || 0) !== 1) {
+    throw new AuthFailure(503, "stripe_webhook_storage_unavailable", "Stripe webhook receipt storage is unavailable.");
+  }
+  return { duplicate: Number(updates?.[0]?.meta?.changes || 0) === 0 };
 }
 
 export async function businessProfilePayload(env, session) {
@@ -752,7 +806,7 @@ function businessCompleteness(profile) {
   return required.every(Boolean) ? "pending" : "setup_required";
 }
 
-function serializeProviderConnection(row, env) {
+function serializeProviderConnection(row, env, settings = {}) {
   const blueprint = PROVIDER_BLUEPRINTS.find((item) => item.provider === row.provider);
   const rawMetadata = safeJson(row.safe_metadata_json, {});
   const metadata = {
@@ -774,16 +828,28 @@ function serializeProviderConnection(row, env) {
     countryCode: cleanText(row.country_code, 2) || null,
     currencyCode: cleanText(row.currency_code, 3) || null,
     accountCreated: rawMetadata.account_created === true,
-    apiConfigured: rawMetadata.api_configured === true,
+    apiConfigured: rawMetadata.api_configured === true && settings.stripe_api_configured === true,
     webhookEndpointReady: row.provider === "stripe",
     webhookSigningConfigured: row.provider === "stripe" && isStripeWebhookSigningConfigured(env),
-    webhookConfigured: rawMetadata.webhook_configured === true,
+    webhookConfigured: rawMetadata.webhook_configured === true && settings.stripe_webhook_configured === true,
     checkoutEnabled: rawMetadata.checkout_enabled === true,
     livePaymentsEnabled: rawMetadata.live_payments_enabled === true,
     livePayoutReadiness: cleanText(rawMetadata.live_payout_readiness, 40) || "unverified",
     metadata,
     lastSynchronizedAt: cleanText(row.last_synchronized_at, 80) || null,
   };
+}
+
+function configuredSettingStatement(db, settingKey, timestamp, accountId) {
+  return db.prepare(
+    `INSERT INTO commerce_settings (setting_key, value_json, classification, updated_at, updated_by_account_id)
+     VALUES (?, 'true', 'safe', ?, ?)
+     ON CONFLICT(setting_key) DO UPDATE SET
+       value_json = excluded.value_json,
+       classification = 'safe',
+       updated_at = excluded.updated_at,
+       updated_by_account_id = excluded.updated_by_account_id`,
+  ).bind(settingKey, timestamp, cleanText(accountId, 160) || null);
 }
 
 function providerBlueprints(env) {

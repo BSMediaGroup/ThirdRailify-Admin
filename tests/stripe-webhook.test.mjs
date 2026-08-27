@@ -37,6 +37,15 @@ async function invoke(request, env) {
   return stripeWebhookRequest({ request, env, data: {}, waitUntil() {} });
 }
 
+async function stripeConfiguration(db) {
+  const settings = await db.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('stripe_api_configured', 'stripe_webhook_configured', 'checkout_enabled', 'live_payment_capture_enabled', 'fulfillment_submission_enabled')").all();
+  const provider = await db.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
+  return {
+    settings: Object.fromEntries(settings.results.map((row) => [row.setting_key, JSON.parse(row.value_json)])),
+    provider: JSON.parse(provider.safe_metadata_json),
+  };
+}
+
 test("webhook fails closed for method, configuration, storage, and body size", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const body = JSON.stringify(eventPayload());
@@ -53,6 +62,8 @@ test("webhook fails closed for method, configuration, storage, and body size", a
   assert.equal(oversized.status, 413); assert.equal((await oversized.json()).error, "request_too_large");
   const streamedOversized = await invoke(webhookRequest("x".repeat(STRIPE_WEBHOOK_MAX_BODY_BYTES + 1)), env);
   assert.equal(streamedOversized.status, 413); assert.equal((await streamedOversized.json()).error, "request_too_large");
+  const configuration = await stripeConfiguration(harness.commerceDb);
+  assert.equal(configuration.settings.stripe_webhook_configured, false); assert.equal(configuration.provider.webhook_configured, false);
 });
 
 test("webhook requires a current valid v1 signature over the exact raw body", async (t) => {
@@ -76,9 +87,14 @@ test("webhook requires a current valid v1 signature over the exact raw body", as
     assert.equal(response.status, 400); assert.equal((await response.json()).error, "stripe_signature_timestamp_invalid");
   }
 
+  const rejectedConfiguration = await stripeConfiguration(harness.commerceDb);
+  assert.equal(rejectedConfiguration.settings.stripe_webhook_configured, false); assert.equal(rejectedConfiguration.provider.webhook_configured, false);
+
   const validSignature = signature(body);
   const multiple = await invoke(webhookRequest(body, { signatureHeader: `t=${NOW_SECONDS},v1=${"0".repeat(64)},v0=${"f".repeat(64)},v1=${validSignature}` }), env);
   assert.equal(multiple.status, 200); assert.equal((await multiple.json()).result, "checkout_disabled");
+  const acceptedConfiguration = await stripeConfiguration(harness.commerceDb);
+  assert.equal(acceptedConfiguration.settings.stripe_webhook_configured, true); assert.equal(acceptedConfiguration.provider.webhook_configured, true);
 });
 
 test("valid signatures still reject malformed JSON, non-Event envelopes, and live events", async (t) => {
@@ -95,6 +111,8 @@ test("valid signatures still reject malformed JSON, non-Event envelopes, and liv
   assert.equal(liveResponse.status, 400); assert.equal((await liveResponse.json()).error, "stripe_live_event_rejected");
   const count = await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_webhook_events").first();
   assert.equal(count.count, 0);
+  const configuration = await stripeConfiguration(harness.commerceDb);
+  assert.equal(configuration.settings.stripe_webhook_configured, false); assert.equal(configuration.provider.webhook_configured, false);
 });
 
 test("checkout completion is receipt-only, duplicate-safe, and persists no sensitive material", async (t) => {
@@ -104,8 +122,20 @@ test("checkout completion is receipt-only, duplicate-safe, and persists no sensi
   const rawSignature = signature(body);
   const first = await invoke(webhookRequest(body), env);
   assert.equal(first.status, 200); assert.deepEqual(await first.json(), { ok: true, received: true, duplicate: false, eventId: "evt_synthetic_checkout_001", result: "checkout_disabled" });
+  const firstConfiguration = await stripeConfiguration(harness.commerceDb);
+  assert.equal(firstConfiguration.settings.stripe_webhook_configured, true); assert.equal(firstConfiguration.provider.webhook_configured, true);
+  assert.equal(firstConfiguration.settings.stripe_api_configured, false);
+  assert.equal(firstConfiguration.settings.checkout_enabled, false); assert.equal(firstConfiguration.settings.live_payment_capture_enabled, false); assert.equal(firstConfiguration.settings.fulfillment_submission_enabled, false);
+
+  const providerMetadata = { ...firstConfiguration.provider, webhook_configured: false };
+  await harness.commerceDb.batch([
+    harness.commerceDb.prepare("UPDATE commerce_settings SET value_json = 'false' WHERE setting_key = 'stripe_webhook_configured'"),
+    harness.commerceDb.prepare("UPDATE commerce_provider_connections SET safe_metadata_json = ? WHERE provider = 'stripe'").bind(JSON.stringify(providerMetadata)),
+  ]);
   const duplicate = await invoke(webhookRequest(body), env);
   assert.equal(duplicate.status, 200); assert.deepEqual(await duplicate.json(), { ok: true, received: true, duplicate: true, eventId: "evt_synthetic_checkout_001", result: "duplicate" });
+  const duplicateConfiguration = await stripeConfiguration(harness.commerceDb);
+  assert.equal(duplicateConfiguration.settings.stripe_webhook_configured, true); assert.equal(duplicateConfiguration.provider.webhook_configured, true);
 
   const rows = await harness.commerceDb.prepare("SELECT * FROM commerce_webhook_events WHERE provider = 'stripe' AND provider_event_id = ?").bind("evt_synthetic_checkout_001").all();
   assert.equal(rows.results.length, 1);
@@ -128,7 +158,7 @@ test("checkout completion is receipt-only, duplicate-safe, and persists no sensi
   const settings = await harness.commerceDb.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled', 'live_payment_capture_enabled', 'fulfillment_submission_enabled') ORDER BY setting_key").all();
   assert.deepEqual(settings.results.map((row) => row.value_json), ["false", "false", "false"]);
   const stripe = await harness.commerceDb.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
-  assert.equal(JSON.parse(stripe.safe_metadata_json).webhook_configured, false); assert.equal(JSON.parse(stripe.safe_metadata_json).checkout_enabled, false);
+  assert.equal(JSON.parse(stripe.safe_metadata_json).webhook_configured, true); assert.equal(JSON.parse(stripe.safe_metadata_json).checkout_enabled, false); assert.equal(JSON.parse(stripe.safe_metadata_json).live_payments_enabled, false);
 });
 
 test("unknown valid event types are acknowledged once and ignored", async (t) => {
@@ -139,4 +169,6 @@ test("unknown valid event types are acknowledged once and ignored", async (t) =>
   assert.equal(response.status, 200); assert.equal((await response.json()).result, "event_type_ignored");
   const row = await harness.commerceDb.prepare("SELECT processing_status, result_code, related_object_id, related_object_type FROM commerce_webhook_events WHERE provider_event_id = ?").bind("evt_synthetic_unknown_001").first();
   assert.deepEqual(row, { processing_status: "ignored", result_code: "event_type_ignored", related_object_id: "cus_safe_001", related_object_type: "customer" });
+  const configuration = await stripeConfiguration(harness.commerceDb);
+  assert.equal(configuration.settings.stripe_webhook_configured, true); assert.equal(configuration.provider.webhook_configured, true);
 });

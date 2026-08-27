@@ -10,6 +10,10 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Reconciled Stripe configuration proof semantics without a schema migration: successful CA/CAD `GET /v1/account` verification now atomically updates provider `api_configured` plus canonical `stripe_api_configured`, preserves earlier webhook proof, and never sets the flag from secret presence or a failed verification.
+- Valid signed, timely, well-formed sandbox Stripe Events now atomically persist/reuse the safe receipt and set canonical/provider webhook configuration proof. Valid duplicates reassert proof without another ledger row; unsigned, invalid, stale, malformed, or live-mode deliveries cannot set it, and Checkout/live-payment/fulfillment gates remain false.
+- Updated `/commerce` and `/commerce/payments` to distinguish connected test API, operational/verified webhook signing, disabled Checkout/live payments/fulfillment, and unverified live payout readiness without exposing secret or event material.
+- Reconciled only the two stale safe setting rows and Stripe provider webhook proof in the confirmed commerce D1 after exact provider/event/order invariant checks, recorded one bounded `stripe.configuration_reconciled` audit event, and preserved the single accepted-noop receipt with zero orders. Deployed Admin Production/main as `f69ea81a-5c6e-4c38-8389-3604bfd135c4`; no Stripe API/event operation or Public deployment was performed.
 - Added a live, structured rendered preview below every Customer Emails template editor. Subject, preheader, heading, introduction, bounded body blocks, CTA, support copy, footer, status, and accent update without raw HTML execution or sending, while the email brand header now prefixes `THIRD RAILIFY OFFICIAL` with the tracked `trzapcolorcon.svg` icon.
 - Added the public machine-to-machine `POST /api/webhooks/stripe` Pages Function without browser auth, CSRF, Turnstile, Origin, CORS, or commerce capability requirements. It instead streams at most 1 MiB of exact request bytes, requires the server-only `STRIPE_WEBHOOK_SECRET`, verifies any valid Stripe `v1` HMAC-SHA256 signature with Web Crypto, and enforces a fixed 300-second past/future timestamp window before JSON parsing.
 - Added `commerce-migrations/0002_stripe_webhook_events.sql` with a composite `provider + provider_event_id` primary key and bounded safe receipt metadata/indexes. Signed Sandbox `checkout.session.completed` deliveries are stored only as `accepted_noop / checkout_disabled`; unknown valid test events are acknowledged as ignored, duplicates are successful no-ops, and raw bodies, signatures, secrets, credentials, customer/card/address data, and full Stripe objects are excluded.
@@ -71,6 +75,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 - Wired the confirmed X OAuth 2.0 Client ID into safe Admin configuration. The X application is configured externally as a confidential Web App with both staging and production callbacks; its separate numeric X App ID is not used by website authentication, and X becomes operational once `X_OAUTH_CLIENT_SECRET` is provisioned as an encrypted Admin secret.
 
 ### Human-readable
+
+The control room now remembers what Stripe has actually proved: the Canadian CAD test API is connected and a real signed sandbox event verified the webhook path. Those configuration checks remain separate from taking payments or fulfilling orders, which are still disabled.
 
 Third Railify Admin now has a deployed-code path ready to receive signed Stripe Sandbox events, but it refuses all delivery until Stripe Workbench creates the destination and its signing secret is stored server-side. Even a valid test Checkout-completed event can only create one safe receipt today; it cannot create an order, fulfill anything, or enable payment acceptance.
 

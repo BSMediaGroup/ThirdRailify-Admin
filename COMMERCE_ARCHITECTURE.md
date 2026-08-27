@@ -9,9 +9,9 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Commerce environment | `staging` |
 | Dedicated Stripe account | created; operator-confirmed |
 | Stripe integration mode | `direct_merchant` |
-| Stripe API connection | restricted TEST credential configured; read-only verification implemented |
-| Stripe webhook endpoint code | deployed and ready at `POST /api/webhooks/stripe` |
-| Stripe webhook signing | not configured; `STRIPE_WEBHOOK_SECRET` does not exist yet |
+| Stripe API connection | connected after successful Canadian CAD account verification |
+| Stripe webhook endpoint | operational at `POST /api/webhooks/stripe`; one signed sandbox event accepted |
+| Stripe webhook signing | configured and verified by a valid signed sandbox Event |
 | Stripe environment | `test`; production readiness not established |
 | Checkout | `disabled` |
 | Live payment capture | `disabled` |
@@ -22,7 +22,7 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Printify | `unavailable`; credential custody undecided |
 | Wix | `legacy production`; remains authoritative and untouched |
 
-The separate Admin-only commerce D1 is bound and migrated, and its encryption key plus Stripe TEST credential remain encrypted Cloudflare Secrets. This milestone adds a webhook receiver and receipt ledger, but it creates no Stripe event destination, payment, Checkout Session, transaction, customer, product, price, refund, payout, commerce order, or fulfillment order.
+The separate Admin-only commerce D1 is bound and migrated, and its encryption key plus Stripe TEST API/webhook credentials remain encrypted Cloudflare Secrets. The receiver has accepted one real signed sandbox event into the safe receipt ledger, but this milestone creates no payment, Checkout Session, transaction, customer, product, price, refund, payout, commerce order, or fulfillment order.
 
 ## Authoritative payment flow
 
@@ -88,6 +88,8 @@ Entities:
 - `commerce_orders`: future order records with customer-payment and Printful cost/refund fields kept separate.
 - `commerce_audit`: redacted mutation history.
 - `commerce_webhook_events`: one safe receipt per provider plus provider Event ID, with bounded event/object/status metadata and a raw-payload SHA-256 only. It has no raw payload, signature, secret, credential, customer, address, card, or full-object column.
+
+The canonical configuration flags are evidence records, not secret-presence probes. `stripe_api_configured` becomes true only in the same successful write batch as a server-side `GET /v1/account` result that normalizes to `country=CA` and `default_currency=cad`. `stripe_webhook_configured` and provider `webhook_configured` become true only in the same duplicate-safe receipt batch as a valid `v1` signature, in-tolerance timestamp, valid Stripe Event envelope, and `livemode=false` event. A later valid duplicate delivery may reassert webhook proof without adding a ledger row. These flags never alter Checkout, live-payment capture, payout readiness, or fulfillment gates.
 
 The Stripe provider row stores only safe, verified values: environment, `direct_merchant`, Stripe account ID retrieved through the API, country, default currency, account/business display name, test charges/payouts/details-submitted flags, account type, last verification time, webhook status, and the existing bounded payment-method summary. It must not store API keys, webhook signing secrets, payout-bank data, card data, identity documents, full private Stripe responses, tax IDs, individual/representative details, or team-member email addresses.
 

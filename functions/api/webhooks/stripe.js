@@ -4,7 +4,10 @@ import {
   jsonResponse,
   nowIso,
 } from "../../_shared/auth-core.js";
-import { requireCommerceDb } from "../../_shared/commerce-core.js";
+import {
+  recordVerifiedStripeWebhookReceipt,
+  requireCommerceDb,
+} from "../../_shared/commerce-core.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -34,7 +37,7 @@ export async function handleStripeWebhook(request, env, now = Date.now()) {
   if (!webhookSecret) {
     throw new AuthFailure(503, "stripe_webhook_not_configured", "Stripe webhook signing is not configured.");
   }
-  const db = requireCommerceDb(env);
+  requireCommerceDb(env);
   const rawBody = await readBoundedRawBody(request);
   const signature = parseStripeSignature(request.headers.get("stripe-signature"));
   await verifyStripeSignature(webhookSecret, signature, rawBody, now);
@@ -55,35 +58,18 @@ export async function handleStripeWebhook(request, env, now = Date.now()) {
   const processingStatus = accepted ? "accepted_noop" : "ignored";
   const resultCode = accepted ? "checkout_disabled" : "event_type_ignored";
   const payloadSha256 = await sha256Hex(rawBody);
-  let insert;
-  try {
-    insert = await db
-      .prepare(
-        `INSERT OR IGNORE INTO commerce_webhook_events (
-           provider, provider_event_id, event_type, event_created_at, received_at, livemode,
-           api_version, related_object_id, related_object_type, processing_status,
-           processed_at, result_code, payload_sha256
-         ) VALUES ('stripe', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        normalized.id,
-        normalized.type,
-        normalized.created,
-        receivedAt,
-        normalized.apiVersion,
-        normalized.relatedObjectId,
-        normalized.relatedObjectType,
-        processingStatus,
-        receivedAt,
-        resultCode,
-        payloadSha256,
-      )
-      .run();
-  } catch {
-    throw new AuthFailure(503, "stripe_webhook_storage_unavailable", "Stripe webhook receipt storage is unavailable.");
-  }
-
-  const duplicate = Number(insert?.meta?.changes || 0) === 0;
+  const { duplicate } = await recordVerifiedStripeWebhookReceipt(env, {
+    eventId: normalized.id,
+    eventType: normalized.type,
+    eventCreatedAt: normalized.created,
+    receivedAt,
+    apiVersion: normalized.apiVersion,
+    relatedObjectId: normalized.relatedObjectId,
+    relatedObjectType: normalized.relatedObjectType,
+    processingStatus,
+    resultCode,
+    payloadSha256,
+  });
   return jsonResponse({
     ok: true,
     received: true,

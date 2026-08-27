@@ -81,6 +81,7 @@ test("Stripe verification route enforces auth, payments authority, CSRF, configu
   assert.equal(missingDb.status, 503); assert.equal((await missingDb.json()).error, "commerce_database_unavailable");
   const missingKey = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), env: { ...env, STRIPE_SECRET_KEY: "" }, data: { commerceFetch } });
   assert.equal(missingKey.status, 503); assert.equal((await missingKey.json()).error, "stripe_credential_unavailable");
+  assert.equal((await harness.commerceDb.prepare("SELECT value_json FROM commerce_settings WHERE setting_key = 'stripe_api_configured'").first()).value_json, "false");
   assert.equal(providerCalls, 0);
 
   const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), env, "stripe/verify", commerceFetch);
@@ -90,6 +91,7 @@ test("Stripe verification route enforces auth, payments authority, CSRF, configu
   assert.equal(stripe.status, "connected"); assert.equal(stripe.externalAccountId, "acct_RouteCanadian123"); assert.equal(stripe.apiConfigured, true);
   assert.equal(stripe.webhookConfigured, false); assert.equal(stripe.checkoutEnabled, false); assert.equal(stripe.livePaymentsEnabled, false); assert.equal(stripe.livePayoutReadiness, "unverified");
   assert.equal(stripe.webhookEndpointReady, true); assert.equal(stripe.webhookSigningConfigured, false);
+  assert.equal((await harness.commerceDb.prepare("SELECT value_json FROM commerce_settings WHERE setting_key = 'stripe_api_configured'").first()).value_json, "true");
 });
 
 test("only Master can grant commerce authority and ordinary users are rejected", async (t) => {
