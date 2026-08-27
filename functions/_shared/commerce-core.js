@@ -14,6 +14,10 @@ const ENCRYPTION_ALGORITHM = "A256GCM";
 const MAX_SECRET_BYTES = 16 * 1024;
 const ENCRYPTION_CONTEXT_PREFIX = "thirdrailify-commerce:v1:";
 const STRIPE_ACCOUNT_URL = "https://api.stripe.com/v1/account";
+const PRINTFUL_STORES_URL = "https://api.printful.com/stores";
+const PRINTFUL_PRODUCTS_URL = "https://api.printful.com/store/products?limit=1";
+const PRINTFUL_EXPECTED_STORE_NAME = "Third Railify API";
+const MAX_PRINTFUL_CREDENTIAL_LENGTH = 4096;
 
 export const COMMERCE_CAPABILITIES = Object.freeze([
   "commerce.view",
@@ -44,7 +48,7 @@ export const COMMERCE_SAFE_POSTURE = Object.freeze({
   stripeApiConnection: "not_configured",
   stripeWebhook: "not_configured",
   stripeLivePayoutReadiness: "unverified",
-  printfulApi: "disabled",
+  printfulApi: "verification_available",
   paypal: "deferred",
   wix: "legacy_production",
 });
@@ -66,7 +70,7 @@ export const PRINTFUL_TWO_TRANSACTION_MODEL = Object.freeze({
 
 export const PROVIDER_BLUEPRINTS = Object.freeze([
   Object.freeze({ provider: "stripe", label: "Stripe", status: "setup_required", integrationMode: "direct_merchant", credentialCustody: "environment_secret", environment: "test", countryCode: "CA", currencyCode: "CAD", accountCreated: true, apiConfigured: false, webhookEndpointReady: true, webhookSigningConfigured: false, webhookConfigured: false, checkoutEnabled: false, livePaymentsEnabled: false, livePayoutReadiness: "unverified", metadata: Object.freeze({ accountDisplayName: "Third Railify Official", paymentMethods: Object.freeze(["cards", "eligible_apple_pay", "eligible_google_pay"]) }) }),
-  Object.freeze({ provider: "printful", label: "Printful", status: "setup_required", integrationMode: "fulfillment", credentialCustody: "environment_secret", environment: "staging", currencyCode: "CAD" }),
+  Object.freeze({ provider: "printful", label: "Printful", status: "setup_required", integrationMode: "fulfillment", credentialCustody: "environment_secret", environment: "staging", currencyCode: "CAD", apiConfigured: false, webhookConfigured: false, metadata: Object.freeze({ accessLevel: "single_store", orderMode: "draft_only", fulfillmentEnabled: false, credentialConfigured: false, existingWixStoreUntouched: true, providerApi: "real" }) }),
   Object.freeze({ provider: "paypal", label: "PayPal", status: "deferred", integrationMode: "direct_merchant", credentialCustody: "admin_encrypted", environment: "deferred", countryCode: "CA", currencyCode: "CAD" }),
   Object.freeze({ provider: "printify", label: "Printify", status: "unavailable", credentialCustody: "no_secret", environment: "staging" }),
   Object.freeze({ provider: "wix", label: "Wix commerce", status: "legacy_production", integrationMode: "legacy", credentialCustody: "no_secret", environment: "legacy", countryCode: "CA", currencyCode: "CAD" }),
@@ -109,6 +113,10 @@ export function isStripeWebhookSigningConfigured(env) {
   return /^whsec_[^\s]{6,}$/.test(secret) && secret.length <= 512;
 }
 
+export function isPrintfulCredentialConfigured(env) {
+  return Boolean(printfulCredential(env));
+}
+
 export async function commerceAccessForSession(env, session) {
   const isMasterAdmin = session?.account?.adminLevel === "master";
   if (isMasterAdmin) return { isMasterAdmin: true, capabilities: [...COMMERCE_CAPABILITIES] };
@@ -142,6 +150,7 @@ export async function commerceOverview(env, session) {
       databaseConfigured: false,
       encryptionConfigured: hasValidEncryptionKeyShape(env),
       stripeSecretConfigured: isStripeTestCredentialConfigured(env),
+      printfulSecretConfigured: isPrintfulCredentialConfigured(env),
       access,
       posture: COMMERCE_SAFE_POSTURE,
       providers: providerBlueprints(env),
@@ -155,7 +164,7 @@ export async function commerceOverview(env, session) {
   const db = requireCommerceDb(env);
   const [providerResult, settingResult, profile, taxCount, templateCount, productCount, orderCount] = await Promise.all([
     db.prepare("SELECT provider, integration_mode, credential_custody, status, environment, external_account_id, country_code, currency_code, safe_metadata_json, last_synchronized_at FROM commerce_provider_connections ORDER BY provider").all(),
-    db.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('stripe_api_configured', 'stripe_webhook_configured')").all(),
+    db.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('stripe_api_configured', 'stripe_webhook_configured', 'printful_api_configured', 'printful_order_mode', 'fulfillment_submission_enabled')").all(),
     db.prepare("SELECT * FROM commerce_business_profiles WHERE id = 'primary'").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_tax_registrations").first(),
     db.prepare("SELECT COUNT(*) AS count FROM commerce_templates").first(),
@@ -169,6 +178,7 @@ export async function commerceOverview(env, session) {
     databaseConfigured: true,
     encryptionConfigured: hasValidEncryptionKeyShape(env),
     stripeSecretConfigured: isStripeTestCredentialConfigured(env),
+    printfulSecretConfigured: isPrintfulCredentialConfigured(env),
     access,
     posture: COMMERCE_SAFE_POSTURE,
     providers: providers.length ? providers : providerBlueprints(env),
@@ -352,6 +362,103 @@ export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
     accountId: account.id,
     country: account.country,
     currency: account.defaultCurrency,
+  });
+  return commerceOverview(env, session);
+}
+
+export async function verifyPrintfulStore(env, session, fetchImpl = fetch) {
+  const db = requireCommerceDb(env);
+  const correlationId = randomId();
+  const current = await db
+    .prepare("SELECT id, external_account_id, safe_metadata_json FROM commerce_provider_connections WHERE provider = 'printful' LIMIT 1")
+    .first();
+  if (!current) {
+    throw new AuthFailure(503, "printful_provider_unavailable", "The Printful provider connection is not configured.");
+  }
+
+  const credential = printfulCredential(env);
+  if (!credential) {
+    throw new AuthFailure(503, "printful_credential_unavailable", "The store-scoped Printful credential is not configured.");
+  }
+  const configuredStoreId = configuredPrintfulStoreId(env);
+
+  const storesPayload = await printfulGet(fetchImpl, PRINTFUL_STORES_URL, credential, "stores");
+  const store = normalizePrintfulStoreList(storesPayload);
+  if (isWixPrintfulStore(store)) {
+    throw new AuthFailure(409, "printful_wix_store_rejected", "The configured credential resolves to a Wix-connected Printful store and was rejected.");
+  }
+  if (normalizeStoreName(store.name) !== normalizeStoreName(PRINTFUL_EXPECTED_STORE_NAME) || store.type !== "native") {
+    throw new AuthFailure(409, "printful_store_identity_ambiguous", "The configured credential does not resolve unambiguously to the dedicated Third Railify API store.");
+  }
+
+  const persistedStoreId = optionalPrintfulStoreId(current.external_account_id, "printful_persisted_store_invalid");
+  if ((configuredStoreId && configuredStoreId !== store.id) || (persistedStoreId && persistedStoreId !== store.id) || (configuredStoreId && !persistedStoreId)) {
+    throw new AuthFailure(409, "printful_store_mismatch", "The configured, token-resolved, and persisted Printful Store IDs do not agree.");
+  }
+
+  const productsPayload = await printfulGet(fetchImpl, PRINTFUL_PRODUCTS_URL, credential, "products");
+  const productProbe = normalizePrintfulProductProbe(productsPayload);
+  const timestamp = nowIso();
+  const existingMetadata = safeJson(current.safe_metadata_json, {});
+  const safeMetadata = {
+    ...existingMetadata,
+    mode: "draft_only",
+    order_mode: "draft_only",
+    api_active: true,
+    api_configured: true,
+    credential_configured: true,
+    credential_custody: "cloudflare_secret_server_only",
+    access_level: "single_store",
+    provider_api: "real",
+    store_name: store.name,
+    store_type: store.type,
+    product_count: productProbe.total,
+    webhook_configured: false,
+    fulfillment_enabled: false,
+    parallel_store_planned: false,
+    existing_wix_store_untouched: true,
+    last_verified_at: timestamp,
+  };
+  delete safeMetadata.token;
+  delete safeMetadata.authorization;
+  delete safeMetadata.raw_response;
+
+  let updates;
+  try {
+    updates = await db.batch([
+      db.prepare(
+        `UPDATE commerce_provider_connections
+         SET integration_mode = 'fulfillment', credential_custody = 'environment_secret',
+             credential_ciphertext = NULL, status = 'connected', environment = 'staging',
+             external_account_id = ?, currency_code = 'CAD', safe_metadata_json = ?,
+             last_synchronized_at = ?, updated_at = ?
+         WHERE provider = 'printful'`,
+      ).bind(store.id, JSON.stringify(safeMetadata), timestamp, timestamp),
+      safeSettingStatement(db, "printful_api_configured", true, timestamp, session?.accountId),
+      safeSettingStatement(db, "printful_order_mode", "draft_only", timestamp, session?.accountId),
+    ]);
+  } catch {
+    throw new AuthFailure(503, "printful_provider_persistence_failed", "The verified Printful store could not be saved.");
+  }
+  if (updates.some((update) => Number(update?.meta?.changes || 0) !== 1)) {
+    throw new AuthFailure(503, "printful_provider_persistence_failed", "The verified Printful store could not be saved.");
+  }
+
+  await writeCommerceAudit(env, {
+    actorAccountId: session?.accountId,
+    action: "printful.store_verified",
+    targetType: "commerce_provider_connection",
+    targetId: "printful",
+    result: "success",
+    metadata: {
+      provider: "printful",
+      storeId: Number(store.id),
+      storeName: store.name,
+      storeType: store.type,
+      productCount: productProbe.total,
+      result: "verified",
+      correlationId,
+    },
   });
   return commerceOverview(env, session);
 }
@@ -808,6 +915,99 @@ function normalizeStripeAccount(value) {
   };
 }
 
+function printfulCredential(env) {
+  const credential = String(env?.PRINTFUL_API_TOKEN || "").trim();
+  if (!credential || credential.length > MAX_PRINTFUL_CREDENTIAL_LENGTH || /[\u0000-\u001F\u007F]/.test(credential)) return "";
+  return credential;
+}
+
+function configuredPrintfulStoreId(env) {
+  const raw = String(env?.PRINTFUL_STORE_ID ?? "").trim();
+  if (!raw) return null;
+  return requiredPrintfulStoreId(raw, "printful_store_configuration_invalid");
+}
+
+function optionalPrintfulStoreId(value, errorCode) {
+  const raw = String(value ?? "").trim();
+  return raw ? requiredPrintfulStoreId(raw, errorCode) : null;
+}
+
+function requiredPrintfulStoreId(value, errorCode) {
+  const raw = typeof value === "number" && Number.isSafeInteger(value) ? String(value) : String(value || "").trim();
+  if (!/^[1-9]\d{0,14}$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new AuthFailure(409, errorCode, "The Printful Store ID is invalid.");
+  }
+  return raw;
+}
+
+async function printfulGet(fetchImpl, url, credential, resource) {
+  let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    response = await fetchImpl(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${credential}`,
+      },
+    });
+  } catch {
+    throw new AuthFailure(502, "printful_provider_unavailable", "Printful verification is temporarily unavailable.");
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response?.ok) {
+    throw new AuthFailure(502, "printful_provider_error", "Printful rejected the read-only verification request.");
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new AuthFailure(502, `printful_${resource}_response_invalid`, "Printful returned an invalid verification response.");
+  }
+}
+
+function normalizePrintfulStoreList(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.code !== 200 || !Array.isArray(value.result)) {
+    throw new AuthFailure(502, "printful_stores_response_invalid", "Printful returned an invalid store response.");
+  }
+  const total = Number(value.paging?.total);
+  if (!Number.isSafeInteger(total) || total !== 1 || value.result.length !== 1) {
+    throw new AuthFailure(409, value.result.length > 1 || total > 1 ? "printful_store_scope_invalid" : "printful_store_unavailable", "The Printful credential must resolve to exactly one authorized store.");
+  }
+  const raw = value.result[0];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new AuthFailure(502, "printful_stores_response_invalid", "Printful returned an invalid store response.");
+  }
+  const id = requiredPrintfulStoreId(raw.id, "printful_stores_response_invalid");
+  const name = cleanText(raw.name, 160);
+  const type = cleanText(raw.type, 40).toLowerCase();
+  if (!name || !type) {
+    throw new AuthFailure(502, "printful_stores_response_invalid", "Printful returned an invalid store response.");
+  }
+  return { id, name, type };
+}
+
+function normalizePrintfulProductProbe(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.code !== 200 || !Array.isArray(value.result)) {
+    throw new AuthFailure(502, "printful_products_response_invalid", "Printful returned an invalid product response.");
+  }
+  const total = Number(value.paging?.total);
+  if (!Number.isSafeInteger(total) || total < 0 || value.result.length > 1 || total < value.result.length) {
+    throw new AuthFailure(502, "printful_products_response_invalid", "Printful returned an invalid product response.");
+  }
+  return { total };
+}
+
+function normalizeStoreName(value) {
+  return cleanText(value, 160).toLocaleLowerCase("en").replace(/\s+/g, " ");
+}
+
+function isWixPrintfulStore(store) {
+  return /wix/i.test(store.type) || /\bwix\b/i.test(store.name);
+}
+
 async function writeStripeVerificationAudit(env, session, resultCategory, result, safe = {}) {
   await writeCommerceAudit(env, {
     actorAccountId: session?.accountId,
@@ -878,7 +1078,24 @@ function serializeProviderConnection(row, env, settings = {}) {
     payoutsEnabled: rawMetadata.payouts_enabled === true,
     detailsSubmitted: rawMetadata.details_submitted === true,
     accountType: cleanText(rawMetadata.account_type, 40) || undefined,
+    storeName: cleanText(rawMetadata.store_name, 160) || undefined,
+    storeType: cleanText(rawMetadata.store_type, 40) || undefined,
+    productCount: Number.isSafeInteger(Number(rawMetadata.product_count)) && Number(rawMetadata.product_count) >= 0 ? Number(rawMetadata.product_count) : undefined,
+    credentialConfigured: rawMetadata.credential_configured === true,
+    accessLevel: cleanText(rawMetadata.access_level, 40) || undefined,
+    orderMode: cleanText(rawMetadata.order_mode || rawMetadata.mode, 40) || undefined,
+    fulfillmentEnabled: rawMetadata.fulfillment_enabled === true,
+    existingWixStoreUntouched: rawMetadata.existing_wix_store_untouched === true,
+    providerApi: cleanText(rawMetadata.provider_api, 40) || undefined,
   };
+  const providerApiConfigured = row.provider === "stripe"
+    ? rawMetadata.api_configured === true && settings.stripe_api_configured === true
+    : row.provider === "printful"
+      ? rawMetadata.api_configured === true && settings.printful_api_configured === true
+      : rawMetadata.api_configured === true;
+  const providerWebhookConfigured = row.provider === "stripe"
+    ? rawMetadata.webhook_configured === true && settings.stripe_webhook_configured === true
+    : rawMetadata.webhook_configured === true;
   return {
     provider: row.provider,
     label: blueprint?.label || row.provider,
@@ -890,10 +1107,10 @@ function serializeProviderConnection(row, env, settings = {}) {
     countryCode: cleanText(row.country_code, 2) || null,
     currencyCode: cleanText(row.currency_code, 3) || null,
     accountCreated: rawMetadata.account_created === true,
-    apiConfigured: rawMetadata.api_configured === true && settings.stripe_api_configured === true,
+    apiConfigured: providerApiConfigured,
     webhookEndpointReady: row.provider === "stripe",
     webhookSigningConfigured: row.provider === "stripe" && isStripeWebhookSigningConfigured(env),
-    webhookConfigured: rawMetadata.webhook_configured === true && settings.stripe_webhook_configured === true,
+    webhookConfigured: providerWebhookConfigured,
     checkoutEnabled: rawMetadata.checkout_enabled === true,
     livePaymentsEnabled: rawMetadata.live_payments_enabled === true,
     livePayoutReadiness: cleanText(rawMetadata.live_payout_readiness, 40) || "unverified",
@@ -903,21 +1120,27 @@ function serializeProviderConnection(row, env, settings = {}) {
 }
 
 function configuredSettingStatement(db, settingKey, timestamp, accountId) {
+  return safeSettingStatement(db, settingKey, true, timestamp, accountId);
+}
+
+function safeSettingStatement(db, settingKey, value, timestamp, accountId) {
   return db.prepare(
     `INSERT INTO commerce_settings (setting_key, value_json, classification, updated_at, updated_by_account_id)
-     VALUES (?, 'true', 'safe', ?, ?)
+     VALUES (?, ?, 'safe', ?, ?)
      ON CONFLICT(setting_key) DO UPDATE SET
        value_json = excluded.value_json,
        classification = 'safe',
        updated_at = excluded.updated_at,
        updated_by_account_id = excluded.updated_by_account_id`,
-  ).bind(settingKey, timestamp, cleanText(accountId, 160) || null);
+  ).bind(settingKey, JSON.stringify(value), timestamp, cleanText(accountId, 160) || null);
 }
 
 function providerBlueprints(env) {
-  return PROVIDER_BLUEPRINTS.map((provider) => provider.provider === "stripe"
-    ? { ...provider, webhookSigningConfigured: isStripeWebhookSigningConfigured(env) }
-    : provider);
+  return PROVIDER_BLUEPRINTS.map((provider) => {
+    if (provider.provider === "stripe") return { ...provider, webhookSigningConfigured: isStripeWebhookSigningConfigured(env) };
+    if (provider.provider === "printful") return { ...provider, metadata: { ...provider.metadata, credentialConfigured: isPrintfulCredentialConfigured(env) } };
+    return provider;
+  });
 }
 
 function serializeTemplate(row) {

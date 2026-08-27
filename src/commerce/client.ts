@@ -17,7 +17,7 @@ export type BusinessProfile = {
   private: { legalBusinessNameStored: boolean; privateAddressStored: boolean; registrations: Array<{ type: string; jurisdiction: string; maskedIdentifier: string; status: string }> };
 };
 export type CommerceOverviewPayload = {
-  ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; stripeSecretConfigured: boolean; access: CommerceAccess;
+  ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; stripeSecretConfigured: boolean; printfulSecretConfigured: boolean; access: CommerceAccess;
   posture: Record<string, string>; providers: ProviderStatus[]; business: Omit<BusinessProfile, "private">;
   completeness: { businessProfile: string; tax: string; templates: string };
   counts: { products: number | null; orders: number | null; templates: number | null }; checkedAt: string;
@@ -46,6 +46,9 @@ export type CommerceOrdersPayload = { ok: boolean; databaseConfigured: boolean; 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
 export function verifyStripeConnection(csrfToken: string) {
   return adminApi<CommerceOverviewPayload>("/api/admin/commerce/stripe/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+}
+export function verifyPrintfulConnection(csrfToken: string) {
+  return adminApi<CommerceOverviewPayload>("/api/admin/commerce/printful/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
 }
 export function getBusinessProfile() { return adminApi<BusinessPayload>("/api/admin/commerce/business"); }
 export function saveBusinessProfile(csrfToken: string, body: Record<string, unknown>) {

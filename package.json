@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test:functions": "node --test --test-concurrency=1 tests/auth-migration.test.mjs tests/auth-functions.test.mjs tests/profile-media.test.mjs tests/commerce-migration.test.mjs tests/commerce-core.test.mjs tests/commerce-functions.test.mjs tests/checkout.test.mjs tests/stripe-webhook.test.mjs tests/goats-migration.test.mjs tests/goats-core.test.mjs",
+    "test:functions": "node --test --test-concurrency=1 tests/auth-migration.test.mjs tests/auth-functions.test.mjs tests/profile-media.test.mjs tests/commerce-migration.test.mjs tests/commerce-core.test.mjs tests/commerce-functions.test.mjs tests/printful.test.mjs tests/checkout.test.mjs tests/stripe-webhook.test.mjs tests/goats-migration.test.mjs tests/goats-core.test.mjs",
+    "test:printful": "node --test --test-concurrency=1 tests/printful.test.mjs",
     "typecheck": "tsc -b --pretty false",
     "goats:import:dry-run": "node scripts/validate-goats-import.mjs",
     "preview": "vite preview --host 127.0.0.1"

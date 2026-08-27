@@ -18,7 +18,8 @@
     "ADMIN_EMAIL_1": "mail@danielclancy.net",
     "ADMIN_EMAIL_2": "thirdmailify@gmail.com",
     "MAIL_FROM": "Third Railify Official <alerts@notify.thirdrailify.com>",
-    "MAIL_REPLY_TO": "info@thirdrailify.com"
+    "MAIL_REPLY_TO": "info@thirdrailify.com",
+    "PRINTFUL_STORE_ID": "18668025"
   },
   "d1_databases": [
     {

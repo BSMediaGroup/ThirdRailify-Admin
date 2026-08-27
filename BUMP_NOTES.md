@@ -10,6 +10,12 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Technical
 
+- Added the permanent store-scoped Printful verification seam without a D1 migration: `POST /api/admin/commerce/printful/verify` reuses exact Admin origin/session, Master or `commerce.integrations.manage`, CSRF, the bounded commerce rate limit, and existing auth/commerce audits. The server accepts an opaque bounded `PRINTFUL_API_TOKEN`, performs only `GET /stores` and `GET /store/products?limit=1`, sends no discovery store header, and exposes no credential material.
+- Made Wix-store isolation permanent: verification requires exactly one whitespace/case-normalized `Third Railify API` store of Printful's `native` type, rejects Wix/multi-store/ambiguous identities before the product probe, and fails closed when configured, token-resolved, and persisted Store IDs disagree. Only the existing unique Printful provider row receives safe Store ID/name/type/count proof; no token, Authorization header, raw response, product, order, webhook, or duplicate provider row is stored.
+- Upgraded Commerce Overview and Fulfillment Integrations to show the real production-capable Printful API separately from the pre-cutover application rollout, including safe store identity, single-store access, product count, `draft_only`, disabled automatic fulfillment, unconfigured webhooks, and explicit confirmation that the active Wix integration remains unaffected. Added a permission-gated verification control with no browser credential path.
+- Added `tests/printful.test.mjs` and `npm run test:printful` for opaque/bounded credential handling, auth/origin/CSRF/capability gates, existing commerce rate limiting, exact GET/header behavior, malformed/zero/multi/Wix/ambiguous rejection, empty and non-empty product probes, safe persistence/audit, no duplicate provider or commerce records, unchanged checkout/live/fulfillment gates, no provider write method, and permanent three-way Store-ID matching.
+- Verified the deployed Admin seam against the permanent store-scoped token: it resolved exactly one `native` store named `Third Railify API`, safe Store ID `18668025`, and one visible product. Bound only that safe ID as `PRINTFUL_STORE_ID`; the Wix store was not selected or accessed, and no Printful write was performed.
+
 - Added additive `commerce-migrations/0004_goats_community.sql` as the Admin-only authority for drafts/submissions, opaque media metadata, reactions, plain-text comments, moderation events, idempotent email outbox events, templates, and privacy-hashed rate limits. It inserts four templates with `INSERT OR IGNORE`, no production listing, and leaves existing migrations unchanged.
 - Added the first-class Master Admin GOATS overview, Pending/Approved/Rejected queues, private moderation detail, comment moderation, and email-template workspace. Moderators can correct public fields/coarse coordinates, order/select media, approve/reject, hide/restore, preview, retry delivery, and delete only fixed `DEMO-*` records with optimistic versions; approval fails without ready main media, valid product/slug/consent/fields, and confirmed coordinates.
 - Added the fixed approved-only `/api/goats/*` projection/ingestion authority and protected `/api/admin/goats/*` surface. Public-to-Admin mutations require a five-minute HMAC signature; Admin writes retain exact origin, current server-resolved Master role, CSRF, parameterised D1, and no-store output. Status change, audit event, and idempotent status-email event are one D1 batch.
@@ -93,6 +99,8 @@ No prior version metadata or release scheme existed in this repository. `0.0.0-s
 
 ### Human-readable
 
+The new website now proves that its permanent Printful credential belongs only to the separate Third Railify API store (Store ID `18668025`). The check found one visible product, but it cannot create or change products, orders, files, or webhooks. Draft-only mode and automatic fulfillment remain firmly off, and the existing Wix store stays live and untouched.
+
 The control room now has a complete local GOATS moderation desk. A Master Admin can review private submissions, make the public location deliberately approximate, verify the product and photos, publish or reject the story, hide it later, moderate comments, and see whether each status email is pending, failed, or sent.
 
 Nothing has been placed into production: the new database migration is only checked in, the live gallery has not been populated, no email was sent, and the two invented proof listings run only when someone deliberately applies the local test seed. The later Wix export can be checked safely before an importer is added around its real shape.
@@ -129,7 +137,7 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 
 - Historical blocker removed: the superseded Stripe Connect platform eligibility check is no longer part of the Third Railify shop architecture.
 - Authoritative product/variant catalogue import, Public cart/checkout client wiring, enabled sandbox Checkout acceptance, wallet eligibility testing, refund/dispute handling, and all live payment activity.
-- Creation of a parallel Printful manual/API store and scoped token, catalogue connectivity, draft-order API work, explicit confirmation gates, and fulfillment activation. Existing Wix-connected Printful remains untouched.
+- Authoritative Printful catalogue reconciliation/import, draft-order API work, explicit order-confirmation gates, and fulfillment activation. The separate API store and scoped-token verification seam now exist; the Wix-connected Printful store remains untouched.
 - PayPal direct-merchant setup and donations/VIP work; Printify evidence and credential custody; authoritative Wix catalogue/provider/export/policy reconciliation and cutover planning.
 - Creation/binding of the real staging D1 database, remaining encrypted secrets, provider applications, Turnstile widget, deployment, and live Resend acceptance.
 - CMS, catalogue/provider writes, orders, membership operations, users, media uploads, settings persistence, and integrations.

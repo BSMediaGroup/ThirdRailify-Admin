@@ -17,7 +17,7 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Live payment capture | `disabled` |
 | Live payout readiness | not verified |
 | Fulfillment submission | `disabled` |
-| Printful API connection | not active; draft-only design |
+| Printful API connection | verified native `Third Railify API` store `18668025`; provider writes disabled |
 | PayPal | `deferred` |
 | Printify | `unavailable`; credential custody undecided |
 | Wix | `legacy production`; remains authoritative and untouched |
@@ -90,7 +90,7 @@ Entities:
 - `commerce_audit`: redacted mutation history.
 - `commerce_webhook_events`: one safe receipt per provider plus provider Event ID, with bounded event/object/status metadata and a raw-payload SHA-256 only. It has no raw payload, signature, secret, credential, customer, address, card, or full-object column.
 
-The canonical configuration flags are evidence records, not secret-presence probes. `stripe_api_configured` becomes true only in the same successful write batch as a server-side `GET /v1/account` result that normalizes to `country=CA` and `default_currency=cad`. `stripe_webhook_configured` and provider `webhook_configured` become true only in the same duplicate-safe receipt batch as a valid `v1` signature, in-tolerance timestamp, valid Stripe Event envelope, and `livemode=false` event. A later valid duplicate delivery may reassert webhook proof without adding a ledger row. These flags never alter Checkout, live-payment capture, payout readiness, or fulfillment gates.
+The canonical configuration flags are evidence records, not secret-presence probes. `stripe_api_configured` becomes true only in the same successful write batch as a server-side `GET /v1/account` result that normalizes to `country=CA` and `default_currency=cad`. `stripe_webhook_configured` and provider `webhook_configured` become true only in the same duplicate-safe receipt batch as a valid `v1` signature, in-tolerance timestamp, valid Stripe Event envelope, and `livemode=false` event. `printful_api_configured` becomes true only after the store-scoped credential exposes exactly one intended native store and its read-only product probe succeeds. These flags never alter Checkout, live-payment capture, payout readiness, or fulfillment gates.
 
 The Stripe provider row stores only safe, verified values: environment, `direct_merchant`, Stripe account ID retrieved through the API, country, default currency, account/business display name, test charges/payouts/details-submitted flags, account type, last verification time, webhook status, and the existing bounded payment-method summary. It must not store API keys, webhook signing secrets, payout-bank data, card data, identity documents, full private Stripe responses, tax IDs, individual/representative details, or team-member email addresses.
 
@@ -132,9 +132,15 @@ Browser-driven commerce reads and mutations reuse the existing Admin session, ro
 
 ThirdRailify Public remains an unchanged read-only client with no commerce binding, key, Stripe script, or enabled payment button. The Admin-hosted customer Checkout endpoint is prepared for a later Public client, but its remote gate stays false until authoritative product import/sync. Public's eventual request contains identifiers and quantities only and receives only the local order ID, TEST Session ID, and Stripe-hosted Checkout URL.
 
-## Fulfillment and deferred providers
+## Printful store isolation and fulfillment boundary
 
-Stripe does not pay Printful. Transaction 1 is the customer's payment to Third Railify. Transaction 2 is Printful's separate charge to the Third Railify Printful Wallet or configured billing method for product/printing, shipping, taxes, and other applicable fees. Order accounting keeps customer gross, Stripe fee, customer refund, Printful product cost, shipping, tax, refund/credit, and gross margin separate. Printful remains disconnected and draft-only until later approval.
+Printful has no Stripe-style sandbox in this architecture. The provider API is real, and the Private Token is production-capable, but it is scoped to the separate permanent `Third Railify API` Manual Order/API store. The existing Wix-connected Printful store remains live and is only a future migration source; this Admin integration must never receive account-wide token access or target that Wix store.
+
+`POST /api/admin/commerce/printful/verify` requires the existing Admin session, exact Admin origin, CSRF, commerce rate limiting, commerce D1, and Master or `commerce.integrations.manage`. It reads the opaque `PRINTFUL_API_TOKEN` only server-side, performs `GET https://api.printful.com/stores` without `X-PF-Store-Id`, requires exactly one returned `native` store whose whitespace/case-normalized name is `Third Railify API`, then performs only `GET https://api.printful.com/store/products?limit=1`. Wix type/name, zero/multiple stores, malformed responses, provider failure, or any configured/token/persisted Store-ID disagreement fail closed before persistence or further provider access.
+
+Only the existing unique Printful provider row is updated. Live read-only verification resolved the token to exactly one `native` store named `Third Railify API`, Store ID `18668025`, with one visible product; that ID is now the safe Wrangler configuration and the Wix store was not selected. Safe store ID/name/type, single-store access, product count, real-API posture, Cloudflare-secret custody, and verification time may persist. The token, Authorization header, raw responses, account/team/billing information, and Wix credentials never persist. The provider row's schema `environment=staging` describes the application rollout, not a Printful sandbox. Permanent pre-cutover gates remain `draft_only`, `fulfillment_enabled=false`, `webhook_configured=false`, `checkout_enabled=false`, and `live_payment_capture_enabled=false`.
+
+Stripe does not pay Printful. Transaction 1 is the customer's payment to Third Railify. Transaction 2 is Printful's separate charge to the Third Railify Printful Wallet or configured billing method for product/printing, shipping, taxes, and other applicable fees. Order accounting keeps customer gross, Stripe fee, customer refund, Printful product cost, shipping, tax, refund/credit, and gross margin separate. No Printful order creation, confirmation, file/product mutation, or webhook configuration exists in this milestone.
 
 PayPal remains a later direct-merchant REST integration for `/donate` and possible VIP use. It is not the preferred shop processor, has no partner onboarding, credential form, or API call, and stays deferred until after Stripe and Printful.
 

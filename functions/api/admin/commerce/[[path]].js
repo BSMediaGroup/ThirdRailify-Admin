@@ -23,6 +23,7 @@ import {
   updateBusinessProfile,
   updateFeaturedProducts,
   updateTemplate,
+  verifyPrintfulStore,
   verifyStripeAccount,
 } from "../../../_shared/commerce-core.js";
 import { commerceOrdersPayload } from "../../../_shared/checkout-core.js";
@@ -82,6 +83,10 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     await requireCommerceCapability(env, session, "commerce.payments.manage");
     payload = await verifyStripeAccount(env, session, fetchImpl);
     authEventType = "stripe_account_verified";
+  } else if (path === "printful/verify") {
+    await requireCommerceCapability(env, session, "commerce.integrations.manage");
+    payload = await verifyPrintfulStore(env, session, fetchImpl);
+    authEventType = "printful_store_verified";
   } else if (path === "business") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
@@ -118,8 +123,12 @@ async function handlePost(request, env, path, fetchImpl = fetch) {
     actorAccountId: session.accountId,
     eventType: authEventType,
     result: "success",
-    provider: path === "stripe/verify" ? "stripe" : undefined,
-    metadata: { commerceAudit: true, ...(path === "stripe/verify" ? { environment: "test" } : {}) },
+    provider: path === "stripe/verify" ? "stripe" : path === "printful/verify" ? "printful" : undefined,
+    metadata: {
+      commerceAudit: true,
+      ...(path === "stripe/verify" ? { environment: "test" } : {}),
+      ...(path === "printful/verify" ? { access: "single_store", providerApi: "real", orderMode: "draft_only" } : {}),
+    },
   });
   return jsonResponse(payload, { headers: corsHeaders(request, env) });
 }
