@@ -22,11 +22,13 @@ export const GOATS_CONSENT_VERSION = "goats-v2-2026-08";
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const ALLOWED_SORTS = new Set(["newest", "most-liked", "highest-rated"]);
 const ALLOWED_STATUSES = new Set(["pending", "approved", "rejected"]);
+const ALLOWED_ENGAGEMENT_MODES = new Set(["inherit", "disabled", "auto", "moderated"]);
+const ALLOWED_GLOBAL_ENGAGEMENT_MODES = new Set(["disabled", "auto", "moderated"]);
 const encoder = new TextEncoder();
 
 export async function publicCommunityConfig(env) {
   const settings = await requireCommerceDb(env)
-    .prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('community_submission_enabled','community_geocoder_configured','community_consent_version')")
+    .prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('community_submission_enabled','community_geocoder_configured','community_consent_version','community_comments_mode','community_reactions_mode')")
     .all();
   const values = Object.fromEntries((settings?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, null)]));
   return {
@@ -38,6 +40,10 @@ export async function publicCommunityConfig(env) {
       : null,
     geocoderConfigured: values.community_geocoder_configured === true,
     consentVersion: typeof values.community_consent_version === "string" ? values.community_consent_version : GOATS_CONSENT_VERSION,
+    engagement: {
+      comments: globalEngagementMode(values.community_comments_mode),
+      reactions: globalEngagementMode(values.community_reactions_mode),
+    },
     limits: { maxImageBytes: MAX_GOAT_IMAGE_BYTES, maxGalleryImages: MAX_GOAT_GALLERY_IMAGES },
   };
 }
@@ -124,13 +130,17 @@ export async function publicListingBySlug(env, slug, accountId = "") {
   ).bind(validSlug(slug)).first();
   if (!row) throw new AuthFailure(404, "goat_not_found", "This GOAT listing was not found.");
   const item = publicListingProjection(row);
+  item.engagement = {
+    comments: await effectiveEngagementMode(env, row.comment_mode, "community_comments_mode"),
+    reactions: await effectiveEngagementMode(env, row.reaction_mode, "community_reactions_mode"),
+  };
   const media = await requireCommerceDb(env).prepare(
     "SELECT id, role, sort_order FROM community_media WHERE submission_id = ? AND processing_state = 'ready' ORDER BY CASE role WHEN 'main' THEN 0 WHEN 'profile' THEN 1 ELSE 2 END, sort_order",
   ).bind(item.id).all();
   const neighbours = await publicNeighbours(env, row.approved_at, row.id);
   let currentReaction = 0;
   if (accountId) {
-    const reaction = await requireCommerceDb(env).prepare("SELECT value FROM community_reactions WHERE submission_id = ? AND account_id = ?").bind(item.id, cleanText(accountId, 160)).first();
+    const reaction = await requireCommerceDb(env).prepare("SELECT value FROM community_reactions WHERE submission_id = ? AND account_id = ? AND moderation_state = 'approved'").bind(item.id, cleanText(accountId, 160)).first();
     currentReaction = Number(reaction?.value || 0);
   }
   return {
@@ -155,10 +165,10 @@ export async function publicComments(env, slug, input = {}) {
   const direction = input.sort === "oldest" ? "ASC" : "DESC";
   const result = await requireCommerceDb(env).prepare(
     `SELECT id, account_id, author_display_name, author_avatar_url, body, created_at, updated_at
-     FROM community_comments WHERE submission_id = ? AND status = 'visible'
+     FROM community_comments WHERE submission_id = ? AND status = 'visible' AND moderation_state = 'approved'
      ORDER BY created_at ${direction} LIMIT ? OFFSET ?`,
   ).bind(listing.id, pageSize, (page - 1) * pageSize).all();
-  const count = await requireCommerceDb(env).prepare("SELECT COUNT(*) AS count FROM community_comments WHERE submission_id = ? AND status = 'visible'").bind(listing.id).first();
+  const count = await requireCommerceDb(env).prepare("SELECT COUNT(*) AS count FROM community_comments WHERE submission_id = ? AND status = 'visible' AND moderation_state = 'approved'").bind(listing.id).first();
   const accountId = cleanText(input.accountId, 160);
   return { ok: true, items: (result?.results || []).map((row) => ({ ...commentProjection(row), isOwn: Boolean(accountId && row.account_id === accountId) })), page, pageSize, total: Number(count?.count || 0) };
 }
@@ -252,37 +262,43 @@ export async function finaliseDraft(env, draftToken, input, context = {}) {
 
 export async function mutateReaction(env, slug, accountId, value, context = {}) {
   const listing = await publicListingRowBySlug(env, slug);
+  const mode = await effectiveEngagementMode(env, listing.reaction_mode, "community_reactions_mode");
+  if (mode === "disabled") throw new AuthFailure(403, "reactions_disabled", "Reactions are disabled for this GOAT listing.");
   const actor = requiredText(accountId, 1, 160, "authentication_required");
   const reaction = Number(value);
   if (![-1, 1].includes(reaction)) throw new AuthFailure(400, "reaction_invalid", "Choose like or dislike.");
   await enforceCommunityRateLimit(env, "reaction", context.rateKey || actor, 60, 60 * 60);
   const db = requireCommerceDb(env);
-  const current = await db.prepare("SELECT value FROM community_reactions WHERE submission_id = ? AND account_id = ?").bind(listing.id, actor).first();
+  const current = await db.prepare("SELECT value, moderation_state FROM community_reactions WHERE submission_id = ? AND account_id = ?").bind(listing.id, actor).first();
   if (Number(current?.value || 0) === reaction) {
     await db.prepare("DELETE FROM community_reactions WHERE submission_id = ? AND account_id = ?").bind(listing.id, actor).run();
   } else {
     const timestamp = nowIso();
     await db.prepare(
-      `INSERT INTO community_reactions (submission_id, account_id, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(submission_id, account_id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    ).bind(listing.id, actor, reaction, timestamp, timestamp).run();
+      `INSERT INTO community_reactions (submission_id, account_id, value, moderation_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(submission_id, account_id) DO UPDATE SET value = excluded.value, moderation_state = excluded.moderation_state,
+       moderated_by_account_id = NULL, moderated_at = NULL, updated_at = excluded.updated_at`,
+    ).bind(listing.id, actor, reaction, mode === "moderated" ? "pending" : "approved", timestamp, timestamp).run();
   }
-  const counts = await db.prepare("SELECT SUM(CASE WHEN value = 1 THEN 1 ELSE 0 END) AS likes, SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END) AS dislikes FROM community_reactions WHERE submission_id = ?").bind(listing.id).first();
-  return { ok: true, likes: Math.max(0, Number(counts?.likes || 0)), dislikes: Math.max(0, Number(counts?.dislikes || 0)), currentReaction: Number(current?.value || 0) === reaction ? 0 : reaction };
+  const counts = await db.prepare("SELECT SUM(CASE WHEN value = 1 AND moderation_state = 'approved' THEN 1 ELSE 0 END) AS likes, SUM(CASE WHEN value = -1 AND moderation_state = 'approved' THEN 1 ELSE 0 END) AS dislikes FROM community_reactions WHERE submission_id = ?").bind(listing.id).first();
+  const removed = Number(current?.value || 0) === reaction;
+  return { ok: true, likes: Math.max(0, Number(counts?.likes || 0) + Number(listing.legacy_like_count || 0)), dislikes: Math.max(0, Number(counts?.dislikes || 0) + Number(listing.legacy_dislike_count || 0)), currentReaction: removed || mode === "moderated" ? 0 : reaction, pendingApproval: !removed && mode === "moderated" };
 }
 
 export async function createComment(env, slug, actor, bodyValue, context = {}) {
   const listing = await publicListingRowBySlug(env, slug);
+  const mode = await effectiveEngagementMode(env, listing.comment_mode, "community_comments_mode");
+  if (mode === "disabled") throw new AuthFailure(403, "comments_disabled", "Comments are disabled for this GOAT listing.");
   const accountId = requiredText(actor?.accountId, 1, 160, "authentication_required");
   const body = requiredText(bodyValue, 1, 1200, "comment_invalid");
   await enforceCommunityRateLimit(env, "comment", context.rateKey || accountId, 20, 60 * 60);
   const id = randomId();
   const timestamp = nowIso();
   await requireCommerceDb(env).prepare(
-    `INSERT INTO community_comments (id, submission_id, account_id, author_display_name, author_avatar_url, body, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'visible', ?, ?)`,
-  ).bind(id, listing.id, accountId, requiredText(actor?.displayName, 1, 80, "authentication_required"), safePublicUrl(actor?.avatarUrl), body, timestamp, timestamp).run();
-  return { ok: true, item: commentProjection({ id, author_display_name: actor.displayName, author_avatar_url: safePublicUrl(actor.avatarUrl), body, created_at: timestamp, updated_at: timestamp }) };
+    `INSERT INTO community_comments (id, submission_id, account_id, author_display_name, author_avatar_url, body, status, moderation_state, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, listing.id, accountId, requiredText(actor?.displayName, 1, 80, "authentication_required"), safePublicUrl(actor?.avatarUrl), body, mode === "moderated" ? "hidden" : "visible", mode === "moderated" ? "pending" : "approved", timestamp, timestamp).run();
+  return { ok: true, pendingApproval: mode === "moderated", item: mode === "moderated" ? null : commentProjection({ id, author_display_name: actor.displayName, author_avatar_url: safePublicUrl(actor.avatarUrl), body, created_at: timestamp, updated_at: timestamp }) };
 }
 
 export async function deleteComment(env, commentId, accountId) {
@@ -319,7 +335,11 @@ export async function adminOverview(env) {
   const [counts, email, recent] = await Promise.all([
     db.prepare("SELECT status, is_published, COUNT(*) AS count FROM community_submissions WHERE status <> 'draft' GROUP BY status, is_published").all(),
     db.prepare("SELECT status, COUNT(*) AS count FROM community_email_outbox GROUP BY status").all(),
-    db.prepare("SELECT id, reference_code, display_name, status, is_published, submitted_at, updated_at FROM community_submissions WHERE status <> 'draft' ORDER BY updated_at DESC LIMIT 8").all(),
+    db.prepare(`SELECT s.*,
+      (SELECT COUNT(*) FROM community_media m WHERE m.submission_id = s.id) AS media_count,
+      (SELECT id FROM community_media m WHERE m.submission_id = s.id AND m.role = 'main' ORDER BY m.created_at LIMIT 1) AS main_media_id,
+      (SELECT status FROM community_email_outbox e WHERE e.submission_id = s.id ORDER BY e.created_at DESC LIMIT 1) AS email_state
+      FROM community_submissions s WHERE s.status <> 'draft' ORDER BY s.updated_at DESC LIMIT 8`).all(),
   ]);
   const state = { pending: 0, approved: 0, rejected: 0, hidden: 0 };
   for (const row of counts?.results || []) {
@@ -327,6 +347,32 @@ export async function adminOverview(env) {
     else state[row.status] = Number(row.count || 0);
   }
   return { ok: true, counts: state, email: Object.fromEntries((email?.results || []).map((row) => [row.status, Number(row.count || 0)])), recent: (recent?.results || []).map(adminSummary) };
+}
+
+export async function adminEngagementSettings(env) {
+  const result = await requireCommerceDb(env).prepare(
+    "SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('community_comments_mode','community_reactions_mode')",
+  ).all();
+  const values = Object.fromEntries((result?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, "auto")]));
+  return { ok: true, comments: globalEngagementMode(values.community_comments_mode), reactions: globalEngagementMode(values.community_reactions_mode) };
+}
+
+export async function updateAdminEngagementSettings(env, input, actorId) {
+  const comments = validateGlobalEngagementMode(input.comments);
+  const reactions = validateGlobalEngagementMode(input.reactions);
+  const timestamp = nowIso();
+  await requireCommerceDb(env).batch([
+    requireCommerceDb(env).prepare("INSERT INTO commerce_settings (setting_key, value_json, classification, updated_at) VALUES ('community_comments_mode', ?, 'safe', ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at").bind(JSON.stringify(comments), timestamp),
+    requireCommerceDb(env).prepare("INSERT INTO commerce_settings (setting_key, value_json, classification, updated_at) VALUES ('community_reactions_mode', ?, 'safe', ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at").bind(JSON.stringify(reactions), timestamp),
+  ]);
+  return { ok: true, comments, reactions, updatedAt: timestamp, updatedBy: actorId };
+}
+
+export async function adminCommunityProducts(env) {
+  const result = await requireCommerceDb(env).prepare(
+    "SELECT id, slug, title, status, visibility FROM commerce_products ORDER BY title COLLATE NOCASE ASC LIMIT 1000",
+  ).all();
+  return { ok: true, items: (result?.results || []).map((row) => ({ id: row.id, slug: row.slug, name: row.title, status: row.status, visibility: row.visibility })) };
 }
 
 export async function adminQueue(env, statusValue = "pending") {
@@ -355,24 +401,86 @@ export async function adminSubmission(env, id) {
 
 export async function updateSubmission(env, id, expectedVersion, input, actorId) {
   const current = await requireVersion(env, id, expectedVersion);
-  if (!new Set(["pending", "rejected"]).has(current.status)) throw new AuthFailure(409, "status_conflict", "This submission can no longer be edited.");
   const displayName = requiredText(input.displayName ?? current.display_name, 2, 80, "display_name_invalid");
+  const description = requiredText(input.description ?? current.description, 1, 2000, "description_invalid");
   const city = requiredText(input.city ?? current.city, 2, 100, "city_invalid");
   const region = cleanText(input.region ?? current.region, 100);
   const country = countryCode(input.countryCode ?? current.country_code, false);
   const latitude = coordinate(input.latitude, -85, 85, true);
   const longitude = coordinate(input.longitude, -180, 180, true);
   const slug = await uniqueSlug(env, input.slug || current.public_slug || displayName, current.id);
+  const rating = input.rating === "" || input.rating == null ? null : boundedInteger(input.rating, 1, 5, null);
+  if (input.rating !== "" && input.rating != null && rating == null) throw new AuthFailure(400, "rating_invalid", "Rating must be an integer from one through five.");
+  const commentMode = validateEngagementMode(input.commentMode ?? current.comment_mode);
+  const reactionMode = validateEngagementMode(input.reactionMode ?? current.reaction_mode);
+  let product = { id: current.product_id, slug: current.product_slug_snapshot, title: current.product_name_snapshot };
+  if (input.productId !== undefined && cleanText(input.productId, 160) !== cleanText(current.product_id, 160)) {
+    const selected = await requireCommerceDb(env).prepare("SELECT id, slug, title FROM commerce_products WHERE id = ? LIMIT 1").bind(cleanText(input.productId, 160)).first();
+    if (!selected) throw new AuthFailure(400, "product_invalid", "Choose a product from the catalogue.");
+    product = selected;
+  }
   const timestamp = nowIso();
   const result = await requireCommerceDb(env).prepare(
-    `UPDATE community_submissions SET display_name = ?, city = ?, region = ?, country_code = ?, public_location_label = ?,
+    `UPDATE community_submissions SET display_name = ?, description = ?, rating = ?, product_id = ?, product_slug_snapshot = ?, product_name_snapshot = ?,
+     city = ?, region = ?, country_code = ?, public_location_label = ?, comment_mode = ?, reaction_mode = ?,
      public_latitude = ?, public_longitude = ?, location_confirmed_at = ?, public_slug = ?, moderator_note = ?, moderator_account_id = ?,
      updated_at = ?, version = version + 1 WHERE id = ? AND version = ?`,
-  ).bind(displayName, city, region || null, country, [city, region, country].filter(Boolean).join(", "), latitude, longitude, latitude != null && longitude != null ? timestamp : null, slug, cleanText(input.moderatorNote, 2000) || null, actorId, timestamp, current.id, current.version).run();
+  ).bind(displayName, description, rating, product.id || null, product.slug || null, product.title || null, city, region || null, country, [city, region, country].filter(Boolean).join(", "), commentMode, reactionMode, latitude, longitude, latitude != null && longitude != null ? timestamp : null, slug, cleanText(input.moderatorNote, 2000) || null, actorId, timestamp, current.id, current.version).run();
   if (Number(result?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "version_conflict", "This submission changed in another tab. Reload before saving.");
   const mediaStatements = await mediaUpdateStatements(env, current.id, input.mainMediaId, input.mediaOrder);
   await requireCommerceDb(env).batch([...mediaStatements, moderationStatement(env, current.id, actorId, "updated", { version: current.version + 1 }, timestamp)]);
   return adminSubmission(env, current.id);
+}
+
+export async function uploadAdminMedia(env, id, roleValue, bytes, declaredType, actorId, replaceMediaIdValue = "") {
+  const submissionId = cleanText(id, 36);
+  const submission = await requireCommerceDb(env).prepare("SELECT id FROM community_submissions WHERE id = ? AND status <> 'draft'").bind(submissionId).first();
+  if (!submission) throw new AuthFailure(404, "submission_not_found", "The submission was not found.");
+  const role = new Set(["main", "profile", "gallery"]).has(roleValue) ? roleValue : "";
+  if (!role) throw new AuthFailure(400, "media_role_invalid", "The image role is invalid.");
+  const image = sanitizeImage(new Uint8Array(bytes), declaredType);
+  const db = requireCommerceDb(env);
+  const existing = await db.prepare("SELECT id, role, sort_order, object_key FROM community_media WHERE submission_id = ? ORDER BY sort_order").bind(submissionId).all();
+  const items = existing?.results || [];
+  const replaceId = cleanText(replaceMediaIdValue, 36);
+  const replaced = replaceId ? items.find((item) => item.id === replaceId) : items.find((item) => item.role === role && role !== "gallery");
+  if (replaceId && !replaced) throw new AuthFailure(404, "media_not_found", "The image to replace was not found.");
+  if (role === "gallery" && !replaced && items.filter((item) => item.role === "gallery").length >= MAX_GOAT_GALLERY_IMAGES) throw new AuthFailure(400, "gallery_limit", "Up to five gallery images are allowed.");
+  const mediaId = randomId();
+  const hash = await digestBytesHex(image.bytes);
+  const extension = image.contentType === "image/jpeg" ? "jpg" : image.contentType.split("/")[1];
+  const objectKey = `goats/private/${submissionId}/${mediaId}-${hash.slice(0, 16)}.${extension}`;
+  const sortOrder = replaced ? Number(replaced.sort_order || 0) : role === "gallery" ? items.filter((item) => item.role === "gallery").length : 0;
+  const bucket = requireMediaBucket(env);
+  await bucket.put(objectKey, image.bytes, { httpMetadata: { contentType: image.contentType, cacheControl: "private, no-store" }, customMetadata: { kind: "goat-admin-media", schema: "thirdrailify-goats-media-v2" } });
+  const timestamp = nowIso();
+  try {
+    const statements = [];
+    if (replaced) statements.push(db.prepare("DELETE FROM community_media WHERE id = ? AND submission_id = ?").bind(replaced.id, submissionId));
+    statements.push(db.prepare("INSERT INTO community_media (id, submission_id, role, sort_order, object_key, content_type, byte_size, width, height, sha256, processing_state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?)").bind(mediaId, submissionId, role, sortOrder, objectKey, image.contentType, image.bytes.byteLength, image.width, image.height, hash, timestamp));
+    statements.push(moderationStatement(env, submissionId, actorId, "updated", { mediaAction: replaced ? "replaced" : "added", role, mediaId }, timestamp));
+    await db.batch(statements);
+  } catch (error) {
+    await bucket.delete(objectKey).catch(() => undefined);
+    throw error;
+  }
+  if (replaced) await bucket.delete(replaced.object_key).catch(() => undefined);
+  return adminSubmission(env, submissionId);
+}
+
+export async function deleteAdminMedia(env, id, mediaIdValue, actorId) {
+  const submissionId = cleanText(id, 36); const mediaId = cleanText(mediaIdValue, 36);
+  const db = requireCommerceDb(env);
+  const row = await db.prepare("SELECT id, role, object_key FROM community_media WHERE id = ? AND submission_id = ?").bind(mediaId, submissionId).first();
+  if (!row) throw new AuthFailure(404, "media_not_found", "The image was not found.");
+  if (row.role === "main") throw new AuthFailure(409, "main_media_required", "Replace the public main image before deleting it.");
+  const timestamp = nowIso();
+  await db.batch([
+    db.prepare("DELETE FROM community_media WHERE id = ? AND submission_id = ?").bind(mediaId, submissionId),
+    moderationStatement(env, submissionId, actorId, "updated", { mediaAction: "deleted", role: row.role, mediaId }, timestamp),
+  ]);
+  await requireMediaBucket(env).delete(row.object_key).catch(() => undefined);
+  return adminSubmission(env, submissionId);
 }
 
 export async function transitionSubmission(env, id, expectedVersion, action, input, actorId) {
@@ -396,26 +504,48 @@ export async function transitionSubmission(env, id, expectedVersion, action, inp
   return adminSubmission(env, current.id);
 }
 
-export async function moderateComment(env, commentId, visible, actorId) {
+export async function moderateComment(env, commentId, action, actorId) {
   const timestamp = nowIso();
-  const status = visible ? "visible" : "hidden";
+  const approved = action === true || action === "approve" || action === "restore";
+  const status = approved ? "visible" : "hidden";
+  const moderationState = approved ? "approved" : "hidden";
   const row = await requireCommerceDb(env).prepare("SELECT id, submission_id FROM community_comments WHERE id = ? AND status <> 'deleted'").bind(cleanText(commentId, 36)).first();
   if (!row) throw new AuthFailure(404, "comment_not_found", "The comment was not found.");
   await requireCommerceDb(env).batch([
-    requireCommerceDb(env).prepare("UPDATE community_comments SET status = ?, moderated_by_account_id = ?, moderated_at = ?, updated_at = ? WHERE id = ?").bind(status, actorId, timestamp, timestamp, row.id),
-    moderationStatement(env, row.submission_id, actorId, visible ? "comment_restored" : "comment_hidden", { commentId: row.id }, timestamp),
+    requireCommerceDb(env).prepare("UPDATE community_comments SET status = ?, moderation_state = ?, moderated_by_account_id = ?, moderated_at = ?, updated_at = ? WHERE id = ?").bind(status, moderationState, actorId, timestamp, timestamp, row.id),
+    moderationStatement(env, row.submission_id, actorId, approved ? "comment_restored" : "comment_hidden", { commentId: row.id, action }, timestamp),
   ]);
   return { ok: true };
 }
 
 export async function adminComments(env, statusValue = "visible") {
-  const status = statusValue === "hidden" ? "hidden" : "visible";
+  const moderationState = new Set(["approved", "pending", "hidden"]).has(statusValue) ? statusValue : statusValue === "visible" ? "approved" : "hidden";
   const result = await requireCommerceDb(env).prepare(
-    `SELECT c.id, c.submission_id, c.author_display_name, c.body, c.status, c.created_at, s.public_slug, s.display_name AS listing_name
+    `SELECT c.id, c.submission_id, c.author_display_name, c.body, c.status, c.moderation_state, c.created_at, s.public_slug, s.display_name AS listing_name
      FROM community_comments c JOIN community_submissions s ON s.id = c.submission_id
-     WHERE c.status = ? ORDER BY c.created_at DESC LIMIT 200`,
+     WHERE c.moderation_state = ? AND c.status <> 'deleted' ORDER BY c.created_at DESC LIMIT 200`,
+  ).bind(moderationState).all();
+  return { ok: true, status: moderationState, items: (result?.results || []).map((row) => ({ id: row.id, submissionId: row.submission_id, listingSlug: row.public_slug, listingName: row.listing_name, displayName: row.author_display_name, body: row.body, status: row.moderation_state, createdAt: row.created_at })) };
+}
+
+export async function adminReactions(env, statusValue = "pending") {
+  const status = new Set(["approved", "pending", "hidden"]).has(statusValue) ? statusValue : "pending";
+  const result = await requireCommerceDb(env).prepare(
+    `SELECT r.submission_id, r.account_id, r.value, r.moderation_state, r.updated_at, s.public_slug, s.display_name AS listing_name
+     FROM community_reactions r JOIN community_submissions s ON s.id = r.submission_id
+     WHERE r.moderation_state = ? ORDER BY r.updated_at DESC LIMIT 200`,
   ).bind(status).all();
-  return { ok: true, status, items: (result?.results || []).map((row) => ({ id: row.id, submissionId: row.submission_id, listingSlug: row.public_slug, listingName: row.listing_name, displayName: row.author_display_name, body: row.body, status: row.status, createdAt: row.created_at })) };
+  return { ok: true, status, items: (result?.results || []).map((row) => ({ submissionId: row.submission_id, accountId: row.account_id, value: Number(row.value), status: row.moderation_state, updatedAt: row.updated_at, listingSlug: row.public_slug, listingName: row.listing_name })) };
+}
+
+export async function moderateReaction(env, submissionIdValue, accountIdValue, action, actorId) {
+  const submissionId = cleanText(submissionIdValue, 36); const accountId = cleanText(accountIdValue, 160);
+  const state = action === "approve" || action === "restore" ? "approved" : "hidden";
+  const timestamp = nowIso();
+  const result = await requireCommerceDb(env).prepare("UPDATE community_reactions SET moderation_state = ?, moderated_by_account_id = ?, moderated_at = ?, updated_at = ? WHERE submission_id = ? AND account_id = ?").bind(state, actorId, timestamp, timestamp, submissionId, accountId).run();
+  if (Number(result?.meta?.changes || 0) !== 1) throw new AuthFailure(404, "reaction_not_found", "The reaction was not found.");
+  await requireCommerceDb(env).prepare("INSERT INTO community_moderation_events (id, submission_id, actor_account_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'updated', ?, ?)").bind(randomId(), submissionId, actorId, JSON.stringify({ reactionAction: action, accountId }), timestamp).run();
+  return { ok: true, status: state };
 }
 
 export async function deleteDemoSubmission(env, id, expectedVersion, actorId) {
@@ -610,11 +740,12 @@ async function publicNeighbours(env, approvedAt, id) {
 function publicSelect() {
   return `SELECT s.id, s.public_slug, s.display_name, s.description, s.rating, s.public_location_label, s.country_code,
     s.public_latitude, s.public_longitude, s.product_id, s.product_slug_snapshot, s.product_name_snapshot, s.approved_at,
+    s.comment_mode, s.reaction_mode, s.legacy_like_count, s.legacy_dislike_count, s.legacy_comment_count,
     (SELECT id FROM community_media m WHERE m.submission_id = s.id AND m.role = 'main' AND m.processing_state = 'ready' LIMIT 1) AS main_media_id,
     (SELECT id FROM community_media m WHERE m.submission_id = s.id AND m.role = 'profile' AND m.processing_state = 'ready' LIMIT 1) AS profile_media_id,
-    (SELECT COUNT(*) FROM community_reactions r WHERE r.submission_id = s.id AND r.value = 1) AS like_count,
-    (SELECT COUNT(*) FROM community_reactions r WHERE r.submission_id = s.id AND r.value = -1) AS dislike_count,
-    (SELECT COUNT(*) FROM community_comments c WHERE c.submission_id = s.id AND c.status = 'visible') AS comment_count
+    (SELECT COUNT(*) FROM community_reactions r WHERE r.submission_id = s.id AND r.value = 1 AND r.moderation_state = 'approved') AS like_count,
+    (SELECT COUNT(*) FROM community_reactions r WHERE r.submission_id = s.id AND r.value = -1 AND r.moderation_state = 'approved') AS dislike_count,
+    (SELECT COUNT(*) FROM community_comments c WHERE c.submission_id = s.id AND c.status = 'visible' AND c.moderation_state = 'approved') AS comment_count
     FROM community_submissions s`;
 }
 
@@ -629,7 +760,8 @@ function publicListingProjection(row) {
     product: { id: row.product_id, slug: row.product_slug_snapshot, name: row.product_name_snapshot },
     location: { label: row.public_location_label, countryCode: row.country_code, latitude: row.public_latitude == null ? null : Number(row.public_latitude), longitude: row.public_longitude == null ? null : Number(row.public_longitude) },
     media: { main: mediaProjection(row.main_media_id ? { id: row.main_media_id, role: "main", sort_order: 0 } : null), profile: mediaProjection(row.profile_media_id ? { id: row.profile_media_id, role: "profile", sort_order: 0 } : null), gallery: [] },
-    counts: { likes: Math.max(0, Number(row.like_count || 0)), dislikes: Math.max(0, Number(row.dislike_count || 0)), comments: Math.max(0, Number(row.comment_count || 0)) },
+    engagement: { comments: row.comment_mode || "inherit", reactions: row.reaction_mode || "inherit" },
+    counts: { likes: Math.max(0, Number(row.like_count || 0) + Number(row.legacy_like_count || 0)), dislikes: Math.max(0, Number(row.dislike_count || 0) + Number(row.legacy_dislike_count || 0)), comments: Math.max(0, Number(row.comment_count || 0) + Number(row.legacy_comment_count || 0)) },
   };
 }
 
@@ -649,6 +781,9 @@ function adminProjection(row, media, events, emails) {
     countryCode: row.country_code,
     latitude: row.public_latitude,
     longitude: row.public_longitude,
+    commentMode: row.comment_mode || "inherit",
+    reactionMode: row.reaction_mode || "inherit",
+    legacy: row.legacy_source ? { source: row.legacy_source, sourceId: row.legacy_source_id, ownerId: row.legacy_owner_id, productUrl: row.legacy_product_url, uploadedAt: row.legacy_uploaded_at, updatedAt: row.legacy_updated_at, likes: Number(row.legacy_like_count || 0), dislikes: Number(row.legacy_dislike_count || 0), comments: Number(row.legacy_comment_count || 0) } : null,
     consent: { version: row.consent_version, timestamp: row.consented_at },
     moderatorNote: row.moderator_note,
     rejectionReason: row.rejection_reason,
@@ -804,6 +939,28 @@ function renderTemplate(template, variables, html) {
     const value = cleanText(variables?.[key], 2048);
     return html ? escapeHtml(value) : value;
   });
+}
+
+function validateEngagementMode(value) {
+  const mode = cleanText(value, 20).toLowerCase();
+  if (!ALLOWED_ENGAGEMENT_MODES.has(mode)) throw new AuthFailure(400, "engagement_mode_invalid", "Choose inherit, disabled, auto-approved, or approval required.");
+  return mode;
+}
+
+function validateGlobalEngagementMode(value) {
+  const mode = cleanText(value, 20).toLowerCase();
+  if (!ALLOWED_GLOBAL_ENGAGEMENT_MODES.has(mode)) throw new AuthFailure(400, "engagement_mode_invalid", "Choose disabled, auto-approved, or approval required.");
+  return mode;
+}
+
+function globalEngagementMode(value) {
+  return ALLOWED_GLOBAL_ENGAGEMENT_MODES.has(value) ? value : "auto";
+}
+
+async function effectiveEngagementMode(env, listingMode, settingKey) {
+  if (listingMode && listingMode !== "inherit") return validateGlobalEngagementMode(listingMode);
+  const row = await requireCommerceDb(env).prepare("SELECT value_json FROM commerce_settings WHERE setting_key = ?").bind(settingKey).first();
+  return globalEngagementMode(parseJson(row?.value_json, "auto"));
 }
 
 export function brandedGoatEmailHtml(content, templateKey, origin = "https://thirdrailify-admin.pages.dev") {

@@ -35,6 +35,7 @@ const RATE_RULES = {
   commerce_migration: { limit: 5_000, windowSeconds: 24 * 60 * 60, blockSeconds: 15 * 60 },
   checkout: { limit: 12, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   watch: { limit: 60, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
+  site_content: { limit: 30, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
 };
 
 const ONE_TIME_TABLES = new Set(["email_verification_tokens", "password_reset_tokens"]);

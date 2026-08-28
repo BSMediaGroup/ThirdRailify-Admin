@@ -10,7 +10,10 @@ import {
 } from "../../../_shared/auth-core.js";
 import {
   adminOverview,
+  adminEngagementSettings,
+  adminCommunityProducts,
   adminComments,
+  adminReactions,
   adminQueue,
   adminSubmission,
   cleanupExpiredDrafts,
@@ -18,11 +21,15 @@ import {
   deleteDemoSubmission,
   dispatchReadyEmails,
   mediaResponse,
+  uploadAdminMedia,
+  deleteAdminMedia,
   moderateComment,
+  moderateReaction,
   retryEmail,
   transitionSubmission,
   updateEmailTemplate,
   updateSubmission,
+  updateAdminEngagementSettings,
 } from "../../../_shared/goats-core.js";
 
 const ROUTE_PREFIX = "/api/admin/goats";
@@ -48,6 +55,9 @@ async function read(request, env, path) {
   if (path === "queue") return response(await adminQueue(env, url.searchParams.get("status")), request, env);
   if (path === "templates") return response(await emailTemplates(env), request, env);
   if (path === "comments") return response(await adminComments(env, url.searchParams.get("status")), request, env);
+  if (path === "reactions") return response(await adminReactions(env, url.searchParams.get("status")), request, env);
+  if (path === "settings") return response(await adminEngagementSettings(env), request, env);
+  if (path === "products") return response(await adminCommunityProducts(env), request, env);
   if (path.startsWith("media/")) return mediaResponse(env, path.slice("media/".length), request, { admin: true });
   const match = path.match(/^submissions\/([^/]+)$/);
   if (match) return response(await adminSubmission(env, decodePart(match[1])), request, env);
@@ -55,6 +65,11 @@ async function read(request, env, path) {
 }
 
 async function write(request, env, path, session, fetchImpl, waitUntil) {
+  const mediaUpload = path.match(/^submissions\/([^/]+)\/media$/);
+  if (mediaUpload) {
+    const url = new URL(request.url);
+    return response(await uploadAdminMedia(env, decodePart(mediaUpload[1]), url.searchParams.get("role"), await request.arrayBuffer(), request.headers.get("content-type"), session.accountId, url.searchParams.get("replace")), request, env);
+  }
   const body = await readJsonBody(request);
   const submission = path.match(/^submissions\/([^/]+)$/);
   if (submission) return response(await updateSubmission(env, decodePart(submission[1]), body.version, body, session.accountId), request, env);
@@ -66,8 +81,13 @@ async function write(request, env, path, session, fetchImpl, waitUntil) {
   }
   const demoDelete = path.match(/^submissions\/([^/]+)\/delete-demo$/);
   if (demoDelete) return response(await deleteDemoSubmission(env, decodePart(demoDelete[1]), body.version, session.accountId), request, env);
-  const comment = path.match(/^comments\/([^/]+)\/(hide|restore)$/);
-  if (comment) return response(await moderateComment(env, decodePart(comment[1]), comment[2] === "restore", session.accountId), request, env);
+  const mediaDelete = path.match(/^submissions\/([^/]+)\/media\/([^/]+)\/delete$/);
+  if (mediaDelete) return response(await deleteAdminMedia(env, decodePart(mediaDelete[1]), decodePart(mediaDelete[2]), session.accountId), request, env);
+  const comment = path.match(/^comments\/([^/]+)\/(approve|hide|restore)$/);
+  if (comment) return response(await moderateComment(env, decodePart(comment[1]), comment[2], session.accountId), request, env);
+  const reaction = path.match(/^reactions\/([^/]+)\/([^/]+)\/(approve|hide|restore)$/);
+  if (reaction) return response(await moderateReaction(env, decodePart(reaction[1]), decodePart(reaction[2]), reaction[3], session.accountId), request, env);
+  if (path === "settings") return response(await updateAdminEngagementSettings(env, body, session.accountId), request, env);
   const template = path.match(/^templates\/([^/]+)$/);
   if (template) return response(await updateEmailTemplate(env, decodePart(template[1]), body, session.accountId), request, env);
   const email = path.match(/^emails\/([^/]+)\/retry$/);

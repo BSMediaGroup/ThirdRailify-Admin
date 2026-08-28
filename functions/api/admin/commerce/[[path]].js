@@ -38,6 +38,7 @@ import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrdersPayload } from "../../../_shared/checkout-core.js";
 import {
   permanentMigrationPayload,
+  resumeManuallyPausedPermanentPrintfulMigration,
   runPermanentPrintfulMigrationStep,
 } from "../../../_shared/printful-migration.js";
 
@@ -143,6 +144,11 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   } else if (path === "printful/catalogue/migrate") {
     await requireMasterAdmin(env, request);
     requireCommerceDatabase(env);
+    const body = await readJsonBody(request);
+    if (!body || Object.keys(body).length !== 1 || body.action !== "continue_permanent_printful_migration") {
+      throw new AuthFailure(400, "printful_migration_action_invalid", "An explicit permanent migration continuation action is required.");
+    }
+    await resumeManuallyPausedPermanentPrintfulMigration(env);
     payload = await runPermanentPrintfulMigrationStep(env, session, fetchImpl, schedulerRuntime);
   } else if (path === "business") {
     const body = await readJsonBody(request);

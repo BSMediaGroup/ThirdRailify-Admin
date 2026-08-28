@@ -4,12 +4,16 @@ import { commerceEnvironment, createCommerceDatabases, insertTestProduct } from 
 import { onRequest as onAdminGoatsRequest } from "../functions/api/admin/goats/[[path]].js";
 import {
   createComment,
+  adminComments,
+  adminReactions,
+  adminSubmission,
   createDraft,
   cleanupExpiredDrafts,
   deleteDemoSubmission,
   finaliseDraft,
   mediaResponse,
   moderateComment,
+  moderateReaction,
   mutateReaction,
   publicComments,
   publicListingBySlug,
@@ -18,6 +22,8 @@ import {
   retryEmail,
   sanitizeImage,
   transitionSubmission,
+  updateAdminEngagementSettings,
+  updateSubmission,
   updateEmailTemplate,
   uploadDraftMedia,
 } from "../functions/_shared/goats-core.js";
@@ -108,6 +114,33 @@ test("collision-safe finalisation, product validation, draft expiry, and gallery
   const rejectedEmail = await harness.commerceDb.prepare("SELECT variables_json FROM community_email_outbox WHERE submission_id = ? AND template_key = 'goat_submission_rejected'").bind(rejectedRow.id).first(); assert.equal(JSON.parse(rejectedEmail.variables_json).rejection_reason, "Please submit a clearer main image."); assert.equal(rejectedEmail.variables_json.includes("Private note"), false);
   const expiring = await makeDraft("expiry"); await harness.commerceDb.prepare("UPDATE community_submissions SET draft_expires_at = '2000-01-01T00:00:00.000Z' WHERE draft_token_hash IS NOT NULL").run(); await assert.rejects(uploadDraftMedia(env, expiring.draftToken, "gallery", 0, tinyPng, "image/png", { rateKey: "expiry" }), /expired|invalid/i); const cleanup = await cleanupExpiredDrafts(env, "master-admin", 10); assert.equal(cleanup.deletedDrafts, 1); assert.equal(cleanup.deletedObjects, 1);
   const galleryDraft = await makeDraft("gallery"); for (let index = 0; index < 5; index += 1) await uploadDraftMedia(env, galleryDraft.draftToken, "gallery", index, tinyPng, "image/png", { rateKey: `gallery-${index}` }); await assert.rejects(uploadDraftMedia(env, galleryDraft.draftToken, "gallery", 4, tinyPng, "image/png", { rateKey: "gallery-over" }), /five/i);
+});
+
+test("global and per-listing interaction rules queue, approve, disable, and keep approved listings editable", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET: "rate-secret" });
+  const id = "22222222-2222-4222-a222-222222222222";
+  await harness.commerceDb.prepare(`INSERT INTO community_submissions (
+    id, reference_code, public_slug, status, is_published, display_name, description, city, country_code,
+    public_location_label, public_latitude, public_longitude, created_at, submitted_at, updated_at, approved_at
+  ) VALUES (?, 'GOAT-MODES', 'goat-modes', 'approved', 1, 'Mode Goat', 'Editable approved story', 'Toronto', 'CA', 'Toronto, CA', 43.65, -79.38, '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z')`).bind(id).run();
+  await updateAdminEngagementSettings(env, { comments: "moderated", reactions: "moderated" }, "master-admin");
+
+  const comment = await createComment(env, "goat-modes", { accountId: "account-1", displayName: "Member" }, "Please approve this", { rateKey: "comment-mode" });
+  assert.equal(comment.pendingApproval, true); assert.equal(comment.item, null); assert.equal((await publicComments(env, "goat-modes")).total, 0);
+  const pendingComments = await adminComments(env, "pending"); assert.equal(pendingComments.items.length, 1);
+  await moderateComment(env, pendingComments.items[0].id, "approve", "master-admin"); assert.equal((await publicComments(env, "goat-modes")).total, 1);
+
+  const reaction = await mutateReaction(env, "goat-modes", "account-1", 1, { rateKey: "reaction-mode" });
+  assert.equal(reaction.pendingApproval, true); assert.equal(reaction.likes, 0);
+  const pendingReactions = await adminReactions(env, "pending"); assert.equal(pendingReactions.items.length, 1);
+  await moderateReaction(env, id, "account-1", "approve", "master-admin"); assert.equal((await publicListingBySlug(env, "goat-modes")).item.counts.likes, 1);
+
+  const detail = await adminSubmission(env, id);
+  const edited = await updateSubmission(env, id, detail.item.version, { displayName: "Mode Goat Edited", description: "Approved content remains editable after publication.", slug: "goat-modes", city: "Toronto", region: "Ontario", countryCode: "CA", latitude: 43.65, longitude: -79.38, commentMode: "disabled", reactionMode: "disabled" }, "master-admin");
+  assert.equal(edited.item.status, "approved"); assert.equal(edited.item.description, "Approved content remains editable after publication.");
+  await assert.rejects(createComment(env, "goat-modes", { accountId: "account-2", displayName: "Member" }, "Disabled", { rateKey: "comment-disabled" }), /disabled/i);
+  await assert.rejects(mutateReaction(env, "goat-modes", "account-2", 1, { rateKey: "reaction-disabled" }), /disabled/i);
 });
 
 function memoryBucket() {

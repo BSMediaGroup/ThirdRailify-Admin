@@ -6,6 +6,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { WatchAdminPage } from "./pages/WatchAdminPage";
 import { AccountsPage } from "./pages/AccountsPage";
+import { SiteContentPage } from "./pages/SiteContentPage";
 import {
   BusinessInformationPage,
   CommerceOrdersPage,
@@ -20,11 +21,13 @@ import {
   GoatModerationPage,
   GoatsCommentsPage,
   GoatsEmailsPage,
+  GoatsReactionsPage,
+  GoatsSettingsPage,
   GoatsOverviewPage,
   GoatsQueuePage,
 } from "./pages/GoatsAdminPages";
 
-const implementedPaths = new Set(["/", "/watch", "/access", "/products", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
+const implementedPaths = new Set(["/", "/watch", "/content", "/access", "/products", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
 
 export function App() {
   return (
@@ -33,6 +36,7 @@ export function App() {
         <Route index element={<OverviewPage />} />
         <Route path="access" element={<AccountsPage />} />
         <Route path="watch" element={<WatchAdminPage />} />
+        <Route path="content" element={<SiteContentPage />} />
         <Route path="products" element={<CommerceProductsPage />} />
         <Route path="orders" element={<CommerceOrdersPage />} />
         <Route path="commerce" element={<CommerceOverviewPage />} />
@@ -46,6 +50,8 @@ export function App() {
         <Route path="goats/approved" element={<GoatsQueuePage status="approved" />} />
         <Route path="goats/rejected" element={<GoatsQueuePage status="rejected" />} />
         <Route path="goats/comments" element={<GoatsCommentsPage />} />
+        <Route path="goats/reactions" element={<GoatsReactionsPage />} />
+        <Route path="goats/settings" element={<GoatsSettingsPage />} />
         <Route path="goats/emails" element={<GoatsEmailsPage />} />
         <Route path="goats/:id" element={<GoatModerationPage />} />
         {adminAreas.filter((area) => !implementedPaths.has(area.path)).map((area) => (

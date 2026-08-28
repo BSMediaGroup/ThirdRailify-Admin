@@ -684,7 +684,10 @@ test("read-only catalogue helper remains GET-only while the browser exposes only
   assert.match(route, /enforceRateLimit/);
   assert.doesNotMatch(helper, /node:fs|writeFile|readFile|commerce-import/i);
   assert.match(page, /EXECUTE PERMANENT PRINTFUL CATALOGUE MIGRATION/);
-  assert.match(page, /\["running", "waiting"\]\.includes\(migrationStatus\)/);
+  assert.match(page, /CONTINUE PERMANENT PRINTFUL MIGRATION FROM CHECKPOINT/);
+  assert.doesNotMatch(page, /if \(migrationStatus.*void continueMigration\(\)/);
+  assert.match(client, /action:\s*"continue_permanent_printful_migration"/);
+  assert.match(route, /printful_migration_action_invalid/);
   assert.doesNotMatch(page, /Retry read-only snapshot|Download Wix source snapshot|Download API target snapshot|Download Public catalogue snapshot|Download reconciliation snapshot/);
   assert.doesNotMatch(`${client}\n${page}`, /downloadJson\(/);
 });

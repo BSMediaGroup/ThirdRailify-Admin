@@ -14,7 +14,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Admin-authoritative avatar ingestion validates JPG/PNG/WebP bytes, stores immutable content-addressed objects under `/u/<opaque-account-key>/avatar/<sha256>.<ext>`, and persists only the resulting HTTPS URL in D1.
 - Admin-only authority for the bound `thirdrailify-commerce` D1, direct-merchant provider/status records, encrypted private business/tax fields, structured email/document templates, commerce capabilities, and redacted commerce audit history.
 - Functional `/products` merchandising workspace backed by `commerce_products`: Master Admins can feature/unfeature displayable snapshot products, set deterministic hero order with accessible move controls, preview warnings, and persist through the established session/origin/CSRF/rate-limit/D1/audit path.
-- Local V2 GOATS authority and Master Admin workspace for submission moderation, coarse map coordinates, private media, approved publication, reactions/comments, and idempotent transactional-email outbox events. Migration `0004` ships no production listings; two synthetic demos are explicit local/test-only fixtures.
+- Admin-authoritative V2 GOATS workspace for submission moderation, coarse map coordinates, private media, approved publication, editable approved stories, per-listing/global interaction policies, pending comment/reaction queues, and idempotent transactional-email outbox events. The owner-supplied Wix collection is imported through the deterministic `goats:wix:build-import` pipeline; Public receives approved fields only.
 - Master-only `/watch` workspace for reading current/retained Public broadcast state and showing or hiding retained episodes through an exact-origin, CSRF/rate-limited, audited, server-signed Admin-to-Public request. The browser receives no shared secret and cannot create, scrape, edit, or delete episodes.
 - Public read-only `/api/catalogue/merchandising` projection exposes only product ID, slug, featured state, and order; it contains no price, image path, safe metadata, credential, or write capability.
 - Protected read-only catalogue recovery pins the legacy Wix source to `Third Railify Official` / `16847493` / `wix` and the permanent target to `Third Railify API` / `18668025` / `native`. One `/commerce/fulfillment` operator click runs signed server phases below the Pages external-subrequest ceiling and carries one shared 675 ms Printful request-start clock across those invocations (about 88.9/minute, below V1's published 120/minute quota). Signed partial checkpoints turn 419/429 into visible automatic wait/resume states without re-fetching completed records. Final assembly exposes four deliberate download controls; every provider request is GET-only and no catalogue row is imported.
@@ -44,6 +44,8 @@ npm run test:printful
 npm run test:functions
 npm run test:browser:fulfillment
 npm run goats:import:dry-run -- C:\path\to\wix-goats-export.json
+npm run goats:wix:build-import
+npm run test:goats:wix-import
 npm run build
 npm run preview
 ```
@@ -56,15 +58,18 @@ The production output is `dist/`. The local development server uses port 5174 an
 | --- | --- |
 | `/` | Authenticated account/configuration posture and deferred-module boundaries |
 | `/watch` | Master-only current broadcast summary and retained-episode visibility controls; no manual archive creation |
-| `/content` | Future site-content shell |
+| `/content` | Master-only normal promo and automatic Live Now banner presentation editor with safe previews |
 | `/products` | D1-backed featured-product selection and stable hero ordering for the bounded snapshot catalogue |
 | `/goats` | GOATS moderation overview with pending/approved/rejected/hidden and email state |
 | `/goats/pending`, `/goats/approved`, `/goats/rejected` | Master-only bounded moderation queues |
-| `/goats/comments` | Visible/hidden comment moderation |
+| `/goats/comments`, `/goats/reactions` | Pending/approved/hidden interaction moderation |
+| `/goats/settings` | Global inherited defaults for comments and reactions |
 | `/goats/emails` | Additive GOATS template editor with safe fixture preview |
-| `/goats/:id` | Private submission detail, media, correction, coordinates, transitions, email retry, and DEMO-only cleanup |
+| `/goats/:id` | Private submission detail plus editable approved content/product/rating/location/interaction policy, media add/replace/remove/order, transitions, email retry, and DEMO-only cleanup |
 | `/api/admin/goats/*` | Master-session, exact-origin, CSRF, and optimistic-version protected GOATS authority |
 | `/api/admin/watch` | Master-session, exact-origin, CSRF, rate-limited and audited bridge to signed Public archive management |
+| `/api/admin/banner` | Master-session banner read/write authority with exact-origin, CSRF, rate limit, validation, revision matching, and audit |
+| `/api/banner` | Cacheable read-only projection of safe banner presentation fields for Public Pages |
 | `/api/goats/*` | Approved-only public reads plus signed fixed internal ingestion actions |
 | `/api/catalogue/merchandising` | Cacheable public read projection of product ID/slug/featured order only; no write path |
 | `/orders` | Read-only bounded local Checkout/payment/fulfillment states; no synthetic orders or revenue |
@@ -129,6 +134,8 @@ ThirdRailify-Admin/
 ├── BUMP_NOTES.md
 └── package.json
 ```
+
+Additive banner files in this structure are `commerce-migrations/0006_site_banner.sql`, `functions/_shared/banner-core.js`, the Public/protected banner Functions, `src/banner/client.ts`, `src/pages/SiteContentPage.tsx`, and focused Function/browser tests. Banner content uses the existing Admin-owned commerce D1; auth D1 is used only for the existing session, rate-limit, and audit conventions.
 
 `docs/WATCH_V2.md` documents the Watch management route, signed server boundary, and Public archive ownership.
 

@@ -49,6 +49,14 @@ test("GOATS email workspace uses the branded Commerce-grade editor and sandboxed
   assert.match(core, /THIRD RAILIFY OFFICIAL/);
 });
 
+test("GOATS approved records expose durable content, media, and interaction editors", async () => {
+  const [app, page, client, navigation] = await Promise.all([read("src/App.tsx"), read("src/pages/GoatsAdminPages.tsx"), read("src/goats/client.ts"), read("src/config/navigation.ts")]);
+  for (const route of ["goats/reactions", "goats/settings"]) assert.match(app, new RegExp(`path="${route}`));
+  for (const label of ["Approved listings remain editable", "Add, replace, or remove images", "Approval required each time", "Save global defaults"]) assert.match(page, new RegExp(label));
+  assert.match(client, /uploadGoatMedia/); assert.match(client, /deleteGoatMedia/); assert.match(client, /saveGoatSettings/); assert.match(client, /moderateGoatReaction/);
+  assert.match(navigation, /path: "\/goats\/reactions"/); assert.match(navigation, /path: "\/goats\/settings"/);
+});
+
 test("Watch authority failures render unknown archive state instead of false zero counts", async () => {
   const page = await read("src/pages/WatchAdminPage.tsx");
   assert.match(page, /summary \? `\$\{summary\.retained\} \/ 24` : "— \/ 24"/);
@@ -59,4 +67,15 @@ test("Watch authority failures render unknown archive state instead of false zer
   assert.match(page, /No zero counts are being inferred/);
   assert.doesNotMatch(page, /summary\?\.retained \?\? 0/);
   assert.doesNotMatch(page, /summary\?\.remaining \?\? 24/);
+});
+
+test("Site Content exposes separate normal and fixture-labelled Live Now configuration without a manual live-title field", async () => {
+  const [app, page, client] = await Promise.all([read("src/App.tsx"), read("src/pages/SiteContentPage.tsx"), read("src/banner/client.ts")]);
+  assert.match(app, /path="content" element={<SiteContentPage/);
+  for (const label of ["Normal promo / info", "Automatic Live Now", "Presentation mode", "Animation speed", "Locked destination", "Fixture preview only", "Unsaved changes"]) assert.match(page, new RegExp(label));
+  assert.match(page, /SAMPLE PREVIEW — Third Railify live broadcast title/);
+  assert.match(page, /<code>\/watch\/live<\/code>/);
+  assert.doesNotMatch(page, /Active stream title<\/span><input/);
+  assert.match(client, /expectedRevision/);
+  assert.match(client, /X-CSRF-Token/);
 });

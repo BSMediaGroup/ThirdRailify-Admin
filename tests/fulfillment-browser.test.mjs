@@ -6,107 +6,64 @@ import { chromium } from "playwright-core";
 
 const PREVIEW_ORIGIN = "http://127.0.0.1:4174";
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-const VIEWPORTS = [390, 768, 1440];
-const STATES = ["ready", "running", "throttled", "resume", "success", "failure"];
 
-test("fulfillment operator states render responsively with deliberate downloads", async (t) => {
+test("a running Printful migration remains checkpointed until an explicit authenticated continuation", async (t) => {
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4174"], { stdio: "ignore" });
   t.after(() => server.kill());
   await waitForPreview();
   const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
   t.after(() => browser.close());
 
-  for (const width of VIEWPORTS) {
-    for (const state of STATES) {
-      const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : width === 768 ? 1024 : 900 }, acceptDownloads: true });
-      const page = await context.newPage();
-      const consoleErrors = [];
-      page.on("console", (message) => {
-        if (message.type() === "error" && !/^Failed to load resource: the server responded with a status of 502/.test(message.text())) consoleErrors.push(message.text());
-      });
-      page.on("pageerror", (error) => consoleErrors.push(error.message));
-      let releaseRunning;
-      let snapshotCalls = 0;
-      const runningGate = new Promise((resolve) => { releaseRunning = resolve; });
-      await page.route("**/api/**", async (route) => {
-        const url = new URL(route.request().url());
-        if (url.pathname === "/api/auth/config") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(authConfig()) });
-        if (url.pathname === "/api/auth/session") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(session()) });
-        if (url.pathname === "/api/admin/commerce/overview") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(overview()) });
-        if (url.pathname === "/api/admin/commerce/printful/catalogue/snapshot") {
-          snapshotCalls += 1;
-          const body = JSON.parse(route.request().postData() || "{}");
-          if (state === "failure" && body.phase === "begin") return route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ ok: false, error: "printful_source_products_unavailable", message: "Printful legacy source product enumeration failed safely (HTTP 503)." }) });
-          if (state === "running" && body.phase === "begin") await runningGate;
-          if ((state === "throttled" || state === "resume") && body.phase === "begin" && !body.checkpoint) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(throttled(state === "throttled" ? 10_000 : 40)) });
-          if (body.phase === "begin") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(manifest()) });
-          if (body.phase === "assemble") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(snapshot()) });
-        }
-        return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: "not_found" }) });
-      });
-
-      await page.goto(`${PREVIEW_ORIGIN}/commerce/fulfillment`);
-      await page.getByRole("heading", { level: 1, name: "Fulfillment integrations" }).waitFor();
-      assert.equal(await page.locator("h1").count(), 1, `${state} at ${width}px has one H1`);
-      assert.equal(await page.getByText("16847493", { exact: true }).count(), 1);
-      assert.equal(await page.getByText("18668025", { exact: true }).count(), 1);
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${state} at ${width}px has no horizontal overflow`);
-      assert.doesNotMatch(await page.locator("body").innerText(), /opaque-wix-reader-token|opaque-target-token|Authorization:\s*Bearer/i);
-
-      const runButton = page.getByRole("button", { name: "Run read-only catalogue snapshot" });
-      if (state === "ready") {
-        await runButton.waitFor();
-        assert.equal(await runButton.isEnabled(), true);
-        await page.getByText("Ready to run", { exact: true }).last().waitFor();
-      } else if (state === "running") {
-        await runButton.click();
-        await page.getByText("Reading source and target catalogues…", { exact: true }).waitFor();
-        await page.getByText("Verifying both Store IDs and enumerating catalogue pages…", { exact: true }).waitFor();
-        releaseRunning();
-      } else if (state === "failure") {
-        await runButton.click();
-        await page.getByText("Catalogue snapshot failed", { exact: true }).waitFor();
-        await page.getByText("Printful legacy source product enumeration failed safely (HTTP 503).", { exact: true }).waitFor();
-        await page.getByRole("button", { name: "Retry read-only snapshot" }).waitFor();
-      } else if (state === "throttled") {
-        await runButton.click();
-        await page.getByText("PRINTFUL RATE LIMIT — Snapshot safely paused", { exact: true }).waitFor();
-        await page.getByText("Rate-limited / waiting", { exact: true }).waitFor();
-        await page.getByText("Legacy product details", { exact: true }).waitFor();
-        assert.equal(await page.getByText("Catalogue snapshot failed", { exact: true }).count(), 0);
-        assert.equal(await page.getByRole("button", { name: "Waiting to resume automatically…" }).isDisabled(), true);
-      } else if (state === "resume") {
-        await runButton.click();
-        await page.getByText("Snapshot completed", { exact: true }).waitFor();
-        assert.equal(snapshotCalls, 3);
-      } else {
-        await runButton.click();
-        await page.getByText("Snapshot completed", { exact: true }).waitFor();
-        const downloads = [
-          ["Download Wix source snapshot", "printful-wix-source.snapshot.json"],
-          ["Download API target snapshot", "printful-api-target.snapshot.json"],
-          ["Download Public catalogue snapshot", "public-wix-catalog.snapshot.json"],
-          ["Download reconciliation snapshot", "catalogue-reconciliation.json"],
-        ];
-        for (const [label, filename] of downloads) {
-          const downloadPromise = page.waitForEvent("download");
-          await page.getByRole("button", { name: label }).click();
-          assert.equal((await downloadPromise).suggestedFilename(), filename);
-        }
+  for (const width of [390, 768, 1440]) {
+    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 } });
+    const page = await context.newPage();
+    const consoleErrors = [];
+    let continuationCalls = 0;
+    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+    page.on("pageerror", (error) => consoleErrors.push(error.message));
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/auth/config") return json(route, authConfig());
+      if (path === "/api/auth/session") return json(route, session());
+      if (path === "/api/admin/commerce/overview") return json(route, overview());
+      if (path === "/api/admin/commerce/printful/catalogue/migration") return json(route, migration("running"));
+      if (path === "/api/admin/commerce/printful/catalogue/migrate") {
+        continuationCalls += 1;
+        assert.equal(request.method(), "POST");
+        assert.equal(request.headers()["x-csrf-token"], "browser-fixture-csrf");
+        assert.deepEqual(JSON.parse(request.postData() || "{}"), { action: "continue_permanent_printful_migration" });
+        return json(route, migration("completed_with_blocked_products"));
       }
-      assert.deepEqual(consoleErrors, [], `${state} at ${width}px has no console errors`);
-      await context.close();
-    }
+      return json(route, { ok: false, error: "not_found" }, 404);
+    });
+
+    await page.goto(`${PREVIEW_ORIGIN}/commerce/fulfillment`);
+    await page.getByRole("heading", { level: 1, name: "Fulfillment integrations" }).waitFor();
+    const button = page.getByRole("button", { name: "CONTINUE PERMANENT PRINTFUL MIGRATION FROM CHECKPOINT" });
+    await button.waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(continuationCalls, 0, "opening the checkpoint page must not resume provider writes");
+    assert.equal(await page.getByText("PERMANENT MIGRATION — CHECKPOINTED", { exact: true }).count(), 1);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    await button.click();
+    await page.getByText("CATALOGUE MIGRATED WITH BLOCKED PRODUCTS RECORDED", { exact: true }).waitFor();
+    assert.equal(continuationCalls, 1);
+    assert.deepEqual(consoleErrors, []);
+    await context.close();
   }
 });
 
 async function waitForPreview() {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    try { if ((await fetch(PREVIEW_ORIGIN)).ok) return; }
-    catch { /* Preview is still starting. */ }
+    try { if ((await fetch(PREVIEW_ORIGIN)).ok) return; } catch { /* still starting */ }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("Vite preview did not start.");
+}
+
+function json(route, body, status = 200) {
+  return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
 function authConfig() {
@@ -114,41 +71,19 @@ function authConfig() {
 }
 
 function session() {
-  return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00.000Z", lastLoginAt: null, source: "test", locked: true } };
+  return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00.000Z", source: "test", locked: true } };
 }
 
 function overview() {
+  return { ok: true, databaseConfigured: true, encryptionConfigured: true, stripeSecretConfigured: true, printfulSecretConfigured: true, access: { isMasterAdmin: true, capabilities: ["commerce.view", "commerce.integrations.manage"] }, posture: { checkout: "disabled", livePaymentCapture: "disabled", fulfillmentSubmission: "disabled" }, providers: [], business: {}, completeness: {}, counts: {}, checkedAt: "2026-08-28T00:00:00.000Z" };
+}
+
+function migration(status) {
+  const complete = status === "completed_with_blocked_products";
   return {
-    ok: true, databaseConfigured: true, encryptionConfigured: true, stripeSecretConfigured: true, printfulSecretConfigured: true,
-    printfulCatalogueSnapshot: { available: true, configurationReady: true, actionPath: "/api/admin/commerce/printful/catalogue/snapshot", sourceTargetDistinct: true, source: { id: "16847493", name: "Third Railify Official", type: "wix" }, target: { id: "18668025", name: "Third Railify API", type: "native" } },
-    access: { isMasterAdmin: true, capabilities: ["commerce.view", "commerce.integrations.manage"] },
-    posture: { checkout: "disabled", livePaymentCapture: "disabled", fulfillmentSubmission: "disabled" },
-    providers: [{ provider: "printful", label: "Printful", status: "connected", credentialCustody: "environment_secret", integrationMode: "fulfillment", environment: "staging", externalAccountId: "18668025", currencyCode: "CAD", apiConfigured: true, metadata: { storeName: "Third Railify API", storeType: "native", productCount: 1 } }],
-    business: {}, completeness: { businessProfile: "setup_required", tax: "setup_required", templates: "pending" }, counts: { products: 0, orders: 0, templates: 5 }, checkedAt: "2026-08-28T00:00:00.000Z",
-  };
-}
-
-function manifest() {
-  return { ok: true, status: "complete", phase: "manifest", schemaVersion: 1, correlationId: "browser-fixture", manifest: { correlationId: "browser-fixture", expiresAt: "2099-01-01T00:00:00.000Z", source: { store: { id: "16847493", name: "Third Railify Official", type: "wix" }, summaries: [] }, target: { store: { id: "18668025", name: "Third Railify API", type: "native" }, summaries: [] } }, signature: "signed-browser-fixture-evidence-value", rateCheckpoint: { correlationId: "browser-fixture", rate: {} }, rateCheckpointSignature: "signed-rate-evidence", chunkSizes: { products: 12, files: 20 } };
-}
-
-function throttled(delayMs) {
-  const retryAt = new Date(Date.now() + delayMs).toISOString();
-  return { ok: true, status: "throttled", phase: "begin", reason: "printful_rate_limited", providerStatus: 429, retryAt, retryAfterMs: delayMs, cursor: { step: "source_pages", sourceOffset: 100, targetOffset: 0 }, partialResults: { sourceSummaries: [], targetSummaries: [] }, checkpoint: { fixture: true }, checkpointSignature: "signed-throttle-checkpoint", progress: { currentPhase: "Legacy product details", completed: 120, total: 140 } };
-}
-
-function counts(products, variants) {
-  return { products, variants, synced: variants, ignored: 0, ignoredProducts: 0, unavailable: 0, missingPrices: 0, malformedPrices: 0, malformedOrMissingPrices: 0, missingFiles: 0, variantsWithoutFiles: 0 };
-}
-
-function snapshot() {
-  return {
-    ok: true, schemaVersion: 1, correlationId: "browser-fixture", endpointsUsed: ["GET /stores"],
-    source: { role: "legacy_wix_source", store: { id: "16847493", name: "Third Railify Official", type: "wix" }, counts: counts(2, 3), products: [] },
-    target: { role: "permanent_api_target", store: { id: "18668025", name: "Third Railify API", type: "native" }, counts: counts(1, 1), products: [] },
-    publicCatalogue: { schemaVersion: 1, source: { repository: "ThirdRailify", file: "src/data/wixSnapshot.ts", totalProductsReportedByLegacyAudit: 49, productsRepresentedInCurrentPublicSnapshot: 8 }, products: [] },
-    reconciliation: { schemaVersion: 1, counts: { publicProducts: 8, printfulBackedMatches: 2, nonPrintful: 0, unresolved: 6, sourceOnly: 0, priceConflicts: 0, variantConflicts: 0, fileConflicts: 0, plannedTargetCreates: 1, manualDecisions: 6 }, matrix: [], targetDispositions: [], plannedTargetPayloads: [] },
-    downloadFilenames: { source: "printful-wix-source.snapshot.json", target: "printful-api-target.snapshot.json", publicCatalogue: "public-wix-catalog.snapshot.json", reconciliation: "catalogue-reconciliation.json" },
-    safety: { providerMethods: ["GET"], sourceCredential: "PRINTFUL_WIX_SOURCE_TOKEN", targetCredential: "PRINTFUL_API_TOKEN", tokensIncluded: false, customerOrOrderDataIncluded: false },
+    ok: true,
+    migration: { id: "permanent-printful-2026-08", status, phase: complete ? "completed" : "source_files", currentProduct: complete ? null : { id: "product-400904088", title: "Third Railify™ | Throw Blanket", legacySourceProductId: "400904088", migrationStatus: "resolving_files" }, fileProgress: complete ? null : { resolved: 0, total: 3 }, completedProducts: complete ? 36 : 10, totalProducts: 49, productsCreated: complete ? 36 : 10, productsAdopted: 0, variantsMapped: complete ? 1000 : 185, providerFailures: 21, providerRequestCount: 409, providerState: complete ? "completed" : "ready", retryAt: null, lastError: null, canResume: false, checkpointState: complete ? "verified" : "checkpointed", scopes: ["file_library", "orders", "sync_products", "webhooks"], targetVerified: true, sourceVerified: true, blockedProducts: Array.from({ length: 13 }, (_, index) => ({ productId: `blocked-${index}` })) },
+    catalogue: { plannedProductCreates: 49, targetNativeKeeps: 1, eligibleVariants: 1317, deferredVariants: 5, d1Products: 50, d1Variants: 1323, verifiedProducts: complete ? 36 : 10, mappedVariants: complete ? 1000 : 185, blockedProducts: 13, fileMappings: { unique: 29, originalExact: 0, targetExisting: 0, printfulPreviewRehydrated: 29, unresolved: 13 } },
+    safety: { checkoutEnabled: false, livePaymentCaptureEnabled: false, fulfillmentEnabled: false, printfulOrderMode: "draft_only", commerceOrders: 0, wixSourceReadOnly: true, printfulOrdersCreated: 0, printfulWebhooksMutated: 0 },
   };
 }

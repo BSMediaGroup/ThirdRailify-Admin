@@ -75,20 +75,22 @@ export type PrintfulProviderSnapshotPayload = {
 export type PermanentPrintfulMigrationPayload = {
   ok: boolean;
   migration: {
-    id: string; status: "ready" | "running" | "waiting" | "completed" | "blocked";
+    id: string; status: "ready" | "running" | "waiting" | "completed" | "completed_with_blocked_products" | "blocked";
     phase: string; currentProduct: { id: string; title: string; legacySourceProductId: string; migrationStatus: string } | null;
     fileProgress: { resolved: number; total: number } | null;
     completedProducts: number; totalProducts: number; productsCreated: number; productsAdopted: number;
     variantsMapped: number; providerFailures: number; providerRequestCount: number;
-    providerState: "ready" | "waiting" | "blocked" | "completed"; retryAt: number | null;
+    providerState: "ready" | "waiting" | "paused" | "blocked" | "completed"; retryAt: number | null; manuallyPaused?: boolean;
     lastError: { code: string; message: string; at: string } | null;
     canResume: boolean; checkpointState: "checkpointed" | "checkpointed_resumable" | "verified";
     scopes: string[] | null; targetVerified: boolean; sourceVerified: boolean;
     updatedAt: string; completedAt: string | null;
+    blockedProducts: Array<{ productId: string; title: string; sourceProductId: string; sourceFileId: string | null; code: string; reason: string; at: string }>;
   };
   catalogue: {
     plannedProductCreates: number; targetNativeKeeps: number; eligibleVariants: number; deferredVariants: number;
     d1Products: number; d1Variants: number; verifiedProducts: number; mappedVariants: number; blockedProducts: number;
+    fileMappings: { unique: number; originalExact: number; targetExisting: number; printfulPreviewRehydrated: number; unresolved: number };
   };
   safety: {
     checkoutEnabled: boolean; livePaymentCaptureEnabled: boolean; fulfillmentEnabled: boolean;
@@ -146,13 +148,13 @@ export function getPermanentPrintfulMigration() {
   return adminApi<PermanentPrintfulMigrationPayload>("/api/admin/commerce/printful/catalogue/migration");
 }
 export function advancePermanentPrintfulMigration(csrfToken: string) {
-  return adminApi<PermanentPrintfulMigrationPayload>("/api/admin/commerce/printful/catalogue/migrate", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+  return adminApi<PermanentPrintfulMigrationPayload>("/api/admin/commerce/printful/catalogue/migrate", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ action: "continue_permanent_printful_migration" }) });
 }
 export async function executePermanentPrintfulMigration(csrfToken: string, onProgress?: (payload: PermanentPrintfulMigrationPayload) => void) {
   for (let step = 0; step < 20_000; step += 1) {
     const payload = await advancePermanentPrintfulMigration(csrfToken);
     onProgress?.(payload);
-    if (payload.migration.status === "completed" || payload.migration.status === "blocked") return payload;
+    if (["completed", "completed_with_blocked_products", "blocked"].includes(payload.migration.status)) return payload;
     const retryAt = payload.migration.retryAt || Date.now() + 750;
     await waitForMigration(retryAt, onProgress, payload);
   }
