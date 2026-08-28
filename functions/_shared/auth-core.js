@@ -32,6 +32,7 @@ const RATE_RULES = {
   avatar: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   commerce: { limit: 30, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   commerce_snapshot: { limit: 2_000, windowSeconds: 4 * 60 * 60, blockSeconds: 15 * 60 },
+  commerce_migration: { limit: 5_000, windowSeconds: 24 * 60 * 60, blockSeconds: 15 * 60 },
   checkout: { limit: 12, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   watch: { limit: 60, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
 };

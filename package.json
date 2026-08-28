@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test:functions": "node --test --test-concurrency=1 tests/auth-migration.test.mjs tests/auth-functions.test.mjs tests/profile-media.test.mjs tests/commerce-migration.test.mjs tests/commerce-core.test.mjs tests/commerce-functions.test.mjs tests/printful.test.mjs tests/printful-catalogue.test.mjs tests/catalogue-reconciliation.test.mjs tests/live-wix-census.test.mjs tests/checkout.test.mjs tests/stripe-webhook.test.mjs tests/goats-migration.test.mjs tests/goats-core.test.mjs tests/watch-admin.test.mjs",
+    "test:functions": "node --test --test-concurrency=1 tests/auth-migration.test.mjs tests/auth-functions.test.mjs tests/profile-media.test.mjs tests/commerce-migration.test.mjs tests/permanent-catalogue-import.test.mjs tests/commerce-core.test.mjs tests/commerce-functions.test.mjs tests/printful.test.mjs tests/printful-catalogue.test.mjs tests/printful-permanent-migration.test.mjs tests/catalogue-reconciliation.test.mjs tests/live-wix-census.test.mjs tests/checkout.test.mjs tests/stripe-webhook.test.mjs tests/goats-migration.test.mjs tests/goats-core.test.mjs tests/watch-admin.test.mjs",
     "test:watch": "node --test --test-concurrency=1 tests/watch-admin.test.mjs",
     "test:printful": "node --test --test-concurrency=1 tests/printful.test.mjs tests/printful-catalogue.test.mjs",
     "test:browser:fulfillment": "node --test --test-concurrency=1 tests/fulfillment-browser.test.mjs",
@@ -16,6 +16,9 @@
     "test:admin-ui": "node --test tests/admin-ui.test.mjs",
     "typecheck": "tsc -b --pretty false",
     "commerce:migration:build": "node scripts/build-commerce-migration-artifacts.mjs",
+    "commerce:catalogue:validate": "node scripts/validate-permanent-catalogue.mjs",
+    "commerce:catalogue:build-import": "node scripts/build-permanent-catalogue-import.mjs",
+    "commerce:printful:verify-permanent": "node scripts/verify-permanent-printful-token.mjs",
     "goats:import:dry-run": "node scripts/validate-goats-import.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },

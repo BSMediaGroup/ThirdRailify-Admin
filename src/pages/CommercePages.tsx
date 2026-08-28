@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import trZapColorIcon from "../../assets/icons/trzapcolorcon.svg";
 import { useAuth } from "../auth/AuthProvider";
@@ -10,11 +10,11 @@ import {
   getCommerceOrders,
   getCommerceTemplates,
   getMerchandisingProducts,
-  capturePrintfulCatalogueSnapshot,
+  executePermanentPrintfulMigration,
+  getPermanentPrintfulMigration,
   saveBusinessProfile,
   saveCommerceTemplate,
   saveFeaturedProducts,
-  verifyPrintfulConnection,
   verifyStripeConnection,
   type BusinessPayload,
   type CommerceOverviewPayload,
@@ -22,8 +22,7 @@ import {
   type CommerceStatus,
   type CommerceTemplate,
   type MerchandisingPayload,
-  type PrintfulProviderSnapshotPayload,
-  type SnapshotProgress,
+  type PermanentPrintfulMigrationPayload,
   type ProviderStatus,
   type TemplatesPayload,
 } from "../commerce/client";
@@ -43,17 +42,6 @@ const COMMERCE_WORKSPACES = [
   { to: "/commerce/emails", eyebrow: "Lifecycle templates", title: "Customer emails", text: "Structured plain-text templates with delivery intentionally disabled.", icon: "emails" },
   { to: "/commerce/fulfillment", eyebrow: "Provider bridge", title: "Fulfillment integrations", text: "Printful draft-only migration planning with explicit submission gates.", icon: "fulfillment" },
 ] as const;
-
-const FINALIZED_PRINTFUL_MIGRATION = {
-  legacyProducts: 119,
-  publishedWixProducts: 49,
-  plannedTargetCreates: 49,
-  targetNativeKeeps: 1,
-  excludedNotPublished: 69,
-  manualReview: 1,
-  migrationEligibleVariants: 1317,
-  discontinuedVariantsExcluded: 163,
-} as const;
 
 export function CommerceOverviewPage() {
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
@@ -295,94 +283,62 @@ function EmailTemplatePreview({ template }: { template: CommerceTemplate }) {
 }
 
 export function FulfillmentIntegrationsPage() {
-  const { csrfToken } = useAuth();
+  const { csrfToken, access } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
+  const [migration, setMigration] = useState<PermanentPrintfulMigrationPayload | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [snapshot, setSnapshot] = useState<PrintfulProviderSnapshotPayload | null>(null);
-  const [snapshotState, setSnapshotState] = useState<"ready" | "running" | "throttled" | "completed" | "failed">("ready");
-  const [snapshotError, setSnapshotError] = useState("");
-  const [snapshotProgress, setSnapshotProgress] = useState<SnapshotProgress | null>(null);
+  const migrationLoopRunning = useRef(false);
   const load = useCallback(async () => {
     const stop = startLoading("Loading Printful connection status"); setError("");
-    try { setPayload(await getCommerceOverview()); }
+    try {
+      setPayload(await getCommerceOverview());
+      if (access.isMasterAdmin) setMigration(await getPermanentPrintfulMigration());
+    }
     catch (reason) { setError(errorMessage(reason, "Printful connection status is unavailable.")); }
     finally { stop(); }
-  }, [startLoading]);
+  }, [access.isMasterAdmin, startLoading]);
   useEffect(() => { void load(); }, [load]);
-  const printful = payload?.providers.find((provider) => provider.provider === "printful");
-  const canManageIntegrations = Boolean(payload?.access.capabilities.includes("commerce.integrations.manage"));
-  const canVerify = Boolean(canManageIntegrations && payload?.databaseConfigured && payload.printfulSecretConfigured && csrfToken && !busy);
-  const snapshotAvailable = Boolean(payload?.printfulCatalogueSnapshot.available);
-  const canRunSnapshot = Boolean(canManageIntegrations && snapshotAvailable && csrfToken && !busy);
-  const connected = Boolean(printful?.status === "connected" && printful.apiConfigured && printful.externalAccountId && metadataText(printful, "storeName"));
-  const verify = async () => {
-    if (!canVerify) return;
-    const stop = startLoading("Verifying the dedicated Printful API store"); setBusy(true); setError(""); setMessage("");
-    try { const next = await verifyPrintfulConnection(csrfToken); setPayload(next); setMessage("Printful read-only verification confirmed the dedicated single store. Fulfillment remains disabled."); }
-    catch (reason) { setError(errorMessage(reason, "Printful store verification failed closed.")); }
-    finally { setBusy(false); stop(); }
-  };
-  const captureSnapshot = async () => {
-    if (!canRunSnapshot) return;
-    const stop = startLoading("Reading both Printful catalogues");
-    setBusy(true); setError(""); setMessage(""); setSnapshotError(""); setSnapshot(null); setSnapshotState("running"); setSnapshotProgress({ currentPhase: "Catalogue manifest", completed: 0, total: null, providerState: "reading", message: "Starting the protected read-only snapshot…" });
+  const continueMigration = useCallback(async () => {
+    if (!csrfToken || !access.isMasterAdmin || migrationLoopRunning.current) return;
+    migrationLoopRunning.current = true;
+    setBusy(true); setError(""); setMessage("");
     try {
-      const next = await capturePrintfulCatalogueSnapshot(csrfToken, (progress) => {
-        setSnapshotProgress(progress);
-        setSnapshotState(progress.providerState === "waiting" || progress.providerState === "rate_limited" ? "throttled" : "running");
-      });
-      setSnapshot(next);
-      setSnapshotState("completed");
-      setSnapshotProgress(null);
-      setMessage("The complete sanitized read-only snapshot is ready. Download each evidence document below. No Printful write was sent.");
-    } catch (reason) {
-      setSnapshotState("failed");
-      setSnapshotError(errorMessage(reason, "The read-only catalogue snapshot failed safely. Retry when the provider is available."));
+      const next = await executePermanentPrintfulMigration(csrfToken, setMigration);
+      setMigration(next);
+      if (next.migration.status === "completed") setMessage("PERMANENT CATALOGUE MIGRATED");
+      else if (next.migration.status === "blocked") setError(next.migration.lastError?.message || "The migration stopped safely on a provider or identity conflict.");
     }
-    finally { setBusy(false); stop(); }
-  };
-  const downloadSnapshot = (document: "source" | "target" | "publicCatalogue" | "reconciliation") => {
-    if (!snapshot) return;
-    const value = document === "source" ? { schemaVersion: snapshot.schemaVersion, ...snapshot.source }
-      : document === "target" ? { schemaVersion: snapshot.schemaVersion, ...snapshot.target }
-        : document === "publicCatalogue" ? snapshot.publicCatalogue
-          : snapshot.reconciliation;
-    downloadJson(snapshot.downloadFilenames[document], value);
-  };
+    catch (reason) { setError(errorMessage(reason, "The permanent Printful migration paused safely. Reload this page to resume from D1.")); }
+    finally { migrationLoopRunning.current = false; setBusy(false); }
+  }, [access.isMasterAdmin, csrfToken]);
+  const migrationStatus = migration?.migration.status;
+  useEffect(() => {
+    if (migrationStatus && ["running", "waiting"].includes(migrationStatus)) void continueMigration();
+  }, [continueMigration, migrationStatus]);
+  const state = migration?.migration;
+  const catalogue = migration?.catalogue;
+  const safety = migration?.safety;
+  const canExecute = Boolean(access.isMasterAdmin && csrfToken && payload?.databaseConfigured && payload.printfulSecretConfigured && state?.status === "ready" && !busy);
   return <>
-    <CommerceHeading eyebrow="Provider adapter boundary" title="Fulfillment integrations" summary={connected ? "The real Printful API is connected only to the dedicated Third Railify API store. Order mode remains draft only, all fulfillment submission is disabled, and the existing Wix store remains active and untouched." : "The permanent Printful credential is production-capable but isolated to a dedicated API store. Read-only verification is available; order creation, confirmation, webhooks, and fulfillment remain disabled."} status={connected ? "connected" : "setup_required"} statusLabel={connected ? "API connected" : undefined} />
+    <CommerceHeading eyebrow="Permanent catalogue authority" title="Fulfillment integrations" summary="The accepted 49-product Wix catalogue is loaded in Commerce D1 and ready for a resumable migration to the permanent native Printful store. The legacy Wix source is read only; checkout and fulfillment remain disabled." status={state?.status === "completed" ? "connected" : state?.status === "blocked" ? "error" : "pending"} statusLabel={state?.status === "completed" ? "Permanent catalogue migrated" : state?.status === "blocked" ? "Migration blocked safely" : "Ready for permanent migration"} />
     {error && <div className="admin-alert" role="alert">{error}</div>}
     {message && <div className="auth-success" role="status">{message}</div>}
     <section className="provider-detail-grid">
-      <DetailCard title="Permanent target" status={connected ? "connected" : "setup_required"} statusLabel={connected ? "Connected" : undefined} lead="Third Railify API"><dl><Fact term="Printful API" value={connected ? "Connected" : "Verification pending"} /><Fact term="Store" value="Third Railify API" /><Fact term="Store ID" value="18668025" /><Fact term="Store type" value="native" /><Fact term="Credential" value={payload?.printfulSecretConfigured ? "Configured" : "Not configured"} /><Fact term="Access" value="Single store" /><Fact term="Products" value={snapshot ? String(snapshot.target.counts.products) : metadataNumberText(printful, "productCount")} /><Fact term="Provider API" value="Real / production-capable" /><Fact term="Application rollout" value="Pre-cutover" /><Fact term="Order mode" value="Draft only" /><Fact term="Fulfillment" value="Disabled" /><Fact term="Printful webhooks" value="Not configured" /></dl>
-        {canManageIntegrations && <button type="button" className="secondary-button" onClick={() => void verify()} disabled={!canVerify}>{busy ? "Verifying…" : "Verify Printful connection"}</button>}
-        {canManageIntegrations && !payload?.databaseConfigured && <p className="commerce-action-note">Commerce D1 is required before verification.</p>}
-        {canManageIntegrations && payload?.databaseConfigured && !payload.printfulSecretConfigured && <p className="commerce-action-note">The store-scoped Printful credential must be configured as an Admin Cloudflare secret before verification.</p>}
+      <DetailCard title="Permanent target" status={state?.targetVerified ? "connected" : "pending"} statusLabel={state?.targetVerified ? "Token accepted" : "Verified before first write"} lead="Third Railify API"><dl><Fact term="Store ID" value="18668025" /><Fact term="Store type" value="native" /><Fact term="Credential" value={payload?.printfulSecretConfigured ? "Configured / server only" : "Not configured"} /><Fact term="Product write scope" value={state?.scopes ? "Verified" : "Pending protected preflight"} /><Fact term="Planned creates" value={String(catalogue?.plannedProductCreates ?? 49)} /><Fact term="Existing target-native keep" value={String(catalogue?.targetNativeKeeps ?? 1)} /><Fact term="Order mode" value="Draft only" /><Fact term="Checkout" value="Disabled" /><Fact term="Fulfillment" value="Disabled" /><Fact term="Webhooks" value="Not configured" /></dl></DetailCard>
+      <DetailCard title="Legacy source" status="legacy_production" statusLabel="Read only" lead="Third Railify Official"><dl><Fact term="Store ID" value="16847493" /><Fact term="Store type" value="wix" /><Fact term="Credential use" value="GET only" /><Fact term="Allowed reads" value="Sync product / original file" /><Fact term="Write access used" value="None" /><Fact term="Wix storefront" value="Live / untouched" /></dl></DetailCard>
+      <DetailCard title="Permanent D1 catalogue" status="connected" statusLabel="Authoritative" lead="Accepted evidence / 2026-08-28"><dl><Fact term="D1 products" value={String(catalogue?.d1Products ?? 50)} /><Fact term="D1 variants" value={String(catalogue?.d1Variants ?? 1323)} /><Fact term="Planned target creates" value={String(catalogue?.plannedProductCreates ?? 49)} /><Fact term="Eligible variants" value={String(catalogue?.eligibleVariants ?? 1317)} /><Fact term="Deferred variants" value={String(catalogue?.deferredVariants ?? 5)} /><Fact term="Manual review" value="1 — Raider's Goblet excluded" /><Fact term="Maximum variants / product" value="96 / 100" /><Fact term="My Balloon" value="Preserved private / non-sellable" /></dl></DetailCard>
+      <DetailCard title="Permanent migration" status={state?.status === "completed" ? "connected" : state?.status === "blocked" ? "error" : "pending"} statusLabel={humanize(state?.status || "ready")} lead={state?.currentProduct?.title || "Server-owned D1 queue"}><dl><Fact term="Progress" value={`${state?.completedProducts ?? 0} / ${state?.totalProducts ?? 49}`} /><Fact term="Current phase" value={humanize(state?.phase || "ready")} /><Fact term="File resolution" value={state?.fileProgress ? `${state.fileProgress.resolved} / ${state.fileProgress.total}` : "Awaiting current product"} /><Fact term="Provider state" value={humanize(state?.providerState || "ready")} /><Fact term="Products created" value={String(state?.productsCreated ?? 0)} /><Fact term="Products adopted" value={String(state?.productsAdopted ?? 0)} /><Fact term="Variants mapped" value={String(state?.variantsMapped ?? 0)} /><Fact term="Provider failures" value={String(state?.providerFailures ?? 0)} /><Fact term="D1 mapping state" value={state?.status === "completed" ? "Verified" : "Checkpointed / resumable"} /></dl>
+        <div className={`catalogue-snapshot-state is-${state?.status || "ready"}`} aria-live="polite"><strong>{state?.status === "completed" ? "PERMANENT CATALOGUE MIGRATED" : state?.status === "blocked" ? "MIGRATION STOPPED SAFELY" : state?.status === "waiting" ? "PROVIDER PACING — RESUMES AUTOMATICALLY" : state?.status === "running" ? "PERMANENT MIGRATION RUNNING" : "READY FOR PERMANENT MIGRATION"}</strong><p>{state?.lastError?.message || (state?.status === "completed" ? "All selected products and active variants are verified and mapped in Commerce D1. Checkout and fulfillment remain disabled." : "The server resolves original source artwork URLs, adopts matching external IDs, creates only missing products, verifies every variant by external ID, and checkpoints all progress in D1.")}</p></div>
+        {access.isMasterAdmin && state?.status === "ready" && <button type="button" className="secondary-button" onClick={() => void continueMigration()} disabled={!canExecute}>EXECUTE PERMANENT PRINTFUL CATALOGUE MIGRATION</button>}
+        {busy && <p className="commerce-action-note">Automatic continuation is active. Rate limits and file-processing waits resume without another click.</p>}
+        {!access.isMasterAdmin && <p className="commerce-action-note">Master Admin authority is required for this provider-write migration.</p>}
       </DetailCard>
-      <DetailCard title="Legacy source" status="legacy_production" statusLabel="Read-only migration source" lead="Third Railify Official"><dl><Fact term="Store" value="Third Railify Official" /><Fact term="Store ID" value="16847493" /><Fact term="Store type" value="wix" /><Fact term="Credential" value="Temporary encrypted secret" /><Fact term="Access used" value="GET only" /><Fact term="Write access" value="None" /><Fact term="Products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Configuration" value="Verified Store ID bound" /><Fact term="Wix storefront" value="Live / untouched" /></dl></DetailCard>
-      <DetailCard title="Finalized migration selection" status="pending" statusLabel="Ready for next write task" lead="Immutable evidence / 2026-08-28"><dl><Fact term="Legacy Printful products" value={String(FINALIZED_PRINTFUL_MIGRATION.legacyProducts)} /><Fact term="Currently published Wix products" value={String(FINALIZED_PRINTFUL_MIGRATION.publishedWixProducts)} /><Fact term="Planned target creates" value={String(FINALIZED_PRINTFUL_MIGRATION.plannedTargetCreates)} /><Fact term="Existing target-native products" value={String(FINALIZED_PRINTFUL_MIGRATION.targetNativeKeeps)} /><Fact term="Excluded not-published legacy" value={String(FINALIZED_PRINTFUL_MIGRATION.excludedNotPublished)} /><Fact term="Manual review" value={String(FINALIZED_PRINTFUL_MIGRATION.manualReview)} /><Fact term="Migration-eligible variants" value={String(FINALIZED_PRINTFUL_MIGRATION.migrationEligibleVariants)} /><Fact term="Discontinued variants excluded" value={String(FINALIZED_PRINTFUL_MIGRATION.discontinuedVariantsExcluded)} /><Fact term="Provider writes" value="None" /><Fact term="Checkout / fulfillment" value="Disabled / disabled" /></dl></DetailCard>
-      <DetailCard title="Catalogue reconciliation" status={snapshotState === "completed" ? "connected" : snapshotState === "failed" ? "error" : "setup_required"} lead="Read-only migration evidence"><dl><Fact term="Catalogue snapshot" value={snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Running" : snapshotState === "throttled" ? "Safely paused" : snapshotState === "completed" ? "Completed" : "Failed"} /><Fact term="Matched" value={snapshot ? String(snapshot.reconciliation.counts.printfulBackedMatches) : "Awaiting snapshot"} /><Fact term="Unresolved" value={snapshot ? String(snapshot.reconciliation.counts.unresolved) : "Awaiting snapshot"} /><Fact term="Non-Printful" value={snapshot ? String(snapshot.reconciliation.counts.nonPrintful) : "Awaiting snapshot"} /><Fact term="Source products" value={snapshot ? String(snapshot.source.counts.products) : "Awaiting snapshot"} /><Fact term="Source variants" value={snapshot ? String(snapshot.source.counts.variants) : "Awaiting snapshot"} /><Fact term="Target products" value={snapshot ? String(snapshot.target.counts.products) : "Awaiting snapshot"} /><Fact term="Missing / malformed prices" value={snapshot ? String(snapshot.source.counts.malformedOrMissingPrices) : "Awaiting snapshot"} /><Fact term="Missing files" value={snapshot ? String(snapshot.source.counts.missingFiles) : "Awaiting snapshot"} /><Fact term="Provider methods" value="GET only" /><Fact term="Checkout" value="Disabled" /><Fact term="Fulfillment" value="Disabled" /></dl>
-        <div className={`catalogue-snapshot-state is-${snapshotState}`} aria-live="polite">
-          <strong>{snapshotState === "ready" ? "Ready to run" : snapshotState === "running" ? "Reading source and target catalogues…" : snapshotState === "throttled" ? "PRINTFUL RATE LIMIT — Snapshot safely paused" : snapshotState === "completed" ? "Snapshot completed" : "Catalogue snapshot failed"}</strong>
-          <p>{snapshotState === "ready" ? "No previous snapshot is required. The protected action will return sanitized migration evidence without changing either store." : snapshotState === "running" || snapshotState === "throttled" ? snapshotProgress?.message || "The signed checkpoint is progressing through read-only provider records." : snapshotState === "completed" ? "Choose each file below to download the four deterministic evidence documents." : snapshotError}</p>
-          {(snapshotState === "running" || snapshotState === "throttled") && snapshotProgress && <dl className="catalogue-progress"><Fact term="Current phase" value={snapshotProgress.currentPhase} /><Fact term="Completed" value={String(snapshotProgress.completed)} /><Fact term="Total" value={snapshotProgress.total === null ? "Discovering" : String(snapshotProgress.total)} /><Fact term="Provider state" value={snapshotProgress.providerState === "waiting" ? "Rate-limited / waiting" : humanize(snapshotProgress.providerState)} />{snapshotProgress.retryAt && <Fact term="Resume time" value={formatSynchronizedAt(snapshotProgress.retryAt)} />}</dl>}
-        </div>
-        {canManageIntegrations && <button type="button" className="secondary-button" onClick={() => void captureSnapshot()} disabled={!canRunSnapshot}>{snapshotState === "running" ? "Reading catalogues…" : snapshotState === "throttled" ? "Waiting to resume automatically…" : snapshotState === "failed" ? "Retry read-only snapshot" : "Run read-only catalogue snapshot"}</button>}
-        {canManageIntegrations && payload && !snapshotAvailable && <p className="commerce-action-note">The protected action remains fail-closed until the safe source/target Store-ID configuration, commerce audit storage, and permanent Printful integration are present.</p>}
-        {snapshot && <div className="catalogue-downloads" aria-label="Catalogue snapshot downloads">
-          <button type="button" className="secondary-button" onClick={() => downloadSnapshot("source")}>Download Wix source snapshot</button>
-          <button type="button" className="secondary-button" onClick={() => downloadSnapshot("target")}>Download API target snapshot</button>
-          <button type="button" className="secondary-button" onClick={() => downloadSnapshot("publicCatalogue")}>Download Public catalogue snapshot</button>
-          <button type="button" className="secondary-button" onClick={() => downloadSnapshot("reconciliation")}>Download reconciliation snapshot</button>
-        </div>}
-      </DetailCard>
-      <DetailCard title="Printify" status="unavailable" lead="Lower-priority adapter"><p>No current public evidence proves a Printify requirement or connection. Credential custody and connectivity remain undecided until a verified audit establishes them.</p></DetailCard>
     </section>
     {!payload && !error && <CommerceState>Loading truthful Printful status…</CommerceState>}
-    <section className="transaction-model" aria-labelledby="transaction-model-title"><p className="eyebrow">Two separate transactions</p><h2 id="transaction-model-title">Stripe does not pay Printful</h2><div><article><span>01</span><strong>Customer payment</strong><p>The customer pays Third Railify through the dedicated Third Railify Official Stripe account.</p></article><article><span>02</span><strong>Fulfillment billing</strong><p>Printful separately charges the Third Railify Wallet or configured billing method for product, shipping, taxes, and applicable setup costs.</p></article></div></section>
+    <section className="transaction-model" aria-labelledby="transaction-model-title"><p className="eyebrow">Safety remains locked</p><h2 id="transaction-model-title">Catalogue migration does not activate orders</h2><div><article><span>01</span><strong>Customer checkout</strong><p>{safety?.checkoutEnabled ? "Unexpectedly enabled" : "Disabled"}; live payment capture remains {safety?.livePaymentCaptureEnabled ? "unexpectedly enabled" : "disabled"}.</p></article><article><span>02</span><strong>Printful fulfillment</strong><p>{safety?.fulfillmentEnabled ? "Unexpectedly enabled" : "Disabled"}; no order or webhook mutation is part of this migration.</p></article></div></section>
   </>;
 }
 
@@ -487,12 +443,6 @@ function profileToForm(payload: BusinessPayload) {
 function formToBusinessPayload(form: Record<string, string>) { return { ...form, countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicAddress: { line1: form.publicAddressLine1, line2: form.publicAddressLine2, city: form.publicCity, province: "ON", postalCode: form.publicPostalCode, country: "CA" } }; }
 function maskedRegistration(payload: BusinessPayload | null, type: string) { const match = payload?.profile.private.registrations.find((item) => item.type === type); return match ? `Stored as ${match.maskedIdentifier}; leave blank to preserve.` : "Not confirmed or stored."; }
 function errorMessage(reason: unknown, fallback: string) { return reason instanceof Error ? reason.message : fallback; }
-function downloadJson(filename: string, value: unknown) {
-  const url = URL.createObjectURL(new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: "application/json" }));
-  const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = filename; anchor.click();
-  URL.revokeObjectURL(url);
-}
 function metadataText(provider: ProviderStatus | undefined, key: string) { const value = provider?.metadata?.[key]; return typeof value === "string" ? value : ""; }
 function metadataNumberText(provider: ProviderStatus | undefined, key: string) { const value = provider?.metadata?.[key]; return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : "Awaiting verification"; }
 function metadataBooleanLabel(provider: ProviderStatus | undefined, key: string) { return provider?.metadata?.[key] === true ? "Enabled in test mode" : "Disabled in test mode"; }

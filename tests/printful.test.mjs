@@ -25,10 +25,14 @@ function productResponse(total = 0, result = []) {
   return { code: 200, result, paging: { total, offset: 0, limit: 1 } };
 }
 
-function printfulFetch({ stores = storeResponse(), products = productResponse(), status = 200, calls = [] } = {}) {
+function scopesResponse(values = ["sync_products/write", "files/write", "orders/write", "webhooks/write"]) {
+  return { data: values.map((value) => ({ name: value, value })), _links: { self: { href: "https://api.printful.com/v2/oauth-scopes" } } };
+}
+
+function printfulFetch({ stores = storeResponse(), products = productResponse(), scopes = scopesResponse(), status = 200, calls = [] } = {}) {
   return async (input, init) => {
     calls.push({ input, method: init?.method, headers: new Headers(init?.headers) });
-    const body = input === "https://api.printful.com/stores" ? stores : products;
+    const body = input === "https://api.printful.com/stores" ? stores : input === "https://api.printful.com/v2/oauth-scopes" ? scopes : products;
     return Response.json(body, { status });
   };
 }
@@ -78,7 +82,7 @@ test("Printful store discovery fails closed for malformed scope, Wix, and ambigu
   }
 });
 
-test("Printful verification performs exactly two server-only GETs and persists safe existing-row metadata", async (t) => {
+test("Printful verification performs exactly three server-only GETs including write scopes and persists safe existing-row metadata", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness, { PRINTFUL_API_TOKEN: PRINTFUL_TOKEN });
   const session = { accountId: "master", account: { adminLevel: "master" } };
@@ -92,6 +96,7 @@ test("Printful verification performs exactly two server-only GETs and persists s
   assert.deepEqual(calls.map((call) => [call.input, call.method]), [
     ["https://api.printful.com/stores", "GET"],
     ["https://api.printful.com/store/products?limit=1", "GET"],
+    ["https://api.printful.com/v2/oauth-scopes", "GET"],
   ]);
   for (const call of calls) {
     assert.equal(call.headers.get("Authorization"), `Bearer ${PRINTFUL_TOKEN}`);
@@ -104,6 +109,7 @@ test("Printful verification performs exactly two server-only GETs and persists s
   assert.deepEqual({ storeName: metadata.store_name, storeType: metadata.store_type, productCount: metadata.product_count }, { storeName: "Third Railify API", storeType: "native", productCount: 0 });
   assert.equal(metadata.api_configured, true); assert.equal(metadata.credential_configured, true); assert.equal(metadata.access_level, "single_store");
   assert.equal(metadata.order_mode, "draft_only"); assert.equal(metadata.fulfillment_enabled, false); assert.equal(metadata.webhook_configured, false); assert.equal(metadata.existing_wix_store_untouched, true);
+  assert.equal(metadata.product_write_authority, true); assert.equal(metadata.file_manage_authority, true); assert.equal(metadata.order_manage_authority, true); assert.equal(metadata.webhook_manage_authority, true);
   assert.doesNotMatch(row.safe_metadata_json, new RegExp(PRINTFUL_TOKEN)); assert.doesNotMatch(row.safe_metadata_json, /authorization|raw_response/i);
   const printful = overview.providers.find((provider) => provider.provider === "printful");
   assert.equal(printful.apiConfigured, true); assert.equal(printful.webhookConfigured, false); assert.equal(printful.externalAccountId, STORE_ID);
@@ -188,7 +194,7 @@ test("Printful route requires Admin auth, exact origin, CSRF, and integrations a
   assert.equal(response.status, 200); assert.equal((await response.json()).providers.find((provider) => provider.provider === "printful").apiConfigured, true);
 });
 
-test("Printful implementation contains no provider write method or browser credential path", async () => {
+test("Printful verification remains GET-only and browser code contains no provider credential", async () => {
   const files = [
     new URL("../functions/_shared/commerce-core.js", import.meta.url),
     new URL("../functions/api/admin/commerce/[[path]].js", import.meta.url),
@@ -197,7 +203,7 @@ test("Printful implementation contains no provider write method or browser crede
   ];
   const [core, route, client, page] = await Promise.all(files.map((file) => readFile(file, "utf8")));
   const providerUrls = [...core.matchAll(/https:\/\/api\.printful\.com[^"\s]*/g)].map((match) => match[0]).sort();
-  assert.deepEqual(providerUrls, ["https://api.printful.com/store/products?limit=1", "https://api.printful.com/stores"]);
-  assert.doesNotMatch(`${core}\n${route}`, /method:\s*["'](?:POST|PUT|PATCH|DELETE)["'][\s\S]{0,120}printful/i);
+  assert.deepEqual(providerUrls, ["https://api.printful.com/store/products?limit=1", "https://api.printful.com/stores", "https://api.printful.com/v2/oauth-scopes"]);
+  assert.doesNotMatch(core, /method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i);
   assert.doesNotMatch(`${client}\n${page}`, /PRINTFUL_API_TOKEN|Authorization:\s*`?Bearer/i);
 });

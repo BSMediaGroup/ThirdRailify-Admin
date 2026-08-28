@@ -72,6 +72,29 @@ export type PrintfulProviderSnapshotPayload = {
   downloadFilenames: { source: string; target: string; publicCatalogue: string; reconciliation: string };
   safety: { providerMethods: string[]; sourceCredential: string; targetCredential: string; tokensIncluded: boolean; customerOrOrderDataIncluded: boolean };
 };
+export type PermanentPrintfulMigrationPayload = {
+  ok: boolean;
+  migration: {
+    id: string; status: "ready" | "running" | "waiting" | "completed" | "blocked";
+    phase: string; currentProduct: { id: string; title: string; legacySourceProductId: string; migrationStatus: string } | null;
+    fileProgress: { resolved: number; total: number } | null;
+    completedProducts: number; totalProducts: number; productsCreated: number; productsAdopted: number;
+    variantsMapped: number; providerFailures: number; providerRequestCount: number;
+    providerState: "ready" | "waiting" | "blocked" | "completed"; retryAt: number | null;
+    lastError: { code: string; message: string; at: string } | null;
+    scopes: string[] | null; targetVerified: boolean; sourceVerified: boolean;
+    updatedAt: string; completedAt: string | null;
+  };
+  catalogue: {
+    plannedProductCreates: number; targetNativeKeeps: number; eligibleVariants: number; deferredVariants: number;
+    d1Products: number; d1Variants: number; verifiedProducts: number; mappedVariants: number; blockedProducts: number;
+  };
+  safety: {
+    checkoutEnabled: boolean; livePaymentCaptureEnabled: boolean; fulfillmentEnabled: boolean;
+    printfulOrderMode: string; commerceOrders: number; wixSourceReadOnly: boolean;
+    printfulOrdersCreated: number; printfulWebhooksMutated: number;
+  };
+};
 type SnapshotRole = "source" | "target";
 type SnapshotManifest = {
   correlationId: string; expiresAt: string;
@@ -117,6 +140,22 @@ export function verifyPrintfulConnection(csrfToken: string) {
 }
 export function verifyPrintfulCatalogueSource(csrfToken: string) {
   return adminApi<PrintfulSourceVerificationPayload>("/api/admin/commerce/printful/catalogue/source/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+}
+export function getPermanentPrintfulMigration() {
+  return adminApi<PermanentPrintfulMigrationPayload>("/api/admin/commerce/printful/catalogue/migration");
+}
+export function advancePermanentPrintfulMigration(csrfToken: string) {
+  return adminApi<PermanentPrintfulMigrationPayload>("/api/admin/commerce/printful/catalogue/migrate", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+}
+export async function executePermanentPrintfulMigration(csrfToken: string, onProgress?: (payload: PermanentPrintfulMigrationPayload) => void) {
+  for (let step = 0; step < 20_000; step += 1) {
+    const payload = await advancePermanentPrintfulMigration(csrfToken);
+    onProgress?.(payload);
+    if (payload.migration.status === "completed" || payload.migration.status === "blocked") return payload;
+    const retryAt = payload.migration.retryAt || Date.now() + 750;
+    await waitForMigration(retryAt, onProgress, payload);
+  }
+  throw new Error("The permanent Printful migration exceeded its bounded continuation budget.");
 }
 export async function capturePrintfulCatalogueSnapshot(csrfToken: string, onProgress?: (progress: SnapshotProgress) => void) {
   const path = "/api/admin/commerce/printful/catalogue/snapshot";
@@ -226,6 +265,14 @@ function requireRetryAt(value: string | undefined) {
 function formatCountdown(milliseconds: number) {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+async function waitForMigration(retryAt: number, onProgress: ((payload: PermanentPrintfulMigrationPayload) => void) | undefined, payload: PermanentPrintfulMigrationPayload) {
+  for (;;) {
+    const remaining = Math.max(0, retryAt - Date.now());
+    if (!remaining) return;
+    onProgress?.({ ...payload, migration: { ...payload.migration, status: "waiting", providerState: "waiting", retryAt } });
+    await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, remaining)));
+  }
 }
 export function getBusinessProfile() { return adminApi<BusinessPayload>("/api/admin/commerce/business"); }
 export function saveBusinessProfile(csrfToken: string, body: Record<string, unknown>) {

@@ -5,6 +5,7 @@ import { readPermanentCatalogueEvidence, validatePermanentCatalogueEvidence } fr
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_SQL = path.join(ROOT, "commerce-import", "permanent-catalogue-import.sql");
+const OUTPUT_JSON = path.join(ROOT, "commerce-import", "permanent-catalogue-import.json");
 const OUTPUT_REPORT = path.join(ROOT, "commerce-import", "permanent-catalogue-import.report.json");
 
 export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueEvidence()) {
@@ -17,8 +18,17 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
     .sort((left, right) => String(left.sourceProductId).localeCompare(String(right.sourceProductId), "en", { numeric: true }));
   const statements = [
     "PRAGMA foreign_keys = ON;",
-    "BEGIN IMMEDIATE;",
   ];
+  const products = [];
+  const variants = [];
+  const addProduct = (value) => {
+    products.push(value);
+    statements.push(productUpsert(value));
+  };
+  const addVariant = (value) => {
+    variants.push(value);
+    statements.push(variantUpsert(value));
+  };
   let activeVariants = 0;
   let deferredVariants = 0;
 
@@ -52,7 +62,7 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
       excludedDiscontinuedVariantCount: authority.excludedDiscontinuedVariantIds.length,
       acceptedEvidenceGeneratedAt: timestamp,
     };
-    statements.push(productUpsert({
+    addProduct({
       id: productId,
       sourceProvider: "wix_snapshot",
       externalProductId: authority.legacyWixExternalProductId,
@@ -66,7 +76,7 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
       metadata: productMetadata,
       provenance: productProvenance,
       timestamp,
-    }));
+    });
 
     const sourceVariants = new Map(sourceProduct.variants.map((variant) => [String(variant.id), variant]));
     for (const plannedVariant of payload.sync_variants) {
@@ -74,7 +84,7 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
       const sourceVariant = sourceVariants.get(sourceVariantId);
       const wixVariantId = wixVariantFromExternalId(sourceVariant.externalId, authority.legacyWixExternalProductId);
       const optionValues = cleanOptionValues(sourceVariant);
-      statements.push(variantUpsert({
+      addVariant({
         id: `variant-${sourceVariantId}`,
         productId,
         localVariantKey: `legacy-printful-${sourceVariantId}`,
@@ -98,7 +108,7 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
         provenance: variantProvenance(plannedVariant, sourceVariant, timestamp),
         metadata: { sourceVariantName: sourceVariant.name, catalogueProductName: sourceVariant.catalogueProductName, catalogueImageUrl: sourceVariant.catalogueImageUrl, targetOptions: stripNullOptions(plannedVariant.options) },
         timestamp,
-      }));
+      });
       activeVariants += 1;
     }
 
@@ -106,7 +116,7 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
       const sourceVariant = sourceVariants.get(String(deferred.legacy_source_variant_id));
       const sourceVariantId = String(sourceVariant.id);
       const wixVariantId = wixVariantFromExternalId(sourceVariant.externalId, authority.legacyWixExternalProductId);
-      statements.push(variantUpsert({
+      addVariant({
         id: `variant-${sourceVariantId}`,
         productId,
         localVariantKey: `legacy-printful-${sourceVariantId}`,
@@ -130,14 +140,14 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
         provenance: { ...variantProvenance(null, sourceVariant, timestamp), deferredPolicy: deferred.policy },
         metadata: { sourceVariantName: sourceVariant.name, catalogueProductName: sourceVariant.catalogueProductName, catalogueImageUrl: sourceVariant.catalogueImageUrl },
         timestamp,
-      }));
+      });
       deferredVariants += 1;
     }
   }
 
   const nativeProduct = target.products[0];
   const nativeVariant = nativeProduct.variants[0];
-  statements.push(productUpsert({
+  addProduct({
     id: "product-target-native-459991347",
     sourceProvider: "printful",
     externalProductId: nativeProduct.externalId,
@@ -150,8 +160,8 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
     metadata: { authority: "permanent_commerce_catalogue", publicImage: nativeProduct.thumbnailUrl, physical: true, shippingRequired: true, targetNative: true, publicShopDisposition: "private" },
     provenance: { authority: "printful-api-target.snapshot.json", targetStoreId: "18668025", disposition: "USER_OWNED_REAL_TARGET_DATA", relatedLegacyArtworkProductId: "439028668", acceptedEvidenceGeneratedAt: timestamp },
     timestamp,
-  }));
-  statements.push(variantUpsert({
+  });
+  addVariant({
     id: "variant-target-native-5463409939",
     productId: "product-target-native-459991347",
     localVariantKey: "target-printful-5463409939",
@@ -173,16 +183,24 @@ export function buildPermanentCatalogueImport(evidence = readPermanentCatalogueE
     provenance: { authority: "printful-api-target.snapshot.json", targetStoreId: "18668025", disposition: "USER_OWNED_REAL_TARGET_DATA", acceptedEvidenceGeneratedAt: timestamp },
     metadata: { targetNative: true, sourceVariantName: nativeVariant.name, catalogueProductName: nativeVariant.catalogueProductName, catalogueImageUrl: nativeVariant.catalogueImageUrl },
     timestamp,
-  }));
+  });
+  const migration = {
+    id: "permanent-printful-2026-08",
+    status: "ready",
+    phase: "preflight",
+    safeState: { evidenceGeneratedAt: timestamp, plannedProducts: 49, eligibleVariants: activeVariants, deferredVariants, targetNativeKeeps: 1 },
+    updatedAt: timestamp,
+  };
   statements.push(`INSERT INTO commerce_catalogue_migrations (id, status, phase, safe_state_json, updated_at)
-VALUES ('permanent-printful-2026-08', 'ready', 'preflight', ${sqlJson({ evidenceGeneratedAt: timestamp, plannedProducts: 49, eligibleVariants: activeVariants, deferredVariants, targetNativeKeeps: 1 })}, ${sql(timestamp)})
+VALUES (${sql(migration.id)}, ${sql(migration.status)}, ${sql(migration.phase)}, ${sqlJson(migration.safeState)}, ${sql(migration.updatedAt)})
 ON CONFLICT(id) DO UPDATE SET
   safe_state_json = CASE WHEN commerce_catalogue_migrations.status = 'ready' THEN excluded.safe_state_json ELSE commerce_catalogue_migrations.safe_state_json END,
   updated_at = CASE WHEN commerce_catalogue_migrations.status = 'ready' THEN excluded.updated_at ELSE commerce_catalogue_migrations.updated_at END;`);
-  statements.push("COMMIT;", "PRAGMA foreign_keys = ON;");
+  statements.push("PRAGMA foreign_keys = ON;");
 
   const report = { ...validation, d1Products: selected.length + 1, d1Variants: activeVariants + deferredVariants + 1, activeVariants, deferredVariants, targetNativeProducts: 1, targetNativeVariants: 1, checkoutEnabled: false, fulfillmentEnabled: false, generatedFrom: selection.generatedFrom, acceptedEvidenceGeneratedAt: timestamp };
-  return { sql: `${statements.join("\n\n")}\n`, report };
+  const manifest = { format: "thirdrailify-permanent-catalogue-v1", acceptedEvidenceGeneratedAt: timestamp, products, variants, migration };
+  return { sql: `${statements.join("\n\n")}\n`, manifest, report };
 }
 
 function productUpsert(value) {
@@ -259,6 +277,7 @@ function sqlJson(value) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const built = buildPermanentCatalogueImport();
   fs.writeFileSync(OUTPUT_SQL, built.sql, "utf8");
+  fs.writeFileSync(OUTPUT_JSON, `${JSON.stringify(built.manifest)}\n`, "utf8");
   fs.writeFileSync(OUTPUT_REPORT, `${JSON.stringify(built.report, null, 2)}\n`, "utf8");
-  console.log(JSON.stringify({ sql: path.relative(ROOT, OUTPUT_SQL), report: path.relative(ROOT, OUTPUT_REPORT), ...built.report }, null, 2));
+  console.log(JSON.stringify({ sql: path.relative(ROOT, OUTPUT_SQL), manifest: path.relative(ROOT, OUTPUT_JSON), report: path.relative(ROOT, OUTPUT_REPORT), ...built.report }, null, 2));
 }

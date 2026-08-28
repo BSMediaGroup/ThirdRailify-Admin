@@ -1,0 +1,43 @@
+{
+  "databaseName": "thirdrailify-commerce",
+  "databaseId": "3dd23a7e-7c64-49cb-a52c-c1540b41db1c",
+  "verifiedAt": "2026-08-28T09:21:55.2880745+10:00",
+  "migration": {
+    "id": "permanent-printful-2026-08",
+    "status": "ready",
+    "phase": "preflight",
+    "productsCreated": 0,
+    "productsAdopted": 0,
+    "productsVerified": 0,
+    "variantsMapped": 0,
+    "providerFailures": 0
+  },
+  "catalogue": {
+    "products": 50,
+    "variants": 1323,
+    "migrationProducts": 49,
+    "eligibleActiveVariants": 1317,
+    "deferredVariants": 5,
+    "maximumActiveVariantsPerProduct": 96,
+    "orders": 0
+  },
+  "safety": {
+    "raidersGobletInCreateQueue": 0,
+    "discontinuedSellableVariants": 0,
+    "unsafeDeferredVariants": 0,
+    "prematureTargetMappings": 0,
+    "checkoutEnabled": false,
+    "livePaymentCaptureEnabled": false,
+    "fulfillmentSubmissionEnabled": false
+  },
+  "targetNativeKeep": {
+    "productId": "459991347",
+    "variantId": "5463409939",
+    "catalogueProductId": "438",
+    "catalogueVariantId": "11576",
+    "unitAmountCad": 1250,
+    "visibility": "private",
+    "isSellable": false,
+    "migrationStatus": "target_native"
+  }
+}

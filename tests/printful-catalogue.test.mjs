@@ -669,7 +669,7 @@ test("caller-modified pacing or cursor evidence is rejected before a provider ca
   assert.equal(providerCalls, 0);
 });
 
-test("catalogue implementation contains no Printful provider write method or browser token path", async () => {
+test("read-only catalogue helper remains GET-only while the browser exposes only the protected permanent migration", async () => {
   const files = [
     new URL("../functions/_shared/printful-catalogue.js", import.meta.url),
     new URL("../functions/api/admin/commerce/[[path]].js", import.meta.url),
@@ -683,11 +683,8 @@ test("catalogue implementation contains no Printful provider write method or bro
   assert.match(route, /requireCsrf/);
   assert.match(route, /enforceRateLimit/);
   assert.doesNotMatch(helper, /node:fs|writeFile|readFile|commerce-import/i);
-  assert.match(page, /snapshotState === "ready"/);
-  assert.match(page, /Retry read-only snapshot/);
-  assert.match(page, /Download Wix source snapshot/);
-  assert.match(page, /Download API target snapshot/);
-  assert.match(page, /Download Public catalogue snapshot/);
-  assert.match(page, /Download reconciliation snapshot/);
-  assert.doesNotMatch(page, /downloadJson\([^)]*next\./);
+  assert.match(page, /EXECUTE PERMANENT PRINTFUL CATALOGUE MIGRATION/);
+  assert.match(page, /\["running", "waiting"\]\.includes\(migrationStatus\)/);
+  assert.doesNotMatch(page, /Retry read-only snapshot|Download Wix source snapshot|Download API target snapshot|Download Public catalogue snapshot|Download reconciliation snapshot/);
+  assert.doesNotMatch(`${client}\n${page}`, /downloadJson\(/);
 });

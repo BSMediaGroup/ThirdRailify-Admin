@@ -16,6 +16,7 @@ const ENCRYPTION_CONTEXT_PREFIX = "thirdrailify-commerce:v1:";
 const STRIPE_ACCOUNT_URL = "https://api.stripe.com/v1/account";
 const PRINTFUL_STORES_URL = "https://api.printful.com/stores";
 const PRINTFUL_PRODUCTS_URL = "https://api.printful.com/store/products?limit=1";
+const PRINTFUL_SCOPES_URL = "https://api.printful.com/v2/oauth-scopes";
 const PRINTFUL_EXPECTED_STORE_NAME = "Third Railify API";
 const MAX_PRINTFUL_CREDENTIAL_LENGTH = 4096;
 const PRINTFUL_WIX_SOURCE_STORE_ID = "16847493";
@@ -418,6 +419,8 @@ export async function verifyPrintfulStore(env, session, fetchImpl = fetch) {
 
   const productsPayload = await printfulGet(fetchImpl, PRINTFUL_PRODUCTS_URL, credential, "products");
   const productProbe = normalizePrintfulProductProbe(productsPayload);
+  const scopesPayload = await printfulGet(fetchImpl, PRINTFUL_SCOPES_URL, credential, "scopes");
+  const scopes = normalizePrintfulManageScopes(scopesPayload);
   const timestamp = nowIso();
   const existingMetadata = safeJson(current.safe_metadata_json, {});
   const safeMetadata = {
@@ -433,6 +436,11 @@ export async function verifyPrintfulStore(env, session, fetchImpl = fetch) {
     store_name: store.name,
     store_type: store.type,
     product_count: productProbe.total,
+    oauth_scopes: scopes.values,
+    product_write_authority: scopes.products,
+    file_manage_authority: scopes.files,
+    order_manage_authority: scopes.orders,
+    webhook_manage_authority: scopes.webhooks,
     webhook_configured: false,
     fulfillment_enabled: false,
     parallel_store_planned: false,
@@ -476,6 +484,11 @@ export async function verifyPrintfulStore(env, session, fetchImpl = fetch) {
       storeName: store.name,
       storeType: store.type,
       productCount: productProbe.total,
+      oauthScopes: scopes.values,
+      productWriteAuthority: scopes.products,
+      fileManageAuthority: scopes.files,
+      orderManageAuthority: scopes.orders,
+      webhookManageAuthority: scopes.webhooks,
       result: "verified",
       correlationId,
     },
@@ -1023,6 +1036,27 @@ function normalizePrintfulProductProbe(value) {
     throw new AuthFailure(502, "printful_products_response_invalid", "Printful returned an invalid product response.");
   }
   return { total };
+}
+
+function normalizePrintfulManageScopes(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !Array.isArray(value.data)) {
+    throw new AuthFailure(502, "printful_scopes_response_invalid", "Printful returned an invalid OAuth scope response.");
+  }
+  const values = value.data.map((scope) => cleanText(scope?.value, 160).toLowerCase()).filter(Boolean).sort();
+  if (!values.length || new Set(values).size !== values.length) {
+    throw new AuthFailure(502, "printful_scopes_response_invalid", "Printful returned missing or duplicate OAuth scopes.");
+  }
+  const includesWrite = (names, prefix) => values.some((scope) => names.includes(scope) || (scope.startsWith(`${prefix}/`) && scope.endsWith("/write")));
+  const authority = {
+    values,
+    products: includesWrite(["sync_products", "sync_products/write", "products", "products/write"], "sync_products") || includesWrite(["products", "products/write"], "products"),
+    files: includesWrite(["files", "files/write", "file_library", "file_library/write"], "files"),
+    orders: includesWrite(["orders", "orders/write"], "orders"),
+    webhooks: includesWrite(["webhooks", "webhooks/write"], "webhooks"),
+  };
+  if (!authority.products) throw new AuthFailure(409, "printful_product_write_scope_missing", "The permanent Printful token lacks Sync Product write authority.");
+  if (!authority.files || !authority.orders || !authority.webhooks) throw new AuthFailure(409, "printful_expected_manage_scopes_missing", "The permanent Printful token does not expose all expected file, order, and webhook manage scopes.");
+  return authority;
 }
 
 function normalizeStoreName(value) {

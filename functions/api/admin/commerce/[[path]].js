@@ -36,6 +36,10 @@ import {
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrdersPayload } from "../../../_shared/checkout-core.js";
+import {
+  permanentMigrationPayload,
+  runPermanentPrintfulMigrationStep,
+} from "../../../_shared/printful-migration.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
 
@@ -71,6 +75,9 @@ async function handleGet(request, env, path) {
   } else if (path === "orders") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOrdersPayload(env, session);
+  } else if (path === "printful/catalogue/migration") {
+    await requireMasterAdmin(env, request);
+    payload = await permanentMigrationPayload(env);
   } else if (path === "permissions") {
     await requireMasterAdmin(env, request);
     payload = await permissionGrantsPayload(env, session);
@@ -86,7 +93,10 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   await requireCsrf(request, session);
   const snapshotBody = path === "printful/catalogue/snapshot" ? await readSnapshotRequest(request) : null;
   const isSnapshotStart = snapshotBody?.phase === "begin" && !snapshotBody?.checkpoint;
-  await enforceRateLimit(env, request, path === "printful/catalogue/snapshot" && !isSnapshotStart ? "commerce_snapshot" : "commerce", session.accountId);
+  const rateCategory = path === "printful/catalogue/migrate"
+    ? "commerce_migration"
+    : path === "printful/catalogue/snapshot" && !isSnapshotStart ? "commerce_snapshot" : "commerce";
+  await enforceRateLimit(env, request, rateCategory, session.accountId);
   let payload;
   let authEventType;
 
@@ -130,6 +140,10 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     } else {
       throw new AuthFailure(400, "printful_snapshot_phase_invalid", "The catalogue snapshot phase is invalid.");
     }
+  } else if (path === "printful/catalogue/migrate") {
+    await requireMasterAdmin(env, request);
+    requireCommerceDatabase(env);
+    payload = await runPermanentPrintfulMigrationStep(env, session, fetchImpl, schedulerRuntime);
   } else if (path === "business") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
