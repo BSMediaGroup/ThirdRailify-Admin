@@ -54,7 +54,7 @@ import {
 } from "../../../_shared/printful-catalogue.js";
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
-import { commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
+import { commerceOrderDetailPayload, commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
 import { commerceMediaLimits, ingestCommerceProductMedia, uploadCommerceProductMedia } from "../../../_shared/commerce-media.js";
 import {
   createTaxRegistration,
@@ -133,7 +133,10 @@ async function handleGet(request, env, path) {
     payload = await merchandisingProductPayload(env, session, decodePathPart(path.slice("products/".length)));
   } else if (path === "orders") {
     await requireCommerceCapability(env, session, "commerce.view");
-    payload = await commerceOrdersPayload(env, session);
+    payload = await commerceOrdersPayload(env, session, Object.fromEntries(new URL(request.url).searchParams));
+  } else if (/^orders\/[^/]+$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await commerceOrderDetailPayload(env, session, decodePathPart(path.split("/")[1]));
   } else if (path === "media/config") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = commerceMediaLimits();

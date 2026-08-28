@@ -153,6 +153,8 @@ Additive banner files in this structure are `commerce-migrations/0006_site_banne
 
 Catalogue imagery is copied into the existing Admin-owned R2 binding under immutable `commerce/catalogue/<sha256>.<ext>` keys and served through `/commerce-media/<sha256>.<ext>` with year-long immutable caching, content sniffing, and cross-origin image delivery. Product saves ingest external HTTPS image sources before persisting first-party URLs; the Public catalogue owns no R2 binding and receives only those safe first-party URLs. Products and Collections use focus-trapped, body-scroll-locked modal editors so long lists never push editing controls below the page.
 
+`src/pages/OrdersManagementPage.tsx` is the dedicated read-only order-management surface. It uses bounded list/detail projections from the existing order, line snapshot, Stripe webhook, document, email-delivery, and commerce-audit authority; no customer data, provider state, financial value, or timeline event is synthesized.
+
 `docs/WATCH_V2.md` documents the Watch management route, signed server boundary, and Public archive ownership.
 
 The display system uses the seeded American Captain asset at its real weight with lightly relaxed tracking for the primary header voice, with seeded Blinker and Geist Mono for readable body and technical roles.

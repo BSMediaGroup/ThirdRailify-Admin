@@ -195,81 +195,181 @@ export async function processStripeCheckoutCompleted(env, event, receipt) {
   return { ...stored, resultCode: stored.duplicate ? "duplicate" : resolution.resultCode };
 }
 
-export async function commerceOrdersPayload(env, session) {
+export async function commerceOrdersPayload(env, session, input = {}) {
   const access = await commerceAccessForSession(env, session);
-  if (!env?.THIRDRAILIFY_COMMERCE_DB) return { ok: true, databaseConfigured: false, access, controlledTest: null, orders: [] };
+  const options = normalizeOrderListOptions(input);
+  if (!env?.THIRDRAILIFY_COMMERCE_DB) return emptyOrdersPayload(access, options);
   const db = requireCommerceDb(env);
-  const result = await db.prepare(
-    `SELECT id, checkout_status, payment_status, fulfillment_status, currency_code, environment,
-            customer_gross_amount, stripe_checkout_session_id, stripe_checkout_url, stripe_payment_intent_id,
-            printful_order_id, created_at, updated_at, checkout_created_at, payment_confirmed_at
-     FROM commerce_orders ORDER BY created_at DESC LIMIT 100`,
-  ).all();
+  const { sql: whereSql, params } = orderListWhere(options);
+  const countRow = await db.prepare(`SELECT COUNT(*) AS total_matching FROM commerce_orders o ${whereSql}`).bind(...params).first();
+  const totalMatching = Number(countRow?.total_matching || 0);
+  const totalPages = totalMatching ? Math.ceil(totalMatching / options.pageSize) : 0;
+  const page = totalPages ? Math.min(options.page, totalPages) : 1;
+  const offset = (page - 1) * options.pageSize;
+  const [result, summary] = await Promise.all([
+    db.prepare(
+      `WITH item_counts AS (
+         SELECT order_id, COUNT(*) AS line_count, COALESCE(SUM(quantity), 0) AS item_count
+         FROM commerce_order_items GROUP BY order_id
+       ), document_counts AS (
+         SELECT order_id, COUNT(*) AS document_count FROM commerce_order_documents GROUP BY order_id
+       ), email_counts AS (
+         SELECT order_id, COUNT(*) AS email_count FROM commerce_email_deliveries WHERE order_id IS NOT NULL GROUP BY order_id
+       )
+       SELECT o.id, o.checkout_status, o.payment_status, o.fulfillment_status, o.currency_code, o.environment,
+              o.customer_gross_amount, o.refund_amount, o.stripe_checkout_session_id, o.stripe_payment_intent_id,
+              o.printful_order_id, o.created_at, o.updated_at, o.checkout_created_at, o.payment_confirmed_at,
+              COALESCE(i.line_count, 0) AS line_count, COALESCE(i.item_count, 0) AS item_count,
+              COALESCE(d.document_count, 0) AS document_count, COALESCE(e.email_count, 0) AS email_count
+       FROM commerce_orders o
+       LEFT JOIN item_counts i ON i.order_id = o.id
+       LEFT JOIN document_counts d ON d.order_id = o.id
+       LEFT JOIN email_counts e ON e.order_id = o.id
+       ${whereSql}
+       ORDER BY ${orderSortSql(options.sort)}, o.id ASC LIMIT ? OFFSET ?`,
+    ).bind(...params, options.pageSize, offset).all(),
+    db.prepare(
+      `SELECT COUNT(*) AS total_matching,
+              SUM(CASE WHEN payment_status = 'paid' THEN 1 ELSE 0 END) AS paid,
+              SUM(CASE WHEN payment_status = 'pending' THEN 1 ELSE 0 END) AS pending,
+              SUM(CASE WHEN payment_status IN ('refunded','partially_refunded') THEN 1 ELSE 0 END) AS refunded,
+              SUM(CASE WHEN fulfillment_status IN ('submitted','fulfilled') THEN 1 ELSE 0 END) AS fulfillment_active,
+              SUM(CASE WHEN environment = 'test' THEN 1 ELSE 0 END) AS test_orders,
+              SUM(CASE WHEN environment = 'live' THEN 1 ELSE 0 END) AS live_orders,
+              SUM(CASE WHEN environment = 'live' AND payment_status IN ('paid','refunded','partially_refunded') THEN customer_gross_amount ELSE 0 END) AS live_gross_amount,
+              SUM(CASE WHEN environment = 'live' AND payment_status IN ('paid','refunded','partially_refunded') THEN MAX(customer_gross_amount - refund_amount, 0) ELSE 0 END) AS live_net_amount
+       FROM commerce_orders o ${whereSql}`,
+    ).bind(...params).first(),
+  ]);
   const rows = result?.results || [];
-  const itemResult = rows.length ? await db.prepare(
-    `SELECT order_id, line_number, product_id, variant_id, product_name, variant_name,
-            option_values_json, currency_code, unit_amount, quantity, line_total_amount
-     FROM commerce_order_items WHERE order_id IN (${rows.map(() => "?").join(",")})
-     ORDER BY order_id, line_number`,
-  ).bind(...rows.map((row) => row.id)).all() : { results: [] };
-  const sessionIds = rows.map((row) => row.stripe_checkout_session_id).filter(Boolean);
-  const webhookResult = sessionIds.length ? await db.prepare(
-    `SELECT related_object_id, COUNT(*) AS receipt_count
-     FROM commerce_webhook_events
-     WHERE provider = 'stripe' AND event_type = 'checkout.session.completed'
-       AND livemode = 0 AND related_object_type = 'checkout.session'
-       AND processing_status = 'processed' AND result_code = 'payment_confirmed'
-       AND related_object_id IN (${sessionIds.map(() => "?").join(",")})
-     GROUP BY related_object_id`,
-  ).bind(...sessionIds).all() : { results: [] };
-  const webhookReceiptsBySession = new Map((webhookResult?.results || []).map((row) => [row.related_object_id, Number(row.receipt_count || 0)]));
-  const itemsByOrder = new Map();
-  for (const row of itemResult?.results || []) {
-    const items = itemsByOrder.get(row.order_id) || [];
-    items.push({
-      productId: cleanText(row.product_id, 160),
-      variantId: cleanText(row.variant_id, 160) || null,
-      productName: cleanText(row.product_name, 240),
-      variantName: cleanText(row.variant_name, 300) || null,
-      options: parseJson(row.option_values_json, {}),
-      currencyCode: cleanText(row.currency_code, 3).toUpperCase(),
-      unitAmount: Number(row.unit_amount),
-      quantity: Number(row.quantity),
-      lineTotalAmount: Number(row.line_total_amount),
-    });
-    itemsByOrder.set(row.order_id, items);
-  }
   return {
     ok: true,
     databaseConfigured: true,
     access,
     controlledTest: await controlledTestAcceptancePayload(env),
-    orders: rows.map((row) => ({
-      id: cleanText(row.id, 160),
-      test: row.environment === "test",
-      checkoutStatus: cleanText(row.checkout_status, 40),
-      paymentStatus: cleanText(row.payment_status, 40),
-      fulfillmentStatus: cleanText(row.fulfillment_status, 40),
-      currencyCode: cleanText(row.currency_code, 3).toUpperCase(),
-      expectedAmount: Number(row.customer_gross_amount || 0),
-      stripeSessionId: safeStripeId(row.stripe_checkout_session_id, "cs_test_"),
-      checkoutUrl: access.isMasterAdmin ? safeCheckoutUrl(row.stripe_checkout_url) || null : null,
-      stripePaymentIntentId: safeStripeId(row.stripe_payment_intent_id, "pi_"),
-      createdAt: cleanText(row.created_at, 80),
-      updatedAt: cleanText(row.updated_at, 80),
-      checkoutCreatedAt: cleanText(row.checkout_created_at, 80) || null,
-      paymentConfirmedAt: cleanText(row.payment_confirmed_at, 80) || null,
-      webhookReceiptCount: webhookReceiptsBySession.get(row.stripe_checkout_session_id) || 0,
-      webhookVerified: webhookReceiptsBySession.get(row.stripe_checkout_session_id) === 1,
-      hasPrintfulOrder: Boolean(row.printful_order_id),
-      items: itemsByOrder.get(row.id) || [],
-    })),
+    orders: rows.map(serializeOrderListRow),
+    page,
+    pageSize: options.pageSize,
+    totalMatching,
+    totalPages,
+    startIndex: totalMatching ? offset + 1 : 0,
+    endIndex: totalMatching ? offset + rows.length : 0,
+    filters: { query: options.query, environment: options.environment, payment: options.payment, fulfillment: options.fulfillment, sort: options.sort },
+    summary: {
+      totalMatching,
+      paid: Number(summary?.paid || 0),
+      pending: Number(summary?.pending || 0),
+      refunded: Number(summary?.refunded || 0),
+      fulfillmentActive: Number(summary?.fulfillment_active || 0),
+      testOrders: Number(summary?.test_orders || 0),
+      liveOrders: Number(summary?.live_orders || 0),
+      liveGrossAmount: Number(summary?.live_gross_amount || 0),
+      liveNetAmount: Number(summary?.live_net_amount || 0),
+      currencyCode: "CAD",
+    },
+  };
+}
+
+export async function commerceOrderDetailPayload(env, session, rawOrderId) {
+  const access = await commerceAccessForSession(env, session);
+  const db = requireCommerceDb(env);
+  const orderId = safeLocalId(rawOrderId);
+  if (!orderId) throw new AuthFailure(400, "commerce_order_id_invalid", "The commerce order identifier is invalid.");
+  const order = await db.prepare(
+    `SELECT id, customer_payment_provider, payment_status, fulfillment_provider, fulfillment_status,
+            currency_code, customer_gross_amount, refund_amount, printful_product_cost_amount,
+            printful_shipping_cost_amount, printful_tax_amount, printful_refund_credit_amount,
+            stripe_checkout_session_id, stripe_payment_intent_id, printful_order_id, checkout_request_id,
+            environment, checkout_status, checkout_failure_code, checkout_created_at, payment_confirmed_at,
+            payment_failed_at, created_at, updated_at
+     FROM commerce_orders WHERE id = ? LIMIT 1`,
+  ).bind(orderId).first();
+  if (!order) throw new AuthFailure(404, "commerce_order_not_found", "The commerce order was not found.");
+  const [itemsResult, webhooksResult, documentsResult, deliveriesResult, auditResult] = await Promise.all([
+    db.prepare(
+      `SELECT i.id, i.line_number, i.product_id, i.variant_id, i.product_name, i.variant_name, i.sku,
+              i.option_values_json, i.currency_code, i.unit_amount, i.quantity, i.line_total_amount,
+              i.requires_shipping, i.fulfillment_provider, i.fulfillment_variant_id,
+              json_extract(p.safe_metadata_json, '$.publicImage') AS current_image_url
+       FROM commerce_order_items i LEFT JOIN commerce_products p ON p.id = i.product_id
+       WHERE i.order_id = ? ORDER BY i.line_number`,
+    ).bind(orderId).all(),
+    db.prepare(
+      `SELECT provider_event_id, event_type, event_created_at, received_at, livemode, related_object_id,
+              related_object_type, processing_status, processed_at, result_code
+       FROM commerce_webhook_events
+       WHERE provider = 'stripe' AND (related_object_id = ? OR related_object_id = ?)
+       ORDER BY received_at ASC, provider_event_id ASC LIMIT 100`,
+    ).bind(order.stripe_checkout_session_id || "", order.stripe_payment_intent_id || "").all(),
+    db.prepare(
+      `SELECT id, document_type, display_reference, environment, status, template_key, template_revision,
+              issued_at, created_at, updated_at
+       FROM commerce_order_documents WHERE order_id = ? ORDER BY created_at ASC, id ASC LIMIT 20`,
+    ).bind(orderId).all(),
+    db.prepare(
+      `SELECT id, template_key, template_revision, event_key, purpose, status, attempt_count,
+              created_at, updated_at, sent_at
+       FROM commerce_email_deliveries WHERE order_id = ? ORDER BY created_at ASC, id ASC LIMIT 100`,
+    ).bind(orderId).all(),
+    db.prepare(
+      `SELECT id, action, target_type, result, created_at
+       FROM commerce_audit WHERE target_id = ? ORDER BY created_at ASC, id ASC LIMIT 100`,
+    ).bind(orderId).all(),
+  ]);
+  const items = (itemsResult?.results || []).map(serializeOrderItem);
+  const webhooks = (webhooksResult?.results || []).map((row) => ({
+    eventId: cleanText(row.provider_event_id, 255), eventType: cleanText(row.event_type, 255),
+    eventCreatedAt: stripeEventTimestamp(row.event_created_at), receivedAt: cleanText(row.received_at, 80),
+    processedAt: cleanText(row.processed_at, 80) || null, test: row.livemode !== 1,
+    relatedObjectId: safeStripeObjectId(row.related_object_id), relatedObjectType: cleanText(row.related_object_type, 120) || null,
+    processingStatus: cleanText(row.processing_status, 40), resultCode: cleanText(row.result_code, 80) || null,
+  }));
+  const documents = (documentsResult?.results || []).map((row) => ({
+    id: cleanText(row.id, 160), type: cleanText(row.document_type, 20), displayReference: cleanText(row.display_reference, 180),
+    test: row.environment === "test", status: cleanText(row.status, 20), templateKey: cleanText(row.template_key, 60),
+    templateRevision: Number(row.template_revision), issuedAt: cleanText(row.issued_at, 80) || null,
+    createdAt: cleanText(row.created_at, 80), updatedAt: cleanText(row.updated_at, 80),
+  }));
+  const deliveries = (deliveriesResult?.results || []).map((row) => ({
+    id: cleanText(row.id, 160), templateKey: cleanText(row.template_key, 60), templateRevision: Number(row.template_revision),
+    eventKey: cleanText(row.event_key, 200), purpose: cleanText(row.purpose, 30), status: cleanText(row.status, 30),
+    attemptCount: Number(row.attempt_count || 0), createdAt: cleanText(row.created_at, 80),
+    updatedAt: cleanText(row.updated_at, 80), sentAt: cleanText(row.sent_at, 80) || null,
+  }));
+  const audit = (auditResult?.results || []).map((row) => ({
+    id: cleanText(row.id, 160), action: cleanText(row.action, 160), targetType: cleanText(row.target_type, 160),
+    result: cleanText(row.result, 20), createdAt: cleanText(row.created_at, 80),
+  }));
+  const subtotalAmount = items.reduce((sum, item) => sum + item.lineTotalAmount, 0);
+  const totalAmount = safeMinorAmount(order.customer_gross_amount);
+  const refundAmount = safeMinorAmount(order.refund_amount);
+  return {
+    ok: true,
+    databaseConfigured: true,
+    access,
+    order: {
+      id: cleanText(order.id, 160), test: order.environment === "test", environment: order.environment === "live" ? "live" : "test",
+      checkoutStatus: cleanText(order.checkout_status, 40), paymentStatus: cleanText(order.payment_status, 40),
+      fulfillmentStatus: cleanText(order.fulfillment_status, 40), paymentProvider: cleanText(order.customer_payment_provider, 40),
+      fulfillmentProvider: cleanText(order.fulfillment_provider, 40) || null, currencyCode: cleanText(order.currency_code, 3).toUpperCase(),
+      createdAt: cleanText(order.created_at, 80), updatedAt: cleanText(order.updated_at, 80),
+      checkoutCreatedAt: cleanText(order.checkout_created_at, 80) || null, paymentConfirmedAt: cleanText(order.payment_confirmed_at, 80) || null,
+      paymentFailedAt: cleanText(order.payment_failed_at, 80) || null, checkoutFailureCode: cleanText(order.checkout_failure_code, 80) || null,
+      customer: { available: false, name: null, email: null, phone: null, billingAddress: null, shippingAddress: null },
+      items,
+      financial: { subtotalAmount, discountAmount: null, shippingAmount: null, taxAmount: null, totalAmount, refundAmount, netAmount: refundAmount <= totalAmount ? totalAmount - refundAmount : null, currencyCode: cleanText(order.currency_code, 3).toUpperCase() },
+      payment: { provider: cleanText(order.customer_payment_provider, 40), status: cleanText(order.payment_status, 40), environment: order.environment === "live" ? "live" : "test", stripeSessionId: safeStripeObjectId(order.stripe_checkout_session_id), stripePaymentIntentId: safeStripeObjectId(order.stripe_payment_intent_id) },
+      fulfillment: { provider: cleanText(order.fulfillment_provider, 40) || null, status: cleanText(order.fulfillment_status, 40), printfulOrderId: cleanText(order.printful_order_id, 255) || null, orderMode: "draft_only", submissionEnabled: false, tracking: null, carrier: null, failureReason: cleanText(order.checkout_failure_code, 80) || null, providerCosts: { product: safeMinorAmount(order.printful_product_cost_amount), shipping: safeMinorAmount(order.printful_shipping_cost_amount), tax: safeMinorAmount(order.printful_tax_amount), refundCredit: safeMinorAmount(order.printful_refund_credit_amount) } },
+      documents, deliveries, webhooks, audit,
+      technical: { checkoutRequestId: cleanText(order.checkout_request_id, 36) || null, stripeSessionId: safeStripeObjectId(order.stripe_checkout_session_id), stripePaymentIntentId: safeStripeObjectId(order.stripe_payment_intent_id), printfulOrderId: cleanText(order.printful_order_id, 255) || null },
+      timeline: orderTimeline(order, webhooks, documents, deliveries, audit),
+    },
   };
 }
 
 export async function controlledTestAcceptancePayload(env) {
   const db = requireCommerceDb(env);
-  const [stripe, printful, settingsResult] = await Promise.all([
+  const [stripe, printful, settingsResult, orderCount] = await Promise.all([
     db.prepare("SELECT status, environment, integration_mode, currency_code, safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe' LIMIT 1").first(),
     db.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider = 'printful' LIMIT 1").first(),
     db.prepare(
@@ -277,6 +377,7 @@ export async function controlledTestAcceptancePayload(env) {
        WHERE setting_key IN ('checkout_enabled', 'live_payment_capture_enabled', 'fulfillment_submission_enabled',
                              'stripe_test_checkout_enabled', 'stripe_test_checkout_product_id', 'stripe_test_checkout_variant_id')`,
     ).all(),
+    db.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first(),
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, null)]));
   const stripeMetadata = parseJson(stripe?.safe_metadata_json, {});
@@ -297,6 +398,7 @@ export async function controlledTestAcceptancePayload(env) {
     normalCheckoutEnabled: settings.checkout_enabled === true || stripeMetadata.checkout_enabled === true,
     livePaymentsEnabled: settings.live_payment_capture_enabled === true || stripeMetadata.live_payments_enabled === true,
     fulfillmentEnabled: settings.fulfillment_submission_enabled === true || printfulMetadata.fulfillment_enabled === true,
+    existingOrderCount: Number(orderCount?.count || 0),
     stripe: {
       status: cleanText(stripe?.status, 40),
       environment: cleanText(stripe?.environment, 20),
@@ -705,6 +807,99 @@ function safeLocalId(value) {
   const id = cleanText(value, 160);
   return /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id) ? id : "";
 }
+
+function normalizeOrderListOptions(input = {}) {
+  const allowedPageSizes = new Set([20, 50, 75, 100]);
+  const pageSize = Number(input.pageSize ?? 20);
+  if (!allowedPageSizes.has(pageSize)) throw new AuthFailure(400, "commerce_orders_page_size_invalid", "Order page size must be 20, 50, 75, or 100.");
+  const requestedPage = Number(input.page ?? 1);
+  if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > 1_000_000) throw new AuthFailure(400, "commerce_orders_page_invalid", "The order page is invalid.");
+  const query = cleanText(input.query, 120);
+  const environment = cleanText(input.environment, 20).toLowerCase() || "all";
+  const payment = cleanText(input.payment, 40).toLowerCase() || "all";
+  const fulfillment = cleanText(input.fulfillment, 40).toLowerCase() || "all";
+  const sort = cleanText(input.sort, 30).toLowerCase() || "newest";
+  if (!new Set(["all", "test", "live"]).has(environment)) throw new AuthFailure(400, "commerce_orders_environment_invalid", "The order environment filter is invalid.");
+  if (!new Set(["all", "pending", "paid", "failed", "refunded", "partially_refunded", "disputed", "canceled"]).has(payment)) throw new AuthFailure(400, "commerce_orders_payment_invalid", "The order payment filter is invalid.");
+  if (!new Set(["all", "disabled", "pending", "draft", "submitted", "fulfilled", "canceled", "error"]).has(fulfillment)) throw new AuthFailure(400, "commerce_orders_fulfillment_invalid", "The order fulfillment filter is invalid.");
+  if (!new Set(["newest", "oldest", "highest_total", "lowest_total"]).has(sort)) throw new AuthFailure(400, "commerce_orders_sort_invalid", "The order sort is invalid.");
+  return { page: requestedPage, pageSize, query, environment, payment, fulfillment, sort };
+}
+
+function orderListWhere(options) {
+  const clauses = [];
+  const params = [];
+  if (options.query) {
+    const query = `%${escapeSqlLike(options.query)}%`;
+    clauses.push("(o.id LIKE ? ESCAPE '\\' OR COALESCE(o.stripe_checkout_session_id,'') LIKE ? ESCAPE '\\' OR COALESCE(o.stripe_payment_intent_id,'') LIKE ? ESCAPE '\\' OR COALESCE(o.printful_order_id,'') LIKE ? ESCAPE '\\' OR COALESCE(o.checkout_request_id,'') LIKE ? ESCAPE '\\')");
+    params.push(query, query, query, query, query);
+  }
+  if (options.environment !== "all") { clauses.push("o.environment = ?"); params.push(options.environment); }
+  if (options.payment !== "all") { clauses.push("o.payment_status = ?"); params.push(options.payment); }
+  if (options.fulfillment !== "all") { clauses.push("o.fulfillment_status = ?"); params.push(options.fulfillment); }
+  return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
+}
+
+function orderSortSql(value) {
+  if (value === "oldest") return "o.created_at ASC";
+  if (value === "highest_total") return "o.customer_gross_amount DESC, o.created_at DESC";
+  if (value === "lowest_total") return "o.customer_gross_amount ASC, o.created_at DESC";
+  return "o.created_at DESC";
+}
+
+function serializeOrderListRow(row) {
+  return {
+    id: cleanText(row.id, 160), test: row.environment === "test", environment: row.environment === "live" ? "live" : "test",
+    checkoutStatus: cleanText(row.checkout_status, 40), paymentStatus: cleanText(row.payment_status, 40),
+    fulfillmentStatus: cleanText(row.fulfillment_status, 40), currencyCode: cleanText(row.currency_code, 3).toUpperCase(),
+    totalAmount: safeMinorAmount(row.customer_gross_amount), refundAmount: safeMinorAmount(row.refund_amount),
+    stripeSessionId: safeStripeObjectId(row.stripe_checkout_session_id), stripePaymentIntentId: safeStripeObjectId(row.stripe_payment_intent_id),
+    hasPrintfulOrder: Boolean(cleanText(row.printful_order_id, 255)), createdAt: cleanText(row.created_at, 80),
+    updatedAt: cleanText(row.updated_at, 80), checkoutCreatedAt: cleanText(row.checkout_created_at, 80) || null,
+    paymentConfirmedAt: cleanText(row.payment_confirmed_at, 80) || null, lineCount: Number(row.line_count || 0),
+    itemCount: Number(row.item_count || 0), documentCount: Number(row.document_count || 0), emailCount: Number(row.email_count || 0),
+  };
+}
+
+function serializeOrderItem(row) {
+  return {
+    id: cleanText(row.id, 160), lineNumber: Number(row.line_number), productId: cleanText(row.product_id, 160),
+    variantId: cleanText(row.variant_id, 160) || null, productName: cleanText(row.product_name, 240),
+    variantName: cleanText(row.variant_name, 300) || null, sku: cleanText(row.sku, 240) || null,
+    options: parseJson(row.option_values_json, {}), currencyCode: cleanText(row.currency_code, 3).toUpperCase(),
+    unitAmount: safeMinorAmount(row.unit_amount), quantity: Number(row.quantity), lineTotalAmount: safeMinorAmount(row.line_total_amount),
+    requiresShipping: row.requires_shipping === 1, fulfillmentProvider: cleanText(row.fulfillment_provider, 40) || null,
+    fulfillmentVariantId: cleanText(row.fulfillment_variant_id, 240) || null,
+    imageUrl: safeCommerceMediaUrl(row.current_image_url),
+  };
+}
+
+function emptyOrdersPayload(access, options) {
+  return { ok: true, databaseConfigured: false, access, controlledTest: null, orders: [], page: 1, pageSize: options.pageSize, totalMatching: 0, totalPages: 0, startIndex: 0, endIndex: 0, filters: { query: options.query, environment: options.environment, payment: options.payment, fulfillment: options.fulfillment, sort: options.sort }, summary: { totalMatching: 0, paid: 0, pending: 0, refunded: 0, fulfillmentActive: 0, testOrders: 0, liveOrders: 0, liveGrossAmount: 0, liveNetAmount: 0, currencyCode: "CAD" } };
+}
+
+function orderTimeline(order, webhooks, documents, deliveries, audit) {
+  const entries = [];
+  const add = (timestamp, kind, title, detail, status = null, id = "") => {
+    const value = cleanText(timestamp, 80);
+    if (value) entries.push({ id: `${kind}:${id || entries.length}`, timestamp: value, kind, title, detail, status });
+  };
+  add(order.created_at, "order", "Order record created", "Authoritative local order and immutable line snapshots were persisted.", cleanText(order.checkout_status, 40), order.id);
+  add(order.checkout_created_at, "checkout", "Stripe Checkout Session linked", "The stored Checkout Session was linked to this order.", "checkout_created", order.stripe_checkout_session_id);
+  add(order.payment_confirmed_at, "payment", "Payment confirmed", "Stored payment state was confirmed through the signed webhook path.", "paid", order.stripe_payment_intent_id);
+  add(order.payment_failed_at, "payment", "Payment failed", "The persisted payment failure timestamp was recorded.", "failed", order.id);
+  for (const event of webhooks) add(event.processedAt || event.receivedAt || event.eventCreatedAt, "webhook", event.eventType || "Stripe webhook", `${event.processingStatus}${event.resultCode ? ` / ${event.resultCode}` : ""}`, event.processingStatus, event.eventId);
+  for (const document of documents) add(document.issuedAt || document.createdAt, "document", `${document.type === "receipt" ? "Receipt" : "Invoice"} ${document.status}`, `Template ${document.templateKey} revision ${document.templateRevision}.`, document.status, document.id);
+  for (const delivery of deliveries) add(delivery.sentAt || delivery.createdAt, "email", `Email delivery ${delivery.status}`, `${delivery.templateKey} / ${delivery.eventKey} / ${delivery.purpose}.`, delivery.status, delivery.id);
+  for (const event of audit) add(event.createdAt, "audit", event.action, `${event.targetType} / ${event.result}.`, event.result, event.id);
+  return entries.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id.localeCompare(right.id));
+}
+
+function safeMinorAmount(value) { const amount = Number(value || 0); return Number.isSafeInteger(amount) && amount >= 0 ? amount : 0; }
+function stripeEventTimestamp(value) { const seconds = Number(value); return Number.isSafeInteger(seconds) && seconds >= 0 ? new Date(seconds * 1000).toISOString() : null; }
+function safeStripeObjectId(value) { const id = cleanText(value, 255); return /^(?:cs_(?:test|live)_|pi_|evt_)[A-Za-z0-9_]+$/.test(id) ? id : null; }
+function safeCommerceMediaUrl(value) { try { const url = new URL(String(value || "")); return url.protocol === "https:" && !url.username && !url.password && /^\/commerce-media\/[a-f0-9]{64}\.(?:jpg|png|webp)$/.test(url.pathname) ? url.toString().slice(0, 4096) : null; } catch { return null; } }
+function escapeSqlLike(value) { return String(value).replace(/[\\%_]/g, (character) => `\\${character}`); }
 
 function parseJson(value, fallback) {
   try { return JSON.parse(String(value || "")); } catch { return fallback; }

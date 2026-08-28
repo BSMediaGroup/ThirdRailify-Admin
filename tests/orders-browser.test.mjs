@@ -5,61 +5,43 @@ import { chromium } from "playwright-core";
 
 const ORIGIN = "http://127.0.0.1:4197";
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+const ORDER_ID = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
 
-test("Orders renders the accepted TEST payment and canonicalizes /ORDERS without a Not found shell", async (t) => {
+test("Orders is responsive, filterable, accessible, and exposes a complete read-only TEST detail", async (t) => {
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4197"], { stdio: "ignore" });
-  t.after(() => server.kill());
-  await waitForPreview();
-  const browser = await chromium.launch({ executablePath: CHROME, headless: true });
-  t.after(() => browser.close());
-
-  for (const [width, height] of [[1440, 900], [390, 844]]) {
-    const context = await browser.newContext({ viewport: { width, height } });
-    const page = await context.newPage();
-    const errors = [];
-    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-    page.on("pageerror", (error) => errors.push(error.message));
+  t.after(() => server.kill()); await waitForPreview();
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
+  for (const [width, height] of [[1440, 900], [768, 1024], [390, 844]]) {
+    const context = await browser.newContext({ viewport: { width, height } }); const page = await context.newPage(); const errors = []; const listQueries = [];
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); }); page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/**", async (route) => {
-      const pathname = new URL(route.request().url()).pathname;
-      if (pathname === "/api/auth/config") return json(route, authConfig());
-      if (pathname === "/api/auth/session") return json(route, session());
-      if (pathname === "/api/admin/commerce/orders") return json(route, orders());
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/config") return json(route, authConfig());
+      if (url.pathname === "/api/auth/session") return json(route, session());
+      if (url.pathname === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
+      if (url.pathname === "/api/admin/commerce/orders") { listQueries.push(url.search); return json(route, orders(url)); }
+      if (url.pathname === `/api/admin/commerce/orders/${ORDER_ID}`) return json(route, detail());
+      if (url.pathname === `/api/admin/commerce/orders/${ORDER_ID}/documents/receipt`) return json(route, document("receipt"));
+      if (url.pathname === `/api/admin/commerce/orders/${ORDER_ID}/documents/invoice`) return json(route, document("invoice"));
       return json(route, { ok: false, error: "not_found" }, 404);
     });
-
-    await page.goto(`${ORIGIN}/ORDERS`);
-    await page.getByRole("heading", { level: 1, name: "Orders" }).waitFor();
-    await page.waitForURL(`${ORIGIN}/orders`);
-    assert.equal(await page.locator(".topbar-title strong").innerText(), "Orders");
-    assert.equal(await page.getByText("Not found", { exact: true }).count(), 0);
-    assert.equal(await page.getByText("STRIPE TEST ACCEPTANCE", { exact: true }).count(), 1);
-    assert.equal(await page.getByRole("heading", { level: 2, name: "Passed" }).count(), 1);
-    assert.equal(await page.getByText(/TEST .* ord_e47b94a4-4252-438b-8ca7-c47470029940/).count(), 1);
-    assert.equal(await page.getByText("Payment confirmed", { exact: true }).count(), 1);
-    assert.equal(await page.getByText(/(?:CA)?\$15\.00/).count() >= 1, true);
-    assert.equal(await page.getByText("None", { exact: true }).count(), 1);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
-    assert.deepEqual(errors, []);
-    await context.close();
+    await page.goto(`${ORIGIN}/ORDERS`); await page.getByRole("heading", { level: 1, name: "Orders" }).waitFor(); await page.waitForURL(`${ORIGIN}/orders`);
+    assert.equal(await page.locator(".topbar-title strong").innerText(), "Orders"); assert.equal(await page.getByText("TEST-only order history", { exact: true }).count(), 1); assert.equal(await page.getByText("TEST", { exact: true }).count(), 1); assert.equal(await page.getByText("Live gross paid value", { exact: true }).count(), 1); assert.equal(await page.getByText(/(?:CA)?\$0\.00/).count() >= 1, true);
+    await page.getByLabel("Environment").selectOption("test"); await page.waitForTimeout(350); assert.ok(listQueries.some((query) => query.includes("environment=test")));
+    const action = page.getByRole("button", { name: `View order ${ORDER_ID}` }); assert.equal(await action.getAttribute("title"), "View order"); await action.click();
+    const dialog = page.getByRole("dialog", { name: ORDER_ID }); await dialog.waitFor();
+    for (const heading of ["Customer", "Financial breakdown", "Items", "Payment", "Fulfillment", "Customer communication", "Timeline"]) assert.equal(await dialog.getByRole("heading", { name: heading, exact: true }).count(), 1);
+    assert.equal(await dialog.getByText("No customer PII stored", { exact: true }).count(), 1); assert.equal(await dialog.getByText("Sandbox evidence — not real revenue", { exact: true }).count(), 1); assert.equal(await dialog.getByText("Capture, refund, and cancel actions are not available.", { exact: false }).count(), 1); assert.equal(await dialog.getByText("No provider submission or cancellation action is available.", { exact: false }).count(), 1); assert.equal(await dialog.getByText("Immutable historical title with an intentionally very long wrapping suffix", { exact: true }).count(), 1);
+    await dialog.getByRole("button", { name: "Preview receipt" }).click(); await dialog.getByRole("heading", { name: "Payment receipt", exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true); assert.equal(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth), true); assert.deepEqual(errors, []); await context.close();
   }
 });
 
-function orders() {
-  return {
-    ok: true,
-    databaseConfigured: true,
-    access: { isMasterAdmin: true, capabilities: ["commerce.view", "commerce.payments.manage"] },
-    controlledTest: { enabled: false, normalCheckoutEnabled: false, livePaymentsEnabled: false, fulfillmentEnabled: false, stripe: { status: "connected", environment: "test", integrationMode: "direct_merchant", currencyCode: "CAD" }, candidate: null },
-    orders: [{
-      id: "ord_e47b94a4-4252-438b-8ca7-c47470029940", test: true, checkoutStatus: "checkout_created", paymentStatus: "paid", fulfillmentStatus: "disabled",
-      currencyCode: "CAD", expectedAmount: 1500, stripeSessionId: "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC", checkoutUrl: null, stripePaymentIntentId: "pi_test_safe",
-      createdAt: "2026-08-28T12:17:12.217Z", updatedAt: "2026-08-28T12:34:03.094Z", checkoutCreatedAt: "2026-08-28T12:17:13.196Z", paymentConfirmedAt: "2026-08-28T12:34:03.094Z",
-      webhookReceiptCount: 1, webhookVerified: true, hasPrintfulOrder: false,
-      items: [{ productId: "product-397267935", variantId: "variant-5019554081", productName: "Third Rail Farm | Black Glossy Mug", variantName: "11 oz / Black", options: { Size: "11 oz", Color: "Black" }, currencyCode: "CAD", unitAmount: 1500, quantity: 1, lineTotalAmount: 1500 }],
-    }],
-  };
-}
-
+function orders(url) { const environment = url.searchParams.get("environment") || "all"; const items = environment === "live" ? [] : [orderRow()]; return { ok: true, databaseConfigured: true, access: access(), controlledTest: { enabled: false, normalCheckoutEnabled: false, livePaymentsEnabled: false, fulfillmentEnabled: false, existingOrderCount: 1, stripe: { status: "connected", environment: "test", integrationMode: "direct_merchant", currencyCode: "CAD" }, candidate: null }, orders: items, page: 1, pageSize: 20, totalMatching: items.length, totalPages: items.length ? 1 : 0, startIndex: items.length ? 1 : 0, endIndex: items.length, filters: { query: "", environment, payment: "all", fulfillment: "all", sort: "newest" }, summary: { totalMatching: items.length, paid: items.length, pending: 0, refunded: 0, fulfillmentActive: 0, testOrders: items.length, liveOrders: 0, liveGrossAmount: 0, liveNetAmount: 0, currencyCode: "CAD" } }; }
+function orderRow() { return { id: ORDER_ID, test: true, environment: "test", checkoutStatus: "checkout_created", paymentStatus: "paid", fulfillmentStatus: "disabled", currencyCode: "CAD", totalAmount: 1500, refundAmount: 0, stripeSessionId: "cs_test_safe", stripePaymentIntentId: "pi_test_safe", hasPrintfulOrder: false, createdAt: "2026-08-28T12:17:12.217Z", updatedAt: "2026-08-28T12:34:03.094Z", checkoutCreatedAt: "2026-08-28T12:17:13.196Z", paymentConfirmedAt: "2026-08-28T12:34:03.094Z", lineCount: 1, itemCount: 1, documentCount: 0, emailCount: 0 }; }
+function detail() { return { ok: true, databaseConfigured: true, access: access(), order: { id: ORDER_ID, test: true, environment: "test", checkoutStatus: "checkout_created", paymentStatus: "paid", fulfillmentStatus: "disabled", paymentProvider: "stripe", fulfillmentProvider: null, currencyCode: "CAD", createdAt: "2026-08-28T12:17:12.217Z", updatedAt: "2026-08-28T12:34:03.094Z", checkoutCreatedAt: "2026-08-28T12:17:13.196Z", paymentConfirmedAt: "2026-08-28T12:34:03.094Z", paymentFailedAt: null, checkoutFailureCode: null, customer: { available: false, name: null, email: null, phone: null, billingAddress: null, shippingAddress: null }, items: [{ id: "line-1", lineNumber: 1, productId: "deleted-product-reference-with-a-very-long-identifier", variantId: "variant-5019554081", productName: "Immutable historical title with an intentionally very long wrapping suffix", variantName: "11 oz / Black", sku: null, options: { Size: "11 oz", Color: "Black" }, currencyCode: "CAD", unitAmount: 1500, quantity: 1, lineTotalAmount: 1500, requiresShipping: true, fulfillmentProvider: "printful", fulfillmentVariantId: "target-variant-001", imageUrl: null }], financial: { subtotalAmount: 1500, discountAmount: null, shippingAmount: null, taxAmount: null, totalAmount: 1500, refundAmount: 0, netAmount: 1500, currencyCode: "CAD" }, payment: { provider: "stripe", status: "paid", environment: "test", stripeSessionId: "cs_test_safe", stripePaymentIntentId: "pi_test_safe" }, fulfillment: { provider: null, status: "disabled", printfulOrderId: null, orderMode: "draft_only", submissionEnabled: false, tracking: null, carrier: null, failureReason: null, providerCosts: { product: 0, shipping: 0, tax: 0, refundCredit: 0 } }, documents: [], deliveries: [], webhooks: [{ eventId: "evt_safe", eventType: "checkout.session.completed", eventCreatedAt: "2026-08-28T12:34:02.000Z", receivedAt: "2026-08-28T12:34:03.000Z", processedAt: "2026-08-28T12:34:03.094Z", test: true, relatedObjectId: "cs_test_safe", relatedObjectType: "checkout.session", processingStatus: "processed", resultCode: "payment_confirmed" }], audit: [], technical: { checkoutRequestId: "11111111-1111-4111-8111-111111111111", stripeSessionId: "cs_test_safe", stripePaymentIntentId: "pi_test_safe", printfulOrderId: null }, timeline: [{ id: "order:1", timestamp: "2026-08-28T12:17:12.217Z", kind: "order", title: "Order record created", detail: "Authoritative local order and immutable line snapshots were persisted.", status: "checkout_created" }, { id: "payment:1", timestamp: "2026-08-28T12:34:03.094Z", kind: "payment", title: "Payment confirmed", detail: "Stored payment state was confirmed through the signed webhook path.", status: "paid" }] } }; }
+function document(type) { return { ok: true, access: access(), document: { type, available: type === "receipt", reason: type === "receipt" ? "" : "Invoice readiness is blocked until legal business and tax configuration are complete.", test: true, marker: "TEST / SANDBOX", displayReference: ORDER_ID, orderReference: ORDER_ID, merchantName: "Third Railify Official", legalName: null, legalAddress: null, supportEmail: "info@thirdrailify.com", issuedAt: "2026-08-28T12:34:03.094Z", payment: "Confirmed", fulfillment: "Disabled / not started", items: [], subtotal: 1500, shipping: null, tax: null, total: 1500, currency: "CAD", templateKey: type === "receipt" ? "payment_receipt" : "invoice_document", templateRevision: 1, disclosures: [] } }; }
+function access() { return { isMasterAdmin: true, capabilities: ["commerce.view", "commerce.payments.manage"] }; }
 function session() { return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00.000Z", lastLoginAt: null, source: "test", locked: true } }; }
 function authConfig() { return { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: "https://thirdrailify-admin.pages.dev", environment: "test", cookieMode: "host-only" }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }

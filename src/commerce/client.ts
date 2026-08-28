@@ -58,13 +58,29 @@ export type MerchandisingPayload = {
   ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; products: MerchandisingProduct[];
   featured: MerchandisingProduct[]; updatedAt: string | null;
 };
-export type CommerceOrder = {
-  id: string; test: boolean; checkoutStatus: string; paymentStatus: string; fulfillmentStatus: string;
-  currencyCode: string; expectedAmount: number; stripeSessionId: string | null; checkoutUrl: string | null; stripePaymentIntentId: string | null;
-  createdAt: string; updatedAt: string; checkoutCreatedAt: string | null; paymentConfirmedAt: string | null;
-  webhookReceiptCount: number; webhookVerified: boolean;
-  hasPrintfulOrder: boolean;
-  items: Array<{ productId: string; variantId: string | null; productName: string; variantName: string | null; options: Record<string, string>; currencyCode: string; unitAmount: number; quantity: number; lineTotalAmount: number }>;
+export type OrderListFilters = { page?: number; pageSize?: 20 | 50 | 75 | 100; query?: string; environment?: "all" | "test" | "live"; payment?: string; fulfillment?: string; sort?: "newest" | "oldest" | "highest_total" | "lowest_total" };
+export type CommerceOrderListItem = {
+  id: string; test: boolean; environment: "test" | "live"; checkoutStatus: string; paymentStatus: string; fulfillmentStatus: string;
+  currencyCode: string; totalAmount: number; refundAmount: number; stripeSessionId: string | null; stripePaymentIntentId: string | null;
+  hasPrintfulOrder: boolean; createdAt: string; updatedAt: string; checkoutCreatedAt: string | null; paymentConfirmedAt: string | null;
+  lineCount: number; itemCount: number; documentCount: number; emailCount: number;
+};
+export type OrderTimelineEntry = { id: string; timestamp: string; kind: string; title: string; detail: string; status: string | null };
+export type CommerceOrderDetail = {
+  id: string; test: boolean; environment: "test" | "live"; checkoutStatus: string; paymentStatus: string; fulfillmentStatus: string;
+  paymentProvider: string; fulfillmentProvider: string | null; currencyCode: string; createdAt: string; updatedAt: string;
+  checkoutCreatedAt: string | null; paymentConfirmedAt: string | null; paymentFailedAt: string | null; checkoutFailureCode: string | null;
+  customer: { available: boolean; name: string | null; email: string | null; phone: string | null; billingAddress: PublicAddress | null; shippingAddress: PublicAddress | null };
+  items: Array<{ id: string; lineNumber: number; productId: string; variantId: string | null; productName: string; variantName: string | null; sku: string | null; options: Record<string, string>; currencyCode: string; unitAmount: number; quantity: number; lineTotalAmount: number; requiresShipping: boolean; fulfillmentProvider: string | null; fulfillmentVariantId: string | null; imageUrl: string | null }>;
+  financial: { subtotalAmount: number; discountAmount: number | null; shippingAmount: number | null; taxAmount: number | null; totalAmount: number; refundAmount: number; netAmount: number | null; currencyCode: string };
+  payment: { provider: string; status: string; environment: "test" | "live"; stripeSessionId: string | null; stripePaymentIntentId: string | null };
+  fulfillment: { provider: string | null; status: string; printfulOrderId: string | null; orderMode: string; submissionEnabled: boolean; tracking: string | null; carrier: string | null; failureReason: string | null; providerCosts: { product: number; shipping: number; tax: number; refundCredit: number } };
+  documents: Array<{ id: string; type: string; displayReference: string; test: boolean; status: string; templateKey: string; templateRevision: number; issuedAt: string | null; createdAt: string; updatedAt: string }>;
+  deliveries: Array<{ id: string; templateKey: string; templateRevision: number; eventKey: string; purpose: string; status: string; attemptCount: number; createdAt: string; updatedAt: string; sentAt: string | null }>;
+  webhooks: Array<{ eventId: string; eventType: string; eventCreatedAt: string | null; receivedAt: string; processedAt: string | null; test: boolean; relatedObjectId: string | null; relatedObjectType: string | null; processingStatus: string; resultCode: string | null }>;
+  audit: Array<{ id: string; action: string; targetType: string; result: string; createdAt: string }>;
+  technical: { checkoutRequestId: string | null; stripeSessionId: string | null; stripePaymentIntentId: string | null; printfulOrderId: string | null };
+  timeline: OrderTimelineEntry[];
 };
 export type ProductListFilters = {
   page?: number; pageSize?: 20 | 50 | 75 | 100; query?: string; visibility?: string; status?: string;
@@ -84,10 +100,12 @@ export type ProductBulkResult = {
 };
 export type ControlledTestAcceptance = {
   enabled: boolean; normalCheckoutEnabled: boolean; livePaymentsEnabled: boolean; fulfillmentEnabled: boolean;
+  existingOrderCount: number;
   stripe: { status: string; environment: string; integrationMode: string; currencyCode: string };
   candidate: null | { productId: string; variantId: string; slug: string; title: string; variantLabel: string; options: Record<string, string>; unitAmount: number; currencyCode: string; sellable: boolean; mappingStatus: string; migrationStatus: string };
 };
-export type CommerceOrdersPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; controlledTest: ControlledTestAcceptance | null; orders: CommerceOrder[] };
+export type CommerceOrdersPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; controlledTest: ControlledTestAcceptance | null; orders: CommerceOrderListItem[]; page: number; pageSize: 20 | 50 | 75 | 100; totalMatching: number; totalPages: number; startIndex: number; endIndex: number; filters: Required<Pick<OrderListFilters, "query" | "environment" | "payment" | "fulfillment" | "sort">>; summary: { totalMatching: number; paid: number; pending: number; refunded: number; fulfillmentActive: number; testOrders: number; liveOrders: number; liveGrossAmount: number; liveNetAmount: number; currencyCode: string } };
+export type CommerceOrderDetailPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; order: CommerceOrderDetail };
 export type TestCheckoutPayload = { ok: true; orderId: string; sessionId: string; checkoutUrl: string };
 export type PrintfulStoreIdentity = { id: string; name: string; type: string };
 export type PrintfulSourceVerificationPayload = {
@@ -374,7 +392,8 @@ export function getCollectionDetail(collectionId: string) { return adminApi<Coll
 export function getCollectionProducts(collectionId: string, filters: CollectionProductListFilters = {}) { const query = new URLSearchParams(); Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); }); return adminApi<CollectionProductListPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/products/list?${query.toString()}`); }
 export function bulkUpdateCollections(csrfToken: string, body: { operation: CollectionBulkOperation; collectionIds: string[] } | { operation: CollectionBulkOperation; matching: Omit<CollectionListFilters, "page" | "pageSize">; confirmMatching: true; expectedCount: number }) { return adminApi<CollectionBulkResult>("/api/admin/commerce/collections/bulk", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
 export function updateCollectionMemberships(csrfToken: string, collectionId: string, body: { operation: "add" | "remove"; productIds: string[]; revision: number }) { return adminApi<CollectionMembershipResult>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/products/bulk`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
-export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
+export function getCommerceOrders(filters: OrderListFilters = {}) { const query = new URLSearchParams(); Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); }); return adminApi<CommerceOrdersPayload>(`/api/admin/commerce/orders?${query.toString()}`); }
+export function getCommerceOrder(orderId: string) { return adminApi<CommerceOrderDetailPayload>(`/api/admin/commerce/orders/${encodeURIComponent(orderId)}`); }
 export function getOrderDocument(orderId: string, type: "receipt" | "invoice") { return adminApi<DocumentPreviewPayload>(`/api/admin/commerce/orders/${encodeURIComponent(orderId)}/documents/${type}`); }
 export function generateControlledTestCheckout(csrfToken: string, body: { checkoutRequestId: string; productId: string; variantId: string; quantity: 1 }) {
   return adminApi<TestCheckoutPayload>("/api/admin/commerce/test-checkout", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });

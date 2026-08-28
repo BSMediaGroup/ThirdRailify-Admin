@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { commerceOrdersPayload, createStripeCheckoutSession, publicOrderStatusPayload } from "../functions/_shared/checkout-core.js";
+import { commerceOrderDetailPayload, commerceOrdersPayload, createStripeCheckoutSession, publicOrderStatusPayload } from "../functions/_shared/checkout-core.js";
 import {
   applySqlBatches,
   commerceEnvironment,
@@ -76,7 +76,8 @@ test("acceptance closure preserves paid evidence and paused migration while both
   const status = await publicOrderStatusPayload(env, created.sessionId);
   assert.equal(status.order.paymentStatus, "paid"); assert.equal(status.order.amount, 1500); assert.equal(status.order.currency, "CAD"); assert.equal(status.order.fulfillmentStatus, "disabled");
   const admin = await commerceOrdersPayload(env, { account: { adminLevel: "master" } });
-  assert.equal(admin.orders.length, 1); assert.equal(admin.orders[0].test, true); assert.equal(admin.orders[0].webhookReceiptCount, 1); assert.equal(admin.orders[0].webhookVerified, true); assert.equal(admin.controlledTest.enabled, false); assert.equal(admin.controlledTest.candidate, null);
+  const detail = await commerceOrderDetailPayload(env, { account: { adminLevel: "master" } }, created.orderId);
+  assert.equal(admin.orders.length, 1); assert.equal(admin.orders[0].test, true); assert.equal(detail.order.webhooks.length, 1); assert.equal(detail.order.webhooks[0].resultCode, "payment_confirmed"); assert.equal(admin.controlledTest.enabled, false); assert.equal(admin.controlledTest.candidate, null);
 
   const mustNotCallStripe = async () => { stripeCalls += 1; throw new Error("Stripe must not be called"); };
   await assert.rejects(createStripeCheckoutSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), {

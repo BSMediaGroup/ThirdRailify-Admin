@@ -1,0 +1,134 @@
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useOutletContext } from "react-router-dom";
+import { AdminIcon } from "../components/AdminIcon";
+import type { AdminShellOutletContext } from "../components/AdminShell";
+import {
+  getCommerceOrder,
+  getCommerceOrders,
+  getOrderDocument,
+  type CommerceDocument,
+  type CommerceOrderDetail,
+  type CommerceOrderListItem,
+  type CommerceOrdersPayload,
+  type OrderListFilters,
+} from "../commerce/client";
+
+type Filters = {
+  page: number; pageSize: 20 | 50 | 75 | 100; query: string; environment: "all" | "test" | "live";
+  payment: string; fulfillment: string; sort: "newest" | "oldest" | "highest_total" | "lowest_total";
+};
+
+const INITIAL_FILTERS: Filters = { page: 1, pageSize: 20, query: "", environment: "all", payment: "all", fulfillment: "all", sort: "newest" };
+
+export function OrdersManagementPage() {
+  const { startLoading } = useOutletContext<AdminShellOutletContext>();
+  const [payload, setPayload] = useState<CommerceOrdersPayload | null>(null);
+  const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
+  const [queryInput, setQueryInput] = useState("");
+  const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<CommerceOrderDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => setFilters((current) => ({ ...current, [key]: value, ...(key === "page" ? {} : { page: 1 }) }));
+  useEffect(() => { const timer = window.setTimeout(() => setFilters((current) => current.query === queryInput ? current : { ...current, query: queryInput, page: 1 }), 250); return () => window.clearTimeout(timer); }, [queryInput]);
+  useEffect(() => {
+    let active = true;
+    const stop = startLoading("Loading authoritative commerce orders");
+    setError("");
+    void getCommerceOrders(filters as OrderListFilters).then((result) => {
+      if (!active) return;
+      setPayload(result);
+      if (result.page !== filters.page) setFilters((current) => ({ ...current, page: result.page }));
+    }).catch((reason: unknown) => { if (active) setError(errorMessage(reason, "Commerce orders are unavailable.")); }).finally(stop);
+    return () => { active = false; };
+  }, [filters, startLoading]);
+
+  const openOrder = useCallback(async (orderId: string) => {
+    setSelectedId(orderId); setDetail(null); setDetailLoading(true); setError("");
+    try { setDetail((await getCommerceOrder(orderId)).order); }
+    catch (reason) { setError(errorMessage(reason, "The order detail is unavailable.")); setSelectedId(null); }
+    finally { setDetailLoading(false); }
+  }, []);
+  const closeOrder = useCallback(() => { setSelectedId(null); setDetail(null); }, []);
+  const filtered = filters.query || filters.environment !== "all" || filters.payment !== "all" || filters.fulfillment !== "all";
+
+  return <>
+    <section className="area-heading commerce-heading"><div className="area-icon"><AdminIcon name="orders" size={28} /></div><div><p className="eyebrow">Commerce operations</p><h1>Orders</h1><p>Search and inspect authoritative order, payment, document, email, and fulfillment evidence. Provider-origin state is read-only.</p></div><span className="commerce-status commerce-status--disabled">Read only</span></section>
+    {error && <div className="admin-alert" role="alert">{error}</div>}
+    {payload && <section className="order-summary-rail" aria-label="Order summary"><Metric label="Matching orders" value={String(payload.summary.totalMatching)} /><Metric label="Paid" value={String(payload.summary.paid)} /><Metric label="Pending" value={String(payload.summary.pending)} /><Metric label="Refunded / partial" value={String(payload.summary.refunded)} /><Metric label="TEST evidence" value={String(payload.summary.testOrders)} /><Metric label="Live orders" value={String(payload.summary.liveOrders)} /><Metric label="Live gross paid value" value={formatMoney(payload.summary.liveGrossAmount, payload.summary.currencyCode)} /></section>}
+    {payload?.summary.testOrders && !payload.summary.liveOrders ? <div className="order-test-only" role="status"><strong>TEST-only order history</strong><span>Sandbox evidence is isolated and excluded from live value totals. It does not indicate commerce readiness.</span></div> : null}
+    <section className="commerce-section orders-workspace" aria-labelledby="orders-list-title">
+      <div className="commerce-section-heading-actions"><div><p className="eyebrow">Server-backed order history</p><h2 id="orders-list-title">Order management</h2></div><span className="order-provider-lock">Provider actions unavailable · fulfillment disabled</span></div>
+      <div className="order-filters" aria-label="Order filters">
+        <Field label="Search orders" className="order-search"><input type="search" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="Order or provider reference" maxLength={120} /></Field>
+        <Field label="Environment"><select value={filters.environment} onChange={(event) => updateFilter("environment", event.target.value as Filters["environment"])}><option value="all">All</option><option value="test">Test</option><option value="live">Live</option></select></Field>
+        <Field label="Payment"><select value={filters.payment} onChange={(event) => updateFilter("payment", event.target.value)}><option value="all">All</option><option value="pending">Pending</option><option value="paid">Paid</option><option value="failed">Failed</option><option value="refunded">Refunded</option><option value="partially_refunded">Partially refunded</option><option value="disputed">Disputed</option><option value="canceled">Canceled</option></select></Field>
+        <Field label="Fulfillment"><select value={filters.fulfillment} onChange={(event) => updateFilter("fulfillment", event.target.value)}><option value="all">All</option><option value="disabled">Not started / disabled</option><option value="pending">Pending</option><option value="draft">Draft</option><option value="submitted">Submitted</option><option value="fulfilled">Fulfilled</option><option value="canceled">Canceled</option><option value="error">Failed</option></select></Field>
+        <Field label="Sort"><select value={filters.sort} onChange={(event) => updateFilter("sort", event.target.value as Filters["sort"])}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest_total">Highest total</option><option value="lowest_total">Lowest total</option></select></Field>
+      </div>
+      {payload && <div className="commerce-results-bar"><p>{payload.totalMatching ? `Showing ${payload.startIndex}–${payload.endIndex} of ${payload.totalMatching} matching orders` : filtered ? "No orders match these filters." : "No authoritative orders are stored."}</p><Field label="Rows per page"><select value={filters.pageSize} onChange={(event) => updateFilter("pageSize", Number(event.target.value) as Filters["pageSize"])}><option value={20}>20</option><option value={50}>50</option><option value={75}>75</option><option value={100}>100</option></select></Field></div>}
+      {!payload && !error ? <State>Loading authoritative orders…</State> : payload?.orders.length ? <div className="order-table" role="list">{payload.orders.map((order) => <OrderListRow key={order.id} order={order} onOpen={openOrder} />)}</div> : <State><strong>{filtered ? "No matching orders." : "0 authoritative orders."}</strong><span>{filtered ? "Clear or adjust the server-backed filters." : "No customer or revenue data has been manufactured. Checkout remains disabled."}</span></State>}
+      {payload && payload.totalPages > 0 && <Pagination page={payload.page} totalPages={payload.totalPages} onPage={(page) => updateFilter("page", page)} />}
+    </section>
+    {selectedId && <OrderDialog titleId="order-detail-title" onClose={closeOrder}><OrderDetailView order={detail} loading={detailLoading} onClose={closeOrder} /></OrderDialog>}
+  </>;
+}
+
+function OrderListRow({ order, onOpen }: { order: CommerceOrderListItem; onOpen: (orderId: string) => void }) {
+  return <article className={`order-row ${order.test ? "is-test" : "is-live"}`} role="listitem"><div className="order-row__identity"><span className={`order-environment order-environment--${order.environment}`}>{order.test ? "TEST" : "LIVE"}</span><strong title={order.id}>{compactId(order.id)}</strong><small>{formatTimestamp(order.createdAt)}</small></div><div><span className="order-row__label">Payment</span><OrderStatus value={order.paymentStatus} kind="payment" /></div><div><span className="order-row__label">Fulfillment</span><OrderStatus value={order.fulfillmentStatus} kind="fulfillment" /></div><div><span className="order-row__label">Items</span><strong>{order.itemCount} item{order.itemCount === 1 ? "" : "s"}</strong><small>{order.lineCount} line{order.lineCount === 1 ? "" : "s"}</small></div><div className="order-row__total"><span className="order-row__label">Total</span><strong>{formatMoney(order.totalAmount, order.currencyCode)}</strong>{order.refundAmount > 0 && <small>{formatMoney(order.refundAmount, order.currencyCode)} refunded</small>}</div><div className="order-row__signals"><small>{order.documentCount ? `${order.documentCount} document` : "No documents"}</small><small>{order.emailCount ? `${order.emailCount} email event` : "No email delivery"}</small></div><button type="button" className="commerce-row-action commerce-row-action--icon" aria-label={`View order ${order.id}`} title="View order" onClick={() => onOpen(order.id)}><AdminIcon name="edit" size={17} /></button></article>;
+}
+
+function OrderDetailView({ order, loading, onClose }: { order: CommerceOrderDetail | null; loading: boolean; onClose: () => void }) {
+  const [previews, setPreviews] = useState<Partial<Record<"receipt" | "invoice", CommerceDocument>>>({});
+  const [documentBusy, setDocumentBusy] = useState<"receipt" | "invoice" | null>(null);
+  const [documentError, setDocumentError] = useState("");
+  const preview = async (type: "receipt" | "invoice") => { if (!order || documentBusy) return; setDocumentBusy(type); setDocumentError(""); try { const result = await getOrderDocument(order.id, type); setPreviews((current) => ({ ...current, [type]: result.document })); } catch (reason) { setDocumentError(errorMessage(reason, "The document preview is unavailable.")); } finally { setDocumentBusy(null); } };
+  if (loading || !order) return <section className="order-detail"><header className="order-detail__header"><div><p className="eyebrow">Order detail</p><h2 id="order-detail-title">Loading authoritative order…</h2></div><button type="button" className="commerce-editor-close" onClick={onClose} data-autofocus>Close</button></header><State>Loading one bounded order projection…</State></section>;
+  return <section className={`order-detail ${order.test ? "is-test" : "is-live"}`}>
+    <header className="order-detail__header"><div><div className="order-detail__badges"><span className={`order-environment order-environment--${order.environment}`}>{order.test ? "TEST / SANDBOX" : "LIVE"}</span><OrderStatus value={order.paymentStatus} kind="payment" /><OrderStatus value={order.fulfillmentStatus} kind="fulfillment" /></div><p className="eyebrow">Order detail</p><h2 id="order-detail-title">{order.id}</h2><p>{formatTimestamp(order.createdAt)} · {formatMoney(order.financial.totalAmount, order.currencyCode)}</p></div><button type="button" className="commerce-editor-close" onClick={onClose} data-autofocus>Close order</button></header>
+    {order.test && <div className="order-test-warning"><strong>Sandbox evidence — not real revenue</strong><span>Viewing this canonical TEST order is read-only and does not change readiness, payment, fulfillment, documents, or email state.</span></div>}
+    <div className="order-detail__grid"><Section title="Customer" eyebrow="Stored customer data">{order.customer.available ? <dl><Fact term="Name" value={order.customer.name || "Not recorded"} /><Fact term="Email" value={order.customer.email || "Not recorded"} /><Fact term="Phone" value={order.customer.phone || "Not recorded"} /></dl> : <Missing title="No customer PII stored" text="The current checkout evidence intentionally persisted no name, email, phone, billing address, or shipping address." />}</Section><Section title="Financial breakdown" eyebrow="Stored minor-unit values"><dl><MoneyFact term="Line-item subtotal" value={order.financial.subtotalAmount} currency={order.currencyCode} /><Fact term="Discount" value="Not recorded" /><Fact term="Customer shipping" value="Not recorded" /><Fact term="Customer tax" value="Not recorded" /><MoneyFact term="Order total" value={order.financial.totalAmount} currency={order.currencyCode} /><MoneyFact term="Refund" value={order.financial.refundAmount} currency={order.currencyCode} /><Fact term="Net after refund" value={order.financial.netAmount === null ? "Not safely derivable" : formatMoney(order.financial.netAmount, order.currencyCode)} /></dl></Section></div>
+    <Section title="Items" eyebrow="Immutable historical snapshots"><div className="order-items">{order.items.length ? order.items.map((item) => <article key={item.id}><div className="order-item__image">{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <span aria-hidden="true">TR</span>}</div><div><strong>{item.productName}</strong><span>{item.variantName || formatOptions(item.options) || "Standard"}</span><small>Quantity {item.quantity} · {formatMoney(item.unitAmount, item.currencyCode)} each</small></div><strong>{formatMoney(item.lineTotalAmount, item.currencyCode)}</strong><details><summary>Technical identifiers</summary><dl><Fact term="Product ID" value={item.productId} /><Fact term="Variant ID" value={item.variantId || "Not recorded"} /><Fact term="SKU" value={item.sku || "Not recorded"} /><Fact term="Fulfillment variant" value={item.fulfillmentVariantId || "Not recorded"} /></dl></details></article>) : <Missing title="No line items stored" text="No historical product lines are available for this order." />}</div></Section>
+    <div className="order-detail__grid"><Section title="Payment" eyebrow="Stripe / webhook authority"><dl><Fact term="Provider" value={humanize(order.payment.provider)} /><Fact term="Status" value={humanize(order.payment.status)} /><Fact term="Environment" value={order.test ? "TEST / SANDBOX" : "LIVE"} /><Fact term="Checkout Session" value={order.payment.stripeSessionId || "Not recorded"} /><Fact term="PaymentIntent" value={order.payment.stripePaymentIntentId || "Not recorded"} /><Fact term="Confirmed" value={order.paymentConfirmedAt ? formatTimestamp(order.paymentConfirmedAt) : "Not recorded"} /></dl><p className="order-readonly-note">Provider-origin payment fields are read-only. Capture, refund, and cancel actions are not available.</p></Section><Section title="Fulfillment" eyebrow="Stored provider posture"><dl><Fact term="Status" value={fulfillmentLabel(order.fulfillment.status)} /><Fact term="Provider" value={order.fulfillment.provider ? humanize(order.fulfillment.provider) : "Not assigned"} /><Fact term="Printful order" value={order.fulfillment.printfulOrderId || "None"} /><Fact term="Order mode" value={humanize(order.fulfillment.orderMode)} /><Fact term="Tracking" value={order.fulfillment.tracking || "Not recorded"} /><Fact term="Carrier" value={order.fulfillment.carrier || "Not recorded"} /></dl><p className="order-readonly-note">Fulfillment submission is globally disabled. No provider submission or cancellation action is available.</p></Section></div>
+    <Section title="Customer communication" eyebrow="Documents and delivery ledger"><div className="order-communication"><Communication title="Receipt" text={order.paymentStatus === "paid" ? "Preview available from stored payment evidence." : "Unavailable until payment is confirmed."}><button type="button" className="secondary-button" onClick={() => void preview("receipt")} disabled={documentBusy !== null}>{documentBusy === "receipt" ? "Loading…" : "Preview receipt"}</button></Communication><Communication title="Invoice" text="Availability is determined by the existing tax and legal readiness engine."><button type="button" className="secondary-button" onClick={() => void preview("invoice")} disabled={documentBusy !== null}>{documentBusy === "invoice" ? "Loading…" : "Preview invoice"}</button></Communication><Communication title="Email delivery" text={order.deliveries.length ? `${order.deliveries.length} persisted delivery record${order.deliveries.length === 1 ? "" : "s"}.` : "No transactional email delivery is stored."}><span className="order-provider-lock">Sending and resending unavailable</span></Communication></div>{documentError && <div className="admin-alert" role="alert">{documentError}</div>}{previews.receipt && <DocumentPreview document={previews.receipt} />}{previews.invoice && <DocumentPreview document={previews.invoice} />}</Section>
+    <Section title="Timeline" eyebrow="Persisted chronological evidence"><ol className="order-timeline">{order.timeline.length ? order.timeline.map((entry) => <li key={entry.id}><time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp)}</time><div><strong>{humanize(entry.title)}</strong><p>{entry.detail}</p></div></li>) : <li><Missing title="No timeline evidence" text="No persisted event timestamp is available." /></li>}</ol></Section>
+    <details className="order-technical"><summary>Technical and audit evidence</summary><div className="order-detail__grid"><section><h3>Identifiers</h3><dl><Fact term="Internal order" value={order.id} /><Fact term="Checkout request" value={order.technical.checkoutRequestId || "Not recorded"} /><Fact term="Stripe Session" value={order.technical.stripeSessionId || "Not recorded"} /><Fact term="PaymentIntent" value={order.technical.stripePaymentIntentId || "Not recorded"} /><Fact term="Printful order" value={order.technical.printfulOrderId || "Not recorded"} /></dl></section><section><h3>Evidence counts</h3><dl><Fact term="Webhook events" value={String(order.webhooks.length)} /><Fact term="Audit events" value={String(order.audit.length)} /><Fact term="Stored documents" value={String(order.documents.length)} /><Fact term="Email deliveries" value={String(order.deliveries.length)} /></dl></section></div></details>
+  </section>;
+}
+
+function DocumentPreview({ document }: { document: CommerceDocument }) { return <article className="order-document-preview"><span className={`order-environment order-environment--${document.test ? "test" : "live"}`}>{document.marker}</span><h4>{document.type === "receipt" ? "Payment receipt" : "Invoice / sales document"}</h4>{!document.available && <div className="admin-alert" role="status">Not ready — {document.reason}</div>}<dl><Fact term="Merchant" value={document.merchantName} /><Fact term="Order reference" value={document.orderReference} /><Fact term="Payment" value={document.payment} /><Fact term="Total" value={formatMoney(document.total, document.currency)} /></dl><small>Preview only. Opening this view does not create or issue a customer document.</small></article>; }
+function Section({ title, eyebrow, children }: { title: string; eyebrow: string; children: ReactNode }) { return <section className="order-detail-section"><p className="eyebrow">{eyebrow}</p><h3>{title}</h3>{children}</section>; }
+function Communication({ title, text, children }: { title: string; text: string; children: ReactNode }) { return <div><h4>{title}</h4><p>{text}</p>{children}</div>; }
+function Missing({ title, text }: { title: string; text: string }) { return <div className="order-missing"><strong>{title}</strong><span>{text}</span></div>; }
+function OrderStatus({ value, kind }: { value: string; kind: "payment" | "fulfillment" }) { const tone = value === "paid" || value === "fulfilled" ? "good" : value === "failed" || value === "error" || value === "canceled" ? "bad" : value === "refunded" || value === "partially_refunded" ? "refund" : value === "disabled" ? "quiet" : "pending"; return <span className={`order-status order-status--${tone}`}>{kind === "fulfillment" ? fulfillmentLabel(value) : humanize(value)}</span>; }
+function Fact({ term, value }: { term: string; value: string }) { return <div><dt>{term}</dt><dd>{value}</dd></div>; }
+function MoneyFact({ term, value, currency }: { term: string; value: number; currency: string }) { return <Fact term={term} value={formatMoney(value, currency)} />; }
+function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) { return <label className={`commerce-field ${className}`.trim()}><span>{label}</span>{children}</label>; }
+function Metric({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
+function State({ children }: { children: ReactNode }) { return <div className="commerce-state" role="status">{children}</div>; }
+
+function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (page: number) => void }) { return <nav className="commerce-pagination" aria-label="Orders pages"><button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1}>Previous</button><div>{paginationItems(page, totalPages).map((item) => typeof item === "number" ? <button key={item} type="button" className={item === page ? "is-current" : ""} aria-current={item === page ? "page" : undefined} onClick={() => onPage(item)}>{item}</button> : <span key={item} aria-hidden="true">…</span>)}</div><span>Page {page} of {totalPages}</span><button type="button" onClick={() => onPage(page + 1)} disabled={page >= totalPages}>Next</button></nav>; }
+function paginationItems(page: number, totalPages: number): Array<number | string> { if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1); const pages = new Set([1, totalPages, page - 1, page, page + 1].filter((value) => value > 0 && value <= totalPages)); const sorted = [...pages].sort((a, b) => a - b); const result: Array<number | string> = []; sorted.forEach((value, index) => { if (index && value - sorted[index - 1] > 1) result.push(`ellipsis-${value}`); result.push(value); }); return result; }
+
+function OrderDialog({ titleId, onClose, children }: { titleId: string; onClose: () => void; children: ReactNode }) {
+  const dialog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow; document.body.style.overflow = "hidden";
+    const frame = window.requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>("[data-autofocus],button")?.focus());
+    const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } };
+    document.addEventListener("keydown", keydown);
+    return () => { window.cancelAnimationFrame(frame); document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", keydown); returnFocus?.focus(); };
+  }, [onClose]);
+  return createPortal(<div className="commerce-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialog} className="commerce-editor-dialog order-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>{children}</div></div>, document.body);
+}
+
+function formatMoney(value: number, currency: string) { return new Intl.NumberFormat("en-CA", { style: "currency", currency: /^[A-Z]{3}$/.test(currency) ? currency : "CAD" }).format(value / 100); }
+function formatTimestamp(value: string | null | undefined) { const timestamp = Date.parse(String(value || "")); return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : "Not recorded"; }
+function compactId(value: string) { return value.length > 28 ? `${value.slice(0, 20)}…${value.slice(-5)}` : value; }
+function formatOptions(options: Record<string, string>) { return Object.entries(options).map(([key, value]) => `${key}: ${value}`).join(" · "); }
+function fulfillmentLabel(value: string) { return value === "disabled" ? "Not started / disabled" : value === "error" ? "Failed" : humanize(value); }
+function humanize(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase()); }
+function errorMessage(reason: unknown, fallback: string) { return reason instanceof Error ? reason.message : fallback; }

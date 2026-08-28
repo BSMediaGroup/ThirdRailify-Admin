@@ -111,12 +111,13 @@ test("Overview is a fail-soft operational snapshot rather than a deferred founda
   assert.match(scripts, /"test:browser:overview"/);
 });
 
-test("Orders exposes only the Master-controlled Stripe TEST acceptance and truthful fulfillment state", async () => {
-  const [page, client, core, route, shell] = await Promise.all([read("src/pages/CommercePages.tsx"), read("src/commerce/client.ts"), read("functions/_shared/checkout-core.js"), read("functions/api/admin/commerce/[[path]].js"), read("src/components/AdminShell.tsx")]);
-  for (const label of ["TEST CHECKOUT · STRIPE SANDBOX · NO REAL CHARGE", "Generate Test Checkout", "Single acceptance Session already created", "Printful order", "Open Stripe TEST Checkout"]) assert.match(page, new RegExp(label));
-  for (const label of ["STRIPE TEST ACCEPTANCE", "Signed payment acceptance", "Webhook", "Verified", "Test gate", "Closed"]) assert.match(page, new RegExp(label));
-  assert.match(page, /access\.isMasterAdmin/); assert.match(client, /\/api\/admin\/commerce\/test-checkout/); assert.match(route, /requireMasterAdmin\(env, request\)/);
-  assert.match(core, /gate === "controlled_test"/); assert.match(core, /stripe_test_checkout_already_created/); assert.match(core, /fulfillment_status = 'disabled'|fulfillment_status, currency_code/); assert.match(core, /webhookReceiptCount/); assert.match(core, /webhookVerified/);
+test("Orders is a read-only paginated management surface with isolated TEST evidence and no provider controls", async () => {
+  const [page, client, core, route, shell] = await Promise.all([read("src/pages/OrdersManagementPage.tsx"), read("src/commerce/client.ts"), read("functions/_shared/checkout-core.js"), read("functions/api/admin/commerce/[[path]].js"), read("src/components/AdminShell.tsx")]);
+  for (const label of ["Server-backed order history", "Live gross paid value", "TEST-only order history", "Financial breakdown", "Customer communication", "Persisted chronological evidence", "Provider actions unavailable"]) assert.match(page, new RegExp(label));
+  for (const forbidden of ["Generate Test Checkout", "Open Stripe TEST Checkout", "Refund payment", "Submit fulfillment", "Resend email"]) assert.doesNotMatch(page, new RegExp(forbidden));
+  assert.match(client, /getCommerceOrder\(orderId/); assert.match(client, /pageSize\?: 20 \| 50 \| 75 \| 100/);
+  assert.match(route, /commerceOrderDetailPayload/); assert.match(route, /requireCommerceCapability\(env, session, "commerce\.view"\)/);
+  assert.match(core, /normalizeOrderListOptions/); assert.match(core, /live_gross_amount/); assert.match(core, /environment = 'live'/); assert.match(core, /submissionEnabled: false/);
   assert.match(shell, /area\.path\.toLowerCase\(\) === location\.pathname\.toLowerCase\(\)/); assert.match(shell, /navigate\(`\$\{canonical\}/);
 });
 
