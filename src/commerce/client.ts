@@ -32,8 +32,19 @@ export type CommerceTemplate = {
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; revision: number;
 };
 export type TemplatesPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; templates: CommerceTemplate[] };
+export type MerchandisingVariant = {
+  id: string; productId: string; localVariantKey: string; displayLabel: string; status: string; visibility: string;
+  sellable: boolean; availability: string; unitAmount: number; currencyCode: string; sku: string | null;
+  size: string | null; color: string | null; options: Record<string, string>; fulfillmentProvider: string;
+  fulfillmentMappingStatus: string; migrationStatus: string; integration: Record<string, string | null>; updatedAt: string;
+};
 export type MerchandisingProduct = {
-  id: string; slug: string; title: string; status: string; featured: boolean; featuredOrder: number | null;
+  id: string; slug: string; title: string; description: string; primaryImageUrl: string | null; additionalImages: string[];
+  categories: string[]; tags: string[]; status: string; visibility: string; currencyCode: string; unitAmount: number | null;
+  price: { minimum: number | null; maximum: number | null; label: string }; maxQuantity: number; requiresShipping: boolean;
+  featured: boolean; featuredOrder: number | null; displayOrder: number; migrationStatus: string; sourceProvider: string;
+  integration: Record<string, string | null>; variantCount: number; activeVariantCount: number; sellableVariantCount: number;
+  readiness: { displayable: boolean; checkout: boolean; fulfillment: string }; variants: MerchandisingVariant[];
   displayData: { hasImage: boolean; hasPrice: boolean; ready: boolean }; updatedAt: string;
 };
 export type MerchandisingPayload = {
@@ -50,6 +61,7 @@ export type PrintfulStoreIdentity = { id: string; name: string; type: string };
 export type PrintfulSourceVerificationPayload = {
   ok: boolean; store: PrintfulStoreIdentity; configuredStoreId: string | null; configurationMatches: boolean;
 };
+export type MerchandisingProductPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; product: MerchandisingProduct };
 export type PrintfulCatalogueSnapshot = {
   role: string; store: PrintfulStoreIdentity;
   counts: { products: number; variants: number; synced: number; ignored: number; ignoredProducts: number; unavailable: number; missingPrices: number; malformedPrices: number; malformedOrMissingPrices: number; missingFiles: number; variantsWithoutFiles: number };
@@ -289,6 +301,21 @@ export function getMerchandisingProducts() { return adminApi<MerchandisingPayloa
 export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
 export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {
   return adminApi<MerchandisingPayload>("/api/admin/commerce/products/featured", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ featuredIds }) });
+}
+export function saveMerchandisingProduct(csrfToken: string, productId: string, body: Record<string, unknown>) {
+  return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+}
+export function saveMerchandisingVariant(csrfToken: string, productId: string, variantId: string, body: Record<string, unknown>) {
+  return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+}
+
+export function cadTextToMinorUnits(value: string) {
+  const normalized = value.trim();
+  if (!/^(?:0|[1-9]\d{0,7})(?:\.\d{1,2})?$/.test(normalized)) throw new Error("Enter a valid CAD amount with at most two decimal places.");
+  const [whole, fraction = ""] = normalized.split(".");
+  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 100_000_000) throw new Error("Enter a CAD amount between CA$0.01 and CA$1,000,000.00.");
+  return amount;
 }
 
 function chunks<T>(values: T[], size: number) {

@@ -223,10 +223,32 @@ export async function merchandisingProductsPayload(env, session) {
   if (!isCommerceDbConfigured(env)) {
     return { ok: true, databaseConfigured: false, access, products: [], featured: [], updatedAt: null };
   }
-  const result = await requireCommerceDb(env)
-    .prepare("SELECT id, slug, title, status, safe_metadata_json, is_featured, featured_order, updated_at FROM commerce_products ORDER BY is_featured DESC, featured_order ASC, slug ASC")
-    .all();
-  const products = (result?.results || []).map(serializeMerchandisingProduct);
+  const db = requireCommerceDb(env);
+  const [result, variantResult] = await Promise.all([
+    db.prepare(`SELECT id, slug, title, status, visibility, currency_code, unit_amount,
+                       max_checkout_quantity, requires_shipping, is_featured, featured_order,
+                       migration_status, safe_metadata_json, source_provider,
+                       target_printful_product_id, legacy_printful_source_product_id,
+                       legacy_wix_external_product_id, updated_at
+                FROM commerce_products
+                ORDER BY is_featured DESC, featured_order ASC, slug ASC`).all(),
+    db.prepare(`SELECT id, product_id, local_variant_key, status, visibility,
+                       is_sellable, availability_status, unit_amount, currency_code, sku,
+                       size_label, color_label, option_values_json, fulfillment_provider,
+                       fulfillment_mapping_status, migration_status, target_printful_product_id,
+                       target_printful_sync_variant_id, target_catalogue_product_id,
+                       target_catalogue_variant_id, legacy_source_product_id,
+                       legacy_source_variant_id, legacy_wix_external_product_id,
+                       legacy_wix_external_variant_id, safe_metadata_json, updated_at
+                FROM commerce_product_variants ORDER BY product_id, local_variant_key, id`).all(),
+  ]);
+  const variants = new Map();
+  for (const row of variantResult?.results || []) {
+    const list = variants.get(row.product_id) || [];
+    list.push(serializeMerchandisingVariant(row));
+    variants.set(row.product_id, list);
+  }
+  const products = (result?.results || []).map((row) => serializeMerchandisingProduct(row, variants.get(row.id) || []));
   return {
     ok: true,
     databaseConfigured: true,
@@ -235,6 +257,80 @@ export async function merchandisingProductsPayload(env, session) {
     featured: products.filter((product) => product.featured),
     updatedAt: products.reduce((latest, product) => !latest || product.updatedAt > latest ? product.updatedAt : latest, "" ) || null,
   };
+}
+
+export async function merchandisingProductPayload(env, session, productId) {
+  const payload = await merchandisingProductsPayload(env, session);
+  const product = payload.products.find((entry) => entry.id === cleanText(productId, 160));
+  if (!product) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
+  return { ok: true, databaseConfigured: payload.databaseConfigured, access: payload.access, product };
+}
+
+export async function updateMerchandisingProduct(env, session, productId, input) {
+  const db = requireCommerceDb(env);
+  const id = cleanText(productId, 160);
+  const current = await db.prepare("SELECT id, safe_metadata_json FROM commerce_products WHERE id = ?").bind(id).first();
+  if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
+  requireExactFields(input, ["title", "slug", "description", "primaryImageUrl", "additionalImages", "categories", "tags", "featured", "visibility", "status", "displayOrder", "maxQuantity", "unitAmount", "currencyCode"], "commerce_product_fields_invalid");
+  const title = requiredPlainText(input.title, 240, "commerce_product_title_invalid");
+  const slug = cleanText(input.slug, 180).toLowerCase();
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new AuthFailure(400, "commerce_product_slug_invalid", "The product slug is invalid.");
+  const description = plainMerchText(input.description, 12000);
+  const primaryImageUrl = validateMerchandisingUrl(input.primaryImageUrl);
+  const additionalImages = validateStringArray(input.additionalImages, 24, 4096, "commerce_product_images_invalid").map(validateMerchandisingUrl).filter(Boolean);
+  const categories = validateStringArray(input.categories, 20, 120, "commerce_product_categories_invalid");
+  const tags = validateStringArray(input.tags, 30, 80, "commerce_product_tags_invalid");
+  const visibility = ["private", "public"].includes(input.visibility) ? input.visibility : invalidMerch("commerce_product_visibility_invalid", "Product visibility is invalid.");
+  const status = ["active", "disabled"].includes(input.status) ? input.status : invalidMerch("commerce_product_status_invalid", "Product status is invalid.");
+  const displayOrder = boundedMerchInteger(input.displayOrder, 0, 999999, "commerce_product_display_order_invalid");
+  const maxQuantity = boundedMerchInteger(input.maxQuantity, 1, 20, "commerce_product_max_quantity_invalid");
+  const featured = input.featured === true ? 1 : input.featured === false ? 0 : invalidMerch("commerce_product_featured_invalid", "Featured state is invalid.");
+  const unitAmount = input.unitAmount === null ? null : boundedMerchInteger(input.unitAmount, 1, 100_000_000, "commerce_product_price_invalid");
+  if (String(input.currencyCode || "").toUpperCase() !== "CAD") throw new AuthFailure(400, "commerce_product_currency_invalid", "Product currency must be CAD.");
+  const timestamp = nowIso();
+  const metadata = { ...safeJson(current.safe_metadata_json, {}), description, publicImage: primaryImageUrl, publicImages: additionalImages, categories, tags, displayOrder };
+  const metadataJson = JSON.stringify(metadata);
+  if (metadataJson.length > 16384) throw new AuthFailure(400, "commerce_product_metadata_too_large", "Product merchandising metadata is too large.");
+  try {
+    await db.prepare(`UPDATE commerce_products SET title = ?, slug = ?, safe_metadata_json = ?, is_featured = ?,
+                      featured_order = CASE WHEN ? = 1 THEN COALESCE(featured_order, ?) ELSE NULL END,
+                      visibility = ?, status = ?, max_checkout_quantity = ?, unit_amount = ?, updated_at = ?
+                      WHERE id = ?`)
+      .bind(title, slug, metadataJson, featured, featured, displayOrder, visibility, status, maxQuantity, unitAmount, timestamp, id).run();
+  } catch (error) {
+    if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "commerce_product_slug_duplicate", "The product slug is already in use.");
+    throw error;
+  }
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.product_updated", targetType: "commerce_product", targetId: id, result: "success", metadata: { fields: Object.keys(input).sort(), visibility, status, featured: Boolean(featured) } });
+  return merchandisingProductPayload(env, session, id);
+}
+
+export async function updateMerchandisingVariant(env, session, productId, variantId, input) {
+  const db = requireCommerceDb(env);
+  const product = cleanText(productId, 160);
+  const id = cleanText(variantId, 160);
+  const current = await db.prepare("SELECT id, safe_metadata_json FROM commerce_product_variants WHERE id = ? AND product_id = ?").bind(id, product).first();
+  if (!current) throw new AuthFailure(404, "commerce_variant_not_found", "The commerce product variant was not found.");
+  requireExactFields(input, ["displayLabel", "size", "color", "options", "unitAmount", "currencyCode", "status", "visibility", "sellable", "availability"], "commerce_variant_fields_invalid");
+  const displayLabel = plainMerchText(input.displayLabel, 240) || null;
+  const size = plainMerchText(input.size, 120) || null;
+  const color = plainMerchText(input.color, 120) || null;
+  const options = validateOptionValues(input.options);
+  const unitAmount = boundedMerchInteger(input.unitAmount, 1, 100_000_000, "commerce_variant_price_invalid");
+  if (String(input.currencyCode || "").toUpperCase() !== "CAD") throw new AuthFailure(400, "commerce_variant_currency_invalid", "Variant currency must be CAD.");
+  const status = ["active", "disabled"].includes(input.status) ? input.status : invalidMerch("commerce_variant_status_invalid", "Variant status is invalid.");
+  const visibility = ["private", "public"].includes(input.visibility) ? input.visibility : invalidMerch("commerce_variant_visibility_invalid", "Variant visibility is invalid.");
+  const sellable = input.sellable === true ? 1 : input.sellable === false ? 0 : invalidMerch("commerce_variant_sellable_invalid", "Variant sellability is invalid.");
+  const availability = ["active", "temporarily_out_of_stock", "discontinued"].includes(input.availability) ? input.availability : invalidMerch("commerce_variant_availability_invalid", "Variant availability is invalid.");
+  const metadata = { ...safeJson(current.safe_metadata_json, {}), displayLabel };
+  const metadataJson = JSON.stringify(metadata);
+  if (metadataJson.length > 16384) throw new AuthFailure(400, "commerce_variant_metadata_too_large", "Variant merchandising metadata is too large.");
+  await db.prepare(`UPDATE commerce_product_variants SET safe_metadata_json = ?, size_label = ?, color_label = ?,
+                    option_values_json = ?, unit_amount = ?, status = ?, visibility = ?, is_sellable = ?,
+                    availability_status = ?, updated_at = ? WHERE id = ? AND product_id = ?`)
+    .bind(metadataJson, size, color, JSON.stringify(options), unitAmount, status, visibility, sellable, availability, nowIso(), id, product).run();
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.variant_updated", targetType: "commerce_product_variant", targetId: id, result: "success", metadata: { productId: product, fields: Object.keys(input).sort(), visibility, status, sellable: Boolean(sellable), availability } });
+  return merchandisingProductPayload(env, session, product);
 }
 
 export async function updateFeaturedProducts(env, session, input) {
@@ -1220,21 +1316,94 @@ function serializeTemplate(row) {
   };
 }
 
-function serializeMerchandisingProduct(row) {
+function serializeMerchandisingProduct(row, variants = []) {
   const metadata = safeJson(row.safe_metadata_json, {});
-  const hasImage = metadata.public_image_captured === true;
-  const hasPrice = metadata.public_price_captured === true;
+  const primaryImageUrl = validateStoredHttpsUrl(metadata.publicImage || metadata.public_image);
+  const additionalImages = safeStoredStringArray(metadata.publicImages, []);
+  const categories = safeStoredStringArray(metadata.categories, []);
+  const tags = safeStoredStringArray(metadata.tags, []);
+  const prices = variants.map((variant) => variant.unitAmount).filter(Number.isSafeInteger);
+  if (!prices.length && Number.isSafeInteger(Number(row.unit_amount))) prices.push(Number(row.unit_amount));
+  const minimum = prices.length ? Math.min(...prices) : null;
+  const maximum = prices.length ? Math.max(...prices) : null;
+  const hasImage = Boolean(primaryImageUrl) || metadata.public_image_captured === true;
+  const hasPrice = minimum !== null || metadata.public_price_captured === true;
+  const activeVariants = variants.filter((variant) => variant.status === "active" && variant.visibility === "public");
+  const sellableVariants = activeVariants.filter((variant) => variant.sellable && variant.availability === "active");
   return {
     id: cleanText(row.id, 160),
     slug: cleanText(row.slug, 180),
     title: cleanText(row.title, 240),
+    description: cleanText(metadata.description, 12000),
+    primaryImageUrl,
+    additionalImages,
+    categories,
+    tags,
     status: cleanText(row.status, 40),
+    visibility: cleanText(row.visibility, 20),
+    currencyCode: String(row.currency_code || "").toUpperCase(),
+    unitAmount: Number.isSafeInteger(Number(row.unit_amount)) ? Number(row.unit_amount) : null,
+    price: { minimum, maximum, label: minimum === null ? "Unavailable" : minimum === maximum ? formatCadMinor(minimum) : `${formatCadMinor(minimum)}–${formatCadMinor(maximum)}` },
+    maxQuantity: Number(row.max_checkout_quantity || 20),
+    requiresShipping: row.requires_shipping === 1,
     featured: row.is_featured === 1,
     featuredOrder: row.is_featured === 1 && Number.isInteger(Number(row.featured_order)) ? Number(row.featured_order) : null,
+    displayOrder: Number.isSafeInteger(Number(metadata.displayOrder)) ? Number(metadata.displayOrder) : Number(row.featured_order || 1000),
+    migrationStatus: cleanText(row.migration_status, 40),
+    sourceProvider: cleanText(row.source_provider, 40),
+    integration: {
+      targetPrintfulProductId: cleanText(row.target_printful_product_id, 240) || null,
+      legacyPrintfulSourceProductId: cleanText(row.legacy_printful_source_product_id, 240) || null,
+      legacyWixExternalProductId: cleanText(row.legacy_wix_external_product_id, 240) || null,
+    },
+    variantCount: variants.length,
+    activeVariantCount: activeVariants.length,
+    sellableVariantCount: sellableVariants.length,
+    readiness: { displayable: row.status === "active" && row.visibility === "public" && hasImage && hasPrice, checkout: sellableVariants.length > 0, fulfillment: fulfillmentReadiness(variants) },
+    variants,
     displayData: { hasImage, hasPrice, ready: hasImage && hasPrice },
     updatedAt: cleanText(row.updated_at, 80),
   };
 }
+
+function serializeMerchandisingVariant(row) {
+  const options = safeJson(row.option_values_json, {});
+  const metadata = safeJson(row.safe_metadata_json, {});
+  const size = cleanText(row.size_label, 120) || null;
+  const color = cleanText(row.color_label, 120) || null;
+  return {
+    id: cleanText(row.id, 160), productId: cleanText(row.product_id, 160), localVariantKey: cleanText(row.local_variant_key, 180),
+    displayLabel: cleanText(metadata.displayLabel, 240) || [size, color].filter(Boolean).join(" / ") || "Standard",
+    status: cleanText(row.status, 40), visibility: cleanText(row.visibility, 20), sellable: row.is_sellable === 1,
+    availability: cleanText(row.availability_status, 40), unitAmount: Number(row.unit_amount), currencyCode: String(row.currency_code || "").toUpperCase(),
+    sku: cleanText(row.sku, 240) || null, size, color, options,
+    fulfillmentProvider: cleanText(row.fulfillment_provider, 40), fulfillmentMappingStatus: cleanText(row.fulfillment_mapping_status, 40), migrationStatus: cleanText(row.migration_status, 40),
+    integration: {
+      targetPrintfulProductId: cleanText(row.target_printful_product_id, 240) || null,
+      targetPrintfulVariantId: cleanText(row.target_printful_sync_variant_id, 240) || null,
+      targetCatalogueProductId: cleanText(row.target_catalogue_product_id, 240) || null,
+      targetCatalogueVariantId: cleanText(row.target_catalogue_variant_id, 240) || null,
+      legacySourceProductId: cleanText(row.legacy_source_product_id, 240) || null,
+      legacySourceVariantId: cleanText(row.legacy_source_variant_id, 240) || null,
+      legacyWixProductId: cleanText(row.legacy_wix_external_product_id, 240) || null,
+      legacyWixVariantId: cleanText(row.legacy_wix_external_variant_id, 240) || null,
+    },
+    updatedAt: cleanText(row.updated_at, 80),
+  };
+}
+
+function fulfillmentReadiness(variants) { if (variants.some((variant) => variant.migrationStatus === "blocked" || variant.fulfillmentMappingStatus === "conflict")) return "blocked"; if (variants.length && variants.every((variant) => variant.fulfillmentMappingStatus === "mapped")) return "mapped"; return "pending"; }
+function formatCadMinor(value) { return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value / 100); }
+function requireExactFields(input, allowed, code) { if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.includes(key)) || allowed.some((key) => !(key in input))) throw new AuthFailure(400, code, "The merchandising mutation fields are invalid."); }
+function requiredPlainText(value, maximum, code) { const text = plainMerchText(value, maximum); if (!text) throw new AuthFailure(400, code, "A required merchandising value is invalid."); return text; }
+function plainMerchText(value, maximum) { const text = cleanText(value, maximum); return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ""); }
+function boundedMerchInteger(value, minimum, maximum, code) { const number = Number(value); if (!Number.isSafeInteger(number) || number < minimum || number > maximum) throw new AuthFailure(400, code, "A bounded integer merchandising value is invalid."); return number; }
+function invalidMerch(code, message) { throw new AuthFailure(400, code, message); }
+function validateMerchandisingUrl(value) { const text = plainMerchText(value, 4096); if (!text) return null; try { const url = new URL(text); if (url.protocol !== "https:" || url.username || url.password) throw new Error(); return url.href; } catch { throw new AuthFailure(400, "commerce_product_image_invalid", "Product images must use safe HTTPS URLs."); } }
+function validateStringArray(value, maximum, itemLength, code) { if (!Array.isArray(value) || value.length > maximum) throw new AuthFailure(400, code, "The merchandising list is invalid."); const result = [...new Set(value.map((item) => plainMerchText(item, itemLength)).filter(Boolean))]; if (result.length !== value.length && value.some((item) => !plainMerchText(item, itemLength))) throw new AuthFailure(400, code, "The merchandising list is invalid."); return result; }
+function validateOptionValues(value) { if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length > 12) throw new AuthFailure(400, "commerce_variant_options_invalid", "Variant options are invalid."); const entries = Object.entries(value).map(([key, item]) => [plainMerchText(key, 80), plainMerchText(item, 120)]).filter(([key, item]) => key && item); if (entries.length !== Object.keys(value).length) throw new AuthFailure(400, "commerce_variant_options_invalid", "Variant options are invalid."); return Object.fromEntries(entries); }
+function validateStoredHttpsUrl(value) { const text = cleanText(value, 4096); if (!text) return null; try { const url = new URL(text); return url.protocol === "https:" && !url.username && !url.password ? url.href : null; } catch { return null; } }
+function safeStoredStringArray(value, fallback) { try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) && parsed.length ? parsed.map((item) => cleanText(item, 4096)).filter(Boolean) : Array.isArray(fallback) ? fallback.map((item) => cleanText(item, 4096)).filter(Boolean) : []; } catch { return Array.isArray(fallback) ? fallback.map((item) => cleanText(item, 4096)).filter(Boolean) : []; } }
 
 function validateBusinessProfile(input, current) {
   const tradingName = cleanText(input?.tradingName ?? current?.trading_name, 160);

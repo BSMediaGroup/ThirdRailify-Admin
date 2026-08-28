@@ -1,5 +1,18 @@
 # Commerce architecture
 
+## Replacement catalogue read path
+
+```text
+Admin Commerce D1 -> /api/public/commerce/catalogue
+                  -> /api/public/commerce/products/:slug
+                  -> Public same-origin Pages Function proxy
+                  -> replacement shop UI and local variant-aware cart
+```
+
+Commerce D1 owns replacement product and variant identities, integer CAD prices, public presentation, and readiness state. Public owns no Commerce D1 binding and receives only local IDs plus sanitized merchandising fields. Browser totals are display values; the checkout server revalidates product/variant association, state, quantity, currency, and exact D1 price.
+
+Displayability is deliberately separate from checkout and fulfillment readiness. The 49 accepted current-Wix products may be public while their Printful migration is paused or incomplete. The preserved target-native My Balloon product remains private. Checkout, live payment capture, and fulfillment submission stay gated for the later Stripe sandbox milestone; Wix remains production until explicit cutover.
+
 ## Milestone posture
 
 This repository contains the Admin-only control-plane foundation for a future Stripe-first Canadian commerce stack. It is a staging scaffold, not an activated payment or fulfillment system.

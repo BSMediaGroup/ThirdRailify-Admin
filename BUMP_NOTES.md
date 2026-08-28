@@ -1,5 +1,12 @@
 # Bump notes
 
+## 2026-08-28 — Commerce D1 storefront authority
+
+- Reused the existing bounded merchandising JSON plus first-class visibility/status/price fields for product images, descriptions, categories/tags, display order, and variant display labels; no commerce migration was required.
+- Replaced the featured-only `/products` surface with searchable/filterable product and variant management, integer CAD editing, provider-readiness presentation, protected mutations, and commerce audit records.
+- Added sanitized public catalogue and product-by-slug projections. Provider IDs, migration details, SKUs, and internal metadata are excluded.
+- Added a deterministic 49-product merchandising reconciliation while leaving My Balloon private, sellability unchanged, checkout disabled, and the Printful checkpoint untouched.
+
 CURRENT VER=0.0.0-seed
 
 PENDING VER=0.1.0-alpha.0

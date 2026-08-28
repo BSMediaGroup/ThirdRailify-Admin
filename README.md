@@ -1,5 +1,11 @@
 # Third Railify Admin
 
+## Replacement commerce catalogue authority
+
+Commerce D1 (`thirdrailify-commerce`) is the merchandising and CAD price authority for the replacement shop. `/products` manages product presentation, public visibility, deterministic ordering, bounded quantities, variant labels/options, integer-minor-unit CAD prices, and display-versus-checkout readiness. Provider identities and migration provenance are read-only integration metadata.
+
+The Admin exposes only a sanitized, unauthenticated read projection under `/api/public/commerce/*`; the Public Pages project proxies that projection without owning a Commerce D1 binding. Checkout, live payment capture, and fulfillment remain globally disabled. The permanent Printful migration is independently checkpointed and may remain manually paused while products are displayed.
+
 Independent authenticated control room for Third Railify operations. The shared D1 account authority, real session/role enforcement, bounded account administration, and an Admin-only Canadian commerce control plane are implemented. The real Printful API can be verified read-only against its dedicated store, while checkout, live payment capture, provider writes, and fulfillment remain disabled.
 
 ## Current state

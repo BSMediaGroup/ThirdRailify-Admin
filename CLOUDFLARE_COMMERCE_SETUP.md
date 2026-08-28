@@ -1,5 +1,14 @@
 # Future Cloudflare commerce setup
 
+## Catalogue authority and projection
+
+- Bind `THIRDRAILIFY_COMMERCE_DB` only to the Admin project.
+- Keep the database pinned to `thirdrailify-commerce` / `3dd23a7e-7c64-49cb-a52c-c1540b41db1c`.
+- The Public project calls the Admin HTTPS origin through its same-origin `/api/commerce/*` proxy; no Admin credential or commerce secret is sent to the browser.
+- Public catalogue responses are sanitized and bounded-cacheable. Authenticated Admin writes are never publicly cached.
+- Keep `checkout_enabled`, `live_payment_capture_enabled`, and `fulfillment_submission_enabled` false and `printful_order_mode` at `draft_only` until their separate acceptance milestones.
+- A paused permanent Printful job must not be resumed by catalogue reads or merchandising writes.
+
 This runbook records the completed staging control-plane prerequisites and the separately authorized steps that remain. Do not use it to activate live commerce.
 
 ## Current blockers and invariants

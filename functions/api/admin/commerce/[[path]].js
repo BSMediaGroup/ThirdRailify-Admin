@@ -16,12 +16,15 @@ import {
   commerceOverview,
   grantCommerceCapability,
   merchandisingProductsPayload,
+  merchandisingProductPayload,
   permissionGrantsPayload,
   requireCommerceCapability,
   revokeCommerceCapability,
   templatesPayload,
   updateBusinessProfile,
   updateFeaturedProducts,
+  updateMerchandisingProduct,
+  updateMerchandisingVariant,
   updateTemplate,
   verifyPrintfulStore,
   verifyStripeAccount,
@@ -73,6 +76,9 @@ async function handleGet(request, env, path) {
   } else if (path === "products") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductsPayload(env, session);
+  } else if (path.startsWith("products/")) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await merchandisingProductPayload(env, session, decodePathPart(path.slice("products/".length)));
   } else if (path === "orders") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOrdersPayload(env, session);
@@ -163,9 +169,20 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     authEventType = "commerce_template_updated";
   } else if (path === "products/featured") {
     const body = await readJsonBody(request);
-    await requireMasterAdmin(env, request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
     payload = await updateFeaturedProducts(env, session, body);
     authEventType = "commerce_featured_products_updated";
+  } else if (/^products\/[^/]+\/variants\/[^/]+$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    const [, productPart, , variantPart] = path.split("/");
+    payload = await updateMerchandisingVariant(env, session, decodePathPart(productPart), decodePathPart(variantPart), body);
+    authEventType = "commerce_variant_updated";
+  } else if (/^products\/[^/]+$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await updateMerchandisingProduct(env, session, decodePathPart(path.slice("products/".length)), body);
+    authEventType = "commerce_product_updated";
   } else if (path === "permissions/grant") {
     const body = await readJsonBody(request);
     await requireMasterAdmin(env, request);
