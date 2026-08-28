@@ -47,6 +47,17 @@ import {
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
+import { ingestCommerceProductMedia } from "../../../_shared/commerce-media.js";
+import {
+  createTaxRegistration,
+  issueOrderDocumentAccess,
+  orderDocumentPreviewPayload,
+  productionReadinessPayload,
+  sendTestTemplateEmail,
+  taxRegistrationsPayload,
+  templatePreviewPayload,
+  updateTaxRegistration,
+} from "../../../_shared/commerce-control-plane.js";
 import {
   permanentMigrationPayload,
   resumeManuallyPausedPermanentPrintfulMigration,
@@ -75,12 +86,19 @@ async function handleGet(request, env, path) {
   if (!path || path === "overview") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOverview(env, session);
+    if (payload.databaseConfigured) payload.readiness = await productionReadinessPayload(env, session);
   } else if (path === "business") {
     await requireCommerceCapability(env, session, "commerce.business.manage");
     payload = await businessProfilePayload(env, session);
   } else if (path === "templates") {
     await requireCommerceCapability(env, session, "commerce.templates.manage");
     payload = await templatesPayload(env, session);
+  } else if (path === "tax") {
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await taxRegistrationsPayload(env, session);
+  } else if (path === "readiness") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await productionReadinessPayload(env, session);
   } else if (path === "products") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductsPayload(env, session);
@@ -93,6 +111,10 @@ async function handleGet(request, env, path) {
   } else if (path === "orders") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOrdersPayload(env, session);
+  } else if (/^orders\/[^/]+\/documents\/(receipt|invoice)$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    const [, orderId, , documentType] = path.split("/");
+    payload = await orderDocumentPreviewPayload(env, session, decodePathPart(orderId), documentType);
   } else if (path === "printful/catalogue/migration") {
     await requireMasterAdmin(env, request);
     payload = await permanentMigrationPayload(env);
@@ -113,6 +135,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   const isSnapshotStart = snapshotBody?.phase === "begin" && !snapshotBody?.checkpoint;
   const rateCategory = path === "printful/catalogue/migrate"
     ? "commerce_migration"
+    : path.endsWith("/send-test") ? "commerce_email"
     : path === "printful/catalogue/snapshot" && !isSnapshotStart ? "commerce_snapshot" : "commerce";
   await enforceRateLimit(env, request, rateCategory, session.accountId);
   let payload;
@@ -186,17 +209,48 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.business.manage");
     payload = await updateBusinessProfile(env, session, body);
     authEventType = "commerce_business_updated";
+  } else if (path === "tax") {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await createTaxRegistration(env, session, body);
+    authEventType = "commerce_tax_registration_created";
+  } else if (/^tax\/[^/]+$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await updateTaxRegistration(env, session, decodePathPart(path.slice("tax/".length)), body);
+    authEventType = "commerce_tax_registration_updated";
+  } else if (/^templates\/[^/]+\/preview$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.templates.manage");
+    payload = await templatePreviewPayload(env, session, decodePathPart(path.split("/")[1]), body);
+  } else if (/^templates\/[^/]+\/send-test$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.templates.manage");
+    payload = await sendTestTemplateEmail(env, session, decodePathPart(path.split("/")[1]), body, fetchImpl);
+    authEventType = "commerce_template_test_email_requested";
   } else if (path.startsWith("templates/")) {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.templates.manage");
     const templateKey = decodePathPart(path.slice("templates/".length));
     payload = await updateTemplate(env, session, templateKey, body);
     authEventType = "commerce_template_updated";
+  } else if (/^orders\/[^/]+\/documents\/(receipt|invoice)\/issue$/.test(path)) {
+    const body = await readJsonBody(request);
+    if (body?.confirmIssue !== true || Object.keys(body).length !== 1) throw new AuthFailure(400, "document_issue_confirmation_required", "Explicit document issuance confirmation is required.");
+    await requireCommerceCapability(env, session, "commerce.templates.manage");
+    const [, orderId, , documentType] = path.split("/");
+    payload = await issueOrderDocumentAccess(env, session, decodePathPart(orderId), documentType);
+    authEventType = "commerce_order_document_issued";
   } else if (path === "products/featured") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
     payload = await updateFeaturedProducts(env, session, body);
     authEventType = "commerce_featured_products_updated";
+  } else if (/^products\/[^/]+\/media\/ingest$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await ingestCommerceProductMedia(env, session, decodePathPart(path.split("/")[1]), body, fetchImpl);
+    authEventType = "commerce_product_media_ingested";
   } else if (path === "collections") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");

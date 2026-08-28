@@ -14,8 +14,10 @@ export type BusinessProfile = {
   tradingName: string; countryCode: string; provinceCode: string; currencyCode: string; publicAddress: PublicAddress;
   publicContactEmail: string; supportEmail: string; publicPhone: string; websiteUrl: string; invoicePrefix: string; documentFooter: string;
   taxProviderState: string; invoiceAccentColor: string; receiptAccentColor: string;
-  private: { legalBusinessNameStored: boolean; privateAddressStored: boolean; registrations: Array<{ type: string; jurisdiction: string; maskedIdentifier: string; status: string }> };
+  private: { legalBusinessNameStored: boolean; privateAddressStored: boolean; privatePhoneStored: boolean; businessRegistrationNumberStored: boolean; legalBusinessName: string; privateAddress: PublicAddress; privatePhone: string; businessRegistrationNumber: string; registrations: Array<{ type: string; jurisdiction: string; maskedIdentifier: string; status: string }> };
 };
+export type ReadinessDomain = { ready: boolean; status: "ready" | "blocked"; summary: string; details: Record<string, unknown> };
+export type ProductionReadiness = { ok: boolean; authority: string; phase: "pre_cutover"; productionReady: boolean; mandatoryDomains: string[]; domains: Record<string, ReadinessDomain>; checkedAt: string };
 export type CommerceOverviewPayload = {
   ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; stripeSecretConfigured: boolean; printfulSecretConfigured: boolean; access: CommerceAccess;
   printfulCatalogueSnapshot: {
@@ -24,14 +26,19 @@ export type CommerceOverviewPayload = {
   };
   posture: Record<string, string>; providers: ProviderStatus[]; business: Omit<BusinessProfile, "private">;
   completeness: { businessProfile: string; tax: string; templates: string };
-  counts: { products: number | null; orders: number | null; templates: number | null }; checkedAt: string;
+  counts: { products: number | null; orders: number | null; templates: number | null }; readiness?: ProductionReadiness; checkedAt: string;
 };
 export type BusinessPayload = { ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; access: CommerceAccess; profile: BusinessProfile };
 export type CommerceTemplate = {
-  templateKey: string; subject: string; preheader: string; heading: string; introduction: string; bodyBlocks: string[];
-  ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; revision: number;
+  templateKey: string; templateKind: "email" | "document"; displayName: string; subject: string; preheader: string; heading: string; introduction: string; bodyBlocks: string[];
+  ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; enabled: boolean; revision: number;
 };
 export type TemplatesPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; templates: CommerceTemplate[] };
+export type TaxRegistration = { id: string; registrationType: "gst_hst" | "qst" | "pst" | "rst" | "other"; jurisdiction: string; countryCode: string; provinceCode: string | null; maskedIdentifier: string; status: string; effectiveDate: string | null; expiresAt: string | null; notes: string; documentDisclosureEnabled: boolean; revision: number; updatedAt: string };
+export type TaxPayload = { ok: boolean; access: CommerceAccess; registrations: TaxRegistration[]; calculation: { provider: string; stripeTax: string; ratesConfigured: boolean }; readiness: { ready: boolean; status: string; reason: string } };
+export type TemplatePreviewPayload = { ok: boolean; preview: CommerceTemplate & { text: string; html: string }; source: string; test: boolean; orderId: string | null; variables: Record<string, string> };
+export type CommerceDocument = { type: "receipt" | "invoice"; available: boolean; reason: string; test: boolean; marker: string; displayReference: string; orderReference: string; merchantName: string; legalName: string | null; legalAddress: PublicAddress | string | null; supportEmail: string; issuedAt: string; payment: string; fulfillment: string; items: Array<{ productName: string; variantName: string | null; options: Record<string, string>; unitAmount: number; quantity: number; lineTotalAmount: number }>; subtotal: number; shipping: number | null; tax: number | null; total: number; currency: string; templateKey: string; templateRevision: number; disclosures: string[] };
+export type DocumentPreviewPayload = { ok: boolean; access: CommerceAccess; document: CommerceDocument };
 export type MerchandisingVariant = {
   id: string; productId: string; localVariantKey: string; displayLabel: string; status: string; visibility: string;
   sellable: boolean; availability: string; unitAmount: number; currencyCode: string; sku: string | null;
@@ -312,12 +319,18 @@ export function saveBusinessProfile(csrfToken: string, body: Record<string, unkn
   return adminApi<BusinessPayload>("/api/admin/commerce/business", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
 export function getCommerceTemplates() { return adminApi<TemplatesPayload>("/api/admin/commerce/templates"); }
+export function getTaxRegistrations() { return adminApi<TaxPayload>("/api/admin/commerce/tax"); }
+export function createTaxRegistration(csrfToken: string, body: Record<string, unknown>) { return adminApi<TaxPayload>("/api/admin/commerce/tax", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
+export function saveTaxRegistration(csrfToken: string, id: string, body: Record<string, unknown>) { return adminApi<TaxPayload>(`/api/admin/commerce/tax/${encodeURIComponent(id)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
 export function saveCommerceTemplate(csrfToken: string, template: CommerceTemplate) {
   return adminApi<TemplatesPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(template) });
 }
+export function previewCommerceTemplate(csrfToken: string, template: CommerceTemplate, orderId?: string) { return adminApi<TemplatePreviewPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}/preview`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ template, ...(orderId ? { orderId } : {}) }) }); }
+export function sendCommerceTemplateTest(csrfToken: string, templateKey: string, recipient: string, orderId?: string) { return adminApi<{ ok: true; duplicate: boolean; status: string; recipient: string }>(`/api/admin/commerce/templates/${encodeURIComponent(templateKey)}/send-test`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ recipient, ...(orderId ? { orderId } : {}) }) }); }
 export function getMerchandisingProducts() { return adminApi<MerchandisingPayload>("/api/admin/commerce/products"); }
 export function getCollections() { return adminApi<CollectionsPayload>("/api/admin/commerce/collections"); }
 export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
+export function getOrderDocument(orderId: string, type: "receipt" | "invoice") { return adminApi<DocumentPreviewPayload>(`/api/admin/commerce/orders/${encodeURIComponent(orderId)}/documents/${type}`); }
 export function generateControlledTestCheckout(csrfToken: string, body: { checkoutRequestId: string; productId: string; variantId: string; quantity: 1 }) {
   return adminApi<TestCheckoutPayload>("/api/admin/commerce/test-checkout", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
@@ -326,6 +339,9 @@ export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {
 }
 export function saveMerchandisingProduct(csrfToken: string, productId: string, body: Record<string, unknown>) {
   return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+}
+export function ingestMerchandisingProductMedia(csrfToken: string, productId: string, imageUrls: string[]) {
+  return adminApi<{ ok: true; productId: string; primaryImageUrl: string | null; additionalImages: string[]; assets: Array<{ url: string; sha256: string; contentType: string; bytes: number }> }>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/media/ingest`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ imageUrls }) });
 }
 export function saveMerchandisingVariant(csrfToken: string, productId: string, variantId: string, body: Record<string, unknown>) {
   return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });

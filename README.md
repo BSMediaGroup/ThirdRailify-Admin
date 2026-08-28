@@ -116,7 +116,7 @@ ThirdRailify-Admin/
 │   └── _redirects          SPA fallback
 ├── functions/
 │   ├── _shared/            D1 auth/session/OAuth/security, profile-media, commerce, and GOATS helpers
-│   ├── api/                Shared auth, signed Admin/GOATS APIs, public projections, and signed Stripe webhook receiver
+│   ├── api/                Shared auth, protected contact delivery, signed Admin/GOATS APIs, public projections, and signed Stripe webhook receiver
 │   └── u/                  Immutable R2-backed profile-media delivery
 ├── commerce-import/        Sanitized catalogue evidence and design-only variant schema
 ├── commerce-migrations/    Commerce, Stripe/order/product/collection authority, and additive GOATS community schema
@@ -149,6 +149,8 @@ ThirdRailify-Admin/
 Additive banner files in this structure are `commerce-migrations/0006_site_banner.sql`, `functions/_shared/banner-core.js`, the Public/protected banner Functions, `src/banner/client.ts`, `src/pages/SiteContentPage.tsx`, and focused Function/browser tests. Banner content uses the existing Admin-owned commerce D1; auth D1 is used only for the existing session, rate-limit, and audit conventions.
 
 `commerce-migrations/0009_commerce_collections.sql` is the additive collection authority. It preserves the existing category slugs while adding stable collection metadata and normalized product membership. `/collections` and product editing reuse the existing authenticated commerce capability, exact-Origin, CSRF, rate-limit, revision, parameterized-D1, and audit boundaries; Public receives only active visible collection metadata and displayable memberships.
+
+Catalogue imagery is copied into the existing Admin-owned R2 binding under immutable `commerce/catalogue/<sha256>.<ext>` keys and served through `/commerce-media/<sha256>.<ext>` with year-long immutable caching, content sniffing, and cross-origin image delivery. Product saves ingest external HTTPS image sources before persisting first-party URLs; the Public catalogue owns no R2 binding and receives only those safe first-party URLs. Products and Collections use focus-trapped, body-scroll-locked modal editors so long lists never push editing controls below the page.
 
 `docs/WATCH_V2.md` documents the Watch management route, signed server boundary, and Public archive ownership.
 

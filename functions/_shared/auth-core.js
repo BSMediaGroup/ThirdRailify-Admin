@@ -31,11 +31,13 @@ const RATE_RULES = {
   profile: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   avatar: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   commerce: { limit: 30, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
+  commerce_email: { limit: 5, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   commerce_snapshot: { limit: 2_000, windowSeconds: 4 * 60 * 60, blockSeconds: 15 * 60 },
   commerce_migration: { limit: 5_000, windowSeconds: 24 * 60 * 60, blockSeconds: 15 * 60 },
   checkout: { limit: 12, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   watch: { limit: 60, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
   site_content: { limit: 30, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
+  contact: { limit: 6, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
 };
 
 const ONE_TIME_TABLES = new Set(["email_verification_tokens", "password_reset_tokens"]);
@@ -864,19 +866,24 @@ export async function writeAudit(env, event) {
 export async function sendAccountEmail(env, message, fetchImpl = fetch) {
   const apiKey = String(env?.RESEND_API_KEY || "");
   const from = cleanText(env?.MAIL_FROM, 254);
-  const replyTo = normalizeEmail(env?.MAIL_REPLY_TO);
+  const recipients = (Array.isArray(message.to) ? message.to : [message.to]).map(normalizeEmail).filter(Boolean);
+  const carbonCopy = (Array.isArray(message.cc) ? message.cc : message.cc ? [message.cc] : []).map(normalizeEmail).filter(Boolean);
+  const replyTo = normalizeEmail(message.replyTo) || normalizeEmail(env?.MAIL_REPLY_TO);
+  const idempotencyKey = /^[0-9a-f]{64}$/.test(String(message.idempotencyKey || "")) ? String(message.idempotencyKey) : "";
   if (!apiKey || !from) throw new AuthFailure(503, "email_not_configured", "Account email delivery is not configured.");
+  if (!recipients.length) throw new AuthFailure(503, "email_recipient_not_configured", "Email delivery is not configured.");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
     const response = await fetchImpl("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}) },
       redirect: "manual",
       signal: controller.signal,
       body: JSON.stringify({
         from,
-        to: [message.to],
+        to: recipients,
+        ...(carbonCopy.length ? { cc: carbonCopy } : {}),
         subject: message.subject,
         html: message.html,
         text: message.text,
@@ -884,6 +891,8 @@ export async function sendAccountEmail(env, message, fetchImpl = fetch) {
       }),
     });
     if (!response.ok) throw new Error("email delivery failed");
+    try { const payload = await response.clone().json(); return { providerMessageId: cleanText(payload?.id, 200) || null }; }
+    catch { return { providerMessageId: null }; }
   } catch {
     throw new AuthFailure(503, "email_unavailable", "Account email delivery is temporarily unavailable.");
   } finally {

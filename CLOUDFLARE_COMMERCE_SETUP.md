@@ -115,3 +115,9 @@ Do not configure PayPal credentials yet. Its future direct-merchant REST credent
 Require evidence for exact D1 identity and migration, secret presence without values, role/capability enforcement, CSRF/rate limits/audit redaction, read-only Stripe account identity, webhook signature/idempotency, test Checkout redirect and completion, wallet eligibility, refund/dispute handling, order reconciliation, Printful draft creation, explicit no-confirm behavior, and Public's no-secret boundary.
 
 Keep Wix connected throughout testing. A later production cutover requires its own inventory/order/customer/policy reconciliation, URL plan, rollback plan, and explicit approval. No deployment or live provider activation is part of this runbook's current execution.
+
+## Production-control configuration still required
+
+The Admin now exposes permanent operator controls at `/commerce/business`, `/commerce/tax`, `/commerce/emails`, and `/orders`. Known safe defaults may remain `Third Railify Official`, `CA`, `ON`, `CAD`, and `info@thirdrailify.com`; do not fill legal entity, registration, address, phone, tax status, identifier, or rate fields with placeholders.
+
+Before production readiness can become true, an authorized operator must enter and approve the legal identity/address/contact fields, configure the applicable tax registrations and calculation strategy, configure shipping, finish and accept the paused Printful catalogue/draft-order workflow, configure live Stripe credentials and webhook evidence, enable the required customer templates and communications gate, approve invoice disclosures, and separately enable normal checkout, live payments, fulfillment submission, and customer document access. These gates must remain disabled until their own milestones.

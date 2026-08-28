@@ -1000,7 +1000,19 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .commerce-product-row small,.commerce-product-row span { color: var(--quiet); font-size: .65rem; }
 .commerce-product-row__image { width: 66px; height: 66px; display: grid; place-items: center; overflow: hidden; border-radius: 7px; background: #151510; color: var(--gold); }
 .commerce-product-row__image img { width: 100%; height: 100%; object-fit: cover; }
+.commerce-row-action,.commerce-editor-close,.commerce-editor-secondary,.commerce-editor-danger { min-height: 42px; padding: 0 16px; border: 1px solid var(--gold); border-radius: 8px; font: 700 .72rem var(--body); cursor: pointer; transition: border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease; }
+.commerce-row-action { color: #080807; background: var(--gold); box-shadow: 0 7px 22px rgba(243,201,40,.12); }
+.commerce-row-action:hover,.commerce-row-action:focus-visible { background: var(--gold-hot); transform: translateY(-1px); outline: 2px solid rgba(243,201,40,.3); outline-offset: 2px; }
+.commerce-editor-close,.commerce-editor-secondary { color: var(--gold); background: rgba(243,201,40,.055); }
+.commerce-editor-close:hover,.commerce-editor-close:focus-visible,.commerce-editor-secondary:hover,.commerce-editor-secondary:focus-visible { color: #080807; background: var(--gold); outline: 2px solid rgba(243,201,40,.3); outline-offset: 2px; }
+.commerce-editor-danger { border-color: rgba(242,141,117,.7); color: #f5a18d; background: rgba(242,141,117,.055); }
+.commerce-editor-danger:hover,.commerce-editor-danger:focus-visible { color: #080807; background: #f28d75; outline: 2px solid rgba(242,141,117,.28); outline-offset: 2px; }
+.commerce-row-action:disabled,.commerce-editor-close:disabled,.commerce-editor-secondary:disabled,.commerce-editor-danger:disabled { opacity: .42; cursor: default; transform: none; }
+.commerce-editor-backdrop { position: fixed; z-index: 180; inset: 0; display: grid; min-width: 0; min-height: 0; place-items: center; padding: clamp(12px,2vw,28px); background: rgba(3,3,2,.88); backdrop-filter: blur(12px); }
+.commerce-editor-dialog { width: min(1180px,100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; border: 1px solid rgba(243,201,40,.46); border-radius: 14px; background: #0c0c09; box-shadow: 0 34px 120px rgba(0,0,0,.82),0 0 60px rgba(243,201,40,.06); scrollbar-color: rgba(243,201,40,.65) #0b0b09; }
+.commerce-editor-dialog:focus { outline: none; }
 .commerce-product-editor { padding: 24px; border: 1px solid rgba(243,201,40,.38); border-radius: 12px; background: linear-gradient(145deg,rgba(243,201,40,.045),rgba(255,255,255,.01)); }
+.commerce-editor-dialog > .commerce-product-editor { border: 0; border-radius: 0; }
 .commerce-product-editor > header { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
 .commerce-product-editor h2,.commerce-variant-manager h2 { margin: 4px 0 0; }
 .featured-dirty-rail { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 15px; border: 1px solid rgba(243,201,40,.45); border-radius: 9px; background: #15130a; }
@@ -1075,6 +1087,10 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .commerce-product-row > div:not(.commerce-product-row__image),.commerce-product-row > button { grid-column: 2; }
   .commerce-product-row__image { width: 54px; height: 54px; }
   .commerce-product-editor { padding: 16px; }
+  .commerce-editor-backdrop { align-items: end; padding: 0; }
+  .commerce-editor-dialog { width: 100%; max-height: 96vh; max-height: 96dvh; border-right: 0; border-bottom: 0; border-left: 0; border-radius: 14px 14px 0 0; }
+  .commerce-product-editor > header { align-items: stretch; flex-direction: column; }
+  .commerce-editor-close { align-self: flex-start; }
   .featured-dirty-rail,.collection-admin-heading,.collection-editor__actions { align-items: stretch; flex-direction: column; }
   .featured-dirty-rail > div { justify-content: flex-end; }
   .collection-assignment__tools { grid-template-columns: 1fr; }

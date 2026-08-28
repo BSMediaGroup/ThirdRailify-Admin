@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import { onRequestGet as catalogueRequest } from "../functions/api/public/commerce/catalogue.js";
 import { onRequestGet as productRequest } from "../functions/api/public/commerce/products/[slug].js";
+import { commerceMediaResponse } from "../functions/_shared/commerce-media.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { applySqlBatches, commerceEnvironment, createCommerceDatabases, importPermanentCatalogue, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
@@ -28,6 +29,20 @@ test("Admin product and variant merchandising requires auth, exact origin, CSRF,
   for (const [body, code] of [[variantBody({ unitAmount: -1 }), "commerce_variant_price_invalid"], [variantBody({ currencyCode: "USD" }), "commerce_variant_currency_invalid"], [{ ...variantBody(), targetPrintfulVariantId: "overwrite" }, "commerce_variant_fields_invalid"]]) { const response = await commerceRequest({ request: jsonRequest(variantUrl, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body }), env, data: {} }); assert.equal(response.status, 400); assert.equal((await response.json()).error, code); }
   await insertTestProduct(harness.commerceDb, { id: "product-test-002", slug: "other-product" }); const duplicate = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/product-test-002`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: productBody() }), env, data: {} }); assert.equal(duplicate.status, 409); assert.equal((await duplicate.json()).error, "commerce_product_slug_duplicate");
   const audits = await harness.commerceDb.prepare("SELECT action,actor_account_id FROM commerce_audit WHERE action IN ('commerce.product_updated','commerce.variant_updated') ORDER BY action").all(); assert.deepEqual(audits.results.map((row) => row.action), ["commerce.product_updated", "commerce.variant_updated"]); assert.ok(audits.results.every((row) => row.actor_account_id === master.id));
+});
+
+test("product media ingestion copies validated bytes into first-party R2 and serves immutable cross-origin images", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const objects = new Map();
+  const bucket = { async head(key) { return objects.get(key) || null; }, async put(key, body, options) { const bytes = new Uint8Array(body); objects.set(key, { body: bytes, size: bytes.byteLength, httpEtag: '"fixture"', httpMetadata: options.httpMetadata }); }, async get(key) { return objects.get(key) || null; } };
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_PROFILE_MEDIA: bucket, THIRDRAILIFY_PROFILE_MEDIA_ORIGIN: ADMIN_ORIGIN }); const { created, cookie } = await masterSession(env); await insertTestProduct(harness.commerceDb);
+  const png = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+  const fetchImage = async () => new Response(png, { status: 200, headers: { "Content-Type": "image/png", "Content-Length": String(png.byteLength) } });
+  const url = `${ADMIN_ORIGIN}/api/admin/commerce/products/product-test-001/media/ingest`;
+  const response = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { imageUrls: ["https://static.wixstatic.com/media/source.png"] } }), env, data: { commerceFetch: fetchImage } });
+  assert.equal(response.status, 200); const payload = await response.json(); assert.match(payload.primaryImageUrl, /^https:\/\/thirdrailify-admin\.pages\.dev\/commerce-media\/[a-f0-9]{64}\.png$/); assert.equal(payload.assets[0].contentType, "image/png"); assert.equal(objects.size, 1);
+  const delivered = await commerceMediaResponse(new Request(payload.primaryImageUrl), env); assert.equal(delivered.status, 200); assert.equal(delivered.headers.get("content-type"), "image/png"); assert.equal(delivered.headers.get("cross-origin-resource-policy"), "cross-origin"); assert.match(delivered.headers.get("cache-control"), /immutable/); assert.deepEqual(new Uint8Array(await delivered.arrayBuffer()), png);
+  const repeated = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { imageUrls: [payload.primaryImageUrl] } }), env, data: { commerceFetch: () => { throw new Error("first-party media must not be refetched"); } } }); assert.equal(repeated.status, 200); assert.equal(objects.size, 1);
+  const audit = await harness.commerceDb.prepare("SELECT action FROM commerce_audit WHERE action='commerce.product_media_ingested'").first(); assert.equal(audit.action, "commerce.product_media_ingested");
 });
 
 test("authorized commerce role can edit while ungranted Admin is rejected", async (t) => {

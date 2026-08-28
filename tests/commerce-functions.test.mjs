@@ -55,6 +55,26 @@ test("business mutations require CSRF and encryption, then persist ciphertext on
   assert.ok(audits.results.length >= 1); assert.doesNotMatch(JSON.stringify(audits.results), /123456789|Private legal name/);
 });
 
+test("tax, template preview, and test-email routes enforce auth, exact origin, CSRF, capability, and dedicated rate limiting", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  const taxUrl = `${ADMIN_ORIGIN}/api/admin/commerce/tax`;
+  const body = { registrationType: "gst_hst", jurisdiction: "CA", countryCode: "CA", provinceCode: "", identifier: "123456789RT0001", status: "unverified", effectiveDate: "", expiresAt: "", notes: "", documentDisclosureEnabled: false };
+  const unauthenticated = await commerceRequest({ request: jsonRequest(taxUrl, { origin: ADMIN_ORIGIN, body, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(unauthenticated.status, 401);
+  const wrongOrigin = await commerceRequest({ request: jsonRequest(taxUrl, { origin: "https://evil.example", cookie, body, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(wrongOrigin.status, 403);
+  const noCsrf = await commerceRequest({ request: jsonRequest(taxUrl, { origin: ADMIN_ORIGIN, cookie, body }), env, data: {} }); assert.equal(noCsrf.status, 403);
+  const createdTax = await commerceRequest({ request: jsonRequest(taxUrl, { origin: ADMIN_ORIGIN, cookie, body, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(createdTax.status, 200); assert.doesNotMatch(JSON.stringify(await createdTax.json()), /123456789RT0001/);
+
+  const preview = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/templates/order_confirmation/preview`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: {} }), env, data: {} });
+  assert.equal(preview.status, 200); assert.equal((await preview.json()).source, "synthetic_fixture");
+
+  let sends = 0; let response;
+  const commerceFetch = async () => { sends += 1; return Response.json({ id: "test-email-id" }); };
+  for (let attempt = 0; attempt < 6; attempt += 1) response = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/templates/order_confirmation/send-test`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { recipient: "master@example.test" } }), env, data: { commerceFetch } });
+  assert.equal(response.status, 429); assert.equal(sends, 1);
+  const rate = await harness.authDb.prepare("SELECT attempt_count FROM auth_rate_limits WHERE category='commerce_email'").first(); assert.equal(rate.attempt_count, 6);
+});
+
 test("Stripe verification route enforces auth, payments authority, CSRF, configuration, and a read-only provider request", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "rk_test_notARealRestrictedKey123" });

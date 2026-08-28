@@ -19,6 +19,8 @@
     "ADMIN_EMAIL_2": "thirdmailify@gmail.com",
     "MAIL_FROM": "Third Railify Official <alerts@notify.thirdrailify.com>",
     "MAIL_REPLY_TO": "info@thirdrailify.com",
+    "CONTACT_TO_EMAIL": "info@thirdrailify.com",
+    "CONTACT_CC_EMAIL": "thirdmailify@gmail.com",
     "PRINTFUL_STORE_ID": "18668025",
     "PRINTFUL_WIX_SOURCE_STORE_ID": "16847493"
   },

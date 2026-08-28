@@ -185,3 +185,13 @@ PayPal remains a later direct-merchant REST integration for `/donate` and possib
 ## Rejected historical architecture
 
 The earlier local milestone modeled this shop as a Stripe Connect platform plus a Canadian connected merchant. That unprovisioned design is superseded and retained here only as a rejection record. The authoritative implementation must not create connected accounts, Account Links, Connect onboarding, Connect OAuth, platform or destination charges, application fees, transfer destinations, `Stripe-Account` headers, capability polling, Connect webhook onboarding, or platform-versus-merchant accounting.
+
+## Permanent production-control plane
+
+Migration `0010_commerce_production_control_plane.sql` extends the existing authorities instead of creating parallel business, tax, or template stores. Private legal name, structured legal address, private phone, business registration number, and tax identifiers use the existing purpose-bound AES-256-GCM envelope. Ordinary tax projections contain only masks and safe lifecycle fields.
+
+`commerce_templates` owns seven customer-email templates plus structured payment-receipt and invoice/sales-document templates. The renderer accepts plain structured fields only and rejects executable markup and merge variables outside the explicit allowlist. Resend delivery reuses the central server mail adapter; `commerce_email_deliveries.delivery_key` is a unique deterministic digest of template revision, order, event/state, recipient, and purpose so duplicate events cannot reserve a second delivery.
+
+Paid-order receipt and invoice previews are built from immutable D1 order-item snapshots. Customer access uses a one-time returned 256-bit opaque token whose SHA-256 alone is stored in `commerce_order_documents`; order IDs, email addresses, and Stripe IDs are not customer authorization. Formal invoice readiness stays blocked until operator-entered legal identity, address, registration, and tax calculation strategy are complete.
+
+The centralized readiness projection derives BUSINESS, TAX, PAYMENTS, CATALOGUE, SHIPPING, FULFILLMENT, COMMUNICATIONS, DOCUMENTS, and CHECKOUT from stored configuration and evidence. There is no manual `production_ready` override. Merchandising readiness remains independent from fulfillment readiness, so the permanent D1 catalogue stays public while the Printful migration is paused.

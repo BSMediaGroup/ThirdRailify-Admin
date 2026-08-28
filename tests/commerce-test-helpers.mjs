@@ -13,6 +13,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0007_goats_engagement_and_wix_import.sql", import.meta.url),
   new URL("../commerce-migrations/0008_goats_profile_gif.sql", import.meta.url),
   new URL("../commerce-migrations/0009_commerce_collections.sql", import.meta.url),
+  new URL("../commerce-migrations/0010_commerce_production_control_plane.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

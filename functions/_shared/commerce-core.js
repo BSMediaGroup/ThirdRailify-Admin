@@ -87,6 +87,13 @@ export const TEMPLATE_BLUEPRINTS = Object.freeze([
   templateBlueprint("payment_failure", "Payment was not completed", "Payment incomplete", "No order will be fulfilled from an incomplete payment."),
   templateBlueprint("invoice_notification", "Your Third Railify invoice", "Invoice available", "Your invoice details are available through the approved payment workflow."),
   templateBlueprint("receipt_notification", "Your Third Railify receipt", "Payment receipt", "This receipt reflects the authoritative payment record."),
+  templateBlueprint("payment_receipt", "Payment receipt", "Payment receipt", "Payment confirmed for {{order_reference}}.", "document", "Payment receipt", true),
+  templateBlueprint("invoice_document", "Invoice / sales document", "Invoice / sales document", "Document for {{order_reference}}.", "document", "Invoice / sales document"),
+]);
+
+export const COMMERCE_TEMPLATE_VARIABLES = Object.freeze([
+  "order_reference", "customer_name", "merchant_name", "order_total", "currency",
+  "product_summary", "support_email", "receipt_url", "shipping_method", "tracking_number",
 ]);
 
 export function isCommerceDbConfigured(env) {
@@ -824,12 +831,20 @@ export async function businessProfilePayload(env, session) {
     db.prepare("SELECT * FROM commerce_business_profiles WHERE id = 'primary'").first(),
     db.prepare("SELECT registration_type, jurisdiction, masked_identifier, status FROM commerce_tax_registrations WHERE business_profile_id = 'primary' ORDER BY registration_type, jurisdiction").all(),
   ]);
+  const privateValues = {};
+  if (profile?.legal_business_name_ciphertext) privateValues.legalBusinessName = await decryptCommerceSecret(env, profile.legal_business_name_ciphertext, "business:legal-name");
+  if (profile?.private_address_ciphertext) {
+    const plaintext = await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address");
+    privateValues.privateAddress = safeJson(plaintext, plaintext);
+  }
+  if (profile?.private_phone_ciphertext) privateValues.privatePhone = await decryptCommerceSecret(env, profile.private_phone_ciphertext, "business:private-phone");
+  if (profile?.business_registration_number_ciphertext) privateValues.businessRegistrationNumber = await decryptCommerceSecret(env, profile.business_registration_number_ciphertext, "business:registration-number");
   return {
     ok: true,
     databaseConfigured: true,
     encryptionConfigured: hasValidEncryptionKeyShape(env),
     access,
-    profile: businessProjection(profile || defaultBusinessProfile(), taxResult?.results || []),
+    profile: businessProjection(profile || defaultBusinessProfile(), taxResult?.results || [], privateValues),
   };
 }
 
@@ -843,8 +858,14 @@ export async function updateBusinessProfile(env, session, input) {
     ? await encryptCommerceSecret(env, values.legalBusinessName, "business:legal-name")
     : current?.legal_business_name_ciphertext || null;
   const privateAddressCiphertext = values.privateAddress
-    ? await encryptCommerceSecret(env, values.privateAddress, "business:private-address")
+    ? await encryptCommerceSecret(env, JSON.stringify(values.privateAddress), "business:private-address")
     : current?.private_address_ciphertext || null;
+  const privatePhoneCiphertext = values.privatePhone
+    ? await encryptCommerceSecret(env, values.privatePhone, "business:private-phone")
+    : current?.private_phone_ciphertext || null;
+  const businessRegistrationNumberCiphertext = values.businessRegistrationNumber
+    ? await encryptCommerceSecret(env, values.businessRegistrationNumber, "business:registration-number")
+    : current?.business_registration_number_ciphertext || null;
 
   await db
     .prepare(
@@ -852,9 +873,10 @@ export async function updateBusinessProfile(env, session, input) {
          id, trading_name, legal_business_name_ciphertext, country_code, province_code, currency_code,
          public_address_json, private_address_ciphertext, public_contact_email, support_email,
          public_phone, website_url, invoice_prefix, document_footer, tax_provider_state,
-         invoice_accent_color, receipt_accent_color, revision,
+         invoice_accent_color, receipt_accent_color, private_phone_ciphertext,
+         business_registration_number_ciphertext, revision,
          created_at, updated_at, updated_by_account_id
-       ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+       ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          trading_name = excluded.trading_name,
          legal_business_name_ciphertext = excluded.legal_business_name_ciphertext,
@@ -872,6 +894,8 @@ export async function updateBusinessProfile(env, session, input) {
          tax_provider_state = excluded.tax_provider_state,
          invoice_accent_color = excluded.invoice_accent_color,
          receipt_accent_color = excluded.receipt_accent_color,
+         private_phone_ciphertext = excluded.private_phone_ciphertext,
+         business_registration_number_ciphertext = excluded.business_registration_number_ciphertext,
          revision = commerce_business_profiles.revision + 1,
          updated_at = excluded.updated_at,
          updated_by_account_id = excluded.updated_by_account_id`,
@@ -893,6 +917,8 @@ export async function updateBusinessProfile(env, session, input) {
       values.taxProviderState,
       values.invoiceAccentColor,
       values.receiptAccentColor,
+      privatePhoneCiphertext,
+      businessRegistrationNumberCiphertext,
       current?.created_at || timestamp,
       timestamp,
       session.accountId,
@@ -938,11 +964,13 @@ export async function updateTemplate(env, session, templateKey, input) {
   await db
     .prepare(
       `INSERT INTO commerce_templates (
-         id, template_key, subject, preheader, heading, introduction, body_blocks_json,
-         cta_label, cta_url, support_text, footer, accent_color, status, revision,
+         id, template_key, template_kind, display_name, subject, preheader, heading, introduction, body_blocks_json,
+         cta_label, cta_url, support_text, footer, accent_color, status, revision, enabled,
          created_at, updated_at, updated_by_account_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
        ON CONFLICT(template_key) DO UPDATE SET
+         template_kind = excluded.template_kind,
+         display_name = excluded.display_name,
          subject = excluded.subject,
          preheader = excluded.preheader,
          heading = excluded.heading,
@@ -954,6 +982,7 @@ export async function updateTemplate(env, session, templateKey, input) {
          footer = excluded.footer,
          accent_color = excluded.accent_color,
          status = excluded.status,
+         enabled = excluded.enabled,
          revision = commerce_templates.revision + 1,
          updated_at = excluded.updated_at,
          updated_by_account_id = excluded.updated_by_account_id`,
@@ -961,6 +990,8 @@ export async function updateTemplate(env, session, templateKey, input) {
     .bind(
       id,
       template.templateKey,
+      template.templateKind,
+      template.displayName,
       template.subject,
       template.preheader,
       template.heading,
@@ -972,6 +1003,7 @@ export async function updateTemplate(env, session, templateKey, input) {
       template.footer,
       template.accentColor,
       template.status,
+      template.enabled ? 1 : 0,
       timestamp,
       timestamp,
       session.accountId,
@@ -1103,12 +1135,18 @@ export function publicBusinessProjection(profile) {
   };
 }
 
-export function businessProjection(profile, registrations = []) {
+export function businessProjection(profile, registrations = [], privateValues = {}) {
   return {
     ...publicBusinessProjection(profile),
     private: {
       legalBusinessNameStored: Boolean(profile?.legal_business_name_ciphertext),
       privateAddressStored: Boolean(profile?.private_address_ciphertext),
+      privatePhoneStored: Boolean(profile?.private_phone_ciphertext),
+      businessRegistrationNumberStored: Boolean(profile?.business_registration_number_ciphertext),
+      legalBusinessName: cleanText(privateValues.legalBusinessName, 240),
+      privateAddress: privateValues.privateAddress || {},
+      privatePhone: cleanText(privateValues.privatePhone, 80),
+      businessRegistrationNumber: cleanText(privateValues.businessRegistrationNumber, 100),
       registrations: registrations.map((row) => ({
         type: cleanText(row.registration_type, 40),
         jurisdiction: cleanText(row.jurisdiction, 20),
@@ -1128,9 +1166,14 @@ export function maskTaxIdentifier(value) {
 
 export function validateTemplate(raw) {
   const templateKey = cleanText(raw?.templateKey, 60);
-  if (!TEMPLATE_BLUEPRINTS.some((item) => item.templateKey === templateKey)) throw new AuthFailure(400, "template_key_invalid", "The template type is invalid.");
+  const blueprint = TEMPLATE_BLUEPRINTS.find((item) => item.templateKey === templateKey);
+  if (!blueprint) throw new AuthFailure(400, "template_key_invalid", "The template type is invalid.");
+  const allowed = new Set(["templateKey", "templateKind", "displayName", "subject", "preheader", "heading", "introduction", "bodyBlocks", "ctaLabel", "ctaUrl", "supportText", "footer", "accentColor", "status", "enabled", "revision"]);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).some((key) => !allowed.has(key))) throw new AuthFailure(400, "template_fields_invalid", "The template fields are invalid.");
   const template = {
     templateKey,
+    templateKind: blueprint.templateKind,
+    displayName: plainTemplateText(raw?.displayName ?? blueprint.displayName, 120, true),
     subject: plainTemplateText(raw?.subject, 160, true),
     preheader: plainTemplateText(raw?.preheader, 200),
     heading: plainTemplateText(raw?.heading, 160, true),
@@ -1142,8 +1185,10 @@ export function validateTemplate(raw) {
     footer: plainTemplateText(raw?.footer, 1000),
     accentColor: /^#[0-9a-f]{6}$/i.test(String(raw?.accentColor || "")) ? String(raw.accentColor).toLowerCase() : "#f3c928",
     status: ["draft", "disabled", "ready"].includes(raw?.status) ? raw.status : "draft",
+    enabled: raw?.enabled === true && raw?.status !== "disabled",
   };
   if (template.ctaLabel && !template.ctaUrl) throw new AuthFailure(400, "template_cta_invalid", "A CTA label requires a safe HTTPS or relative URL.");
+  validateTemplateVariables(template);
   return template;
 }
 
@@ -1336,9 +1381,11 @@ async function writeStripeVerificationAudit(env, session, resultCategory, result
   });
 }
 
-function templateBlueprint(templateKey, subject, heading, introduction) {
+function templateBlueprint(templateKey, subject, heading, introduction, templateKind = "email", displayName = "", enabled = false) {
   return Object.freeze({
     templateKey,
+    templateKind,
+    displayName: displayName || templateKey.replaceAll("_", " "),
     subject,
     preheader: "",
     heading,
@@ -1350,6 +1397,7 @@ function templateBlueprint(templateKey, subject, heading, introduction) {
     footer: "",
     accentColor: "#f3c928",
     status: "draft",
+    enabled,
     revision: 1,
   });
 }
@@ -1363,6 +1411,8 @@ function defaultBusinessProfile() {
     currency_code: "CAD",
     public_address_json: "{}",
     private_address_ciphertext: null,
+    private_phone_ciphertext: null,
+    business_registration_number_ciphertext: null,
     public_contact_email: "info@thirdrailify.com",
     support_email: "",
     public_phone: "",
@@ -1458,6 +1508,8 @@ function providerBlueprints(env) {
 function serializeTemplate(row) {
   return {
     templateKey: row.template_key,
+    templateKind: row.template_kind || "email",
+    displayName: row.display_name || String(row.template_key || "").replaceAll("_", " "),
     subject: row.subject,
     preheader: row.preheader,
     heading: row.heading,
@@ -1469,6 +1521,7 @@ function serializeTemplate(row) {
     footer: row.footer,
     accentColor: row.accent_color,
     status: row.status,
+    enabled: row.enabled === 1,
     revision: Number(row.revision || 1),
   };
 }
@@ -1571,6 +1624,8 @@ async function requireCurrentCollection(db, id, revision) { const row = await db
 function throwCollectionConflict(error) { if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "commerce_collection_slug_or_title_duplicate", "Collection title and slug must both be unique."); throw error; }
 
 function validateBusinessProfile(input, current) {
+  const allowed = new Set(["tradingName", "legalBusinessName", "countryCode", "provinceCode", "currencyCode", "publicContactEmail", "supportEmail", "publicPhone", "websiteUrl", "publicAddress", "privateAddress", "privatePhone", "businessRegistrationNumber", "invoicePrefix", "documentFooter", "taxProviderState", "invoiceAccentColor", "receiptAccentColor", "businessNumber", "gstHstNumber", "provincialRegistration"]);
+  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.has(key))) throw new AuthFailure(400, "business_profile_fields_invalid", "The business profile fields are invalid.");
   const tradingName = cleanText(input?.tradingName ?? current?.trading_name, 160);
   if (!tradingName) throw new AuthFailure(400, "trading_name_required", "A public trading name is required.");
   const countryCode = cleanText(input?.countryCode ?? current?.country_code, 2).toUpperCase();
@@ -1579,11 +1634,11 @@ function validateBusinessProfile(input, current) {
   if (countryCode !== "CA" || provinceCode !== "ON" || currencyCode !== "CAD") {
     throw new AuthFailure(400, "commerce_locale_locked", "This foundation is scoped to Ontario, Canada with CAD storefront currency.");
   }
-  const publicContactEmail = validateOptionalEmail(input?.publicContactEmail);
-  const supportEmail = validateOptionalEmail(input?.supportEmail);
-  const websiteUrl = validateOptionalHttpsUrl(input?.websiteUrl);
-  const publicAddress = validateAddress(input?.publicAddress);
-  const privateAddress = plainPrivateValue(input?.privateAddress, 1200);
+  const publicContactEmail = validateOptionalEmail(input?.publicContactEmail ?? current?.public_contact_email);
+  const supportEmail = validateOptionalEmail(input?.supportEmail ?? current?.support_email);
+  const websiteUrl = validateOptionalHttpsUrl(input?.websiteUrl ?? current?.website_url);
+  const publicAddress = validateAddress(input?.publicAddress ?? safeJson(current?.public_address_json, {}));
+  const privateAddress = input.privateAddress && typeof input.privateAddress === "object" && !Array.isArray(input.privateAddress) ? validatePrivateAddress(input.privateAddress) : null;
   const legalBusinessName = plainPrivateValue(input?.legalBusinessName, 240);
   return {
     tradingName,
@@ -1593,15 +1648,17 @@ function validateBusinessProfile(input, current) {
     currencyCode,
     publicAddress,
     privateAddress,
+    privatePhone: plainPrivateValue(input?.privatePhone, 80),
+    businessRegistrationNumber: plainPrivateValue(input?.businessRegistrationNumber, 100),
     publicContactEmail,
     supportEmail,
-    publicPhone: cleanText(input?.publicPhone, 40),
+    publicPhone: cleanText(input?.publicPhone ?? current?.public_phone, 40),
     websiteUrl,
-    invoicePrefix: cleanText(input?.invoicePrefix, 24),
-    documentFooter: plainTemplateText(input?.documentFooter, 1000),
+    invoicePrefix: cleanText(input?.invoicePrefix ?? current?.invoice_prefix, 24),
+    documentFooter: plainTemplateText(input?.documentFooter ?? current?.document_footer, 1000),
     taxProviderState: "unavailable",
-    invoiceAccentColor: safeAccentColor(input?.invoiceAccentColor),
-    receiptAccentColor: safeAccentColor(input?.receiptAccentColor),
+    invoiceAccentColor: safeAccentColor(input?.invoiceAccentColor ?? current?.invoice_accent_color),
+    receiptAccentColor: safeAccentColor(input?.receiptAccentColor ?? current?.receipt_accent_color),
     registrations: [
       { type: "business_number", jurisdiction: "CA", identifier: plainPrivateValue(input?.businessNumber, 40) },
       { type: "gst_hst", jurisdiction: "CA", identifier: plainPrivateValue(input?.gstHstNumber, 40) },
@@ -1639,6 +1696,34 @@ function plainTemplateText(value, maxLength, required = false) {
   return text;
 }
 
+function validateTemplateVariables(template) {
+  const values = [template.subject, template.preheader, template.heading, template.introduction, ...template.bodyBlocks, template.ctaLabel, template.ctaUrl, template.supportText, template.footer];
+  const unknown = new Set();
+  for (const value of values) {
+    for (const match of String(value || "").matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)) {
+      if (!COMMERCE_TEMPLATE_VARIABLES.includes(match[1].toLowerCase())) unknown.add(match[1].toLowerCase());
+    }
+    if (/\{\{[^}]*$|^[^{]*\}\}/.test(String(value || ""))) throw new AuthFailure(400, "template_placeholder_invalid", "A template placeholder is malformed.");
+  }
+  if (unknown.size) throw new AuthFailure(400, "template_placeholder_unknown", `Unsupported template variables: ${[...unknown].join(", ")}.`);
+}
+
+function validatePrivateAddress(value) {
+  const allowed = new Set(["line1", "line2", "city", "province", "postalCode", "country"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new AuthFailure(400, "private_address_invalid", "The private address fields are invalid.");
+  const result = {
+    line1: plainPrivateValue(value.line1, 180),
+    line2: plainPrivateValue(value.line2, 180),
+    city: plainPrivateValue(value.city, 120),
+    province: cleanText(value.province, 3).toUpperCase(),
+    postalCode: plainPrivateValue(value.postalCode, 12).toUpperCase(),
+    country: cleanText(value.country, 2).toUpperCase(),
+  };
+  if (result.country && !/^[A-Z]{2}$/.test(result.country)) throw new AuthFailure(400, "private_address_invalid", "The private address country is invalid.");
+  if (result.province && !/^[A-Z]{2,3}$/.test(result.province)) throw new AuthFailure(400, "private_address_invalid", "The private address province is invalid.");
+  return result;
+}
+
 function plainPrivateValue(value, maxLength) {
   const text = String(value ?? "").trim().slice(0, maxLength);
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text)) throw new AuthFailure(400, "private_value_invalid", "The private value contains invalid characters.");
@@ -1648,6 +1733,7 @@ function plainPrivateValue(value, maxLength) {
 function validateCtaUrl(value) {
   const text = cleanText(value, 500);
   if (!text) return "";
+  if (text === "{{receipt_url}}") return text;
   if (text.startsWith("/") && !text.startsWith("//")) return text;
   try {
     const url = new URL(text);
