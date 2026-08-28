@@ -85,7 +85,7 @@ test("Watch authority failures render unknown archive state instead of false zer
 test("Site Content exposes separate normal and fixture-labelled Live Now configuration without a manual live-title field", async () => {
   const [app, page, client] = await Promise.all([read("src/App.tsx"), read("src/pages/SiteContentPage.tsx"), read("src/banner/client.ts")]);
   assert.match(app, /path="content" element={<SiteContentPage/);
-  for (const label of ["Normal promo / info", "Automatic Live Now", "Presentation mode", "Animation speed", "Locked destination", "Fixture preview only", "Unsaved changes"]) assert.match(page, new RegExp(label));
+  for (const label of ["Normal promo / info", "Homepage content rail", "Seamless marquee scroll", "Third Railify triple zap", "Automatic Live Now", "Presentation mode", "Animation speed", "Locked destination", "Fixture preview only", "Unsaved changes"]) assert.match(page, new RegExp(label));
   assert.match(page, /SAMPLE PREVIEW — Third Railify live broadcast title/);
   assert.match(page, /<code>\/watch\/live<\/code>/);
   assert.doesNotMatch(page, /Active stream title<\/span><input/);
@@ -125,7 +125,7 @@ test("Shop is an expandable Products, Collections, Orders group with dirty-only 
   for (const [path, label] of [["/products", "Products"], ["/collections", "Collections"], ["/orders", "Orders"]]) assert.match(navigation, new RegExp(`path: "${path.replaceAll("/", "\\/")}"[\\s\\S]{0,90}parentPath: "\\/shop"[\\s\\S]{0,100}label: "${label}"`));
   assert.equal((navigation.match(/path: "\/orders"/g) || []).length, 1);
   assert.match(app, /path="collections" element=\{<CommerceCollectionsPage/); assert.match(app, /path="shop" element=\{<Navigate to="\/products"/);
-  assert.match(page, /featuredDirty \? <div className="featured-dirty-rail"/); assert.match(page, /Featured order changed/); assert.match(page, /Discard changes/); assert.doesNotMatch(page, /Save featured order/);
+  assert.match(page, /featuredDirty && <div className="featured-order-save"/); assert.match(page, /Featured order changed/); assert.match(page, />Discard<\/button>/); assert.match(page, /Select all \{payload\.totalItems\} matching/); assert.match(page, /Rows per page/);
   for (const label of ["Create collection", "Stable Public slug", "Product assignments", "Archive collection", "Delete empty collection", "Assigned", "Public"]) assert.match(page, new RegExp(label));
   assert.match(styles, /\.featured-dirty-rail/); assert.match(styles, /\.collection-assignment__list/); assert.match(headers, /img-src[^;]*https:\/\/static\.wixstatic\.com/);
 });

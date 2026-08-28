@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import tripleZapMark from "../../assets/icons/trzap-0.svg";
 import { useAuth } from "../auth/AuthProvider";
 import { type BannerConfig, type BannerMessage, readBannerSettings, saveBannerSettings } from "../banner/client";
 import { AdminIcon } from "../components/AdminIcon";
 
 const EMPTY_MESSAGE: BannerMessage = { text: "", ctaLabel: null, href: null, newTab: false };
 const FIXTURE_TITLE = "SAMPLE PREVIEW — Third Railify live broadcast title";
+const tripleZapMask = { "--triple-zap-mask": `url("${tripleZapMark}")` } as CSSProperties;
 
 export function SiteContentPage() {
   const { access, csrfToken } = useAuth();
@@ -51,11 +53,27 @@ export function SiteContentPage() {
       {!loading && !config && !error && <div className="content-admin-loading">Banner configuration is unavailable.</div>}
       {config && <form className="banner-editor" onSubmit={submit}>
         <NormalEditor config={config} setConfig={setConfig} />
+        <HomeRailEditor config={config} setConfig={setConfig} />
         <LiveEditor config={config} setConfig={setConfig} />
         <div className="banner-savebar"><span className={dirty ? "is-dirty" : saved ? "is-saved" : ""}><i />{saving ? "Saving to server…" : dirty ? "Unsaved changes" : saved || "All changes saved"}</span><button className="primary-button" type="submit" disabled={!dirty || saving}>{saving ? "Saving…" : "Save banner settings"}</button></div>
       </form>}
     </section>
   );
+}
+
+function HomeRailEditor({ config, setConfig }: EditorProps) {
+  const update = (patch: Partial<BannerConfig["homeRail"]>) => setConfig({ ...config, homeRail: { ...config.homeRail, ...patch } });
+  return <section className="banner-editor__panel banner-editor__panel--home-rail" aria-labelledby="home-rail-title">
+    <EditorHeading kicker="Homepage / below hero" title="Homepage content rail" description="The narrow editorial rail directly below the main landing hero. Marquee mode uses two identical tracks for a seamless loop with no trailing blank space." enabled={config.homeRail.enabled} onEnabled={(enabled) => update({ enabled })} id="home-rail-title" />
+    <div className="banner-editor__controls banner-editor__controls--rail">
+      <label><span>Effect</span><select value={config.homeRail.mode} onChange={(event) => update({ mode: event.target.value as BannerConfig["homeRail"]["mode"] })}><option value="marquee">Seamless marquee scroll</option><option value="crossfade">Crossfade between items</option><option value="static">Static row</option></select></label>
+      <label><span>Animation speed</span><select value={config.homeRail.speed} onChange={(event) => update({ speed: event.target.value as BannerConfig["homeRail"]["speed"] })}><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
+      <label><span>Motion easing</span><select value={config.homeRail.easing} onChange={(event) => update({ easing: event.target.value as BannerConfig["homeRail"]["easing"] })}><option value="linear">Linear / continuous</option><option value="ease-in-out">Ease in and out</option></select></label>
+      <label><span>Divider glyph</span><select value={config.homeRail.glyph} onChange={(event) => update({ glyph: event.target.value as BannerConfig["homeRail"]["glyph"] })}><option value="zap">Third Railify triple zap</option><option value="arrow">Original wonky arrow</option><option value="diamond">Signal diamond</option><option value="dot">Signal dot</option></select></label>
+      <label className="is-wide"><span>Rail text · one item per line <small>{config.homeRail.items.length}/8</small></span><textarea rows={6} value={config.homeRail.items.join("\n")} maxLength={647} required onChange={(event) => update({ items: event.target.value.split(/\r?\n/).slice(0, 8) })} /><small>Up to eight non-empty items, 80 characters each. The Public rail repeats this exact sequence without exposing Admin metadata.</small></label>
+    </div>
+    <HomeRailPreview config={config} />
+  </section>;
 }
 
 function NormalEditor({ config, setConfig }: EditorProps) {
@@ -85,5 +103,46 @@ function EditorHeading({ kicker, title, description, enabled, onEnabled, id }: {
 
 function NormalPreview({ config }: { config: BannerConfig }) { const messages = config.normal.messages.length ? config.normal.messages : [{ ...EMPTY_MESSAGE, text: "Your normal announcement preview appears here." }]; return <PreviewShell label="Normal banner preview"><div className={`admin-banner-preview admin-banner-preview--normal is-${config.normal.mode}`}><div>{messages.map((message, index) => <span key={index}>{message.text}{message.ctaLabel && <b>{message.ctaLabel} ↗</b>}</span>)}</div></div></PreviewShell>; }
 function LivePreview({ config }: { config: BannerConfig }) { return <PreviewShell label="Live banner fixture preview"><div className={`admin-banner-preview admin-banner-preview--live is-${config.live.animation} is-${config.live.intensity}`}><span className="admin-live-label"><i />{config.live.label || "LIVE NOW"}</span><span className="admin-live-title">{config.live.showTitle ? FIXTURE_TITLE : config.live.supportingText || "Live broadcast confirmed"}</span><b>{config.live.ctaLabel || "WATCH NOW"} ↗</b></div><small className="banner-fixture-note">Fixture preview only — this does not indicate or create a real live broadcast.</small></PreviewShell>; }
+function HomeRailPreview({ config }: { config: BannerConfig }) {
+  const items = config.homeRail.items.length ? config.homeRail.items : ["YOUR HOMEPAGE RAIL TEXT"];
+  const [active, setActive] = useState(0);
+  const [repetitions, setRepetitions] = useState(2);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const itemsKey = items.join("\u0000");
+  useEffect(() => {
+    if (!config.homeRail.enabled || config.homeRail.mode !== "crossfade" || items.length < 2) return;
+    const delay = config.homeRail.speed === "slow" ? 6500 : config.homeRail.speed === "fast" ? 2600 : 4200;
+    const timer = window.setInterval(() => setActive((value) => (value + 1) % items.length), delay);
+    return () => window.clearInterval(timer);
+  }, [config.homeRail.enabled, config.homeRail.mode, config.homeRail.speed, items.length]);
+  useEffect(() => { setActive(0); }, [itemsKey]);
+  useLayoutEffect(() => {
+    if (!config.homeRail.enabled || config.homeRail.mode !== "marquee" || !previewRef.current || !measureRef.current) return;
+    const update = () => {
+      const cycleWidth = measureRef.current?.scrollWidth || 1;
+      const viewportWidth = previewRef.current?.clientWidth || 1;
+      setRepetitions((current) => {
+        const next = Math.max(2, Math.ceil(viewportWidth / cycleWidth) + 1);
+        return current === next ? current : next;
+      });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(previewRef.current);
+    observer.observe(measureRef.current);
+    return () => observer.disconnect();
+  }, [config.homeRail.enabled, config.homeRail.glyph, config.homeRail.mode, itemsKey]);
+  const cycleSeconds = config.homeRail.speed === "slow" ? 42 : config.homeRail.speed === "fast" ? 18 : 28;
+  return <PreviewShell label="Homepage rail preview">
+    {!config.homeRail.enabled ? <div className="admin-home-rail-preview admin-home-rail-preview--disabled">Disabled — no homepage rail is rendered.</div> : <div ref={previewRef} className={`admin-home-rail-preview admin-home-rail-preview--${config.homeRail.mode} is-${config.homeRail.speed} is-${config.homeRail.easing}`}>
+      {config.homeRail.mode === "marquee" ? <><div ref={measureRef} className="admin-home-rail-preview__measure" aria-hidden="true"><AdminRailSegment items={items} glyph={config.homeRail.glyph} /></div><div className="admin-home-rail-preview__track" style={{ animationDuration: `${cycleSeconds * repetitions}s` }}><AdminRailSegment items={items} glyph={config.homeRail.glyph} repetitions={repetitions} /><AdminRailSegment items={items} glyph={config.homeRail.glyph} repetitions={repetitions} duplicate /></div></>
+        : config.homeRail.mode === "crossfade" ? <div className="admin-home-rail-preview__crossfade" key={`${active}-${items[active]}`}>{items[active]}</div>
+        : <AdminRailSegment items={items} glyph={config.homeRail.glyph} />}
+    </div>}
+  </PreviewShell>;
+}
+function AdminRailSegment({ items, glyph, repetitions = 1, duplicate = false }: { items: string[]; glyph: BannerConfig["homeRail"]["glyph"]; repetitions?: number; duplicate?: boolean }) { return <div className="admin-home-rail-preview__segment" aria-hidden={duplicate || undefined}>{Array.from({ length: repetitions }, (_, cycle) => items.map((item, index) => <span key={`${cycle}-${item}-${index}`}>{item}<RailGlyph glyph={glyph} /></span>))}</div>; }
+function RailGlyph({ glyph }: { glyph: BannerConfig["homeRail"]["glyph"] }) { if (glyph === "zap") return <i className="admin-home-rail-preview__zap" style={tripleZapMask} aria-hidden="true" />; return <i aria-hidden="true">{glyph === "arrow" ? "↯" : glyph === "diamond" ? "◆" : "•"}</i>; }
 function PreviewShell({ label, children }: { label: string; children: ReactNode }) { return <div className="banner-preview-shell"><span>{label}</span>{children}</div>; }
 type EditorProps = { config: BannerConfig; setConfig: (config: BannerConfig) => void };

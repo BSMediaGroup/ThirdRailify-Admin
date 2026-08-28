@@ -21,6 +21,8 @@ const PRINTFUL_EXPECTED_STORE_NAME = "Third Railify API";
 const MAX_PRINTFUL_CREDENTIAL_LENGTH = 4096;
 const PRINTFUL_WIX_SOURCE_STORE_ID = "16847493";
 const PRINTFUL_API_TARGET_STORE_ID = "18668025";
+const PRODUCT_PAGE_SIZES = Object.freeze([20, 50, 75, 100]);
+const PRODUCT_BULK_OPERATIONS = Object.freeze(["show", "hide", "feature", "unfeature"]);
 
 export const COMMERCE_CAPABILITIES = Object.freeze([
   "commerce.view",
@@ -277,6 +279,38 @@ export async function merchandisingProductsPayload(env, session) {
   };
 }
 
+export async function merchandisingProductListPayload(env, session, input = {}) {
+  const options = normalizeProductListOptions(input);
+  const payload = await merchandisingProductsPayload(env, session);
+  const matching = filterMerchandisingProducts(payload.products, options);
+  const totalItems = matching.length;
+  const totalPages = totalItems ? Math.ceil(totalItems / options.pageSize) : 0;
+  const page = totalPages ? Math.min(options.page, totalPages) : 1;
+  const start = (page - 1) * options.pageSize;
+  const categories = [...new Set(payload.products.flatMap((product) => product.categories))].sort((a, b) => a.localeCompare(b));
+  const migrationStatuses = [...new Set(payload.products.map((product) => product.migrationStatus).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return {
+    ok: true,
+    databaseConfigured: payload.databaseConfigured,
+    access: payload.access,
+    items: matching.slice(start, start + options.pageSize),
+    featured: payload.featured,
+    page,
+    pageSize: options.pageSize,
+    totalItems,
+    totalPages,
+    filters: { query: options.query, visibility: options.visibility, status: options.status, migration: options.migration, category: options.category, featured: options.featured, sort: options.sort },
+    facets: { categories, migrationStatuses },
+    totals: {
+      products: payload.products.length,
+      publicProducts: payload.products.filter((product) => product.visibility === "public" && product.status === "active").length,
+      variants: payload.products.reduce((total, product) => total + product.variantCount, 0),
+      featuredProducts: payload.featured.length,
+    },
+    updatedAt: payload.updatedAt,
+  };
+}
+
 export async function merchandisingProductPayload(env, session, productId) {
   const payload = await merchandisingProductsPayload(env, session);
   const product = payload.products.find((entry) => entry.id === cleanText(productId, 160));
@@ -287,7 +321,7 @@ export async function merchandisingProductPayload(env, session, productId) {
 export async function updateMerchandisingProduct(env, session, productId, input) {
   const db = requireCommerceDb(env);
   const id = cleanText(productId, 160);
-  const current = await db.prepare("SELECT id, safe_metadata_json FROM commerce_products WHERE id = ?").bind(id).first();
+  const current = await db.prepare("SELECT id, safe_metadata_json, is_featured, featured_order FROM commerce_products WHERE id = ?").bind(id).first();
   if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
   requireExactFields(input, ["title", "slug", "description", "primaryImageUrl", "additionalImages", "categories", "tags", "featured", "visibility", "status", "displayOrder", "maxQuantity", "unitAmount", "currencyCode"], "commerce_product_fields_invalid");
   const title = requiredPlainText(input.title, 240, "commerce_product_title_invalid");
@@ -300,25 +334,37 @@ export async function updateMerchandisingProduct(env, session, productId, input)
   const collectionRows = categories.length ? await db.prepare(`SELECT id, title FROM commerce_collections WHERE status = 'active' AND title IN (${categories.map(() => "?").join(",")}) COLLATE NOCASE`).bind(...categories).all() : { results: [] };
   if ((collectionRows?.results || []).length !== categories.length) throw new AuthFailure(400, "commerce_product_collection_unknown", "Every product collection must reference an active collection.");
   const tags = validateStringArray(input.tags, 30, 80, "commerce_product_tags_invalid");
-  const visibility = ["private", "public"].includes(input.visibility) ? input.visibility : invalidMerch("commerce_product_visibility_invalid", "Product visibility is invalid.");
+  const visibility = normalizeProductVisibility(input.visibility);
   const status = ["active", "disabled"].includes(input.status) ? input.status : invalidMerch("commerce_product_status_invalid", "Product status is invalid.");
   const displayOrder = boundedMerchInteger(input.displayOrder, 0, 999999, "commerce_product_display_order_invalid");
   const maxQuantity = boundedMerchInteger(input.maxQuantity, 1, 20, "commerce_product_max_quantity_invalid");
-  const featured = input.featured === true ? 1 : input.featured === false ? 0 : invalidMerch("commerce_product_featured_invalid", "Featured state is invalid.");
+  const featured = normalizeProductFeatured(input.featured);
   const unitAmount = input.unitAmount === null ? null : boundedMerchInteger(input.unitAmount, 1, 100_000_000, "commerce_product_price_invalid");
   if (String(input.currencyCode || "").toUpperCase() !== "CAD") throw new AuthFailure(400, "commerce_product_currency_invalid", "Product currency must be CAD.");
   const timestamp = nowIso();
+  let featuredOrder = null;
+  if (featured === 1) {
+    if (current.is_featured === 1 && Number.isSafeInteger(Number(current.featured_order))) featuredOrder = Number(current.featured_order);
+    else {
+      const maximum = await db.prepare("SELECT COALESCE(MAX(featured_order), 0) maximum FROM commerce_products WHERE is_featured = 1").first();
+      featuredOrder = Number(maximum?.maximum || 0) + 10;
+    }
+  }
   const metadata = { ...safeJson(current.safe_metadata_json, {}), description, publicImage: primaryImageUrl, publicImages: additionalImages, categories, tags, displayOrder };
   const metadataJson = JSON.stringify(metadata);
   if (metadataJson.length > 16384) throw new AuthFailure(400, "commerce_product_metadata_too_large", "Product merchandising metadata is too large.");
+  const remainingFeatured = current.is_featured === 1 && featured === 0
+    ? (await db.prepare("SELECT id, featured_order FROM commerce_products WHERE is_featured = 1 AND id <> ? ORDER BY featured_order, slug").bind(id).all())?.results || []
+    : [];
   try {
     const statements = [db.prepare(`UPDATE commerce_products SET title = ?, slug = ?, safe_metadata_json = ?, is_featured = ?,
-                      featured_order = CASE WHEN ? = 1 THEN COALESCE(featured_order, ?) ELSE NULL END,
+                      featured_order = ?,
                       visibility = ?, status = ?, max_checkout_quantity = ?, unit_amount = ?, updated_at = ?
                       WHERE id = ?`)
-      .bind(title, slug, metadataJson, featured, featured, displayOrder, visibility, status, maxQuantity, unitAmount, timestamp, id),
+      .bind(title, slug, metadataJson, featured, featuredOrder, visibility, status, maxQuantity, unitAmount, timestamp, id),
       db.prepare("DELETE FROM commerce_product_collections WHERE product_id = ?").bind(id)];
     for (const row of collectionRows?.results || []) statements.push(db.prepare("INSERT INTO commerce_product_collections (product_id, collection_id, assigned_at, assigned_by_account_id) VALUES (?, ?, ?, ?)").bind(id, row.id, timestamp, session?.accountId || null));
+    remainingFeatured.forEach((row, index) => { const order = (index + 1) * 10; if (Number(row.featured_order) !== order) statements.push(db.prepare("UPDATE commerce_products SET featured_order = ?, updated_at = ? WHERE id = ?").bind(order, timestamp, row.id)); });
     await db.batch(statements);
   } catch (error) {
     if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "commerce_product_slug_duplicate", "The product slug is already in use.");
@@ -386,6 +432,99 @@ export async function updateFeaturedProducts(env, session, input) {
   return merchandisingProductsPayload(env, session);
 }
 
+export async function bulkUpdateMerchandisingProducts(env, session, input) {
+  const db = requireCommerceDb(env);
+  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["operation", "productIds", "matching", "confirmMatching", "expectedCount"].includes(key))) {
+    throw new AuthFailure(400, "commerce_product_bulk_fields_invalid", "The bulk product mutation fields are invalid.");
+  }
+  const operation = cleanText(input.operation, 40);
+  if (!PRODUCT_BULK_OPERATIONS.includes(operation)) throw new AuthFailure(400, "commerce_product_bulk_operation_invalid", "The bulk product operation is invalid.");
+  const usesMatching = input.matching !== undefined;
+  const usesIds = input.productIds !== undefined;
+  if (usesMatching === usesIds) throw new AuthFailure(400, "commerce_product_bulk_selection_invalid", "Choose explicit product IDs or one confirmed matching selection.");
+
+  const payload = await merchandisingProductsPayload(env, session);
+  let products;
+  let selection;
+  if (usesMatching) {
+    if (Object.keys(input).some((key) => !["operation", "matching", "confirmMatching", "expectedCount"].includes(key)) || !input.matching || typeof input.matching !== "object" || Array.isArray(input.matching) || Object.keys(input.matching).some((key) => !["query", "search", "visibility", "status", "migration", "category", "featured", "sort"].includes(key))) {
+      throw new AuthFailure(400, "commerce_product_bulk_selection_invalid", "The matching product selection is invalid.");
+    }
+    if (input.confirmMatching !== true || !Number.isSafeInteger(input.expectedCount) || input.expectedCount < 1) {
+      throw new AuthFailure(400, "commerce_product_bulk_confirmation_required", "Confirm the current filtered result count before applying this bulk operation.");
+    }
+    const options = normalizeProductListOptions({ ...input.matching, page: 1, pageSize: 100 });
+    products = filterMerchandisingProducts(payload.products, options);
+    if (products.length !== input.expectedCount) throw new AuthFailure(409, "commerce_product_bulk_match_changed", "The matching product count changed. Review and confirm the current result set again.");
+    selection = "matching";
+  } else {
+    if (Object.keys(input).some((key) => !["operation", "productIds"].includes(key))) throw new AuthFailure(400, "commerce_product_bulk_selection_invalid", "The explicit product selection is invalid.");
+    const ids = Array.isArray(input.productIds) ? input.productIds.map((value) => cleanText(value, 160)) : null;
+    if (!ids || !ids.length || ids.length > 1000 || ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+      throw new AuthFailure(400, "commerce_product_bulk_ids_invalid", "Bulk product IDs must be a unique bounded list.");
+    }
+    const byId = new Map(payload.products.map((product) => [product.id, product]));
+    const unknownIds = ids.filter((id) => !byId.has(id));
+    if (unknownIds.length) throw new AuthFailure(400, "commerce_product_unknown", "Every bulk product ID must reference an authoritative catalogue product.");
+    products = ids.map((id) => byId.get(id));
+    selection = "explicit";
+  }
+
+  const timestamp = nowIso();
+  const statements = [];
+  const updatedIds = [];
+  if (operation === "show" || operation === "hide") {
+    const visibility = normalizeProductVisibility(operation === "show" ? "public" : "private");
+    for (const product of products) {
+      if (product.visibility === visibility) continue;
+      statements.push(db.prepare("UPDATE commerce_products SET visibility = ?, updated_at = ? WHERE id = ?").bind(visibility, timestamp, product.id));
+      updatedIds.push(product.id);
+    }
+  } else if (operation === "feature") {
+    normalizeProductFeatured(true);
+    let nextOrder = payload.featured.reduce((maximum, product) => Math.max(maximum, product.featuredOrder || 0), 0);
+    for (const product of products) {
+      if (product.featured) continue;
+      nextOrder += 10;
+      statements.push(db.prepare("UPDATE commerce_products SET is_featured = 1, featured_order = ?, updated_at = ? WHERE id = ?").bind(nextOrder, timestamp, product.id));
+      updatedIds.push(product.id);
+    }
+  } else {
+    normalizeProductFeatured(false);
+    const selected = new Set(products.map((product) => product.id));
+    for (const product of products) {
+      if (!product.featured) continue;
+      statements.push(db.prepare("UPDATE commerce_products SET is_featured = 0, featured_order = NULL, updated_at = ? WHERE id = ?").bind(timestamp, product.id));
+      updatedIds.push(product.id);
+    }
+    payload.featured.filter((product) => !selected.has(product.id)).forEach((product, index) => {
+      const order = (index + 1) * 10;
+      if (product.featuredOrder !== order) statements.push(db.prepare("UPDATE commerce_products SET featured_order = ?, updated_at = ? WHERE id = ?").bind(order, timestamp, product.id));
+    });
+  }
+  if (statements.length) await db.batch(statements);
+  const result = {
+    ok: true,
+    operation,
+    selection,
+    matched: products.length,
+    requested: products.length,
+    updated: updatedIds.length,
+    unchanged: products.length - updatedIds.length,
+    rejected: 0,
+    errors: [],
+    updatedIds,
+  };
+  await writeCommerceAudit(env, {
+    actorAccountId: session?.accountId,
+    action: "commerce.products_bulk_updated",
+    targetType: "commerce_products",
+    result: "success",
+    metadata: { operation, selection, matched: result.matched, updated: result.updated, unchanged: result.unchanged, productIds: products.map((product) => product.id) },
+  });
+  return result;
+}
+
 export async function collectionsPayload(env, session) {
   const access = session ? await commerceAccessForSession(env, session) : null;
   if (!isCommerceDbConfigured(env)) return { ok: true, databaseConfigured: false, access, collections: [], products: [], updatedAt: null };
@@ -417,6 +556,11 @@ export async function collectionsPayload(env, session) {
     };
   });
   return { ok: true, databaseConfigured: true, access, collections, products: productPayload.products, updatedAt: collections.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, "") || null };
+}
+
+export async function collectionOptionsPayload(env, session) {
+  const payload = await collectionsPayload(env, session);
+  return { ok: payload.ok, databaseConfigured: payload.databaseConfigured, access: payload.access, collections: payload.collections, updatedAt: payload.updatedAt };
 }
 
 export async function createCollection(env, session, input) {
@@ -1605,6 +1749,42 @@ function serializeMerchandisingVariant(row) {
 
 function fulfillmentReadiness(variants) { if (variants.some((variant) => variant.migrationStatus === "blocked" || variant.fulfillmentMappingStatus === "conflict")) return "blocked"; if (variants.length && variants.every((variant) => variant.fulfillmentMappingStatus === "mapped")) return "mapped"; return "pending"; }
 function formatCadMinor(value) { return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value / 100); }
+function normalizeProductListOptions(input = {}) {
+  const value = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const pageValue = Number.parseInt(String(value.page ?? "1"), 10);
+  const pageSizeValue = Number.parseInt(String(value.pageSize ?? "20"), 10);
+  const choice = (candidate, allowed, fallback) => allowed.includes(candidate) ? candidate : fallback;
+  return {
+    page: Number.isSafeInteger(pageValue) && pageValue > 0 ? pageValue : 1,
+    pageSize: PRODUCT_PAGE_SIZES.includes(pageSizeValue) ? pageSizeValue : 20,
+    query: cleanText(value.query ?? value.search, 200).toLowerCase(),
+    visibility: choice(cleanText(value.visibility, 40), ["all", "public", "private"], "all"),
+    status: choice(cleanText(value.status, 40), ["all", "active", "disabled", "pending", "restricted", "error", "legacy_production"], "all"),
+    migration: cleanText(value.migration, 80) || "all",
+    category: cleanText(value.category, 160) || "all",
+    featured: choice(cleanText(value.featured, 40), ["all", "featured", "not_featured"], "all"),
+    sort: choice(cleanText(value.sort, 40), ["display", "name", "price"], "display"),
+  };
+}
+function filterMerchandisingProducts(products, options) {
+  const next = products.filter((product) => {
+    const searchable = `${product.title} ${product.slug} ${product.categories.join(" ")} ${product.tags.join(" ")}`.toLowerCase();
+    return (!options.query || searchable.includes(options.query))
+      && (options.visibility === "all" || product.visibility === options.visibility)
+      && (options.status === "all" || product.status === options.status)
+      && (options.migration === "all" || product.migrationStatus === options.migration)
+      && (options.category === "all" || product.categories.includes(options.category))
+      && (options.featured === "all" || (options.featured === "featured" ? product.featured : !product.featured));
+  });
+  next.sort(options.sort === "name"
+    ? (a, b) => a.title.localeCompare(b.title) || a.slug.localeCompare(b.slug)
+    : options.sort === "price"
+      ? (a, b) => (a.price.minimum ?? Infinity) - (b.price.minimum ?? Infinity) || a.slug.localeCompare(b.slug)
+      : (a, b) => Number(b.featured) - Number(a.featured) || (a.featuredOrder ?? Infinity) - (b.featuredOrder ?? Infinity) || a.displayOrder - b.displayOrder || a.slug.localeCompare(b.slug));
+  return next;
+}
+function normalizeProductVisibility(value) { return ["private", "public"].includes(value) ? value : invalidMerch("commerce_product_visibility_invalid", "Product visibility is invalid."); }
+function normalizeProductFeatured(value) { return value === true ? 1 : value === false ? 0 : invalidMerch("commerce_product_featured_invalid", "Featured state is invalid."); }
 function requireExactFields(input, allowed, code) { if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.includes(key)) || allowed.some((key) => !(key in input))) throw new AuthFailure(400, code, "The merchandising mutation fields are invalid."); }
 function requiredPlainText(value, maximum, code) { const text = plainMerchText(value, maximum); if (!text) throw new AuthFailure(400, code, "A required merchandising value is invalid."); return text; }
 function plainMerchText(value, maximum) { const text = cleanText(value, maximum); return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ""); }

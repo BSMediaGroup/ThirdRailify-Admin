@@ -201,6 +201,15 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 - CMS, catalogue/provider writes, orders, membership operations, users, media uploads, settings persistence, and integrations.
 - Pages project creation, deployment, custom domain, DNS, analytics, and production acceptance.
 
+## 2026-08-29 — scalable product merchandising controls
+
+- Rebuilt `/products` around a bounded server-paginated catalogue contract with 20-row default pages, 20/50/75/100 page sizes, filter-before-pagination totals, compact navigation, and preserved search/filter/sort state.
+- Added unobtrusive bulk selection with current-page and confirmed all-matching scope plus authenticated, CSRF-protected, rate-limited, audited D1 batch operations for show, hide, feature, and unfeature. These writes reject unknown IDs and do not change provider identity, migration, variant, price, checkout, payment, or fulfillment state.
+- Added icon-only eye, star, and primary edit actions to every product row. Visibility and featured state now update without opening the editor and synchronize with the paginated list, editor, and Featured Products Manager.
+- Promoted the editor's `Featured product` control into a labelled storefront-presentation switch. Newly featured products append deterministically; unfeatured products are removed and the remaining order is compacted.
+- Replaced the complete-catalogue featured checkbox wall with current-featured ordering/removal and a separate searchable, filtered, paginated add/find browser. Responsive and keyboard-focused coverage includes 1440, 1024, 768, and 390 pixel layouts.
+- No D1 migration, provider request, catalogue migration continuation, checkout/payment/fulfillment change, deployment, or Public repository change is part of this milestone.
+
 ## 2026-08-29 — first-party catalogue media and modal editors
 
 - Copied all 464 unique current catalogue images (466 product image references across 49 public products) into immutable, content-addressed Admin R2 objects and replaced the Commerce D1 browser projection with the first-party `/commerce-media/*` route. Product image edits now ingest validated JPG/PNG/WebP HTTPS sources into R2 before merchandising data is saved.

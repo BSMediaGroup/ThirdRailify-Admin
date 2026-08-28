@@ -2,6 +2,7 @@ export type BannerMessage = { text: string; ctaLabel: string | null; href: strin
 export type BannerConfig = {
   normal: { enabled: boolean; messages: BannerMessage[]; mode: "static" | "ticker" | "crossfade"; speed: "slow" | "normal" | "fast" };
   live: { enabled: boolean; label: string; showTitle: boolean; supportingText: string | null; ctaLabel: string; animation: "pulse" | "sweep" | "pulse-sweep" | "static"; intensity: "subtle" | "normal" | "strong" };
+  homeRail: { enabled: boolean; items: string[]; mode: "marquee" | "crossfade" | "static"; speed: "slow" | "normal" | "fast"; easing: "linear" | "ease-in-out"; glyph: "zap" | "arrow" | "diamond" | "dot" };
 };
 export type BannerSettings = { ok: true; config: BannerConfig; revision: number; updatedAt: string };
 

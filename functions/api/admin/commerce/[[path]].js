@@ -14,12 +14,15 @@ import {
 import {
   businessProfilePayload,
   archiveCollection,
+  bulkUpdateMerchandisingProducts,
   collectionsPayload,
+  collectionOptionsPayload,
   commerceOverview,
   createCollection,
   deleteCollection,
   grantCommerceCapability,
   merchandisingProductsPayload,
+  merchandisingProductListPayload,
   merchandisingProductPayload,
   permissionGrantsPayload,
   requireCommerceCapability,
@@ -99,9 +102,15 @@ async function handleGet(request, env, path) {
   } else if (path === "readiness") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await productionReadinessPayload(env, session);
+  } else if (path === "products/list") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await merchandisingProductListPayload(env, session, Object.fromEntries(new URL(request.url).searchParams));
   } else if (path === "products") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductsPayload(env, session);
+  } else if (path === "collections/options") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await collectionOptionsPayload(env, session);
   } else if (path === "collections") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await collectionsPayload(env, session);
@@ -241,6 +250,11 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     const [, orderId, , documentType] = path.split("/");
     payload = await issueOrderDocumentAccess(env, session, decodePathPart(orderId), documentType);
     authEventType = "commerce_order_document_issued";
+  } else if (path === "products/bulk") {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await bulkUpdateMerchandisingProducts(env, session, body);
+    authEventType = "commerce_products_bulk_updated";
   } else if (path === "products/featured") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");

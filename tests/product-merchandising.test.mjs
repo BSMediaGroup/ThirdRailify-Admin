@@ -45,6 +45,67 @@ test("product media ingestion copies validated bytes into first-party R2 and ser
   const audit = await harness.commerceDb.prepare("SELECT action FROM commerce_audit WHERE action='commerce.product_media_ingested'").first(); assert.equal(audit.action, "commerce.product_media_ingested");
 });
 
+test("Admin product listing paginates after search and filters with bounded page sizes and correct totals", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { cookie } = await masterSession(env);
+  for (let index = 1; index <= 105; index += 1) {
+    const suffix = String(index).padStart(3, "0");
+    await insertTestProduct(harness.commerceDb, {
+      id: "page-product-" + suffix,
+      slug: "page-product-" + suffix,
+      title: (index % 2 ? "Odd" : "Even") + " Product " + suffix,
+      visibility: index % 3 ? "public" : "private",
+      migrationStatus: index % 5 ? "target_verified" : "blocked",
+    });
+  }
+  const request = async (search = "") => {
+    const response = await commerceRequest({ request: new Request(ADMIN_ORIGIN + "/api/admin/commerce/products/list" + search, { headers: { Origin: ADMIN_ORIGIN, Cookie: cookie } }), env, data: {} });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const initial = await request(); assert.equal(initial.page, 1); assert.equal(initial.pageSize, 20); assert.equal(initial.items.length, 20); assert.equal(initial.totalItems, 105); assert.equal(initial.totalPages, 6); assert.equal(initial.totals.products, 105);
+  for (const size of [20, 50, 75, 100]) { const payload = await request("?pageSize=" + String(size)); assert.equal(payload.pageSize, size); assert.equal(payload.items.length, Math.min(size, 105)); }
+  for (const size of [101, 500, 37, "anything"]) { const payload = await request("?pageSize=" + String(size)); assert.equal(payload.pageSize, 20); assert.equal(payload.items.length, 20); }
+  const filtered = await request("?query=even&visibility=public&page=2&pageSize=20&sort=name"); assert.equal(filtered.totalItems, 35); assert.equal(filtered.page, 2); assert.equal(filtered.items.length, 15); assert.ok(filtered.items.every((product) => product.title.startsWith("Even") && product.visibility === "public"));
+  const next = await request("?page=2&pageSize=20"); assert.equal(next.page, 2); assert.equal(next.items.length, 20); assert.notEqual(next.items[0].id, initial.items[0].id);
+  const normalizedHigh = await request("?page=999&pageSize=20"); assert.equal(normalizedHigh.page, 6); assert.equal(normalizedHigh.items.length, 5);
+  const normalizedLow = await request("?page=-4&pageSize=20"); assert.equal(normalizedLow.page, 1);
+});
+
+test("bulk product state operations are authenticated, controlled, audited, synchronized, and preserve unrelated commerce fields", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  await insertTestProduct(harness.commerceDb, { id: "bulk-one", slug: "bulk-one", title: "Bulk Match One", targetPrintfulProductId: "target-one", migrationStatus: "target_verified" });
+  await insertTestProduct(harness.commerceDb, { id: "bulk-two", slug: "bulk-two", title: "Bulk Match Two", targetPrintfulProductId: "target-two", migrationStatus: "blocked" });
+  await insertTestProduct(harness.commerceDb, { id: "bulk-three", slug: "bulk-three", title: "Different Product", isFeatured: 1, featuredOrder: 10 });
+  await insertTestVariant(harness.commerceDb, { id: "bulk-variant", productId: "bulk-one", targetPrintfulProductId: "target-one", migrationStatus: "target_verified" });
+  const url = ADMIN_ORIGIN + "/api/admin/commerce/products/bulk";
+  const post = (body, options = {}) => commerceRequest({ request: jsonRequest(url, { origin: options.origin || ADMIN_ORIGIN, cookie: options.cookie, csrfToken: options.csrfToken, body }), env, data: {} });
+  const unauthenticated = await post({ operation: "hide", productIds: ["bulk-one"] }, { csrfToken: created.csrfToken }); assert.equal(unauthenticated.status, 401);
+  const noCsrf = await post({ operation: "hide", productIds: ["bulk-one"] }, { cookie }); assert.equal(noCsrf.status, 403);
+  const unknown = await post({ operation: "hide", productIds: ["missing"] }, { cookie, csrfToken: created.csrfToken }); assert.equal(unknown.status, 400); assert.equal((await unknown.json()).error, "commerce_product_unknown");
+  const invalidMatching = await post({ operation: "hide", matching: { query: "bulk", pageSize: 100 }, confirmMatching: true, expectedCount: 2 }, { cookie, csrfToken: created.csrfToken }); assert.equal(invalidMatching.status, 400);
+  const hidden = await post({ operation: "hide", productIds: ["bulk-one", "bulk-two"] }, { cookie, csrfToken: created.csrfToken }); const hiddenPayload = await hidden.json(); assert.equal(hidden.status, 200); assert.deepEqual({ matched: hiddenPayload.matched, updated: hiddenPayload.updated, unchanged: hiddenPayload.unchanged, rejected: hiddenPayload.rejected }, { matched: 2, updated: 2, unchanged: 0, rejected: 0 });
+  const unchanged = await post({ operation: "hide", productIds: ["bulk-one", "bulk-two"] }, { cookie, csrfToken: created.csrfToken }); assert.equal((await unchanged.json()).unchanged, 2);
+  const shown = await post({ operation: "show", productIds: ["bulk-one"] }, { cookie, csrfToken: created.csrfToken }); assert.equal((await shown.json()).updated, 1);
+  const featured = await post({ operation: "feature", productIds: ["bulk-one", "bulk-two"] }, { cookie, csrfToken: created.csrfToken }); assert.equal((await featured.json()).updated, 2);
+  const featuredRows = await harness.commerceDb.prepare("SELECT id,is_featured,featured_order FROM commerce_products WHERE id LIKE 'bulk-%' ORDER BY featured_order").all(); assert.deepEqual(featuredRows.results.map((row) => [row.id, row.is_featured, row.featured_order]), [["bulk-three", 1, 10], ["bulk-one", 1, 20], ["bulk-two", 1, 30]]);
+  const unfeatured = await post({ operation: "unfeature", productIds: ["bulk-one"] }, { cookie, csrfToken: created.csrfToken }); assert.equal((await unfeatured.json()).updated, 1); assert.equal((await harness.commerceDb.prepare("SELECT featured_order FROM commerce_products WHERE id='bulk-two'").first()).featured_order, 20);
+  const matching = await post({ operation: "hide", matching: { query: "bulk match", sort: "name" }, confirmMatching: true, expectedCount: 2 }, { cookie, csrfToken: created.csrfToken }); const matchingPayload = await matching.json(); assert.equal(matching.status, 200); assert.equal(matchingPayload.selection, "matching"); assert.equal(matchingPayload.matched, 2);
+  const changedMatch = await post({ operation: "show", matching: { query: "bulk match" }, confirmMatching: true, expectedCount: 99 }, { cookie, csrfToken: created.csrfToken }); assert.equal(changedMatch.status, 409);
+  const product = await harness.commerceDb.prepare("SELECT visibility,is_featured,featured_order,target_printful_product_id,migration_status FROM commerce_products WHERE id='bulk-one'").first(); assert.deepEqual(product, { visibility: "private", is_featured: 0, featured_order: null, target_printful_product_id: "target-one", migration_status: "target_verified" });
+  const variant = await harness.commerceDb.prepare("SELECT visibility,target_printful_product_id,migration_status FROM commerce_product_variants WHERE id='bulk-variant'").first(); assert.deepEqual(variant, { visibility: "public", target_printful_product_id: "target-one", migration_status: "target_verified" });
+  const audit = await harness.commerceDb.prepare("SELECT metadata_json FROM commerce_audit WHERE action='commerce.products_bulk_updated' ORDER BY id DESC LIMIT 1").first(); assert.match(audit.metadata_json, /operation|selection|matched|updated/);
+});
+
+test("individual featured toggle appends deterministically and unfeature removes ordering", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  await insertTestProduct(harness.commerceDb, { id: "featured-existing", slug: "featured-existing", title: "Existing", isFeatured: 1, featuredOrder: 10 });
+  await insertTestProduct(harness.commerceDb, { id: "featured-editor", slug: "featured-editor", title: "Editor Toggle" });
+  const url = ADMIN_ORIGIN + "/api/admin/commerce/products/featured-editor";
+  const enabled = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: productBody({ title: "Editor Toggle", slug: "featured-editor", categories: [], featured: true }) }), env, data: {} }); assert.equal(enabled.status, 200); assert.equal((await enabled.json()).product.featuredOrder, 20);
+  await insertTestProduct(harness.commerceDb, { id: "featured-later", slug: "featured-later", title: "Later", isFeatured: 1, featuredOrder: 30 });
+  const disabled = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: productBody({ title: "Editor Toggle", slug: "featured-editor", categories: [], featured: false }) }), env, data: {} }); const disabledProduct = (await disabled.json()).product; assert.equal(disabled.status, 200); assert.equal(disabledProduct.featured, false); assert.equal(disabledProduct.featuredOrder, null); assert.equal((await harness.commerceDb.prepare("SELECT featured_order FROM commerce_products WHERE id='featured-later'").first()).featured_order, 20);
+});
+
 test("authorized commerce role can edit while ungranted Admin is rejected", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); await insertTestProduct(harness.commerceDb); const now = new Date().toISOString();
   await harness.authDb.prepare("INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES ('merch-admin','merch@example.test','Merch Admin','admin','full','active',?,?,?,'test')").bind(now, now, now).run();

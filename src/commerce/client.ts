@@ -66,6 +66,22 @@ export type CommerceOrder = {
   hasPrintfulOrder: boolean;
   items: Array<{ productId: string; variantId: string | null; productName: string; variantName: string | null; options: Record<string, string>; currencyCode: string; unitAmount: number; quantity: number; lineTotalAmount: number }>;
 };
+export type ProductListFilters = {
+  page?: number; pageSize?: 20 | 50 | 75 | 100; query?: string; visibility?: string; status?: string;
+  migration?: string; category?: string; featured?: "all" | "featured" | "not_featured"; sort?: "display" | "name" | "price";
+};
+export type MerchandisingListPayload = {
+  ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; items: MerchandisingProduct[]; featured: MerchandisingProduct[];
+  page: number; pageSize: 20 | 50 | 75 | 100; totalItems: number; totalPages: number;
+  filters: Required<Pick<ProductListFilters, "query" | "visibility" | "status" | "migration" | "category" | "featured" | "sort">>;
+  facets: { categories: string[]; migrationStatuses: string[] };
+  totals: { products: number; publicProducts: number; variants: number; featuredProducts: number }; updatedAt: string | null;
+};
+export type ProductBulkOperation = "show" | "hide" | "feature" | "unfeature";
+export type ProductBulkResult = {
+  ok: true; operation: ProductBulkOperation; selection: "explicit" | "matching"; matched: number; requested: number;
+  updated: number; unchanged: number; rejected: number; errors: string[]; updatedIds: string[];
+};
 export type ControlledTestAcceptance = {
   enabled: boolean; normalCheckoutEnabled: boolean; livePaymentsEnabled: boolean; fulfillmentEnabled: boolean;
   stripe: { status: string; environment: string; integrationMode: string; currencyCode: string };
@@ -87,6 +103,7 @@ export type CollectionsPayload = {
   ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; collections: CommerceCollection[];
   products: MerchandisingProduct[]; updatedAt: string | null;
 };
+export type CollectionOptionsPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; collections: CommerceCollection[]; updatedAt: string | null };
 export type PrintfulCatalogueSnapshot = {
   role: string; store: PrintfulStoreIdentity;
   counts: { products: number; variants: number; synced: number; ignored: number; ignoredProducts: number; unavailable: number; missingPrices: number; malformedPrices: number; malformedOrMissingPrices: number; missingFiles: number; variantsWithoutFiles: number };
@@ -328,7 +345,17 @@ export function saveCommerceTemplate(csrfToken: string, template: CommerceTempla
 export function previewCommerceTemplate(csrfToken: string, template: CommerceTemplate, orderId?: string) { return adminApi<TemplatePreviewPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}/preview`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ template, ...(orderId ? { orderId } : {}) }) }); }
 export function sendCommerceTemplateTest(csrfToken: string, templateKey: string, recipient: string, orderId?: string) { return adminApi<{ ok: true; duplicate: boolean; status: string; recipient: string }>(`/api/admin/commerce/templates/${encodeURIComponent(templateKey)}/send-test`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ recipient, ...(orderId ? { orderId } : {}) }) }); }
 export function getMerchandisingProducts() { return adminApi<MerchandisingPayload>("/api/admin/commerce/products"); }
+export function getMerchandisingProduct(productId: string) { return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}`); }
+export function getMerchandisingProductList(filters: ProductListFilters = {}) {
+  const query = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
+  return adminApi<MerchandisingListPayload>(`/api/admin/commerce/products/list?${query.toString()}`);
+}
+export function bulkUpdateMerchandisingProducts(csrfToken: string, body: { operation: ProductBulkOperation; productIds: string[] } | { operation: ProductBulkOperation; matching: Omit<ProductListFilters, "page" | "pageSize">; confirmMatching: true; expectedCount: number }) {
+  return adminApi<ProductBulkResult>("/api/admin/commerce/products/bulk", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+}
 export function getCollections() { return adminApi<CollectionsPayload>("/api/admin/commerce/collections"); }
+export function getCollectionOptions() { return adminApi<CollectionOptionsPayload>("/api/admin/commerce/collections/options"); }
 export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
 export function getOrderDocument(orderId: string, type: "receipt" | "invoice") { return adminApi<DocumentPreviewPayload>(`/api/admin/commerce/orders/${encodeURIComponent(orderId)}/documents/${type}`); }
 export function generateControlledTestCheckout(csrfToken: string, body: { checkoutRequestId: string; productId: string; variantId: string; quantity: 1 }) {

@@ -17,7 +17,9 @@ import {
   previewCommerceTemplate,
   sendCommerceTemplateTest,
   getOrderDocument,
-  getMerchandisingProducts,
+  getMerchandisingProductList,
+  getCollectionOptions,
+  bulkUpdateMerchandisingProducts,
   ingestMerchandisingProductMedia,
   getCollections,
   executePermanentPrintfulMigration,
@@ -42,9 +44,11 @@ import {
   type CollectionsPayload,
   type CommerceCollection,
   type CommerceTemplate,
-  type MerchandisingPayload,
+  type MerchandisingListPayload,
   type MerchandisingProduct,
   type MerchandisingVariant,
+  type ProductBulkOperation,
+  type ProductListFilters,
   type PermanentPrintfulMigrationPayload,
   type ProviderStatus,
   type TemplatesPayload,
@@ -426,62 +430,207 @@ export function FulfillmentIntegrationsPage() {
 export function CommerceProductsPage() {
   const { csrfToken } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
-  const [payload, setPayload] = useState<MerchandisingPayload | null>(null);
+  const [payload, setPayload] = useState<MerchandisingListPayload | null>(null);
+  const [featuredBrowser, setFeaturedBrowser] = useState<MerchandisingListPayload | null>(null);
   const [collections, setCollections] = useState<CommerceCollection[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<MerchandisingProduct | null>(null);
   const [query, setQuery] = useState("");
   const [visibility, setVisibility] = useState("all");
   const [status, setStatus] = useState("all");
   const [migration, setMigration] = useState("all");
   const [category, setCategory] = useState("all");
-  const [sort, setSort] = useState("display");
+  const [sort, setSort] = useState<ProductListFilters["sort"]>("display");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<20 | 50 | 75 | 100>(20);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [allMatching, setAllMatching] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pendingVisibility, setPendingVisibility] = useState<string[]>([]);
   const [featuredIds, setFeaturedIds] = useState<string[]>([]);
+  const [featuredQuery, setFeaturedQuery] = useState("");
+  const [featuredFilter, setFeaturedFilter] = useState<"all" | "featured" | "not_featured">("not_featured");
+  const [featuredPage, setFeaturedPage] = useState(1);
+  const [savingFeatured, setSavingFeatured] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [savingFeatured, setSavingFeatured] = useState(false);
-  const load = useCallback(async () => {
-    const stop = startLoading("Loading authoritative products"); setError("");
-    try { const [next, collectionPayload] = await Promise.all([getMerchandisingProducts(), getCollections()]); setPayload(next); setCollections(collectionPayload.collections); setFeaturedIds(next.featured.map((product) => product.id)); }
-    catch (reason) { setError(errorMessage(reason, "Product merchandising is unavailable.")); }
-    finally { stop(); }
-  }, [startLoading]);
-  useEffect(() => { void load(); }, [load]);
+  const mainRequest = useRef(0);
+  const featuredRequest = useRef(0);
+  const featuredAuthority = useRef("");
+  const mainFilters = useMemo<ProductListFilters>(() => ({ page, pageSize, query, visibility, status, migration, category, sort }), [category, migration, page, pageSize, query, sort, status, visibility]);
+  const matchingFilters = useMemo<Omit<ProductListFilters, "page" | "pageSize">>(() => ({ query, visibility, status, migration, category, featured: "all", sort }), [category, migration, query, sort, status, visibility]);
+
+  const loadMain = useCallback(async () => {
+    const requestId = ++mainRequest.current;
+    const stop = startLoading("Loading authoritative products");
+    setError("");
+    try {
+      const next = await getMerchandisingProductList(mainFilters);
+      if (requestId === mainRequest.current) {
+        setPayload(next);
+        if (next.page !== page) setPage(next.page);
+      }
+    } catch (reason) {
+      if (requestId === mainRequest.current) setError(errorMessage(reason, "Product merchandising is unavailable."));
+    } finally {
+      stop();
+    }
+  }, [mainFilters, page, startLoading]);
+  const loadFeaturedBrowser = useCallback(async () => {
+    const requestId = ++featuredRequest.current;
+    try {
+      const next = await getMerchandisingProductList({ page: featuredPage, pageSize: 20, query: featuredQuery, featured: featuredFilter, sort: "display" });
+      if (requestId === featuredRequest.current) {
+        setFeaturedBrowser(next);
+        if (next.page !== featuredPage) setFeaturedPage(next.page);
+      }
+    } catch (reason) {
+      if (requestId === featuredRequest.current) setError(errorMessage(reason, "The featured catalogue browser is unavailable."));
+    }
+  }, [featuredFilter, featuredPage, featuredQuery]);
+  useEffect(() => { void loadMain(); }, [loadMain, refreshKey]);
+  useEffect(() => { void loadFeaturedBrowser(); }, [loadFeaturedBrowser, refreshKey]);
+  useEffect(() => {
+    let active = true;
+    void getCollectionOptions().then((next) => { if (active) setCollections(next.collections); }).catch((reason) => { if (active) setError(errorMessage(reason, "Product collections are unavailable.")); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    const signature = (payload?.featured || []).map((product) => product.id + ":" + String(product.featuredOrder)).join("\u0000");
+    if (signature !== featuredAuthority.current) {
+      featuredAuthority.current = signature;
+      setFeaturedIds((payload?.featured || []).map((product) => product.id));
+    }
+  }, [payload?.featured]);
+  useEffect(() => { setSelectedIds([]); setAllMatching(false); }, [category, migration, pageSize, query, sort, status, visibility]);
+
   const canManage = Boolean(payload?.access?.capabilities.includes("commerce.business.manage"));
-  const categories = useMemo(() => [...new Set((payload?.products || []).flatMap((product) => product.categories))].sort(), [payload]);
-  const products = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const next = (payload?.products || []).filter((product) =>
-      (!needle || `${product.title} ${product.slug} ${product.categories.join(" ")}`.toLowerCase().includes(needle)) &&
-      (visibility === "all" || product.visibility === visibility) && (status === "all" || product.status === status) &&
-      (migration === "all" || product.migrationStatus === migration) && (category === "all" || product.categories.includes(category)));
-    next.sort(sort === "name" ? (a, b) => a.title.localeCompare(b.title) : sort === "price" ? (a, b) => (a.price.minimum ?? Infinity) - (b.price.minimum ?? Infinity) || a.slug.localeCompare(b.slug) : (a, b) => Number(b.featured) - Number(a.featured) || (a.featuredOrder ?? Infinity) - (b.featuredOrder ?? Infinity) || a.displayOrder - b.displayOrder || a.slug.localeCompare(b.slug));
-    return next;
-  }, [category, migration, payload, query, sort, status, visibility]);
-  const selected = payload?.products.find((product) => product.id === selectedId) || null;
-  const ordered = featuredIds.map((id) => payload?.products.find((product) => product.id === id)).filter((product): product is MerchandisingProduct => Boolean(product));
   const authoritativeFeaturedIds = payload?.featured.map((product) => product.id) || [];
+  const orderedFeatured = featuredIds.map((id) => payload?.featured.find((product) => product.id === id) || featuredBrowser?.featured.find((product) => product.id === id)).filter((product): product is MerchandisingProduct => Boolean(product));
   const featuredDirty = featuredIds.join("\u0000") !== authoritativeFeaturedIds.join("\u0000");
-  const toggleFeatured = (id: string) => setFeaturedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
-  const moveFeatured = (id: string, offset: -1 | 1) => setFeaturedIds((current) => { const index = current.indexOf(id); const target = index + offset; if (index < 0 || target < 0 || target >= current.length) return current; const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; return next; });
-  const replaceProduct = (product: MerchandisingProduct) => setPayload((current) => current ? { ...current, products: current.products.map((entry) => entry.id === product.id ? product : entry), featured: current.featured.map((entry) => entry.id === product.id ? product : entry).filter((entry) => entry.featured) } : current);
-  const saveFeatured = async () => { if (!csrfToken || !canManage) return; setSavingFeatured(true); setError(""); setMessage(""); try { const next = await saveFeaturedProducts(csrfToken, featuredIds); setPayload(next); setFeaturedIds(next.featured.map((product) => product.id)); setMessage("Featured order saved to Commerce D1."); } catch (reason) { setError(errorMessage(reason, "Featured products could not be saved.")); } finally { setSavingFeatured(false); } };
+  const selectedCount = allMatching ? payload?.totalItems || 0 : selectedIds.length;
+  const resultStart = payload?.totalItems ? (payload.page - 1) * payload.pageSize + 1 : 0;
+  const resultEnd = payload?.totalItems ? Math.min(payload.page * payload.pageSize, payload.totalItems) : 0;
+  const refresh = () => setRefreshKey((value) => value + 1);
+  const moveFeatured = (id: string, offset: -1 | 1) => setFeaturedIds((current) => {
+    const index = current.indexOf(id);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= current.length) return current;
+    const next = [...current];
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  });
+  const replaceProduct = (product: MerchandisingProduct) => {
+    setSelectedProduct(product);
+    setPayload((current) => current ? {
+      ...current,
+      items: current.items.map((entry) => entry.id === product.id ? product : entry),
+      featured: product.featured
+        ? [...current.featured.filter((entry) => entry.id !== product.id), product].sort((a, b) => (a.featuredOrder ?? Infinity) - (b.featuredOrder ?? Infinity))
+        : current.featured.filter((entry) => entry.id !== product.id),
+    } : current);
+    refresh();
+  };
+  const saveFeatured = async () => {
+    if (!csrfToken || !canManage) return;
+    setSavingFeatured(true); setError(""); setMessage("");
+    try {
+      const next = await saveFeaturedProducts(csrfToken, featuredIds);
+      setFeaturedIds(next.featured.map((product) => product.id));
+      setMessage("Featured order saved to Commerce D1.");
+      refresh();
+    } catch (reason) {
+      setError(errorMessage(reason, "Featured products could not be saved."));
+    } finally {
+      setSavingFeatured(false);
+    }
+  };
+  const mutateExplicit = async (operation: ProductBulkOperation, ids: string[], successPrefix: string) => {
+    if (!csrfToken || !canManage || !ids.length || busy) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await bulkUpdateMerchandisingProducts(csrfToken, { operation, productIds: ids });
+      setMessage(successPrefix + " " + String(result.updated) + " updated; " + String(result.unchanged) + " unchanged.");
+      refresh();
+    } catch (reason) {
+      setError(errorMessage(reason, "The product state could not be updated."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggleVisibility = async (product: MerchandisingProduct) => {
+    if (!csrfToken || !canManage || pendingVisibility.includes(product.id)) return;
+    const operation: ProductBulkOperation = product.visibility === "public" ? "hide" : "show";
+    setPendingVisibility((current) => [...current, product.id]); setError("");
+    try {
+      const result = await bulkUpdateMerchandisingProducts(csrfToken, { operation, productIds: [product.id] });
+      setPayload((current) => current ? { ...current, items: current.items.map((entry) => entry.id === product.id ? { ...entry, visibility: operation === "show" ? "public" : "private" } : entry) } : current);
+      setMessage((operation === "show" ? "Shown in store. " : "Hidden from store. ") + String(result.updated) + " product updated.");
+      refresh();
+    } catch (reason) {
+      setError(errorMessage(reason, "Storefront visibility could not be updated."));
+    } finally {
+      setPendingVisibility((current) => current.filter((id) => id !== product.id));
+    }
+  };
+  const applyBulk = async (operation: ProductBulkOperation) => {
+    if (!csrfToken || !canManage || !payload || !selectedCount || busy) return;
+    if (allMatching && !window.confirm("Apply “" + bulkOperationLabel(operation) + "” to all " + String(payload.totalItems) + " products matching the current filters?")) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = allMatching
+        ? await bulkUpdateMerchandisingProducts(csrfToken, { operation, matching: matchingFilters, confirmMatching: true, expectedCount: payload.totalItems })
+        : await bulkUpdateMerchandisingProducts(csrfToken, { operation, productIds: selectedIds });
+      setMessage(bulkOperationLabel(operation) + " completed: " + String(result.updated) + " updated; " + String(result.unchanged) + " unchanged; " + String(result.rejected) + " rejected.");
+      setSelectedIds([]); setAllMatching(false); refresh();
+    } catch (reason) {
+      setError(errorMessage(reason, "The bulk product update could not be applied."));
+      refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return <>
     <CommerceHeading eyebrow="Commerce D1 authority" title="Shop / Products" summary="Manage the replacement catalogue, real variants, integer CAD prices, public presentation, and provider readiness. Displayability is independent from the globally disabled checkout and paused fulfillment migration." status={payload?.databaseConfigured ? "connected" : "unavailable"} />
-    {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Merchandising saved</strong><p>{message}</p></div></div>}
+    {error && <div className="admin-alert" role="alert">{error}</div>}
+    {message && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Merchandising saved</strong><p>{message}</p></div></div>}
     {!payload && !error ? <CommerceState>Loading catalogue merchandising…</CommerceState> : payload ? <div className="merchandising-workspace commerce-catalogue-manager">
-      <section className="commerce-posture" aria-label="Catalogue totals"><div><span>Products</span><strong>{payload.products.length}</strong></div><div><span>Public</span><strong>{payload.products.filter((product) => product.visibility === "public" && product.status === "active").length}</strong></div><div><span>Variants</span><strong>{payload.products.reduce((total, product) => total + product.variantCount, 0)}</strong></div><div><span>Checkout</span><strong>Globally disabled</strong></div></section>
-      <section className="commerce-section" aria-labelledby="catalogue-products-title"><SectionTitle id="catalogue-products-title" eyebrow="Authoritative catalogue" title="Products and readiness" />
-        <div className="commerce-product-filters"><Field label="Search"><input value={query} onChange={(event) => setQuery(event.target.value)} type="search" placeholder="Title, slug, or category" /></Field><Field label="Visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="all">All</option><option value="public">Public</option><option value="private">Hidden</option></select></Field><Field label="Status"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All</option>{["active", "disabled", "pending", "restricted", "error"].map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Migration"><select value={migration} onChange={(event) => setMigration(event.target.value)}><option value="all">All</option>{[...new Set(payload.products.map((product) => product.migrationStatus))].sort().map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Category"><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="all">All</option>{categories.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Sort"><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="display">Featured / display</option><option value="name">Name</option><option value="price">Price</option></select></Field></div>
-        <p className="commerce-action-note">Showing {products.length} of {payload.products.length} products.</p>
-        <div className="commerce-product-table" role="list">{products.map((product) => <article key={product.id} role="listitem" className="commerce-product-row"><div className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <span aria-hidden="true">TR</span>}</div><div><strong>{product.title}</strong><small>/{product.slug}</small><span>{product.categories.join(" · ") || "Uncategorized"}</span></div><div><span>Price</span><strong>{product.price.label}</strong><small>{product.activeVariantCount} / {product.variantCount} public variants</small></div><div><span>Catalogue</span><strong>{product.visibility === "public" && product.status === "active" ? "Public" : "Hidden"}</strong><small>{product.featured ? "Featured" : `Order ${product.displayOrder}`}</small></div><div><span>Fulfillment mapping</span><strong>{humanize(product.readiness.fulfillment)}</strong><small>Migration: {humanize(product.migrationStatus)}</small></div><button className="commerce-row-action" type="button" onClick={() => setSelectedId(product.id)}>Edit product</button></article>)}</div>
+      <section className="commerce-posture" aria-label="Catalogue totals"><div><span>Products</span><strong>{payload.totals.products}</strong></div><div><span>Public</span><strong>{payload.totals.publicProducts}</strong></div><div><span>Variants</span><strong>{payload.totals.variants}</strong></div><div><span>Checkout</span><strong>Globally disabled</strong></div></section>
+      <section className="commerce-section" aria-labelledby="catalogue-products-title">
+        <div className="commerce-section-heading-actions"><SectionTitle id="catalogue-products-title" eyebrow="Authoritative catalogue" title="Products and readiness" /><button className={bulkMode ? "button-link" : "secondary-button"} type="button" onClick={() => { setBulkMode((value) => !value); setSelectedIds([]); setAllMatching(false); }} disabled={!canManage}>{bulkMode ? "Exit bulk edit" : "Bulk edit"}</button></div>
+        <div className="commerce-product-filters"><Field label="Search"><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} type="search" placeholder="Title, slug, category, or tag" /></Field><Field label="Visibility"><select value={visibility} onChange={(event) => { setVisibility(event.target.value); setPage(1); }}><option value="all">All</option><option value="public">Public</option><option value="private">Hidden</option></select></Field><Field label="Status"><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="all">All</option>{["active", "disabled", "pending", "restricted", "error"].map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Migration"><select value={migration} onChange={(event) => { setMigration(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.migrationStatuses.map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Category"><select value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.categories.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Sort"><select value={sort} onChange={(event) => { setSort(event.target.value as ProductListFilters["sort"]); setPage(1); }}><option value="display">Featured / display</option><option value="name">Name</option><option value="price">Price</option></select></Field></div>
+        {bulkMode && <div className="commerce-bulk-toolbar" aria-label="Bulk product actions"><strong aria-live="polite">{selectedCount} selected</strong><div><button type="button" className="text-button" onClick={() => { setAllMatching(false); setSelectedIds((current) => [...new Set([...current, ...payload.items.map((product) => product.id)])]); }}>Select current page</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(false); }}>Clear selection</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(true); }}>Select all {payload.totalItems} matching</button></div><div className="commerce-bulk-toolbar__actions"><button type="button" onClick={() => void applyBulk("show")} disabled={!selectedCount || busy}>Show in store</button><button type="button" onClick={() => void applyBulk("hide")} disabled={!selectedCount || busy}>Hide from store</button><button type="button" onClick={() => void applyBulk("feature")} disabled={!selectedCount || busy}>Feature</button><button type="button" onClick={() => void applyBulk("unfeature")} disabled={!selectedCount || busy}>Unfeature</button></div>{allMatching && <small>All {payload.totalItems} products matching the current search and filters will be affected. You’ll confirm before applying.</small>}</div>}
+        <div className="commerce-results-bar"><p>Showing {resultStart}–{resultEnd} of {payload.totalItems} products</p><Field label="Rows per page"><select aria-label="Rows per page" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 20 | 50 | 75 | 100); setPage(1); }}>{[20, 50, 75, 100].map((value) => <option key={value} value={value}>{value}</option>)}</select></Field></div>
+        <div className="commerce-product-table" role="list">{payload.items.map((product) => {
+          const visible = product.visibility === "public";
+          const selected = allMatching || selectedIds.includes(product.id);
+          const pending = pendingVisibility.includes(product.id);
+          return <article key={product.id} role="listitem" className={"commerce-product-row" + (bulkMode ? " is-bulk" : "") + (selected ? " is-selected" : "")}>{bulkMode && <label className="commerce-product-row__select"><input type="checkbox" aria-label={"Select " + product.title} checked={selected} disabled={allMatching} onChange={() => setSelectedIds((current) => current.includes(product.id) ? current.filter((id) => id !== product.id) : [...current, product.id])} /></label>}<div className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <span aria-hidden="true">TR</span>}</div><div><strong>{product.title}</strong><small>/{product.slug}</small><span>{product.categories.join(" · ") || "Uncategorized"}{product.tags.length ? " · " + product.tags.join(" · ") : ""}</span></div><div><span>Price</span><strong>{product.price.label}</strong><small>{product.activeVariantCount} / {product.variantCount} public variants</small></div><div><span>Storefront</span><strong>{visible && product.status === "active" ? "Public" : "Hidden"}</strong><small>{product.featured ? "Featured" : "Order " + String(product.displayOrder)}</small></div><div><span>Fulfillment mapping</span><strong>{humanize(product.readiness.fulfillment)}</strong><small>Migration: {humanize(product.migrationStatus)}</small></div><div className="commerce-product-row__actions"><button className="commerce-icon-action" type="button" title={visible ? "Hide from store" : "Show in store"} aria-label={(visible ? "Hide " : "Show ") + product.title + (visible ? " from store" : " in store")} aria-pressed={visible} onClick={() => void toggleVisibility(product)} disabled={!canManage || pending}>{pending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name={visible ? "eye" : "eyeOff"} size={18} />}</button><button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={product.featured ? "Remove from featured" : "Add to featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void mutateExplicit(product.featured ? "unfeature" : "feature", [product.id], product.featured ? "Featured product removed." : "Featured product added.")} disabled={!canManage || busy}><AdminIcon name="star" size={18} /></button><button className="commerce-row-action commerce-row-action--icon" type="button" title="Edit product" aria-label="Edit product" onClick={() => setSelectedProduct(product)}><AdminIcon name="edit" size={18} /></button></div></article>;
+        })}</div>
+        {!payload.items.length && <CommerceState>No products match the current search and filters.</CommerceState>}
+        <ProductPagination page={payload.page} totalPages={payload.totalPages} onPage={setPage} label="Product pages" />
       </section>
-      {selected && <ProductMerchandisingEditor product={selected} collections={collections} csrfToken={csrfToken} canManage={canManage} onClose={() => setSelectedId(null)} onSaved={(product, notice) => { replaceProduct(product); setMessage(notice); }} onError={setError} />}
-      <section className="merchandising-preview" aria-labelledby="featured-manager-title"><div><p className="eyebrow">Public hero order</p><h2 id="featured-manager-title">Featured rail</h2></div>{ordered.length ? <ol>{ordered.map((product, index) => <li key={product.id}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{product.title}</strong><small>{product.displayData.ready ? "Image and CAD price available" : "Image or price requires attention"}</small></div><div className="merchandising-order-actions"><button type="button" onClick={() => moveFeatured(product.id, -1)} disabled={index === 0} aria-label={`Move ${product.title} up`}>↑</button><button type="button" onClick={() => moveFeatured(product.id, 1)} disabled={index === ordered.length - 1} aria-label={`Move ${product.title} down`}>↓</button></div></li>)}</ol> : <p className="merchandising-empty">No products are featured.</p>}</section>
-      <section className="merchandising-products" aria-labelledby="featured-products-title"><div><p className="eyebrow">Deterministic selection</p><h2 id="featured-products-title">Featured products</h2></div><div className="merchandising-product-list">{payload.products.filter((product) => product.status === "active" && product.visibility === "public").map((product) => <label key={product.id} className={featuredIds.includes(product.id) ? "is-featured" : ""}><input type="checkbox" checked={featuredIds.includes(product.id)} onChange={() => toggleFeatured(product.id)} disabled={!canManage} /><span><strong>{product.title}</strong><small>/{product.slug}</small></span><em>{featuredIds.includes(product.id) ? `Featured ${featuredIds.indexOf(product.id) + 1}` : "Catalogue"}</em></label>)}</div></section>
-      {featuredDirty ? <div className="featured-dirty-rail" role="status"><p><strong>Featured order changed</strong><span>These changes apply only to featured products.</span></p><div><button className="text-button" type="button" onClick={() => setFeaturedIds(authoritativeFeaturedIds)} disabled={savingFeatured}>Discard changes</button><button className="button-link" type="button" onClick={() => void saveFeatured()} disabled={savingFeatured || !canManage || !payload.databaseConfigured}>{savingFeatured ? "Saving…" : "Save order"}</button></div></div> : null}
+      {selectedProduct && <ProductMerchandisingEditor product={selectedProduct} collections={collections} csrfToken={csrfToken} canManage={canManage} onClose={() => setSelectedProduct(null)} onSaved={(product, notice) => { replaceProduct(product); setMessage(notice); }} onError={setError} />}
+      <section className="commerce-section featured-products-manager" aria-labelledby="featured-manager-title">
+        <div className="featured-products-manager__heading"><div><p className="eyebrow">Storefront priority</p><h2 id="featured-manager-title">Featured Products Manager</h2><p>See the current storefront rail, set its order, or find another catalogue product without scanning the full list.</p></div><strong>{orderedFeatured.length} featured</strong></div>
+        <div className="featured-products-manager__grid">
+          <section className="featured-current" aria-labelledby="current-featured-title"><div><p className="eyebrow">Current featured products</p><h3 id="current-featured-title">Storefront order</h3></div>{orderedFeatured.length ? <ol>{orderedFeatured.map((product, index) => <li key={product.id}><span className="featured-current__position">{String(index + 1).padStart(2, "0")}</span><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span className="featured-current__identity"><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" ? "Public" : "Hidden"}</small></span><span className="merchandising-order-actions"><button type="button" onClick={() => moveFeatured(product.id, -1)} disabled={index === 0 || savingFeatured} aria-label={"Move " + product.title + " up"}>↑</button><button type="button" onClick={() => moveFeatured(product.id, 1)} disabled={index === orderedFeatured.length - 1 || savingFeatured} aria-label={"Move " + product.title + " down"}>↓</button></span><button className="commerce-icon-action is-featured" type="button" title="Remove from featured" aria-label={"Remove " + product.title + " from featured products"} aria-pressed={true} onClick={() => void mutateExplicit("unfeature", [product.id], "Featured product removed.")} disabled={!canManage || busy}><AdminIcon name="star" size={18} /></button></li>)}</ol> : <p className="merchandising-empty">No products are featured. Use the catalogue finder to add one.</p>}{featuredDirty && <div className="featured-order-save" role="status"><p><strong>Featured order changed</strong><span>Save to publish this deterministic order.</span></p><div><button className="text-button" type="button" onClick={() => setFeaturedIds(authoritativeFeaturedIds)} disabled={savingFeatured}>Discard</button><button className="button-link" type="button" onClick={() => void saveFeatured()} disabled={savingFeatured || !canManage || !payload.databaseConfigured}>{savingFeatured ? "Saving…" : "Save order"}</button></div></div>}</section>
+          <section className="featured-finder" aria-labelledby="featured-finder-title"><div><p className="eyebrow">Add / find products</p><h3 id="featured-finder-title">Catalogue finder</h3></div><div className="featured-finder__tools"><Field label="Search title or slug"><input type="search" value={featuredQuery} onChange={(event) => { setFeaturedQuery(event.target.value); setFeaturedPage(1); }} placeholder="Find a product" /></Field><Field label="Featured state"><select value={featuredFilter} onChange={(event) => { setFeaturedFilter(event.target.value as typeof featuredFilter); setFeaturedPage(1); }}><option value="all">All</option><option value="featured">Featured</option><option value="not_featured">Not featured</option></select></Field></div><div className="featured-finder__results" role="list">{featuredBrowser?.items.map((product) => { const eligible = ["active", "legacy_production"].includes(product.status); return <article key={product.id} role="listitem"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" ? "Public" : "Hidden"}</small></span><button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={product.featured ? "Remove from featured" : "Add to featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void mutateExplicit(product.featured ? "unfeature" : "feature", [product.id], product.featured ? "Featured product removed." : "Featured product added.")} disabled={!canManage || busy || (!product.featured && !eligible)}><AdminIcon name="star" size={18} /></button></article>; })}</div>{featuredBrowser && !featuredBrowser.items.length && <p className="merchandising-empty">No catalogue products match this finder.</p>}{featuredBrowser && <ProductPagination page={featuredBrowser.page} totalPages={featuredBrowser.totalPages} onPage={setFeaturedPage} label="Featured catalogue pages" />}</section>
+        </div>
+      </section>
     </div> : null}
   </>;
 }
+
+function ProductPagination({ page, totalPages, onPage, label }: { page: number; totalPages: number; onPage: (page: number) => void; label: string }) {
+  if (totalPages <= 1) return null;
+  return <nav className="commerce-pagination" aria-label={label}><button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1}>Previous</button><div>{paginationItems(page, totalPages).map((item) => typeof item === "number" ? <button key={item} type="button" className={item === page ? "is-current" : ""} aria-current={item === page ? "page" : undefined} onClick={() => onPage(item)}>{item}</button> : <span key={item} aria-hidden="true">…</span>)}</div><span>Page {page} of {totalPages}</span><button type="button" onClick={() => onPage(page + 1)} disabled={page >= totalPages}>Next</button></nav>;
+}
+function paginationItems(page: number, totalPages: number): Array<number | string> { if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1); const pages = new Set([1, totalPages, page - 1, page, page + 1].filter((value) => value > 0 && value <= totalPages)); const sorted = [...pages].sort((a, b) => a - b); const result: Array<number | string> = []; sorted.forEach((value, index) => { if (index && value - sorted[index - 1] > 1) result.push("ellipsis-" + String(value)); result.push(value); }); return result; }
+function bulkOperationLabel(operation: ProductBulkOperation) { return operation === "show" ? "Show in store" : operation === "hide" ? "Hide from store" : operation === "feature" ? "Feature" : "Unfeature"; }
+
 
 export function CommerceCollectionsPage() {
   const { csrfToken } = useAuth();
@@ -565,11 +714,9 @@ function ProductMerchandisingEditor({ product, collections, csrfToken, canManage
         <Field label="Additional image sources" hint="One HTTPS source per line. Stored catalogue URLs are replaced with immutable first-party media URLs." className="commerce-field--wide"><textarea value={form.additionalImages} onChange={(event) => update("additionalImages", event.target.value)} rows={3} /></Field>
         <fieldset className="commerce-collection-picker commerce-field--wide"><legend>Collections</legend><p>Choose every active collection this product belongs to.</p><div>{collections.map((collection) => <label key={collection.id} className={form.collectionIds.includes(collection.id) ? "is-selected" : ""}><input type="checkbox" checked={form.collectionIds.includes(collection.id)} onChange={() => setForm((current) => ({ ...current, collectionIds: current.collectionIds.includes(collection.id) ? current.collectionIds.filter((id) => id !== collection.id) : [...current.collectionIds, collection.id] }))} /><span>{collection.title}<small>{collection.visibility === "public" ? "Public" : "Hidden"}</small></span></label>)}</div></fieldset>
         <Field label="Tags" hint="Comma separated."><input value={form.tags} onChange={(event) => update("tags", event.target.value)} /></Field>
-        <Field label="Public visibility"><select value={form.visibility} onChange={(event) => update("visibility", event.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field>
-        <Field label="Catalogue status"><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="active">Active</option><option value="disabled">Inactive</option></select></Field>
+        <fieldset className="commerce-presentation-controls commerce-field--wide"><legend>Storefront presentation</legend><p>Control whether this product is visible and whether it receives prioritized storefront placement.</p><div><Field label="Public visibility"><select value={form.visibility} onChange={(event) => update("visibility", event.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field><Field label="Catalogue status"><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="active">Active</option><option value="disabled">Inactive</option></select></Field></div><label className="commerce-featured-switch"><input type="checkbox" role="switch" checked={form.featured} onChange={(event) => update("featured", event.target.checked)} /><span className="commerce-featured-switch__track" aria-hidden="true"><i /></span><span><strong>Featured product</strong><small>Featured products receive prioritized placement in the storefront rail.</small></span></label></fieldset>
         <Field label="Display order"><input type="number" min={0} max={999999} value={form.displayOrder} onChange={(event) => update("displayOrder", event.target.value)} /></Field>
         <Field label="Maximum quantity"><input type="number" min={1} max={20} value={form.maxQuantity} onChange={(event) => update("maxQuantity", event.target.value)} /></Field>
-        <label className="commerce-toggle"><input type="checkbox" checked={form.featured} onChange={(event) => update("featured", event.target.checked)} /><span>Featured product</span></label>
       </div>
       <div className="merchandising-savebar"><p>Provider identity and migration provenance are read-only.</p><button className="button-link" type="submit" disabled={!canManage || !csrfToken || saving}>{saving ? "Saving…" : "Save product"}</button></div>
     </form>

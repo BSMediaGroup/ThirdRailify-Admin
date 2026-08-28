@@ -19,6 +19,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
       const request = route.request(); const pathname = new URL(request.url()).pathname;
       if (pathname === "/api/auth/config") return json(route, authConfig());
       if (pathname === "/api/auth/session") return json(route, session());
+      if (pathname === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
       if (pathname === "/api/admin/banner") {
         if (request.method() === "GET") return json(route, { ok: true, config: stored, revision, updatedAt: "2026-08-28T00:00:00.000Z" });
         assert.equal(request.method(), "PUT"); assert.equal(request.headers()["x-csrf-token"], "browser-fixture-csrf");
@@ -39,6 +40,17 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     assert.ok(Math.abs((labelBox.y + labelBox.height / 2) - (iconBox.y + iconBox.height / 2)) <= 1, `${width}px label and external icon are vertically aligned`);
     if (width <= 760) assert.ok(linkBox.width >= 300, `${width}px Public link uses the available mobile width`);
     await page.getByText("Fixture preview only").waitFor();
+    await page.getByRole("heading", { level: 2, name: "Homepage content rail" }).waitFor();
+    assert.equal(await page.getByText("Third Railify triple zap").count(), 1);
+    const preview = page.locator(".admin-home-rail-preview"); const previewSegments = preview.locator(".admin-home-rail-preview__track > .admin-home-rail-preview__segment");
+    assert.equal(await previewSegments.count(), 2);
+    await page.waitForFunction(() => { const rail = document.querySelector(".admin-home-rail-preview"); const segment = document.querySelector(".admin-home-rail-preview__track > .admin-home-rail-preview__segment"); return rail && segment && segment.getBoundingClientRect().width > rail.getBoundingClientRect().width; });
+    assert.ok(await previewSegments.first().locator(".admin-home-rail-preview__zap").count() >= 4);
+    assert.equal(await preview.locator(".admin-home-rail-preview__zap svg").count(), 0);
+    const zapStyle = await page.locator(".admin-home-rail-preview__zap").first().evaluate((element) => ({ background: getComputedStyle(element).backgroundColor, mask: getComputedStyle(element).maskImage || getComputedStyle(element).webkitMaskImage }));
+    assert.equal(zapStyle.background, "rgb(255, 209, 47)"); assert.match(zapStyle.mask, /trzap-0/);
+    const previewGeometry = await preview.evaluate((element) => { const track = element.querySelector(".admin-home-rail-preview__track"); const segments = [...track.children]; const spans = [...segments[0].querySelectorAll(":scope > span")]; const first = spans[0].getBoundingClientRect(); const second = spans[1].getBoundingClientRect(); const duration = Number(getComputedStyle(track).animationDuration.replace("s", "")); return { cycleDuration: duration / (spans.length / 2), gap: second.left - first.right, fontSize: getComputedStyle(spans[0]).fontSize, letterSpacing: getComputedStyle(spans[0]).letterSpacing, segmentWidths: segments.map((segment) => segment.getBoundingClientRect().width), trackWidth: track.getBoundingClientRect().width }; });
+    assert.equal(previewGeometry.cycleDuration, 28); assert.ok(previewGeometry.gap >= 29 && previewGeometry.gap <= 31); assert.equal(previewGeometry.fontSize, "8px"); assert.equal(previewGeometry.letterSpacing, "1.28px"); assert.ok(Math.abs(previewGeometry.segmentWidths[0] - previewGeometry.segmentWidths[1]) < 1); assert.ok(Math.abs(previewGeometry.trackWidth - previewGeometry.segmentWidths[0] * 2) < 1);
     assert.equal(await page.getByText("SAMPLE PREVIEW — Third Railify live broadcast title").count(), 1);
     assert.equal(await page.locator("code").filter({ hasText: "/watch/live" }).count(), 1);
     const newTabChoice = page.getByText("Open external link in a new tab").locator("..");
@@ -57,7 +69,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
   }
 });
 
-function initialConfig() { return { normal: { enabled: true, messages: [{ text: "Initial announcement", ctaLabel: "Watch", href: "/watch", newTab: false }], mode: "static", speed: "normal" }, live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "Confirmed Watch signal", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" } }; }
+function initialConfig() { return { normal: { enabled: true, messages: [{ text: "Initial announcement", ctaLabel: "Watch", href: "/watch", newTab: false }], mode: "static", speed: "normal" }, homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap" }, live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "Confirmed Watch signal", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" } }; }
 function session() { return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00.000Z", lastLoginAt: null, source: "test", locked: true } }; }
 function authConfig() { return { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: "https://thirdrailify-admin.pages.dev", environment: "test", cookieMode: "host-only" }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { AdminArea } from "../config/navigation";
 
 type Props = {
-  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "chevron" | "shield" | "signal" | "collapse" | "profile" | "external" | "logout";
+  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "chevron" | "shield" | "signal" | "collapse" | "profile" | "external" | "logout" | "eye" | "eyeOff" | "star" | "edit";
   size?: number;
 };
 
@@ -38,6 +38,10 @@ const paths: Record<Props["name"], ReactNode> = {
   profile: <><circle cx="12" cy="8" r="3"/><path d="M5 21c.6-4.7 3-7 7-7s6.4 2.3 7 7"/></>,
   external: <><path d="M14 5h5v5M19 5l-8 8"/><path d="M18 13v6H5V6h6"/></>,
   logout: <><path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10"/></>,
+  eye: <><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></>,
+  eyeOff: <><path d="M3 3l18 18M10.6 6.1A10.5 10.5 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-2.2 3M6.6 6.7C4 8.3 2.5 12 2.5 12s3.5 6 9.5 6a9 9 0 0 0 3-.5M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
+  star: <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>,
+  edit: <><path d="M4 20h4l11-11-4-4L4 16z"/><path d="m13.5 6.5 4 4M4 20h16"/></>,
 };
 
 export function AdminIcon({ name, size = 20 }: Props) {

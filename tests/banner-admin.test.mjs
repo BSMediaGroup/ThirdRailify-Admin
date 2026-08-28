@@ -13,11 +13,14 @@ const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const VALID = {
   normal: { enabled: true, messages: [{ text: "A concise announcement", ctaLabel: "Learn more", href: "/watch", newTab: false }], mode: "ticker", speed: "slow" },
   live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "The rail is active", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" },
+  homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap" },
 };
 
 test("banner defaults and valid normal/live modes normalize to a bounded safe model", () => {
   assert.deepEqual(normalizeBannerConfig(DEFAULT_BANNER_CONFIG), DEFAULT_BANNER_CONFIG);
   for (const mode of ["static", "ticker", "crossfade"]) assert.equal(normalizeBannerConfig({ ...VALID, normal: { ...VALID.normal, mode } }).normal.mode, mode);
+  for (const mode of ["marquee", "crossfade", "static"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, mode } }).homeRail.mode, mode);
+  for (const glyph of ["zap", "arrow", "diamond", "dot"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, glyph } }).homeRail.glyph, glyph);
   assert.equal(normalizeBannerConfig(VALID).normal.messages[0].href, "/watch");
 });
 
@@ -30,6 +33,8 @@ test("malformed, oversized, unsafe-link, and unsupported banner values are rejec
     { ...VALID, normal: { ...VALID.normal, mode: "blink" } },
     { ...VALID, live: { ...VALID.live, animation: "flash" } },
     { ...VALID, live: { ...VALID.live, intensity: "extreme" } },
+    { ...VALID, homeRail: { ...VALID.homeRail, glyph: "emoji" } },
+    { ...VALID, homeRail: { ...VALID.homeRail, items: ["x".repeat(81)] } },
   ];
   for (const value of invalid) assert.throws(() => normalizeBannerConfig(value), (error) => error.status === 400);
 });
@@ -38,25 +43,26 @@ test("banner mutation enforces Master auth, exact origin, CSRF, validation, pers
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness);
   const master = await masterSession(env);
+  const initialRevision = (await readBannerSettings(env)).revision;
 
-  assert.equal((await callPut(env, {}, VALID, 1)).status, 403);
-  assert.equal((await callPut(env, { origin: ADMIN_ORIGIN }, VALID, 1)).status, 401);
-  assert.equal((await callPut(env, { ...master, csrfToken: "wrong" }, VALID, 1)).status, 403);
-  assert.equal((await callPut(env, { ...master, origin: "https://example.test" }, VALID, 1)).status, 403);
+  assert.equal((await callPut(env, {}, VALID, initialRevision)).status, 403);
+  assert.equal((await callPut(env, { origin: ADMIN_ORIGIN }, VALID, initialRevision)).status, 401);
+  assert.equal((await callPut(env, { ...master, csrfToken: "wrong" }, VALID, initialRevision)).status, 403);
+  assert.equal((await callPut(env, { ...master, origin: "https://example.test" }, VALID, initialRevision)).status, 403);
 
   const fullRow = { id: "full-banner-admin", email_normalized: "full-banner@example.test", display_name: "Full Banner Admin", avatar_url: null, role: "admin", admin_level: "full", status: "active", email_verified_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_login_at: null, source: "test", notes: null };
   await harness.authDb.prepare("INSERT INTO accounts (id,email_normalized,display_name,avatar_url,role,admin_level,status,email_verified_at,created_at,updated_at,last_login_at,source,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...Object.values(fullRow)).run();
   const fullSession = await createSession(env, new Request(`${ADMIN_ORIGIN}/`), fullRow, ADMIN_ORIGIN);
   const full = { origin: ADMIN_ORIGIN, cookie: cookiePair(fullSession.cookie), csrfToken: fullSession.csrfToken };
-  assert.equal((await callPut(env, full, VALID, 1)).status, 403);
+  assert.equal((await callPut(env, full, VALID, initialRevision)).status, 403);
 
-  assert.equal((await callPut(env, master, { ...VALID, live: { ...VALID.live, animation: "flash" } }, 1)).status, 400);
-  const savedResponse = await callPut(env, master, VALID, 1);
+  assert.equal((await callPut(env, master, { ...VALID, live: { ...VALID.live, animation: "flash" } }, initialRevision)).status, 400);
+  const savedResponse = await callPut(env, master, VALID, initialRevision);
   assert.equal(savedResponse.status, 200);
   const saved = await savedResponse.json();
-  assert.equal(saved.revision, 2);
+  assert.equal(saved.revision, initialRevision + 1);
   assert.deepEqual((await readBannerSettings(env)).config, VALID);
-  assert.equal((await callPut(env, master, VALID, 1)).status, 409, "stale revision cannot overwrite a newer save");
+  assert.equal((await callPut(env, master, VALID, initialRevision)).status, 409, "stale revision cannot overwrite a newer save");
   const audit = await harness.authDb.prepare("SELECT event_type,result,metadata_json FROM auth_audit WHERE event_type='site_banner_updated'").first();
   assert.equal(audit.result, "success"); assert.match(audit.metadata_json, /revision/);
   assert.equal((await harness.authDb.prepare("SELECT category FROM auth_rate_limits WHERE category='site_content'").first()).category, "site_content");
@@ -74,7 +80,7 @@ test("Public banner projection is read-only, cacheable, and contains no revision
   assert.equal(response.status, 200);
   assert.match(response.headers.get("cache-control"), /s-maxage=180/);
   const payload = await response.json();
-  assert.deepEqual(Object.keys(payload).sort(), ["live", "normal", "ok", "schema", "updatedAt"].sort());
+  assert.deepEqual(Object.keys(payload).sort(), ["homeRail", "live", "normal", "ok", "schema", "updatedAt"].sort());
 });
 
 async function masterSession(env) {

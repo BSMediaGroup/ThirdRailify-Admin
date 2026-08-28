@@ -5,17 +5,23 @@ const MODES = new Set(["static", "ticker", "crossfade"]);
 const SPEEDS = new Set(["slow", "normal", "fast"]);
 const LIVE_ANIMATIONS = new Set(["pulse", "sweep", "pulse-sweep", "static"]);
 const INTENSITIES = new Set(["subtle", "normal", "strong"]);
+const HOME_RAIL_MODES = new Set(["marquee", "crossfade", "static"]);
+const HOME_RAIL_EASINGS = new Set(["linear", "ease-in-out"]);
+const HOME_RAIL_GLYPHS = new Set(["zap", "arrow", "diamond", "dot"]);
 const MESSAGE_LIMIT = 5;
+const HOME_RAIL_ITEM_LIMIT = 8;
 
 export const DEFAULT_BANNER_CONFIG = Object.freeze({
   normal: { enabled: false, messages: [], mode: "static", speed: "normal" },
   live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: null, ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" },
+  homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT", "ABOOT NOTHING", "POP CULTURE BEAT DOWN"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap" },
 });
 
 export function normalizeBannerConfig(value) {
-  if (!record(value) || !exactKeys(value, ["normal", "live"]) || !record(value.normal) || !record(value.live)) invalid("banner_config_invalid", "The banner configuration is malformed.");
+  if (!record(value) || !exactKeys(value, ["normal", "live", "homeRail"]) || !record(value.normal) || !record(value.live) || !record(value.homeRail)) invalid("banner_config_invalid", "The banner configuration is malformed.");
   const normal = value.normal;
   const live = value.live;
+  const homeRail = value.homeRail;
   if (!exactKeys(normal, ["enabled", "messages", "mode", "speed"]) || typeof normal.enabled !== "boolean" || !Array.isArray(normal.messages) || normal.messages.length > MESSAGE_LIMIT || !MODES.has(normal.mode) || !SPEEDS.has(normal.speed)) invalid("banner_normal_invalid", "The normal banner settings are invalid.");
   const messages = normal.messages.map(normalizeMessage);
   if (normal.enabled && messages.length === 0) invalid("banner_message_required", "Add at least one message before enabling the normal banner.");
@@ -25,9 +31,13 @@ export function normalizeBannerConfig(value) {
   const supportingText = live.supportingText === null ? null : requiredText(live.supportingText, 120, "banner_live_support_invalid", "Use supporting text of 120 characters or fewer.");
   if (!LIVE_ANIMATIONS.has(live.animation)) invalid("banner_live_animation_invalid", "Choose a supported Live Now animation.");
   if (!INTENSITIES.has(live.intensity)) invalid("banner_live_intensity_invalid", "Choose a supported Live Now intensity.");
+  if (!exactKeys(homeRail, ["enabled", "items", "mode", "speed", "easing", "glyph"]) || typeof homeRail.enabled !== "boolean" || !Array.isArray(homeRail.items) || homeRail.items.length < 1 || homeRail.items.length > HOME_RAIL_ITEM_LIMIT) invalid("banner_home_rail_invalid", "The homepage rail settings are invalid.");
+  const items = homeRail.items.map((item, index) => requiredText(item, 80, "banner_home_rail_item_invalid", `Homepage rail item ${index + 1} must contain no more than 80 characters.`));
+  if (!HOME_RAIL_MODES.has(homeRail.mode) || !SPEEDS.has(homeRail.speed) || !HOME_RAIL_EASINGS.has(homeRail.easing) || !HOME_RAIL_GLYPHS.has(homeRail.glyph)) invalid("banner_home_rail_invalid", "Choose supported homepage rail presentation settings.");
   return {
     normal: { enabled: normal.enabled, messages, mode: normal.mode, speed: normal.speed },
     live: { enabled: live.enabled, label, showTitle: live.showTitle, supportingText, ctaLabel, animation: live.animation, intensity: live.intensity },
+    homeRail: { enabled: homeRail.enabled, items, mode: homeRail.mode, speed: homeRail.speed, easing: homeRail.easing, glyph: homeRail.glyph },
   };
 }
 
@@ -57,6 +67,7 @@ export function publicBannerProjection(settings) {
     schema: "thirdrailify-banner-v1",
     normal: config.normal,
     live: { ...config.live, ctaPath: "/watch/live" },
+    homeRail: config.homeRail,
     updatedAt: settings.updatedAt,
   };
 }
