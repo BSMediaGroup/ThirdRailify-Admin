@@ -76,7 +76,8 @@ export async function listPublicWheels(env, input = {}) {
   const order = sort === "title" ? "title COLLATE NOCASE ASC, id ASC" : sort === "participants" ? "participant_count DESC, title COLLATE NOCASE ASC" : "display_order ASC, updated_at DESC";
   const rows = await db.prepare(
     `SELECT id, public_slug, title, description, config_json, participant_count, public_demo_spin_enabled,
-            official_spin_enabled, latest_official_spin_at
+            official_spin_enabled, latest_official_spin_at,
+            EXISTS (SELECT 1 FROM wheel_entries e WHERE e.wheel_id = wheels.id AND e.state = 'active' AND e.weight != 1) AS is_weighted
      FROM wheels
      WHERE lifecycle = 'active' AND visibility = 'public' AND (? = '' OR lower(title) LIKE ? OR lower(COALESCE(description, '')) LIKE ?)
      ORDER BY ${order} LIMIT 100`,
@@ -123,7 +124,7 @@ export async function createWheel(env, accountId, input) {
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const lifecycle = input.lifecycle === "draft" ? "draft" : "active";
   const config = validateConfig(input.config || {});
-  const entries = validateEntries(input.entries || []);
+  const entries = validateEntries(input.entries || [], { newIds: true });
   const id = randomId(); const timestamp = nowIso();
   await db.batch([
     db.prepare(`INSERT INTO wheels (
@@ -153,17 +154,29 @@ export async function saveWheel(env, accountId, slug, input) {
   const title = requiredText(input.title, 1, 100, "wheel_title_invalid");
   const description = optionalText(input.description, 280);
   const config = validateConfig(input.config || {});
-  const entries = validateEntries(input.entries || []);
+  const requestedEntries = validateEntries(input.entries || []);
+  const currentEntryRows = await db.prepare("SELECT id FROM wheel_entries WHERE wheel_id = ?").bind(wheel.id).all();
+  const currentEntryIds = new Set((currentEntryRows?.results || []).map((row) => row.id));
+  const usedEntryIds = new Set();
+  const entries = requestedEntries.map((entry) => {
+    const id = currentEntryIds.has(entry.id) && !usedEntryIds.has(entry.id) ? entry.id : randomId();
+    usedEntryIds.add(id);
+    return { ...entry, id };
+  });
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const timestamp = nowIso();
-  const statements = [
+  const savedRevision = expectedRevision + 1;
+  const result = await db.batch([
     db.prepare(`UPDATE wheels SET title = ?, description = ?, visibility = ?, config_json = ?, participant_count = ?, revision = revision + 1, updated_at = ?
                 WHERE id = ? AND revision = ?`).bind(title, description, visibility, JSON.stringify(config), entries.length, timestamp, wheel.id, expectedRevision),
-    db.prepare("DELETE FROM wheel_entries WHERE wheel_id = ?").bind(wheel.id),
-    ...entries.map((entry, index) => entryInsert(db, wheel.id, entry, index, timestamp)),
-    auditStatement(db, wheel.id, accountId, null, "wheel_saved", { previousRevision: expectedRevision, participantCount: entries.length }, timestamp),
-  ];
-  const result = await db.batch(statements);
+    db.prepare("DELETE FROM wheel_entries WHERE wheel_id = ? AND EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)").bind(wheel.id, wheel.id, savedRevision, timestamp),
+    ...entries.map((entry, index) => entryInsertConditional(db, wheel.id, entry, index, timestamp, savedRevision)),
+    db.prepare(`INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, target_account_id, event_type, metadata_json, created_at)
+      SELECT ?, id, ?, NULL, 'wheel_saved', ?, ? FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?`).bind(
+      randomId(), accountId, JSON.stringify({ previousRevision: expectedRevision, participantCount: entries.length }), timestamp,
+      wheel.id, savedRevision, timestamp,
+    ),
+  ]);
   if (Number(result?.[0]?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "wheel_revision_conflict", "The wheel changed. Reload it before saving.");
   return getPublicWheel(env, slug, accountId);
 }
@@ -209,19 +222,26 @@ export async function performOfficialSpin(env, accountId, slug, input) {
   for (const entry of entries) { if (cursor < entry.weight) { winner = entry; break; } cursor -= entry.weight; }
   const snapshotHash = await participantSnapshotHash(entries);
   const spinId = randomId(); const timestamp = nowIso(); const sequence = Number(wheel.spin_sequence || 0);
-  const result = await db.batch([
-    db.prepare(`INSERT INTO wheel_official_spins (
-      id, wheel_id, wheel_revision, participant_snapshot_hash, winning_entry_id, winning_label_snapshot,
-      winning_weight_snapshot, performed_by_account_id, result_type, idempotency_key, created_at
-    ) SELECT ?, id, revision, ?, ?, ?, ?, ?, 'official', ?, ? FROM wheels
-      WHERE id = ? AND revision = ? AND spin_sequence = ? AND lifecycle = 'active'
-        AND official_spin_enabled = 1 AND official_spinning_locked = 0`).bind(
-      spinId, snapshotHash, winner.id, winner.label, winner.weight, accountId, idempotencyKey, timestamp,
-      wheel.id, expectedRevision, sequence,
-    ),
-    db.prepare("UPDATE wheels SET spin_sequence = spin_sequence + 1, latest_official_spin_at = ?, updated_at = ? WHERE id = ? AND revision = ? AND spin_sequence = ?").bind(timestamp, timestamp, wheel.id, expectedRevision, sequence),
-    auditStatement(db, wheel.id, accountId, null, "official_spin_recorded", { spinId, wheelRevision: expectedRevision, snapshotHash }, timestamp),
-  ]);
+  let result;
+  try {
+    result = await db.batch([
+      db.prepare(`INSERT INTO wheel_official_spins (
+        id, wheel_id, wheel_revision, participant_snapshot_hash, winning_entry_id, winning_label_snapshot,
+        winning_weight_snapshot, performed_by_account_id, result_type, idempotency_key, created_at
+      ) SELECT ?, id, revision, ?, ?, ?, ?, ?, 'official', ?, ? FROM wheels
+        WHERE id = ? AND revision = ? AND spin_sequence = ? AND lifecycle = 'active'
+          AND official_spin_enabled = 1 AND official_spinning_locked = 0`).bind(
+        spinId, snapshotHash, winner.id, winner.label, winner.weight, accountId, idempotencyKey, timestamp,
+        wheel.id, expectedRevision, sequence,
+      ),
+      db.prepare("UPDATE wheels SET spin_sequence = spin_sequence + 1, latest_official_spin_at = ?, updated_at = ? WHERE id = ? AND revision = ? AND spin_sequence = ?").bind(timestamp, timestamp, wheel.id, expectedRevision, sequence),
+      db.prepare("INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, event_type, metadata_json, created_at) SELECT ?, wheel_id, ?, 'official_spin_recorded', ?, ? FROM wheel_official_spins WHERE id = ?").bind(randomId(), accountId, JSON.stringify({ spinId, wheelRevision: expectedRevision, snapshotHash }), timestamp, spinId),
+    ]);
+  } catch (error) {
+    const repeated = await db.prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? AND idempotency_key = ?").bind(wheel.id, idempotencyKey).first();
+    if (repeated) return { ok: true, spin: officialProjection(repeated), idempotent: true };
+    throw error;
+  }
   if (Number(result?.[0]?.meta?.changes || 0) !== 1) {
     const repeated = await db.prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? AND idempotency_key = ?").bind(wheel.id, idempotencyKey).first();
     if (repeated) return { ok: true, spin: officialProjection(repeated), idempotent: true };
@@ -301,6 +321,7 @@ export async function searchWheelAccounts(env, query = "") {
 }
 
 export async function mutateCreatorGrant(env, actorId, input) {
+  await enforceWheelRateLimit(env, "admin_grant", actorId, 60, 3600);
   const db = requireWheelDb(env); const accountId = requiredText(input.accountId, 1, 160, "account_id_invalid");
   if (!await activeAccount(env, accountId)) throw new AuthFailure(404, "account_not_found", "The account was not found or is inactive.");
   const action = input.action === "revoke" ? "revoke" : "approve"; const timestamp = nowIso();
@@ -317,6 +338,7 @@ export async function mutateCreatorGrant(env, actorId, input) {
 }
 
 export async function mutateWheelAssignment(env, actorId, input) {
+  await enforceWheelRateLimit(env, "admin_assignment", actorId, 120, 3600);
   const db = requireWheelDb(env); const wheelId = requiredText(input.wheelId, 1, 80, "wheel_id_invalid"); const accountId = requiredText(input.accountId, 1, 160, "account_id_invalid");
   const wheel = await db.prepare("SELECT * FROM wheels WHERE id = ?").bind(wheelId).first();
   if (!wheel) throw new AuthFailure(404, "wheel_not_found", "The wheel was not found.");
@@ -340,6 +362,7 @@ export async function mutateWheelAssignment(env, actorId, input) {
 }
 
 export async function mutateWheelControl(env, actorId, input) {
+  await enforceWheelRateLimit(env, "admin_control", actorId, 120, 3600);
   const db = requireWheelDb(env); const wheelId = requiredText(input.wheelId, 1, 80, "wheel_id_invalid"); const action = String(input.action || "");
   const allowed = new Set(["hide", "show", "lock-edit", "unlock-edit", "lock-spin", "unlock-spin", "archive", "restore", "delete"]);
   if (!allowed.has(action)) throw new AuthFailure(400, "wheel_control_invalid", "The wheel control action is invalid.");
@@ -365,10 +388,11 @@ export async function mutateWheelControl(env, actorId, input) {
 }
 
 export async function voidOfficialResult(env, actorId, input) {
+  await enforceWheelRateLimit(env, "admin_void", actorId, 60, 3600);
   const db = requireWheelDb(env); const spinId = requiredText(input.spinId, 1, 80, "spin_id_invalid"); const reason = requiredText(input.reason, 3, 500, "void_reason_invalid"); const timestamp = nowIso();
   const result = await db.batch([
     db.prepare("UPDATE wheel_official_spins SET voided_at = ?, void_reason = ?, voided_by_account_id = ? WHERE id = ? AND voided_at IS NULL").bind(timestamp, reason, actorId, spinId),
-    db.prepare("INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, event_type, metadata_json, created_at) SELECT ?, wheel_id, ?, 'official_spin_voided', ?, ? FROM wheel_official_spins WHERE id = ?").bind(randomId(), actorId, JSON.stringify({ spinId, reason }), timestamp, spinId),
+    db.prepare("INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, event_type, metadata_json, created_at) SELECT ?, wheel_id, ?, 'official_spin_voided', ?, ? FROM wheel_official_spins WHERE id = ? AND voided_at = ? AND voided_by_account_id = ?").bind(randomId(), actorId, JSON.stringify({ spinId, reason }), timestamp, spinId, timestamp, actorId),
   ]);
   if (Number(result?.[0]?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "result_void_unavailable", "The result was not found or is already voided.");
   return adminWheelResults(env);
@@ -380,6 +404,7 @@ export async function getWheelSettings(env) {
 }
 
 export async function saveWheelSettings(env, actorId, input) {
+  await enforceWheelRateLimit(env, "admin_settings", actorId, 30, 3600);
   const revision = positiveInteger(input.revision, "wheel_revision_invalid", 2_147_483_647);
   const settings = {
     defaultTheme: PRESETS.has(input.defaultTheme) ? input.defaultTheme : "third-rail-gold",
@@ -409,13 +434,13 @@ export async function participantSnapshotHash(entries) {
   return digestHex(new TextEncoder().encode(JSON.stringify(canonical)));
 }
 
-function validateEntries(input) {
+function validateEntries(input, options = {}) {
   if (!Array.isArray(input) || input.length > MAX_ENTRIES) throw new AuthFailure(400, "participants_invalid", `Use between 0 and ${MAX_ENTRIES} participant entries.`);
   return input.map((value, index) => {
     if (!value || typeof value !== "object") throw new AuthFailure(400, "participant_invalid", "A participant entry is invalid.");
     const colour = value.colour == null || value.colour === "" ? null : clean(value.colour, 7);
     if (colour && !HEX.test(colour)) throw new AuthFailure(400, "participant_colour_invalid", "Participant colours must be six-digit hex values.");
-    return { id: /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", 100000), colour: colour?.toUpperCase() || null, state: value.state === "hidden" ? "hidden" : "active" };
+    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", 100000), colour: colour?.toUpperCase() || null, state: value.state === "hidden" ? "hidden" : "active" };
   });
 }
 
@@ -469,7 +494,7 @@ async function entriesForWheel(env, wheelId, includeHidden) { const rows = await
 async function publicHistory(env, wheel, limit) { const config = parseJson(wheel.config_json, DEFAULT_CONFIG); if (!config.publicHistoryVisible) return []; return (await resultRows(env, wheel.id, limit)).map(officialProjection); }
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
-function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: false, themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null }; }
+function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null }; }
 function publicDetail(wheel, entries, history, access) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
 function officialProjection(row) { return { id: row.id, type: "official", winningEntryId: row.winning_entry_id, winningLabel: row.winning_label_snapshot, winningWeight: Number(row.winning_weight_snapshot), wheelRevision: Number(row.wheel_revision), snapshotHash: row.participant_snapshot_hash, createdAt: row.created_at, voided: Boolean(row.voided_at) }; }
 function adminResultProjection(row) { return { ...officialProjection(row), wheelId: row.wheel_id, performedByAccountId: row.performed_by_account_id, idempotencyKey: row.idempotency_key, voidedAt: row.voided_at || null, voidReason: row.void_reason || null, voidedByAccountId: row.voided_by_account_id || null }; }
@@ -477,6 +502,9 @@ async function adminWheelSummary(env, row) { return { id: row.id, reference: row
 async function wheelAccessRows(env, wheelId) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_access WHERE wheel_id = ? ORDER BY active DESC, role, created_at").bind(wheelId).all(); return Promise.all((rows?.results || []).map(async (row) => ({ account: await accountSummary(env, row.account_id), role: row.role, active: Boolean(row.active), updatedAt: row.updated_at }))); }
 
 function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare("INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.state, timestamp, timestamp); }
+function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, state, created_at, updated_at)
+  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
+).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.state, timestamp, timestamp, wheelId, revision, timestamp); }
 function assignmentUpsert(db, wheelId, accountId, role, active, actorId, timestamp) { return db.prepare(`INSERT INTO wheel_access (wheel_id, account_id, role, active, granted_by_account_id, created_at, updated_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(wheel_id, account_id) DO UPDATE SET role = excluded.role, active = excluded.active, granted_by_account_id = excluded.granted_by_account_id, updated_at = excluded.updated_at, revoked_at = excluded.revoked_at`).bind(wheelId, accountId, role, active, actorId, timestamp, timestamp, active ? null : timestamp); }
 function auditStatement(db, wheelId, actorId, targetId, type, metadata, timestamp) { return db.prepare("INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, target_account_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(randomId(), wheelId, actorId || null, targetId || null, type, metadata ? JSON.stringify(metadata) : null, timestamp); }

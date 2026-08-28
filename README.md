@@ -88,7 +88,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/commerce/payments` | Stripe direct-merchant Payments & Payouts control plane with canonical TEST evidence, isolated TEST/LIVE summaries, webhook health, fail-closed activation gates, truthful Stripe-managed payout boundaries, and a disabled future PayPal donations scaffold |
 | `/api/commerce/checkout` | Exact-Public-origin customer POST/OPTIONS endpoint; server-priced Stripe-hosted TEST Checkout behind disabled product/configuration gates |
 | `/api/webhooks/stripe` | External Stripe sandbox delivery route; POST/raw-body/signature/D1 required, with no browser authentication and only invariant-checked existing-order payment confirmation |
-| `/commerce/business` | Structured public/private business profile; persistence fails closed without commerce D1 and encryption |
+| `/commerce/business` | Authoritative merchant-profile editor over the singleton Commerce D1 business model: public-safe storefront/contact/address fields, masked encrypted legal replacements, read-only CA/ON/CAD defaults, server-derived tax/document/email/fulfillment dependencies shared with Payments, revisioned saves, and category-only audit |
 | `/commerce/tax` | Encrypted tax identifiers and document presentation; no custom tax calculation/compliance claim |
 | `/commerce/emails` | Safe structured customer template editor; no send path |
 | `/commerce/fulfillment` | Dedicated Printful identities, executable read-only catalogue snapshot with progress/retry and four explicit evidence downloads, draft-only/fulfillment-disabled gates, and untouched Wix posture |
@@ -100,6 +100,8 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/integrations` | Future server-side integration shell |
 | `/settings` | Future governed settings shell |
 | everything else | Branded 404 |
+
+Business Information reads require `commerce.view`; mutations additionally require `commerce.business.manage`, exact Admin origin, CSRF, the existing commerce rate limit, server validation, optimistic profile revision matching, encryption custody, and commerce audit. Legal name, legal address, private phone, and business/corporation number are never prefilled or returned as plaintext. Tax registrations remain authoritative under `/commerce/tax`, template/sender state remains authoritative in the existing document and email models, PayPal is not a readiness requirement, and Canada / Ontario / CAD cannot be changed through this surface.
 
 ## Structure
 
@@ -187,6 +189,12 @@ The display system uses the seeded American Captain asset at its real weight wit
 - Expired sessions, handoffs, OAuth transactions, email-verification tokens, and password-reset tokens have one Master-only, exact-origin, CSRF-protected maintenance action. It deletes only rows whose existing `expires_at` is at or before execution, writes a bounded auth audit event, and does not touch accounts, identities, rate limits, or audit history.
 - `COMMERCE_SUPPORT_RUNBOOK.md` documents the exact read-only order/support evidence and the absent refund, cancellation, replacement, claim, shipment, email, and fulfilment mutations. It grants no provider-write or remedy authority.
 - `noindex` is not access control. The application gate and signed APIs are mandatory; any outer Cloudflare Access policy must preserve narrowly required public auth/callback routes.
+
+## Wheels authority
+
+Competition wheels are owned exclusively by the existing Admin Commerce D1 through additive migration `commerce-migrations/0014_wheels_v1.sql`. The expandable `/wheels` workspace provides Library, Access, Results, and per-wheel detail routes. Public has no wheel D1 binding: its same-origin gateway signs bounded creator actions and official draws, while Admin revalidates the current account against the accounts D1 and enforces global creator grants, owner/editor/spinner assignments, lifecycle, visibility, locks, revisions, rate limits, and audit.
+
+Official draws reject browser-supplied winners, use Web Crypto rejection sampling over validated integer weights, persist a canonical participant hash plus immutable winner snapshots, and serialize with revision, `spin_sequence`, and idempotency. Voiding preserves the result. The migration seeds no wheels/results; the optional exact staging fixture is in `scripts/wheels-demo-seed.sql`. See `docs/WHEELS_V1.md` for the complete authority and route contract.
 
 ## Cloudflare and domain safety
 

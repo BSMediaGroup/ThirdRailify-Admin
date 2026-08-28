@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   customerDocumentByToken,
+  businessInformationPayload,
   commerceEmailDeliveryKey,
   createTaxRegistration,
   issueOrderDocumentAccess,
@@ -24,23 +25,32 @@ test("permanent business profile keeps safe defaults and encrypts private legal 
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness);
   const updated = await updateBusinessProfile(env, master, {
+    revision: 1,
     tradingName: "Third Railify Official", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD",
     publicContactEmail: "INFO@ThirdRailify.com", supportEmail: "support@thirdrailify.com", publicPhone: "", websiteUrl: "",
     publicAddress: {}, legalBusinessName: "Private Legal Entity", privatePhone: "+1 416 555 0100",
     businessRegistrationNumber: "PRIVATE-REG-123", privateAddress: { line1: "1 Private Way", city: "Toronto", province: "ON", postalCode: "M5V 1A1", country: "CA" },
-    invoicePrefix: "", documentFooter: "", taxProviderState: "unavailable", invoiceAccentColor: "#f3c928", receiptAccentColor: "#f3c928",
+    invoicePrefix: "", documentFooter: "", invoiceAccentColor: "#f3c928", receiptAccentColor: "#f3c928",
   });
   assert.equal(updated.profile.tradingName, "Third Railify Official");
   assert.equal(updated.profile.publicContactEmail, "info@thirdrailify.com");
-  assert.equal(updated.profile.private.legalBusinessName, "Private Legal Entity");
-  assert.equal(updated.profile.private.privateAddress.city, "Toronto");
+  assert.equal(updated.profile.private.legalBusinessNameMasked, "Encrypted value configured");
+  assert.equal(updated.profile.private.privateAddressMasked, "Encrypted address configured");
+  assert.match(updated.profile.private.privatePhoneMasked, /0100$/);
+  assert.match(updated.profile.private.businessRegistrationNumberMasked, /G123$/);
   const row = await harness.commerceDb.prepare("SELECT * FROM commerce_business_profiles WHERE id='primary'").first();
   const serialized = JSON.stringify(row);
   assert.doesNotMatch(serialized, /Private Legal Entity|Private Way|PRIVATE-REG-123|416 555/);
   assert.match(row.legal_business_name_ciphertext, /A256GCM/);
   const publicPayload = JSON.stringify((await businessProfilePayload(env, master)).profile);
-  assert.doesNotMatch(publicPayload, /ciphertext|A256GCM/);
+  assert.doesNotMatch(publicPayload, /Private Legal Entity|Private Way|PRIVATE-REG-123|416 555|ciphertext|A256GCM/);
+  const controlPlane = await businessInformationPayload(env, master);
+  assert.equal(controlPlane.readiness.profile.coreIdentity, "complete");
+  assert.equal(controlPlane.readiness.profile.legalIdentity, "complete");
+  assert.equal(controlPlane.readiness.dependencies.paypalRequired, false);
+  assert.equal(controlPlane.readiness.documentIdentity.taxRegistrationState, "not_configured");
   await assert.rejects(updateBusinessProfile(env, master, { unexpected: true }), /fields are invalid/i);
+  await assert.rejects(updateBusinessProfile(env, master, { revision: 1, tradingName: "Stale" }), /changed in another session/i);
 });
 
 test("tax registrations validate, encrypt, mask, revise, and never invent rates", async (t) => {

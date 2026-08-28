@@ -12,7 +12,6 @@ import {
   writeAudit,
 } from "../../../_shared/auth-core.js";
 import {
-  businessProfilePayload,
   archiveCollection,
   bulkUpdateCollections,
   bulkUpdateMerchandisingProducts,
@@ -57,6 +56,7 @@ import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrderDetailPayload, commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
 import { commerceMediaLimits, ingestCommerceProductMedia, uploadCommerceProductMedia } from "../../../_shared/commerce-media.js";
 import {
+  businessInformationPayload,
   createTaxRegistration,
   issueOrderDocumentAccess,
   orderDocumentPreviewPayload,
@@ -97,8 +97,8 @@ async function handleGet(request, env, path) {
     payload = await commerceOverview(env, session);
     if (payload.databaseConfigured) payload.readiness = await productionReadinessPayload(env, session);
   } else if (path === "business") {
-    await requireCommerceCapability(env, session, "commerce.business.manage");
-    payload = await businessProfilePayload(env, session);
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await businessInformationPayload(env, session);
   } else if (path === "templates") {
     await requireCommerceCapability(env, session, "commerce.templates.manage");
     payload = await templatesPayload(env, session);
@@ -240,7 +240,8 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   } else if (path === "business") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
-    payload = await updateBusinessProfile(env, session, body);
+    await updateBusinessProfile(env, session, body);
+    payload = await businessInformationPayload(env, session);
     authEventType = "commerce_business_updated";
   } else if (path === "tax") {
     const body = await readJsonBody(request);

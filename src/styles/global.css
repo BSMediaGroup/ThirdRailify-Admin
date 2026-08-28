@@ -738,10 +738,11 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .payments-primary-grid { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(330px,.65fr); gap: 12px; align-items: stretch; }
 .payments-panel { min-width: 0; padding: clamp(18px,2.5vw,28px); border: 1px solid var(--line); border-radius: 13px; background: radial-gradient(80% 100% at 100% 0,rgba(243,201,40,.04),transparent 70%),var(--panel-soft); }
 .payments-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.provider-brand { display: flex; min-width: 0; align-items: center; gap: 14px; }
-.provider-brand > img { display: block; width: clamp(66px,7vw,96px); height: 40px; flex: 0 0 auto; object-fit: contain; object-position: center; }
-.payments-provider-card .provider-brand > img { padding: 9px 10px; border: 1px solid rgba(99,91,255,.22); border-radius: 9px; background: rgba(99,91,255,.07); }
-.paypal-scaffold .provider-brand > img { padding: 9px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 9px; background: rgba(255,255,255,.025); }
+.has-provider-feature { position: relative; }
+.has-provider-feature > header { padding-right: 68px; }
+.provider-feature-icon { position: absolute; z-index: 1; top: clamp(16px,2vw,24px); right: clamp(16px,2vw,24px); display: block; width: 48px; height: 48px; border-radius: 10px; object-fit: contain; }
+.payments-provider-card .provider-feature-icon { box-shadow: 0 0 22px rgba(99,91,255,.12); }
+.paypal-scaffold .provider-feature-icon { box-shadow: 0 0 22px rgba(23,155,215,.08); }
 .payments-panel h3 { margin: 5px 0 0; color: var(--paper); font-size: clamp(1.5rem,3vw,2.2rem); }
 .payments-panel > p { color: var(--muted); font-size: .78rem; line-height: 1.55; }
 .payments-panel dl,.payments-technical dl { display: grid; gap: 0; margin: 18px 0 0; }
@@ -776,7 +777,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .payment-gate a { display: inline-flex; align-items: center; gap: 7px; margin-top: auto; color: var(--gold); font: .55rem "Geist Mono",monospace; text-transform: uppercase; }
 .payments-evidence-grid,.payment-activity-grid,.merchant-dependency-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-items: stretch; }
 .payments-boundary-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; align-items: stretch; }
-.payments-panel--disabled { filter: saturate(.35); border-color: rgba(255,255,255,.09); background: linear-gradient(145deg,rgba(255,255,255,.018),rgba(255,255,255,.004)); }
+.payments-panel--disabled { border-color: rgba(255,255,255,.09); background: linear-gradient(145deg,rgba(255,255,255,.018),rgba(255,255,255,.004)); }
 .payments-panel--disabled h3,.payments-panel--disabled strong { color: #aaa99f; }
 .payments-panel--disabled > p,.payments-panel--disabled dd { color: #74746e; }
 .test-evidence { border-color: rgba(89,158,224,.34); background: radial-gradient(85% 100% at 100% 0,rgba(54,121,184,.1),transparent 72%),var(--panel-soft); }
@@ -795,7 +796,10 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .payment-fee-note { margin: 12px 0 0; color: var(--quiet); font-size: .67rem; }
 .payment-method-list { display: grid; gap: 8px; margin-top: 18px; }
 .payment-method-list > div { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: #0a0a08; }
-.payment-method-list > div > svg { color: var(--gold); }
+.payment-method-mark { display: grid; width: 22px; height: 22px; place-items: center; background: var(--gold); }
+.payment-method-mark.is-card { background: transparent; color: var(--gold); }
+.payment-method-mark.is-apple_pay { -webkit-mask: url("../../assets/icons/apple-0.svg") center / contain no-repeat; mask: url("../../assets/icons/apple-0.svg") center / contain no-repeat; }
+.payment-method-mark.is-google_pay { -webkit-mask: url("../../assets/icons/google-0.svg") center / contain no-repeat; mask: url("../../assets/icons/google-0.svg") center / contain no-repeat; }
 .payment-method-list strong { font-size: .74rem; }
 .payment-method-list p { margin: 4px 0 0; color: var(--muted); font-size: .65rem; line-height: 1.42; }
 .dependency-list { display: grid; gap: 8px; }
@@ -836,7 +840,6 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .payments-summary article { min-height: 84px; padding: 12px; }
   .payment-state { white-space: normal; }
   .payments-panel { padding: 16px; }
-  .provider-brand { align-items: flex-start; flex-direction: column; }
   .payments-panel dl > div,.payments-technical dl > div { grid-template-columns: 1fr; gap: 4px; }
   .payments-panel dd,.payments-technical dd { text-align: left; }
   .test-evidence__amount { align-items: flex-start; flex-direction: column; }

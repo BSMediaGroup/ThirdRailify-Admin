@@ -8,10 +8,12 @@ test("commerce migrations apply in order, with the idempotent foundations repeat
   for (const migration of harness.commerceMigrations.slice(0, 2)) await applyMigration(harness.commerceDb, migration);
   const result = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all();
   assert.deepEqual(result.results.map((row) => row.name), [
+    "admin_inbox_messages", "admin_inbox_reads",
     "commerce_audit", "commerce_business_profiles", "commerce_catalogue_migrations", "commerce_collections", "commerce_email_deliveries", "commerce_order_documents", "commerce_order_items", "commerce_orders", "commerce_permission_grants", "commerce_printful_file_mappings", "commerce_product_collections", "commerce_product_variants", "commerce_products",
     "commerce_provider_connections", "commerce_settings", "commerce_tax_registrations", "commerce_templates", "commerce_webhook_events",
     "community_comments", "community_email_outbox", "community_email_templates", "community_media", "community_moderation_events",
     "community_rate_limits", "community_reactions", "community_submissions", "site_banner_settings",
+    "wheel_access", "wheel_audit_events", "wheel_creator_grants", "wheel_entries", "wheel_official_spins", "wheel_rate_limits", "wheel_settings", "wheels",
   ]);
   const profile = await harness.commerceDb.prepare("SELECT trading_name, country_code, province_code, currency_code FROM commerce_business_profiles WHERE id = 'primary'").first();
   assert.deepEqual(profile, { trading_name: "Third Railify Official", country_code: "CA", province_code: "ON", currency_code: "CAD" });

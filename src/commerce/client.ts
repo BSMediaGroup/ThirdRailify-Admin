@@ -13,11 +13,20 @@ export type PublicAddress = { line1?: string; line2?: string; city?: string; pro
 export type BusinessProfile = {
   tradingName: string; countryCode: string; provinceCode: string; currencyCode: string; publicAddress: PublicAddress;
   publicContactEmail: string; supportEmail: string; publicPhone: string; websiteUrl: string; invoicePrefix: string; documentFooter: string;
-  taxProviderState: string; invoiceAccentColor: string; receiptAccentColor: string;
-  private: { legalBusinessNameStored: boolean; privateAddressStored: boolean; privatePhoneStored: boolean; businessRegistrationNumberStored: boolean; legalBusinessName: string; privateAddress: PublicAddress; privatePhone: string; businessRegistrationNumber: string; registrations: Array<{ type: string; jurisdiction: string; maskedIdentifier: string; status: string }> };
+  taxProviderState: string; invoiceAccentColor: string; receiptAccentColor: string; revision: number; updatedAt: string | null;
+  private: { legalBusinessNameStored: boolean; privateAddressStored: boolean; privatePhoneStored: boolean; businessRegistrationNumberStored: boolean; legalBusinessNameMasked: string; privateAddressMasked: string; privatePhoneMasked: string; businessRegistrationNumberMasked: string; registrations: Array<{ type: string; jurisdiction: string; maskedIdentifier: string; status: string }> };
 };
 export type ReadinessDomain = { ready: boolean; status: "ready" | "blocked"; summary: string; details: Record<string, unknown> };
 export type ProductionReadiness = { ok: boolean; authority: string; phase: "pre_cutover"; productionReady: boolean; mandatoryDomains: string[]; domains: Record<string, ReadinessDomain>; checkedAt: string };
+export type BusinessReadinessState = "complete" | "partial" | "action_required" | "incomplete" | "not_configured" | "not_required" | "unverified" | "disabled";
+export type BusinessReadinessItem = { id: string; label: string; state: BusinessReadinessState; detail: string };
+export type BusinessReadinessGroup = { id: string; label: string; state: BusinessReadinessState; items: BusinessReadinessItem[] };
+export type BusinessReadiness = {
+  overallStatus: BusinessReadinessState; completion: { complete: number; total: number; percent: number }; groups: BusinessReadinessGroup[];
+  profile: { coreIdentity: BusinessReadinessState; publicContact: BusinessReadinessState; legalIdentity: BusinessReadinessState; address: BusinessReadinessState; tax: BusinessReadinessState; documents: BusinessReadinessState; productionCommerce: BusinessReadinessState };
+  dependencies: Record<string, ReadinessDomain | boolean>;
+  documentIdentity: { tradingName: string; legalNameStored: boolean; addressStored: boolean; contactEmail: string | null; taxRegistrationState: BusinessReadinessState; receiptTemplate: { state: BusinessReadinessState; revision: number | null }; invoiceTemplate: { state: BusinessReadinessState; revision: number | null } };
+};
 export type CommerceOverviewPayload = {
   ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; stripeSecretConfigured: boolean; printfulSecretConfigured: boolean; access: CommerceAccess;
   printfulCatalogueSnapshot: {
@@ -28,7 +37,7 @@ export type CommerceOverviewPayload = {
   completeness: { businessProfile: string; tax: string; templates: string };
   counts: { products: number | null; orders: number | null; templates: number | null }; readiness?: ProductionReadiness; checkedAt: string;
 };
-export type BusinessPayload = { ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; access: CommerceAccess; profile: BusinessProfile };
+export type BusinessPayload = { ok: boolean; databaseConfigured: boolean; encryptionConfigured: boolean; access: CommerceAccess; authority: string; privacy: { publicSafe: string[]; adminOnly: string[]; sensitive: string[] }; profile: BusinessProfile; readiness: BusinessReadiness; canonicalReadiness: ProductionReadiness | null };
 export type CommerceTemplate = {
   templateKey: string; templateKind: "email" | "document"; displayName: string; subject: string; preheader: string; heading: string; introduction: string; bodyBlocks: string[];
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; enabled: boolean; revision: number;

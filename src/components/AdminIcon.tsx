@@ -28,6 +28,7 @@ const paths: Record<Props["name"], ReactNode> = {
   users: <><circle cx="9" cy="8" r="3"/><path d="M3 20c.5-4 2.5-6 6-6s5.5 2 6 6M16 6h5M18.5 3.5v5"/></>,
   integrations: <><path d="M8 12h8M12 8v8"/><path d="M7 4h10v4h3v8h-3v4H7v-4H4V8h3z"/></>,
   settings: <><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 15 6l-.3-2.6h-4L10.4 6A7 7 0 0 0 8 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A7 7 0 0 0 10.4 18l.3 2.6h4L15 18a7 7 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></>,
+  wheels: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6M5.6 5.6l4.2 4.2M14.2 14.2l4.2 4.2M18.4 5.6l-4.2 4.2M9.8 14.2l-4.2 4.2"/></>,
   menu: <><path d="M4 7h16M4 12h16M4 17h16"/></>,
   close: <><path d="m6 6 12 12M18 6 6 18"/></>,
   arrow: <><path d="M5 12h14M14 7l5 5-5 5"/></>,

@@ -1135,20 +1135,19 @@ export async function businessProfilePayload(env, session) {
     db.prepare("SELECT * FROM commerce_business_profiles WHERE id = 'primary'").first(),
     db.prepare("SELECT registration_type, jurisdiction, masked_identifier, status FROM commerce_tax_registrations WHERE business_profile_id = 'primary' ORDER BY registration_type, jurisdiction").all(),
   ]);
-  const privateValues = {};
-  if (profile?.legal_business_name_ciphertext) privateValues.legalBusinessName = await decryptCommerceSecret(env, profile.legal_business_name_ciphertext, "business:legal-name");
-  if (profile?.private_address_ciphertext) {
-    const plaintext = await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address");
-    privateValues.privateAddress = safeJson(plaintext, plaintext);
+  const maskedValues = {};
+  if (hasValidEncryptionKeyShape(env) && profile?.private_phone_ciphertext) {
+    maskedValues.privatePhone = maskPrivateValue(await decryptCommerceSecret(env, profile.private_phone_ciphertext, "business:private-phone"));
   }
-  if (profile?.private_phone_ciphertext) privateValues.privatePhone = await decryptCommerceSecret(env, profile.private_phone_ciphertext, "business:private-phone");
-  if (profile?.business_registration_number_ciphertext) privateValues.businessRegistrationNumber = await decryptCommerceSecret(env, profile.business_registration_number_ciphertext, "business:registration-number");
+  if (hasValidEncryptionKeyShape(env) && profile?.business_registration_number_ciphertext) {
+    maskedValues.businessRegistrationNumber = maskPrivateValue(await decryptCommerceSecret(env, profile.business_registration_number_ciphertext, "business:registration-number"));
+  }
   return {
     ok: true,
     databaseConfigured: true,
     encryptionConfigured: hasValidEncryptionKeyShape(env),
     access,
-    profile: businessProjection(profile || defaultBusinessProfile(), taxResult?.results || [], privateValues),
+    profile: businessProjection(profile || defaultBusinessProfile(), taxResult?.results || [], maskedValues),
   };
 }
 
@@ -1157,6 +1156,9 @@ export async function updateBusinessProfile(env, session, input) {
   await importEncryptionKey(env);
   const current = await db.prepare("SELECT * FROM commerce_business_profiles WHERE id = 'primary'").first();
   const values = validateBusinessProfile(input, current || defaultBusinessProfile());
+  if (current && values.revision !== Number(current.revision)) {
+    throw new AuthFailure(409, "business_profile_revision_conflict", "This business profile changed in another session. Reload before saving.");
+  }
   const timestamp = nowIso();
   const legalCiphertext = values.legalBusinessName
     ? await encryptCommerceSecret(env, values.legalBusinessName, "business:legal-name")
@@ -1229,17 +1231,13 @@ export async function updateBusinessProfile(env, session, input) {
     )
     .run();
 
-  for (const registration of values.registrations) {
-    if (!registration.identifier) continue;
-    await upsertTaxRegistration(db, env, session.accountId, registration, timestamp);
-  }
   await writeCommerceAudit(env, {
     actorAccountId: session.accountId,
     action: "business_profile_updated",
     targetType: "commerce_business_profile",
     targetId: "primary",
     result: "success",
-    metadata: { fields: values.changedFieldNames, taxIdentifiers: values.registrations.filter((item) => item.identifier).map((item) => item.type) },
+    metadata: { changedFields: values.changedFieldNames },
   });
   return businessProfilePayload(env, session);
 }
@@ -1436,10 +1434,12 @@ export function publicBusinessProjection(profile) {
     taxProviderState: cleanText(profile?.tax_provider_state ?? profile?.taxProviderState, 40) || "unavailable",
     invoiceAccentColor: safeAccentColor(profile?.invoice_accent_color ?? profile?.invoiceAccentColor),
     receiptAccentColor: safeAccentColor(profile?.receipt_accent_color ?? profile?.receiptAccentColor),
+    revision: Number(profile?.revision || 1),
+    updatedAt: cleanText(profile?.updated_at ?? profile?.updatedAt, 80) || null,
   };
 }
 
-export function businessProjection(profile, registrations = [], privateValues = {}) {
+export function businessProjection(profile, registrations = [], maskedValues = {}) {
   return {
     ...publicBusinessProjection(profile),
     private: {
@@ -1447,10 +1447,10 @@ export function businessProjection(profile, registrations = [], privateValues = 
       privateAddressStored: Boolean(profile?.private_address_ciphertext),
       privatePhoneStored: Boolean(profile?.private_phone_ciphertext),
       businessRegistrationNumberStored: Boolean(profile?.business_registration_number_ciphertext),
-      legalBusinessName: cleanText(privateValues.legalBusinessName, 240),
-      privateAddress: privateValues.privateAddress || {},
-      privatePhone: cleanText(privateValues.privatePhone, 80),
-      businessRegistrationNumber: cleanText(privateValues.businessRegistrationNumber, 100),
+      legalBusinessNameMasked: profile?.legal_business_name_ciphertext ? "Encrypted value configured" : "",
+      privateAddressMasked: profile?.private_address_ciphertext ? "Encrypted address configured" : "",
+      privatePhoneMasked: cleanText(maskedValues.privatePhone, 80) || (profile?.private_phone_ciphertext ? "••••" : ""),
+      businessRegistrationNumberMasked: cleanText(maskedValues.businessRegistrationNumber, 100) || (profile?.business_registration_number_ciphertext ? "••••" : ""),
       registrations: registrations.map((row) => ({
         type: cleanText(row.registration_type, 40),
         jurisdiction: cleanText(row.jurisdiction, 20),
@@ -2002,9 +2002,11 @@ async function requireCurrentCollection(db, id, revision) { const row = await db
 function throwCollectionConflict(error) { if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "commerce_collection_slug_or_title_duplicate", "Collection title and slug must both be unique."); throw error; }
 
 function validateBusinessProfile(input, current) {
-  const allowed = new Set(["tradingName", "legalBusinessName", "countryCode", "provinceCode", "currencyCode", "publicContactEmail", "supportEmail", "publicPhone", "websiteUrl", "publicAddress", "privateAddress", "privatePhone", "businessRegistrationNumber", "invoicePrefix", "documentFooter", "taxProviderState", "invoiceAccentColor", "receiptAccentColor", "businessNumber", "gstHstNumber", "provincialRegistration"]);
+  const allowed = new Set(["revision", "tradingName", "legalBusinessName", "countryCode", "provinceCode", "currencyCode", "publicContactEmail", "supportEmail", "publicPhone", "websiteUrl", "publicAddress", "privateAddress", "privatePhone", "businessRegistrationNumber", "invoicePrefix", "documentFooter", "invoiceAccentColor", "receiptAccentColor"]);
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.has(key))) throw new AuthFailure(400, "business_profile_fields_invalid", "The business profile fields are invalid.");
-  const tradingName = cleanText(input?.tradingName ?? current?.trading_name, 160);
+  const revision = Number(input.revision);
+  if (!Number.isInteger(revision) || revision < 1) throw new AuthFailure(400, "business_profile_revision_invalid", "The business profile revision is required.");
+  const tradingName = validateBusinessText(input?.tradingName ?? current?.trading_name, 160, "trading_name_invalid");
   if (!tradingName) throw new AuthFailure(400, "trading_name_required", "A public trading name is required.");
   const countryCode = cleanText(input?.countryCode ?? current?.country_code, 2).toUpperCase();
   const provinceCode = cleanText(input?.provinceCode ?? current?.province_code, 3).toUpperCase();
@@ -2012,13 +2014,17 @@ function validateBusinessProfile(input, current) {
   if (countryCode !== "CA" || provinceCode !== "ON" || currencyCode !== "CAD") {
     throw new AuthFailure(400, "commerce_locale_locked", "This foundation is scoped to Ontario, Canada with CAD storefront currency.");
   }
-  const publicContactEmail = validateOptionalEmail(input?.publicContactEmail ?? current?.public_contact_email);
-  const supportEmail = validateOptionalEmail(input?.supportEmail ?? current?.support_email);
+  const publicContactEmail = validateOptionalEmail(input?.publicContactEmail ?? current?.public_contact_email, "public_contact_email_invalid");
+  const supportEmail = validateOptionalEmail(input?.supportEmail ?? current?.support_email, "support_email_invalid");
   const websiteUrl = validateOptionalHttpsUrl(input?.websiteUrl ?? current?.website_url);
-  const publicAddress = validateAddress(input?.publicAddress ?? safeJson(current?.public_address_json, {}));
-  const privateAddress = input.privateAddress && typeof input.privateAddress === "object" && !Array.isArray(input.privateAddress) ? validatePrivateAddress(input.privateAddress) : null;
+  const publicAddress = validateAddress(input?.publicAddress ?? safeJson(current?.public_address_json, {}), "public_address");
+  const privateAddress = Object.hasOwn(input, "privateAddress") ? validatePrivateAddress(input.privateAddress) : null;
   const legalBusinessName = plainPrivateValue(input?.legalBusinessName, 240);
+  const publicPhone = validateBusinessPhone(input?.publicPhone ?? current?.public_phone, "public_phone_invalid");
+  const privatePhone = plainPrivateValue(input?.privatePhone, 80);
+  if (privatePhone) validateBusinessPhone(privatePhone, "private_phone_invalid");
   return {
+    revision,
     tradingName,
     legalBusinessName,
     countryCode,
@@ -2026,24 +2032,69 @@ function validateBusinessProfile(input, current) {
     currencyCode,
     publicAddress,
     privateAddress,
-    privatePhone: plainPrivateValue(input?.privatePhone, 80),
+    privatePhone,
     businessRegistrationNumber: plainPrivateValue(input?.businessRegistrationNumber, 100),
     publicContactEmail,
     supportEmail,
-    publicPhone: cleanText(input?.publicPhone ?? current?.public_phone, 40),
+    publicPhone,
     websiteUrl,
     invoicePrefix: cleanText(input?.invoicePrefix ?? current?.invoice_prefix, 24),
     documentFooter: plainTemplateText(input?.documentFooter ?? current?.document_footer, 1000),
     taxProviderState: "unavailable",
     invoiceAccentColor: safeAccentColor(input?.invoiceAccentColor ?? current?.invoice_accent_color),
     receiptAccentColor: safeAccentColor(input?.receiptAccentColor ?? current?.receipt_accent_color),
-    registrations: [
-      { type: "business_number", jurisdiction: "CA", identifier: plainPrivateValue(input?.businessNumber, 40) },
-      { type: "gst_hst", jurisdiction: "CA", identifier: plainPrivateValue(input?.gstHstNumber, 40) },
-      { type: "provincial", jurisdiction: "ON", identifier: plainPrivateValue(input?.provincialRegistration, 80) },
-    ],
-    changedFieldNames: Object.keys(input && typeof input === "object" ? input : {}).filter((key) => !/(number|registration|legal|private)/i.test(key)).slice(0, 30),
+    changedFieldNames: businessAuditCategories(input, current, { tradingName, publicContactEmail, supportEmail, publicPhone, websiteUrl, publicAddress, countryCode, provinceCode, currencyCode }),
   };
+}
+
+function businessAuditCategories(input, current, values) {
+  const categories = new Set();
+  const keys = new Set(Object.keys(input || {}));
+  if (keys.has("tradingName") && values.tradingName !== cleanText(current?.trading_name, 160)) categories.add("storefront_identity");
+  if ((keys.has("publicContactEmail") && values.publicContactEmail !== cleanText(current?.public_contact_email, 254).toLowerCase()) || (keys.has("supportEmail") && values.supportEmail !== cleanText(current?.support_email, 254).toLowerCase()) || (keys.has("publicPhone") && values.publicPhone !== cleanText(current?.public_phone, 40)) || (keys.has("websiteUrl") && values.websiteUrl !== cleanText(current?.website_url, 500))) categories.add("contact_information");
+  if (keys.has("publicAddress") && JSON.stringify(values.publicAddress) !== JSON.stringify(validateAddress(safeJson(current?.public_address_json, {}), "public_address"))) categories.add("public_address");
+  if (keys.has("legalBusinessName") && input.legalBusinessName) categories.add("legal_name");
+  if (keys.has("privateAddress")) categories.add("business_address");
+  if (keys.has("privatePhone") && input.privatePhone) categories.add("private_phone");
+  if (keys.has("businessRegistrationNumber") && input.businessRegistrationNumber) categories.add("business_registration");
+  if (["invoicePrefix", "documentFooter", "invoiceAccentColor", "receiptAccentColor"].some((key) => keys.has(key))) categories.add("document_identity");
+  if ((keys.has("countryCode") && values.countryCode !== cleanText(current?.country_code, 2).toUpperCase()) || (keys.has("provinceCode") && values.provinceCode !== cleanText(current?.province_code, 3).toUpperCase()) || (keys.has("currencyCode") && values.currencyCode !== cleanText(current?.currency_code, 3).toUpperCase())) categories.add("commerce_defaults");
+  return [...categories];
+}
+
+function validateBusinessText(value, maxLength, code) {
+  const text = cleanText(value, maxLength);
+  if (/<\/?[a-z][^>]*>|javascript\s*:|on[a-z]+\s*=|<script/i.test(text)) {
+    throw new AuthFailure(400, code, "Business profile fields accept plain text only.");
+  }
+  return text;
+}
+
+function validateBusinessPhone(value, code) {
+  const text = validateBusinessText(value, 40, code);
+  if (text && !/^\+?[0-9][0-9 ()\-.]{5,38}$/.test(text)) throw new AuthFailure(400, code, "Enter a valid business phone number.");
+  return text;
+}
+
+function validateStructuredAddress(address, prefix) {
+  const values = [address.line1, address.line2, address.city, address.province, address.postalCode, address.country];
+  const populated = values.some(Boolean);
+  if (!populated) return;
+  if (!address.line1 || !address.city || !address.province || !address.postalCode || !address.country) {
+    throw new AuthFailure(400, `${prefix}_incomplete`, "Complete the address line, city, province or state, postal code, and country.");
+  }
+  if (!/^[A-Z]{2}$/.test(address.country) || !/^[A-Z]{2,3}$/.test(address.province)) {
+    throw new AuthFailure(400, `${prefix}_invalid`, "Use canonical country and province or state codes.");
+  }
+  if (address.country === "CA" && !/^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ][ -]?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i.test(address.postalCode)) {
+    throw new AuthFailure(400, `${prefix}_postal_invalid`, "Enter a valid Canadian postal-code format, for example M5V 1A1.");
+  }
+}
+
+function maskPrivateValue(value) {
+  const normalized = String(value || "").replace(/[^a-zA-Z0-9]/g, "");
+  if (!normalized) return "";
+  return `${"•".repeat(Math.max(4, Math.min(10, normalized.length - 4)))}${normalized.slice(-4)}`;
 }
 
 async function upsertTaxRegistration(db, env, accountId, registration, timestamp) {
@@ -2087,24 +2138,27 @@ function validateTemplateVariables(template) {
 }
 
 function validatePrivateAddress(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new AuthFailure(400, "private_address_invalid", "The legal business address fields are invalid.");
   const allowed = new Set(["line1", "line2", "city", "province", "postalCode", "country"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new AuthFailure(400, "private_address_invalid", "The private address fields are invalid.");
   const result = {
-    line1: plainPrivateValue(value.line1, 180),
-    line2: plainPrivateValue(value.line2, 180),
-    city: plainPrivateValue(value.city, 120),
+    line1: validateBusinessText(value.line1, 180, "private_address_invalid"),
+    line2: validateBusinessText(value.line2, 180, "private_address_invalid"),
+    city: validateBusinessText(value.city, 120, "private_address_invalid"),
     province: cleanText(value.province, 3).toUpperCase(),
     postalCode: plainPrivateValue(value.postalCode, 12).toUpperCase(),
     country: cleanText(value.country, 2).toUpperCase(),
   };
   if (result.country && !/^[A-Z]{2}$/.test(result.country)) throw new AuthFailure(400, "private_address_invalid", "The private address country is invalid.");
   if (result.province && !/^[A-Z]{2,3}$/.test(result.province)) throw new AuthFailure(400, "private_address_invalid", "The private address province is invalid.");
+  validateStructuredAddress(result, "private_address");
   return result;
 }
 
 function plainPrivateValue(value, maxLength) {
   const text = String(value ?? "").trim().slice(0, maxLength);
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text)) throw new AuthFailure(400, "private_value_invalid", "The private value contains invalid characters.");
+  if (/<\/?[a-z][^>]*>|javascript\s*:|on[a-z]+\s*=|<script/i.test(text)) throw new AuthFailure(400, "private_value_invalid", "Private business values accept plain text only.");
   return text;
 }
 
@@ -2133,10 +2187,10 @@ function validateOptionalHttpsUrl(value) {
   }
 }
 
-function validateOptionalEmail(value) {
+function validateOptionalEmail(value, code = "email_invalid") {
   const email = cleanText(value, 254).toLowerCase();
   if (!email) return "";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new AuthFailure(400, "email_invalid", "Enter a valid email address.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new AuthFailure(400, code, "Enter a valid email address.");
   return email;
 }
 
@@ -2145,16 +2199,20 @@ function safeAccentColor(value) {
   return /^#[0-9a-f]{6}$/i.test(text) ? text.toLowerCase() : "#f3c928";
 }
 
-function validateAddress(value) {
+function validateAddress(value, prefix = "public_address") {
   const raw = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  return {
-    line1: cleanText(raw.line1, 180),
-    line2: cleanText(raw.line2, 180),
-    city: cleanText(raw.city, 120),
+  const allowed = new Set(["line1", "line2", "city", "province", "postalCode", "country"]);
+  if (Object.keys(raw).some((key) => !allowed.has(key))) throw new AuthFailure(400, `${prefix}_invalid`, "The address fields are invalid.");
+  const result = {
+    line1: validateBusinessText(raw.line1, 180, `${prefix}_invalid`),
+    line2: validateBusinessText(raw.line2, 180, `${prefix}_invalid`),
+    city: validateBusinessText(raw.city, 120, `${prefix}_invalid`),
     province: cleanText(raw.province, 3).toUpperCase(),
-    postalCode: cleanText(raw.postalCode, 12).toUpperCase(),
+    postalCode: validateBusinessText(raw.postalCode, 12, `${prefix}_invalid`).toUpperCase(),
     country: cleanText(raw.country, 2).toUpperCase(),
   };
+  validateStructuredAddress(result, prefix);
+  return result;
 }
 
 function safeJson(value, fallback) {

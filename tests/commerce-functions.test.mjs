@@ -40,17 +40,20 @@ test("commerce overview is authenticated and missing DB leaves disabled truthful
 test("business mutations require CSRF and encryption, then persist ciphertext only", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness); const { master, created, cookie } = await masterSession(env);
-  const body = { tradingName: "Third Railify Official", legalBusinessName: "Private legal name", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicContactEmail: "info@thirdrailify.com", supportEmail: "info@thirdrailify.com", websiteUrl: "https://thirdrailify.com", businessNumber: "123456789", publicAddress: {} };
+  const body = { revision: 1, tradingName: "Third Railify Official", legalBusinessName: "Private legal name", businessRegistrationNumber: "123456789", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicContactEmail: "info@thirdrailify.com", supportEmail: "info@thirdrailify.com", websiteUrl: "https://thirdrailify.com", publicAddress: {} };
   const noCsrf = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { origin: ADMIN_ORIGIN, cookie, body }), env, data: {} });
   assert.equal(noCsrf.status, 403);
+  const unauthenticated = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { origin: ADMIN_ORIGIN, csrfToken: created.csrfToken, body }), env, data: {} }); assert.equal(unauthenticated.status, 401);
+  const wrongOrigin = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { origin: "https://evil.example", cookie, csrfToken: created.csrfToken, body }), env, data: {} }); assert.equal(wrongOrigin.status, 403);
   const noKeyEnv = { ...env, THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY: "" };
   const noKey = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body }), env: noKeyEnv, data: {} });
   assert.equal(noKey.status, 503);
   const response = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body }), env, data: {} });
   assert.equal(response.status, 200);
-  const stored = await harness.commerceDb.prepare("SELECT legal_business_name_ciphertext FROM commerce_business_profiles WHERE id = 'primary'").first();
-  const tax = await harness.commerceDb.prepare("SELECT identifier_ciphertext, masked_identifier FROM commerce_tax_registrations WHERE registration_type = 'business_number'").first();
-  assert.doesNotMatch(stored.legal_business_name_ciphertext, /Private legal name/); assert.doesNotMatch(tax.identifier_ciphertext, /123456789/); assert.equal(tax.masked_identifier, "•••••6789");
+  const stored = await harness.commerceDb.prepare("SELECT legal_business_name_ciphertext,business_registration_number_ciphertext FROM commerce_business_profiles WHERE id = 'primary'").first();
+  const tax = await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_tax_registrations").first();
+  assert.doesNotMatch(stored.legal_business_name_ciphertext, /Private legal name/); assert.doesNotMatch(stored.business_registration_number_ciphertext, /123456789/); assert.equal(tax.count, 0);
+  const responsePayload = await response.json(); assert.match(responsePayload.profile.private.businessRegistrationNumberMasked, /6789$/); assert.doesNotMatch(JSON.stringify(responsePayload), /Private legal name|123456789|A256GCM|ciphertext/);
   const audits = await harness.commerceDb.prepare("SELECT metadata_json FROM commerce_audit WHERE actor_account_id = ?").bind(master.id).all();
   assert.ok(audits.results.length >= 1); assert.doesNotMatch(JSON.stringify(audits.results), /123456789|Private legal name/);
 });

@@ -3,7 +3,7 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "content" | "watch" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "content" | "watch" | "wheels" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -48,6 +48,32 @@ export const adminAreas: AdminArea[] = [
     icon: "products",
     summary: "Product, collection, and order authority.",
     futureScope: ["Products", "Collections", "Orders"],
+  },
+  {
+    path: "/wheels",
+    label: "Wheels",
+    shortLabel: "Wheels",
+    icon: "wheels",
+    summary: "Competition wheel persistence, lifecycle, locks, access, and official results.",
+    futureScope: ["Admin D1 authority", "Approved creators", "Immutable official draws"],
+  },
+  {
+    path: "/wheels/access",
+    parentPath: "/wheels",
+    label: "Wheel Access",
+    shortLabel: "Access",
+    icon: "users",
+    summary: "Global creator grants and per-wheel least-privilege roles.",
+    futureScope: ["Creator approval", "Owner transfer", "Editor and spinner assignments"],
+  },
+  {
+    path: "/wheels/results",
+    parentPath: "/wheels",
+    label: "Official Results",
+    shortLabel: "Results",
+    icon: "orders",
+    summary: "Immutable official draw history and audited voiding.",
+    futureScope: ["Snapshot hashes", "Idempotency", "Non-destructive voids"],
   },
   {
     path: "/products",

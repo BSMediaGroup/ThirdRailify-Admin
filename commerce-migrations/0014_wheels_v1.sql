@@ -50,7 +50,7 @@ CREATE TABLE wheel_entries (
   display_label TEXT NOT NULL CHECK (length(display_label) BETWEEN 1 AND 120),
   display_order INTEGER NOT NULL CHECK (display_order >= 0),
   weight INTEGER NOT NULL DEFAULT 1 CHECK (weight BETWEEN 1 AND 100000),
-  segment_colour TEXT CHECK (segment_colour IS NULL OR segment_colour GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'),
+  segment_colour TEXT CHECK (segment_colour IS NULL OR (length(segment_colour) = 7 AND substr(segment_colour, 1, 1) = '#' AND substr(segment_colour, 2) NOT GLOB '*[^0-9A-Fa-f]*')),
   state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'hidden')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -127,4 +127,3 @@ CREATE TABLE wheel_rate_limits (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (key_hash, category)
 );
-

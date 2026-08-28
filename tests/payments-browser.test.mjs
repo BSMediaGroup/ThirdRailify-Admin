@@ -25,15 +25,26 @@ test("Payments and Payouts renders truthful responsive TEST-only control plane",
     assert.equal(await page.getByText("Direct merchant", { exact: true }).count() >= 1, true);
     assert.equal(await page.getByText("No Connect · no platform transfers · payouts managed in Stripe", { exact: true }).count(), 1);
     assert.equal(await page.getByText("Managed directly in Stripe", { exact: true }).count(), 1);
-    const stripeLogo = page.locator(".payments-provider-card .provider-brand img");
+    const stripeCard = page.locator(".payments-provider-card");
+    const stripeLogo = stripeCard.locator(".provider-feature-icon");
     const paypalCard = page.locator(".paypal-scaffold");
-    const paypalLogo = paypalCard.locator(".provider-brand img");
+    const paypalLogo = paypalCard.locator(".provider-feature-icon");
     assert.equal(await stripeLogo.count(), 1); assert.equal(await stripeLogo.evaluate((image) => image.complete && image.naturalWidth > 0), true);
     assert.equal(await paypalCard.count(), 1); assert.equal(await paypalLogo.evaluate((image) => image.complete && image.naturalWidth > 0), true);
+    for (const [card, icon] of [[stripeCard, stripeLogo], [paypalCard, paypalLogo]]) {
+      const cardBox = await card.boundingBox(); const iconBox = await icon.boundingBox(); assert.ok(cardBox && iconBox);
+      assert.equal(Math.round(iconBox.width), 48); assert.equal(Math.round(iconBox.height), 48);
+      assert.equal(iconBox.x + iconBox.width <= cardBox.x + cardBox.width, true); assert.equal(cardBox.x + cardBox.width - iconBox.x - iconBox.width <= 25, true); assert.equal(iconBox.y - cardBox.y <= 25, true);
+    }
     assert.equal(await paypalCard.getByText("Deferred", { exact: true }).count(), 1);
     assert.equal(await paypalCard.getByText("Disabled / future phase", { exact: true }).count(), 2);
     assert.equal(await paypalCard.getByRole("button").count(), 0);
-    assert.notEqual(await paypalCard.evaluate((element) => getComputedStyle(element).filter), "none");
+    assert.equal(await paypalCard.evaluate((element) => getComputedStyle(element).filter), "none");
+    for (const method of ["apple_pay", "google_pay"]) {
+      const mark = page.locator(`.payment-method-mark.is-${method}`); assert.equal(await mark.count(), 1);
+      const style = await mark.evaluate((element) => ({ background: getComputedStyle(element).backgroundColor, mask: getComputedStyle(element).webkitMaskImage }));
+      assert.equal(style.background, "rgb(243, 201, 40)"); assert.notEqual(style.mask, "none");
+    }
     assert.equal(await page.getByText("Not externally verified", { exact: true }).count(), 1);
     assert.equal(await page.getByText("$15.00", { exact: true }).count() >= 2, true);
     assert.equal(await page.getByText("$0.00", { exact: true }).count() >= 4, true);

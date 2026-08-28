@@ -1,5 +1,6 @@
 import { AuthFailure, cleanText, nowIso, randomId, sendAccountEmail } from "./auth-core.js";
 import {
+  businessProfilePayload,
   commerceOverview,
   commerceAccessForSession,
   COMMERCE_TEMPLATE_VARIABLES,
@@ -7,6 +8,7 @@ import {
   encryptCommerceSecret,
   isStripeTestCredentialConfigured,
   isStripeWebhookSigningConfigured,
+  isCommerceDbConfigured,
   maskTaxIdentifier,
   requireCommerceDb,
   validateTemplate,
@@ -20,6 +22,89 @@ const TAX_STATUSES = new Set(["unverified", "pending", "verified", "active", "in
 const ACCEPTED_TEST_ORDER_ID = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
 const ACCEPTED_TEST_SESSION_ID = "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC";
 const ACCEPTED_TEST_EVENT_ID = "evt_1U9OysB2jGrq9Tn1apdsFgi2";
+
+export async function businessInformationPayload(env, session) {
+  const business = await businessProfilePayload(env, session);
+  if (!isCommerceDbConfigured(env)) {
+    return {
+      ...business,
+      authority: "Commerce D1",
+      privacy: businessPrivacyBoundary(),
+      readiness: emptyBusinessReadiness(),
+      canonicalReadiness: null,
+    };
+  }
+  const db = requireCommerceDb(env);
+  const [canonicalReadiness, templateResult] = await Promise.all([
+    productionReadinessPayload(env, session),
+    db.prepare("SELECT template_key,status,enabled,revision FROM commerce_templates WHERE template_key IN ('payment_receipt','invoice_document','order_confirmation','receipt_notification') ORDER BY template_key").all(),
+  ]);
+  const profile = business.profile;
+  const templates = Object.fromEntries((templateResult?.results || []).map((row) => [row.template_key, row]));
+  const registrations = profile.private.registrations;
+  const activeTaxRegistrations = registrations.filter((item) => ["active", "verified"].includes(item.status));
+  const coreItems = [
+    readinessItem("trading_name", "Trading name", Boolean(profile.tradingName), profile.tradingName || "Not configured"),
+    readinessItem("merchant_country", "Merchant country", profile.countryCode === "CA", profile.countryCode === "CA" ? "Canada" : "Action required"),
+    readinessItem("merchant_region", "Merchant region", profile.provinceCode === "ON", profile.provinceCode === "ON" ? "Ontario" : "Action required"),
+    readinessItem("commerce_currency", "Commerce currency", profile.currencyCode === "CAD", profile.currencyCode || "Not configured"),
+  ];
+  const contactItems = [
+    readinessItem("public_contact", "Public contact email", Boolean(profile.publicContactEmail), profile.publicContactEmail || "Not configured"),
+    readinessItem("support_contact", "Customer support email", Boolean(profile.supportEmail), profile.supportEmail || "Not configured"),
+    optionalReadinessItem("public_phone", "Public phone", Boolean(profile.publicPhone), profile.publicPhone || "Not configured / not required"),
+    optionalReadinessItem("website", "Website", Boolean(profile.websiteUrl), profile.websiteUrl || "Not configured / not required"),
+  ];
+  const legalItems = [
+    storedReadinessItem("legal_name", "Legal business name", profile.private.legalBusinessNameStored),
+    storedReadinessItem("business_address", "Legal business address", profile.private.privateAddressStored),
+    storedReadinessItem("business_registration", "Business registration number", profile.private.businessRegistrationNumberStored),
+  ];
+  const taxState = activeTaxRegistrations.length ? "complete" : registrations.length ? "unverified" : "not_configured";
+  const receiptTemplateReady = templates.payment_receipt?.status === "ready" && Number(templates.payment_receipt?.enabled) === 1;
+  const invoiceTemplateReady = templates.invoice_document?.status === "ready" && Number(templates.invoice_document?.enabled) === 1;
+  const readiness = {
+    overallStatus: canonicalReadiness.domains.business.ready ? "complete" : "action_required",
+    completion: businessCompletion([...coreItems, ...contactItems.slice(0, 2), ...legalItems]),
+    groups: [
+      readinessGroup("core", "Core merchant identity", coreItems),
+      readinessGroup("contact", "Customer contact", contactItems),
+      readinessGroup("legal", "Legal / document identity", legalItems),
+      readinessGroup("tax", "Tax", [statusReadinessItem("tax_registration", "Tax registration status", taxState, activeTaxRegistrations.length ? `${activeTaxRegistrations.length} active or verified registration${activeTaxRegistrations.length === 1 ? "" : "s"}` : registrations.length ? "Stored registrations remain unverified or inactive" : "Not configured in Tax & documents")]),
+      readinessGroup("communications", "Customer communications", [canonicalDomainItem("transactional_email", "Transactional sender", canonicalReadiness.domains.communications)]),
+      readinessGroup("documents", "Documents", [readinessItem("receipt_template", "Receipt template", receiptTemplateReady, receiptTemplateReady ? "Ready and enabled" : "Action required"), readinessItem("invoice_template", "Invoice template", invoiceTemplateReady, invoiceTemplateReady ? "Ready and enabled" : "Not ready")]),
+      readinessGroup("fulfillment", "Fulfillment", [canonicalDomainItem("fulfillment", "Fulfillment provider", canonicalReadiness.domains.fulfillment)]),
+    ],
+    profile: {
+      coreIdentity: coreItems.every((item) => item.state === "complete") ? "complete" : "action_required",
+      publicContact: profile.publicContactEmail && profile.supportEmail ? "complete" : profile.publicContactEmail || profile.supportEmail ? "partial" : "not_configured",
+      legalIdentity: legalItems.every((item) => item.state === "unverified") ? "complete" : legalItems.some((item) => item.state === "unverified") ? "partial" : "not_configured",
+      address: profile.private.privateAddressStored ? "complete" : "not_configured",
+      tax: taxState,
+      documents: canonicalReadiness.domains.documents.ready ? "complete" : receiptTemplateReady ? "partial" : "action_required",
+      productionCommerce: canonicalReadiness.productionReady ? "complete" : "action_required",
+    },
+    dependencies: {
+      tax: canonicalReadiness.domains.tax,
+      communications: canonicalReadiness.domains.communications,
+      documents: canonicalReadiness.domains.documents,
+      fulfillment: canonicalReadiness.domains.fulfillment,
+      payments: canonicalReadiness.domains.payments,
+      checkout: canonicalReadiness.domains.checkout,
+      paypalRequired: false,
+    },
+    documentIdentity: {
+      tradingName: profile.tradingName,
+      legalNameStored: profile.private.legalBusinessNameStored,
+      addressStored: profile.private.privateAddressStored,
+      contactEmail: profile.supportEmail || profile.publicContactEmail || null,
+      taxRegistrationState: taxState,
+      receiptTemplate: templateState(templates.payment_receipt),
+      invoiceTemplate: templateState(templates.invoice_document),
+    },
+  };
+  return { ...business, authority: "Commerce D1", privacy: businessPrivacyBoundary(), readiness, canonicalReadiness };
+}
 
 export async function taxRegistrationsPayload(env, session) {
   const access = await commerceAccessForSession(env, session);
@@ -564,6 +649,41 @@ function validateTaxRegistration(input, current) {
 }
 
 function serializeTaxRegistration(row) { return { id: cleanText(row.id, 160), registrationType: cleanText(row.registration_type, 30), jurisdiction: cleanText(row.jurisdiction, 80), countryCode: cleanText(row.country_code, 2), provinceCode: cleanText(row.province_code, 3) || null, maskedIdentifier: cleanText(row.masked_identifier, 40), status: cleanText(row.status, 30), effectiveDate: cleanText(row.effective_date, 10) || null, expiresAt: cleanText(row.expires_at, 10) || null, notes: cleanText(row.notes, 1000), documentDisclosureEnabled: row.document_disclosure_enabled === 1, revision: Number(row.revision), updatedAt: cleanText(row.updated_at, 80) }; }
+function readinessItem(id, label, complete, detail) { return { id, label, state: complete ? "complete" : "incomplete", detail }; }
+function optionalReadinessItem(id, label, configured, detail) { return { id, label, state: configured ? "complete" : "not_required", detail }; }
+function storedReadinessItem(id, label, stored) { return { id, label, state: stored ? "unverified" : "incomplete", detail: stored ? "Configured and encrypted; not externally verified" : "Not configured" }; }
+function statusReadinessItem(id, label, state, detail) { return { id, label, state, detail }; }
+function canonicalDomainItem(id, label, value) { return { id, label, state: value.ready ? "complete" : value.details?.sendEnabled === false || value.details?.enabled === false ? "disabled" : "incomplete", detail: value.summary }; }
+function readinessGroup(id, label, items) {
+  const actionable = items.filter((item) => item.state !== "not_required");
+  const state = actionable.some((item) => item.state === "incomplete" || item.state === "not_configured") ? "action_required"
+    : actionable.some((item) => item.state === "disabled") ? "disabled"
+      : actionable.some((item) => item.state === "unverified") ? "unverified" : "complete";
+  return { id, label, state, items };
+}
+function businessCompletion(items) {
+  const required = items.filter((item) => item.state !== "not_required");
+  const complete = required.filter((item) => item.state === "complete" || item.state === "unverified").length;
+  return { complete, total: required.length, percent: required.length ? Math.round((complete / required.length) * 100) : 0 };
+}
+function templateState(row) { return !row ? { state: "not_configured", revision: null } : { state: row.status === "ready" && Number(row.enabled) === 1 ? "complete" : row.status === "disabled" ? "disabled" : "incomplete", revision: Number(row.revision) }; }
+function businessPrivacyBoundary() {
+  return {
+    publicSafe: ["trading_name", "public_contact_email", "support_email", "public_phone", "website_url", "public_address"],
+    adminOnly: ["profile_revision", "updated_at", "readiness", "template_status"],
+    sensitive: ["legal_business_name", "legal_business_address", "private_phone", "business_registration_number"],
+  };
+}
+function emptyBusinessReadiness() {
+  return {
+    overallStatus: "action_required",
+    completion: { complete: 0, total: 9, percent: 0 },
+    groups: [],
+    profile: { coreIdentity: "action_required", publicContact: "not_configured", legalIdentity: "not_configured", address: "not_configured", tax: "not_configured", documents: "action_required", productionCommerce: "action_required" },
+    dependencies: { paypalRequired: false },
+    documentIdentity: { tradingName: "Third Railify Official", legalNameStored: false, addressStored: false, contactEmail: null, taxRegistrationState: "not_configured", receiptTemplate: { state: "not_configured", revision: null }, invoiceTemplate: { state: "not_configured", revision: null } },
+  };
+}
 function domain(ready, summary, details) { return { ready: Boolean(ready), status: ready ? "ready" : "blocked", summary, details }; }
 function validId(value, code) { const id = cleanText(value, 160); if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id)) throw new AuthFailure(400, code, "The identifier is invalid."); return id; }
 function optionalDate(value, code) { const text = cleanText(value, 10); if (!text) return null; if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T00:00:00Z`))) throw new AuthFailure(400, code, "Enter a valid ISO date."); return text; }
