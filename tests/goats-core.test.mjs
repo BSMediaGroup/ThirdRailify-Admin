@@ -29,6 +29,7 @@ import {
 } from "../functions/_shared/goats-core.js";
 
 const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+const animatedGif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAIfkEAQAAAAAsAAAAAAEAAQAAAgJEAQA7", "base64");
 
 test("GOATS moderation API rejects an unauthenticated browser before returning private records", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
@@ -52,6 +53,8 @@ test("guest draft finalisation stays private until validated approval, then proj
   const request = new Request("https://thirdrailify-admin.pages.dev/api/goats/internal/drafts", { method: "POST", headers: { "CF-Connecting-IP": "203.0.113.10" }, body: "{}" });
   const draft = await createDraft(env, request, { turnstileToken: "token", website: "" }, { rateKey: "guest-key", fetchImpl: async () => Response.json({ success: true, action: "goat_submission", hostname: "thirdrailify-admin.pages.dev" }) });
   await uploadDraftMedia(env, draft.draftToken, "main", 0, tinyPng, "image/png", { rateKey: "guest-key" });
+  await assert.rejects(uploadDraftMedia(env, draft.draftToken, "gallery", 0, animatedGif, "image/gif", { rateKey: "guest-key" }), /valid JPG/);
+  await uploadDraftMedia(env, draft.draftToken, "profile", 0, animatedGif, "image/gif", { rateKey: "guest-key" });
   const finalised = await finaliseDraft(env, draft.draftToken, { email: "private@example.test", displayName: "Test Goat", description: "A sufficiently long and truthful temporary community story.", city: "Toronto", region: "Ontario", countryCode: "CA", productId: product.id, rating: 5, consent: true, consentVersion: "goats-v2-2026-08" }, { rateKey: "guest-key" });
   assert.equal(finalised.status, "pending"); assert.equal((await publicListings(env)).items.length, 0);
   const queuedBeforeRetry = Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM community_email_outbox").first()).count);
@@ -59,6 +62,8 @@ test("guest draft finalisation stays private until validated approval, then proj
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM community_email_outbox").first()).count), queuedBeforeRetry);
   const pending = await harness.commerceDb.prepare("SELECT * FROM community_submissions WHERE reference_code = ?").bind(finalised.reference).first();
   const pendingMedia = await harness.commerceDb.prepare("SELECT id FROM community_media WHERE submission_id = ? AND role = 'main'").bind(pending.id).first();
+  const pendingProfile = await harness.commerceDb.prepare("SELECT id, content_type FROM community_media WHERE submission_id = ? AND role = 'profile'").bind(pending.id).first();
+  assert.equal(pendingProfile.content_type, "image/gif");
   await assert.rejects(mediaResponse(env, pendingMedia.id, new Request(`https://thirdrailify-admin.pages.dev/api/goats/media/${pendingMedia.id}`)), /not found/i);
   assert.equal((await mediaResponse(env, pendingMedia.id, new Request(`https://thirdrailify-admin.pages.dev/api/admin/goats/media/${pendingMedia.id}`), { admin: true })).status, 200);
   await assert.rejects(transitionSubmission(env, pending.id, pending.version, "approve", {}, "master-admin"), /coordinates|location/i);
@@ -114,6 +119,16 @@ test("collision-safe finalisation, product validation, draft expiry, and gallery
   const rejectedEmail = await harness.commerceDb.prepare("SELECT variables_json FROM community_email_outbox WHERE submission_id = ? AND template_key = 'goat_submission_rejected'").bind(rejectedRow.id).first(); assert.equal(JSON.parse(rejectedEmail.variables_json).rejection_reason, "Please submit a clearer main image."); assert.equal(rejectedEmail.variables_json.includes("Private note"), false);
   const expiring = await makeDraft("expiry"); await harness.commerceDb.prepare("UPDATE community_submissions SET draft_expires_at = '2000-01-01T00:00:00.000Z' WHERE draft_token_hash IS NOT NULL").run(); await assert.rejects(uploadDraftMedia(env, expiring.draftToken, "gallery", 0, tinyPng, "image/png", { rateKey: "expiry" }), /expired|invalid/i); const cleanup = await cleanupExpiredDrafts(env, "master-admin", 10); assert.equal(cleanup.deletedDrafts, 1); assert.equal(cleanup.deletedObjects, 1);
   const galleryDraft = await makeDraft("gallery"); for (let index = 0; index < 5; index += 1) await uploadDraftMedia(env, galleryDraft.draftToken, "gallery", index, tinyPng, "image/png", { rateKey: `gallery-${index}` }); await assert.rejects(uploadDraftMedia(env, galleryDraft.draftToken, "gallery", 4, tinyPng, "image/png", { rateKey: "gallery-over" }), /five/i);
+});
+
+test("image pipeline preserves animated GIF frames only for profile media", () => {
+  assert.throws(() => sanitizeImage(animatedGif, "image/gif"), /valid JPG/);
+  const safe = sanitizeImage(animatedGif, "image/gif", true);
+  assert.equal(safe.contentType, "image/gif");
+  assert.equal(safe.width, 1);
+  assert.equal(safe.height, 1);
+  assert.equal(Array.from(safe.bytes).filter((byte) => byte === 0x2c).length, 2);
+  assert.equal(safe.bytes.at(-1), 0x3b);
 });
 
 test("global and per-listing interaction rules queue, approve, disable, and keep approved listings editable", async (t) => {

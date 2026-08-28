@@ -55,6 +55,7 @@ export type CommerceOrder = {
   id: string; test: boolean; checkoutStatus: string; paymentStatus: string; fulfillmentStatus: string;
   currencyCode: string; expectedAmount: number; stripeSessionId: string | null; checkoutUrl: string | null; stripePaymentIntentId: string | null;
   createdAt: string; updatedAt: string; checkoutCreatedAt: string | null; paymentConfirmedAt: string | null;
+  webhookReceiptCount: number; webhookVerified: boolean;
   hasPrintfulOrder: boolean;
   items: Array<{ productId: string; variantId: string | null; productName: string; variantName: string | null; options: Record<string, string>; currencyCode: string; unitAmount: number; quantity: number; lineTotalAmount: number }>;
 };

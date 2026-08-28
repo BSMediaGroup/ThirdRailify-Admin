@@ -53,6 +53,8 @@ test("GOATS approved records expose durable content, media, and interaction edit
   const [app, page, client, navigation] = await Promise.all([read("src/App.tsx"), read("src/pages/GoatsAdminPages.tsx"), read("src/goats/client.ts"), read("src/config/navigation.ts")]);
   for (const route of ["goats/reactions", "goats/settings"]) assert.match(app, new RegExp(`path="${route}`));
   for (const label of ["Approved listings remain editable", "Add, replace, or remove images", "Approval required each time", "Save global defaults"]) assert.match(page, new RegExp(label));
+  assert.match(page, /media\.some\(\(media\) => media\.role === "profile"\)[\s\S]*Add profile/);
+  assert.match(page, /media\.role === "profile" \? "image\/jpeg,image\/png,image\/webp,image\/gif"/);
   assert.match(client, /uploadGoatMedia/); assert.match(client, /deleteGoatMedia/); assert.match(client, /saveGoatSettings/); assert.match(client, /moderateGoatReaction/);
   assert.match(navigation, /path: "\/goats\/reactions"/); assert.match(navigation, /path: "\/goats\/settings"/);
 });
@@ -81,8 +83,10 @@ test("Site Content exposes separate normal and fixture-labelled Live Now configu
 });
 
 test("Orders exposes only the Master-controlled Stripe TEST acceptance and truthful fulfillment state", async () => {
-  const [page, client, core, route] = await Promise.all([read("src/pages/CommercePages.tsx"), read("src/commerce/client.ts"), read("functions/_shared/checkout-core.js"), read("functions/api/admin/commerce/[[path]].js")]);
+  const [page, client, core, route, shell] = await Promise.all([read("src/pages/CommercePages.tsx"), read("src/commerce/client.ts"), read("functions/_shared/checkout-core.js"), read("functions/api/admin/commerce/[[path]].js"), read("src/components/AdminShell.tsx")]);
   for (const label of ["TEST CHECKOUT · STRIPE SANDBOX · NO REAL CHARGE", "Generate Test Checkout", "Single acceptance Session already created", "Printful order", "Open Stripe TEST Checkout"]) assert.match(page, new RegExp(label));
+  for (const label of ["STRIPE TEST ACCEPTANCE", "Signed payment acceptance", "Webhook", "Verified", "Test gate", "Closed"]) assert.match(page, new RegExp(label));
   assert.match(page, /access\.isMasterAdmin/); assert.match(client, /\/api\/admin\/commerce\/test-checkout/); assert.match(route, /requireMasterAdmin\(env, request\)/);
-  assert.match(core, /gate === "controlled_test"/); assert.match(core, /stripe_test_checkout_already_created/); assert.match(core, /fulfillment_status = 'disabled'|fulfillment_status, currency_code/);
+  assert.match(core, /gate === "controlled_test"/); assert.match(core, /stripe_test_checkout_already_created/); assert.match(core, /fulfillment_status = 'disabled'|fulfillment_status, currency_code/); assert.match(core, /webhookReceiptCount/); assert.match(core, /webhookVerified/);
+  assert.match(shell, /area\.path\.toLowerCase\(\) === location\.pathname\.toLowerCase\(\)/); assert.match(shell, /navigate\(`\$\{canonical\}/);
 });

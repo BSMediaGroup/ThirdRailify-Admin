@@ -19,7 +19,7 @@ export const MAX_GOAT_GALLERY_IMAGES = 5;
 export const GOATS_DRAFT_TTL_SECONDS = 60 * 60 * 24;
 export const GOATS_CONSENT_VERSION = "goats-v2-2026-08";
 
-const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const ALLOWED_SORTS = new Set(["newest", "most-liked", "highest-rated"]);
 const ALLOWED_STATUSES = new Set(["pending", "approved", "rejected"]);
 const ALLOWED_ENGAGEMENT_MODES = new Set(["inherit", "disabled", "auto", "moderated"]);
@@ -196,7 +196,7 @@ export async function uploadDraftMedia(env, draftToken, roleValue, sortValue, by
   const role = new Set(["main", "profile", "gallery"]).has(roleValue) ? roleValue : "";
   const sortOrder = role === "gallery" ? boundedInteger(sortValue, 0, MAX_GOAT_GALLERY_IMAGES - 1, null) : 0;
   if (!role || sortOrder == null) throw new AuthFailure(400, "media_role_invalid", "The image role is invalid.");
-  const image = sanitizeImage(new Uint8Array(bytes), declaredType);
+  const image = sanitizeImage(new Uint8Array(bytes), declaredType, role === "profile");
   const count = await requireCommerceDb(env).prepare("SELECT COUNT(*) AS count FROM community_media WHERE submission_id = ? AND role = ?").bind(draft.id, role).first();
   if (role !== "gallery" && Number(count?.count || 0) >= 1) throw new AuthFailure(409, "media_role_exists", "Replace the existing image before uploading another.");
   if (role === "gallery" && Number(count?.count || 0) >= MAX_GOAT_GALLERY_IMAGES) throw new AuthFailure(400, "gallery_limit", "Up to five gallery images are allowed.");
@@ -438,7 +438,7 @@ export async function uploadAdminMedia(env, id, roleValue, bytes, declaredType, 
   if (!submission) throw new AuthFailure(404, "submission_not_found", "The submission was not found.");
   const role = new Set(["main", "profile", "gallery"]).has(roleValue) ? roleValue : "";
   if (!role) throw new AuthFailure(400, "media_role_invalid", "The image role is invalid.");
-  const image = sanitizeImage(new Uint8Array(bytes), declaredType);
+  const image = sanitizeImage(new Uint8Array(bytes), declaredType, role === "profile");
   const db = requireCommerceDb(env);
   const existing = await db.prepare("SELECT id, role, sort_order, object_key FROM community_media WHERE submission_id = ? ORDER BY sort_order").bind(submissionId).all();
   const items = existing?.results || [];
@@ -658,15 +658,16 @@ export async function verifyInternalRequest(request, env, rawBody) {
   if (!timingSafeEqual(expected, signature)) throw new AuthFailure(401, "internal_signature_invalid", "The internal request could not be verified.");
 }
 
-export function sanitizeImage(bytes, declaredType) {
+export function sanitizeImage(bytes, declaredType, allowAnimatedGif = false) {
   if (!bytes.byteLength) throw new AuthFailure(400, "image_empty", "The image is empty.");
   if (bytes.byteLength > MAX_GOAT_IMAGE_BYTES) throw new AuthFailure(413, "image_too_large", "Choose an image no larger than 10 MB.");
   const detected = detectImage(bytes);
   const declared = String(declaredType || "").split(";", 1)[0].trim().toLowerCase().replace("image/jpg", "image/jpeg");
-  if (!detected || !ALLOWED_IMAGE_TYPES.has(declared) || declared !== detected.contentType) throw new AuthFailure(415, "image_format_invalid", "Upload a valid JPG, PNG, or WebP image.");
-  const sanitized = detected.contentType === "image/jpeg" ? sanitizeJpeg(bytes) : detected.contentType === "image/png" ? sanitizePng(bytes) : sanitizeWebp(bytes);
+  const gifAllowed = allowAnimatedGif && declared === "image/gif" && detected?.contentType === "image/gif";
+  if (!detected || !ALLOWED_IMAGE_TYPES.has(declared) || declared !== detected.contentType || detected.contentType === "image/gif" && !gifAllowed) throw new AuthFailure(415, "image_format_invalid", allowAnimatedGif ? "Upload a valid JPG, PNG, WebP, or animated GIF profile image." : "Upload a valid JPG, PNG, or WebP image.");
+  const sanitized = detected.contentType === "image/jpeg" ? sanitizeJpeg(bytes) : detected.contentType === "image/png" ? sanitizePng(bytes) : detected.contentType === "image/webp" ? sanitizeWebp(bytes) : sanitizeGif(bytes);
   const next = detectImage(sanitized);
-  if (!next || next.width > 12_000 || next.height > 12_000 || next.width * next.height > 50_000_000) throw new AuthFailure(415, "image_dimensions_invalid", "The image dimensions are unsupported.");
+  if (!next || next.width < 1 || next.height < 1 || next.width > 12_000 || next.height > 12_000 || next.width * next.height > 50_000_000) throw new AuthFailure(415, "image_dimensions_invalid", "The image dimensions are unsupported.");
   return { bytes: sanitized, contentType: next.contentType, width: next.width, height: next.height };
 }
 
@@ -998,6 +999,9 @@ function detectImage(bytes) {
   if (bytes.length >= 30 && ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WEBP" && uint32Le(bytes, 4) + 8 === bytes.length) {
     const dimensions = webpDimensions(bytes); return dimensions ? { contentType: "image/webp", ...dimensions } : null;
   }
+  if (bytes.length >= 14 && new Set(["GIF87a", "GIF89a"]).has(ascii(bytes, 0, 6))) {
+    return { contentType: "image/gif", width: uint16Le(bytes, 6), height: uint16Le(bytes, 8) };
+  }
   return null;
 }
 
@@ -1055,6 +1059,71 @@ function sanitizeWebp(bytes) {
   result.set(encoder.encode("RIFF"), 0); writeUint32Le(result, 4, result.length - 8); result.set(encoder.encode("WEBP"), 8); result.set(body, 12); return result;
 }
 
+function sanitizeGif(bytes) {
+  const globalTableLength = bytes[10] & 0x80 ? 3 * 2 ** ((bytes[10] & 0x07) + 1) : 0;
+  let offset = 13 + globalTableLength;
+  if (offset >= bytes.length) throw new AuthFailure(415, "image_format_invalid", "The GIF structure is invalid.");
+  const chunks = [bytes.slice(0, offset)];
+  let frames = 0;
+  let hasTrailer = false;
+  while (offset < bytes.length) {
+    const marker = bytes[offset];
+    if (marker === 0x3b) {
+      chunks.push(bytes.slice(offset, offset + 1));
+      hasTrailer = true;
+      break;
+    }
+    if (marker === 0x2c) {
+      if (offset + 10 > bytes.length) throw new AuthFailure(415, "image_format_invalid", "The GIF image descriptor is invalid.");
+      const frameWidth = uint16Le(bytes, offset + 5);
+      const frameHeight = uint16Le(bytes, offset + 7);
+      if (frameWidth < 1 || frameHeight < 1 || frameWidth > 12_000 || frameHeight > 12_000 || frameWidth * frameHeight > 50_000_000) throw new AuthFailure(415, "image_dimensions_invalid", "A GIF frame has unsupported dimensions.");
+      const localTableLength = bytes[offset + 9] & 0x80 ? 3 * 2 ** ((bytes[offset + 9] & 0x07) + 1) : 0;
+      const imageDataOffset = offset + 10 + localTableLength;
+      if (imageDataOffset >= bytes.length || bytes[imageDataOffset] < 2 || bytes[imageDataOffset] > 12) throw new AuthFailure(415, "image_format_invalid", "The GIF image data is invalid.");
+      const end = gifSubBlocksEnd(bytes, imageDataOffset + 1);
+      chunks.push(bytes.slice(offset, end));
+      frames += 1;
+      if (frames > 500) throw new AuthFailure(415, "image_frame_limit", "Animated GIF profiles are limited to 500 frames.");
+      offset = end;
+      continue;
+    }
+    if (marker === 0x21) {
+      if (offset + 3 > bytes.length) throw new AuthFailure(415, "image_format_invalid", "The GIF extension is invalid.");
+      const label = bytes[offset + 1];
+      if (label === 0xf9) {
+        if (offset + 8 > bytes.length || bytes[offset + 2] !== 4 || bytes[offset + 7] !== 0) throw new AuthFailure(415, "image_format_invalid", "The GIF frame control is invalid.");
+        chunks.push(bytes.slice(offset, offset + 8));
+        offset += 8;
+        continue;
+      }
+      const headerLength = bytes[offset + 2];
+      const dataOffset = offset + 3 + headerLength;
+      if (dataOffset > bytes.length) throw new AuthFailure(415, "image_format_invalid", "The GIF extension is invalid.");
+      const end = gifSubBlocksEnd(bytes, dataOffset);
+      const applicationId = label === 0xff ? ascii(bytes, offset + 3, dataOffset) : "";
+      if (label === 0xff && new Set(["NETSCAPE2.0", "ANIMEXTS1.0"]).has(applicationId)) chunks.push(bytes.slice(offset, end));
+      offset = end;
+      continue;
+    }
+    throw new AuthFailure(415, "image_format_invalid", "The GIF structure is invalid.");
+  }
+  if (!hasTrailer || frames < 1) throw new AuthFailure(415, "image_format_invalid", "The GIF contains no valid image frames.");
+  return concatBytes(chunks);
+}
+
+function gifSubBlocksEnd(bytes, start) {
+  let offset = start;
+  while (offset < bytes.length) {
+    const length = bytes[offset];
+    offset += 1;
+    if (length === 0) return offset;
+    if (offset + length > bytes.length) throw new AuthFailure(415, "image_format_invalid", "The GIF data blocks are invalid.");
+    offset += length;
+  }
+  throw new AuthFailure(415, "image_format_invalid", "The GIF data blocks are incomplete.");
+}
+
 function webpDimensions(bytes) {
   const type = ascii(bytes, 12, 16);
   if (type === "VP8X") return { width: 1 + uint24Le(bytes, 24), height: 1 + uint24Le(bytes, 27) };
@@ -1064,6 +1133,7 @@ function webpDimensions(bytes) {
 }
 
 function ascii(bytes, start, end) { return String.fromCharCode(...bytes.slice(start, end)); }
+function uint16Le(bytes, offset) { return bytes[offset] | bytes[offset+1] << 8; }
 function uint32Le(bytes, offset) { return (bytes[offset] | bytes[offset+1] << 8 | bytes[offset+2] << 16 | bytes[offset+3] << 24) >>> 0; }
 function uint32Be(bytes, offset) { return ((bytes[offset] << 24) | (bytes[offset+1] << 16) | (bytes[offset+2] << 8) | bytes[offset+3]) >>> 0; }
 function uint24Le(bytes, offset) { return bytes[offset] | bytes[offset+1] << 8 | bytes[offset+2] << 16; }

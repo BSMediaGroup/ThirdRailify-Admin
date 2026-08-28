@@ -212,6 +212,17 @@ export async function commerceOrdersPayload(env, session) {
      FROM commerce_order_items WHERE order_id IN (${rows.map(() => "?").join(",")})
      ORDER BY order_id, line_number`,
   ).bind(...rows.map((row) => row.id)).all() : { results: [] };
+  const sessionIds = rows.map((row) => row.stripe_checkout_session_id).filter(Boolean);
+  const webhookResult = sessionIds.length ? await db.prepare(
+    `SELECT related_object_id, COUNT(*) AS receipt_count
+     FROM commerce_webhook_events
+     WHERE provider = 'stripe' AND event_type = 'checkout.session.completed'
+       AND livemode = 0 AND related_object_type = 'checkout.session'
+       AND processing_status = 'processed' AND result_code = 'payment_confirmed'
+       AND related_object_id IN (${sessionIds.map(() => "?").join(",")})
+     GROUP BY related_object_id`,
+  ).bind(...sessionIds).all() : { results: [] };
+  const webhookReceiptsBySession = new Map((webhookResult?.results || []).map((row) => [row.related_object_id, Number(row.receipt_count || 0)]));
   const itemsByOrder = new Map();
   for (const row of itemResult?.results || []) {
     const items = itemsByOrder.get(row.order_id) || [];
@@ -248,6 +259,8 @@ export async function commerceOrdersPayload(env, session) {
       updatedAt: cleanText(row.updated_at, 80),
       checkoutCreatedAt: cleanText(row.checkout_created_at, 80) || null,
       paymentConfirmedAt: cleanText(row.payment_confirmed_at, 80) || null,
+      webhookReceiptCount: webhookReceiptsBySession.get(row.stripe_checkout_session_id) || 0,
+      webhookVerified: webhookReceiptsBySession.get(row.stripe_checkout_session_id) === 1,
       hasPrintfulOrder: Boolean(row.printful_order_id),
       items: itemsByOrder.get(row.id) || [],
     })),

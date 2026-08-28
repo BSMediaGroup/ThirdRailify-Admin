@@ -6,7 +6,7 @@
 - Keep the database pinned to `thirdrailify-commerce` / `3dd23a7e-7c64-49cb-a52c-c1540b41db1c`.
 - The Public project calls the Admin HTTPS origin through its same-origin `/api/commerce/*` proxy; no Admin credential or commerce secret is sent to the browser.
 - Public catalogue responses are sanitized and bounded-cacheable. Authenticated Admin writes are never publicly cached.
-- Keep `checkout_enabled`, `live_payment_capture_enabled`, and `fulfillment_submission_enabled` false and `printful_order_mode` at `draft_only`. `stripe_test_checkout_enabled` is a separate temporary Master-only acceptance gate and must never be interpreted as normal checkout activation.
+- Keep `checkout_enabled`, `live_payment_capture_enabled`, `fulfillment_submission_enabled`, and the now-completed `stripe_test_checkout_enabled` gate false, with `printful_order_mode` at `draft_only`. The temporary acceptance product/variant selectors have been removed.
 - A paused permanent Printful job must not be resumed by catalogue reads or merchandising writes.
 
 This runbook records the completed staging control-plane prerequisites and the separately authorized steps that remain. Do not use it to activate live commerce.
@@ -15,11 +15,11 @@ This runbook records the completed staging control-plane prerequisites and the s
 
 - The dedicated Third Railify Official Canadian Stripe account exists and Sandbox/test mode is available.
 - `thirdrailify-commerce` (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`) is bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. Ordered migrations `0001` through `0007_goats_engagement_and_wix_import.sql` are represented remotely and Wrangler reports no migrations to apply. `0007` affects GOATS/community schema and settings only, not commerce catalogue, order, payment, or fulfillment gates.
-- The controlled acceptance settings pin local product `product-397267935` and local variant `variant-5019554081` (Third Rail Farm black mug, 11 oz / Black, CAD 15.00). Exactly this target-verified/mapped variant is temporarily test-sellable. Do not expose provider mapping IDs to Public.
+- Stripe TEST acceptance passed for preserved order `ord_e47b94a4-4252-438b-8ca7-c47470029940`, Session `cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC`, local product `product-397267935`, and local variant `variant-5019554081` (Third Rail Farm black mug, 11 oz / Black, CAD 15.00). The temporary gate/selectors are closed and the variant is again non-sellable. Do not expose provider mapping IDs to Public.
 - The Printful job `permanent-printful-2026-08` is independently manually paused at processed 40/49, verified 12, blocked 28, remaining 9, mapped variants 238. No acceptance action may resume it or make a Printful request.
 - `THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY` and `STRIPE_SECRET_KEY` are stored as Admin Cloudflare encrypted Secrets. Secret values must never be retrieved, printed, logged, committed, or persisted to D1.
 - The intended staging Stripe credential is the restricted TEST key (`rk_test_...`) under the unchanged `STRIPE_SECRET_KEY` name; `sk_test_...` is compatible and all live key forms fail closed.
-- Read-only Stripe account verification, the signed sandbox receiver at `POST /api/webhooks/stripe`, and the gated server-side Checkout/order engine are deployed to Admin. The destination and Admin-only signing secret are configured, and one real signed `checkout.session.completed` sandbox Event remains preserved as `accepted_noop / checkout_disabled`. Deployment `1a9b7e5b-33fe-4bc5-b186-1f24c7e7ecca` returned `409 checkout_disabled` to the allowed-origin acceptance probe; Public checkout/live-payment/fulfillment gates remain disabled and authoritative products and orders remain zero.
+- Read-only Stripe account verification, the signed sandbox receiver at `POST /api/webhooks/stripe`, and the fail-closed Checkout/order engine are deployed to Admin. Event `evt_1U9OysB2jGrq9Tn1apdsFgi2` is preserved once as `processed / payment_confirmed` for the accepted Session, with a payload digest and no raw payload. The resulting single TEST order remains paid; Public checkout, controlled checkout, live payment capture, and fulfillment are disabled.
 - Live business verification, payout banking, charges, payouts, wallets, Tax, and live credentials are not verified.
 - The existing auth D1 remains the identity/session/role authority and must not become the main commerce database.
 - Wix remains production authority and all Wix providers stay connected until an approved cutover.
@@ -42,7 +42,7 @@ The D1, encryption-key, restricted TEST credential, read-only account verificati
 9. Completed: one signed Sandbox test delivery was verified and accepted before treating webhook signing and delivery as operational.
 10. Completed in code: create test Checkout Sessions with `mode=payment`, inline server-authoritative CAD prices, local order snapshots, deterministic idempotency, and server-returned Stripe-hosted Checkout URLs.
 11. Completed in code: signed completed Sessions can transition only a matching existing TEST order after exact reference/Session/amount/currency/payment invariants; unknown webhooks cannot create orders.
-12. Keep checkout disabled throughout deployment acceptance and until authoritative product import/sync has populated `commerce_products`.
+12. Completed: close the one-time TEST gate after acceptance, remove its selectors, and restore the candidate variant to non-sellable. Keep normal checkout disabled until a separately approved production-readiness milestone.
 13. Completed externally and in code: the parallel `Third Railify API` store and store-scoped token exist, and protected read-only store/product verification is implemented while the Wix-connected store remains active.
 14. Later, implement Printful draft orders with no automatic confirmation only after a separately approved catalogue-reconciliation milestone.
 15. Do not disconnect Wix.

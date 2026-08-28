@@ -11,7 +11,7 @@ Admin Commerce D1 -> /api/public/commerce/catalogue
 
 Commerce D1 owns replacement product and variant identities, integer CAD prices, public presentation, and readiness state. Public owns no Commerce D1 binding and receives only local IDs plus sanitized merchandising fields. Browser totals are display values; the checkout server revalidates product/variant association, state, quantity, currency, and exact D1 price.
 
-Displayability is deliberately separate from checkout and fulfillment readiness. The 49 accepted current-Wix products may be public while their Printful migration is paused or incomplete. The preserved target-native My Balloon product remains private. Normal checkout, live payment capture, and fulfillment submission stay disabled; the separate Master-only Stripe TEST acceptance gate does not imply customer cutover. Wix remains production until explicit cutover.
+Displayability is deliberately separate from checkout and fulfillment readiness. The 49 accepted current-Wix products may be public while their Printful migration is paused or incomplete. The preserved target-native My Balloon product remains private. Normal checkout, live payment capture, and fulfillment submission stay disabled; the completed Master-only Stripe TEST acceptance gate is closed and does not imply customer cutover. Wix remains production until explicit cutover.
 
 ## Milestone posture
 
@@ -27,7 +27,7 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Stripe webhook signing | configured and verified by a valid signed sandbox Event |
 | Stripe environment | `test`; production readiness not established |
 | Normal checkout | `disabled` |
-| Controlled acceptance checkout | Master-only Stripe `test`, exact configured variant, quantity one |
+| Controlled acceptance checkout | passed once, then closed; no candidate selectors remain |
 | Live payment capture | `disabled` |
 | Live payout readiness | not verified |
 | Fulfillment submission | `disabled` |
@@ -36,13 +36,13 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Printify | `unavailable`; credential custody undecided |
 | Wix | `legacy production`; remains authoritative and untouched |
 
-The separate Admin-only commerce D1 is bound, and its encryption key plus Stripe TEST API/webhook credentials remain encrypted Cloudflare Secrets. The 50-product/1,323-variant replacement catalogue is authoritative. `checkout_enabled=false` keeps normal checkout closed; `stripe_test_checkout_enabled` is a separate temporary acceptance flag. Live payments, tax, shipping calculation, fulfillment, refunds, payouts, and production merchant readiness remain outside this milestone.
+The separate Admin-only commerce D1 is bound, and its encryption key plus Stripe TEST API/webhook credentials remain encrypted Cloudflare Secrets. The 50-product/1,323-variant replacement catalogue is authoritative. `checkout_enabled=false` keeps normal checkout closed; `stripe_test_checkout_enabled=false` now permanently closes the completed temporary acceptance path. Live payments, tax, shipping calculation, fulfillment, refunds, payouts, and production merchant readiness remain outside this milestone.
 
 ## Pre-cutover Stripe TEST acceptance
 
 `POST /api/admin/commerce/test-checkout` requires the existing Admin exact-origin session, Master role, CSRF proof, D1-backed route rate limit, checkout-core rate limit, and the dedicated test gate. It calls the same `createStripeCheckoutSession` core as normal checkout. The only special authority is passage through the pre-cutover gate; D1 product/variant association, active/public state, integer CAD amount, quantity, target-verified mapped state, immutable order-item snapshot, Stripe response validation, deterministic idempotency, and webhook linkage are unchanged.
 
-The configured acceptance candidate is `product-397267935` / `variant-5019554081`: **Third Rail Farm | Black Glossy Mug**, slug `third-rail-farm-black-glossy-mug`, variant **11 oz / Black**, CAD 15.00. Only this variant is temporarily `is_sellable=1`, with safe metadata marking it as the acceptance candidate. A core-level one-order ceiling prevents a second fresh controlled request while allowing an exact retry of the original request ID.
+The accepted candidate was `product-397267935` / `variant-5019554081`: **Third Rail Farm | Black Glossy Mug**, slug `third-rail-farm-black-glossy-mug`, variant **11 oz / Black**, CAD 15.00. Order `ord_e47b94a4-4252-438b-8ca7-c47470029940` and Session `cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC` remain immutable acceptance evidence. After the signed payment transition, the gate was set false, its selectors were removed, the variant returned to `is_sellable=0`, and only its acceptance-only metadata markers were removed. The historical status lookup is deliberately independent of the gate.
 
 Stripe receives `mode=payment`, quantity one, inline server-generated `price_data[currency]=cad`, and the D1 unit amount. No `Stripe-Account` header or Stripe Product/Price duplication is used. Metadata contains only local order/request correlation and a cart digest. Success returns to `/checkout/success?session_id={CHECKOUT_SESSION_ID}`; Public polls its same-origin proxy to an exact opaque-Session local status lookup. The redirect is never payment authority: only the signed `checkout.session.completed` handler can move `pending` to `paid`, and fulfillment remains disabled afterward.
 
@@ -124,7 +124,7 @@ Staging verification is `POST /api/admin/commerce/stripe/verify`, protected by t
 
 The route reads at most 1 MiB of request bytes once and verifies the exact bytes before parsing JSON. `Stripe-Signature` must contain exactly one numeric `t` value and at least one well-formed `v1` value; `v0` and unknown schemes are ignored. The signed input is the ASCII timestamp, a period, then the untouched request bytes. The complete `whsec_...` value is the UTF-8 HMAC-SHA256 key and is never Base64-decoded. Web Crypto verification safely supports multiple `v1` values during rotation. Timestamps older than 300 seconds or more than 300 seconds in the future fail closed.
 
-Only a sane `object=event`, `livemode=false` Stripe envelope can reach D1. The explicit allowlist contains only `checkout.session.completed`. It never creates an order: metadata/client reference and persisted Session ID must resolve to the same existing TEST order, and mode, CAD currency, authoritative expected amount, Stripe paid status, and checkout state must all agree before the single `pending` to `paid` transition. Unknown, unlinked, mismatched, unpaid, or live Sessions are bounded `accepted_noop` results. Other signed test event types are ignored. `INSERT OR IGNORE` plus the ledger's composite key makes duplicate provider/Event IDs successful no-ops and the order update also requires `payment_status=pending`, so replay cannot double-transition. The accepted historical event remains `accepted_noop / checkout_disabled`.
+Only a sane `object=event`, `livemode=false` Stripe envelope can reach D1. The explicit allowlist contains only `checkout.session.completed`. It never creates an order: metadata/client reference and persisted Session ID must resolve to the same existing TEST order, and mode, CAD currency, authoritative expected amount, Stripe paid status, and checkout state must all agree before the single `pending` to `paid` transition. Unknown, unlinked, mismatched, unpaid, or live Sessions are bounded `accepted_noop` results. Other signed test event types are ignored. `INSERT OR IGNORE` plus the ledger's composite key makes duplicate provider/Event IDs successful no-ops and the order update also requires `payment_status=pending`, so replay cannot double-transition. The accepted payment event is `evt_1U9OysB2jGrq9Tn1apdsFgi2`, stored exactly once as `processed / payment_confirmed` with a payload SHA-256; raw payload data is not retained.
 
 ## Customer Checkout boundary
 

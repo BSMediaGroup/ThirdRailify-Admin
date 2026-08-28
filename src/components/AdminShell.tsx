@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import boltMark from "../../assets/logos/boltv2straight.svg";
 import { adminAreas } from "../config/navigation";
 import { AdminIcon } from "./AdminIcon";
@@ -14,6 +14,7 @@ const childAdminAreas = (parentPath: string) => adminAreas.filter((area) => area
 
 export function AdminShell() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarPreference);
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(topLevelAdminAreas.filter((area) => location.pathname === area.path || location.pathname.startsWith(`${area.path}/`)).map((area) => area.path)));
@@ -40,6 +41,11 @@ export function AdminShell() {
   }, [location.pathname]);
 
   useEffect(() => {
+    const canonical = adminAreas.find((area) => area.path.toLowerCase() === location.pathname.toLowerCase())?.path;
+    if (canonical && canonical !== location.pathname) navigate(`${canonical}${location.search}${location.hash}`, { replace: true });
+  }, [location.hash, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
     if (!mobileOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -60,7 +66,7 @@ export function AdminShell() {
     return () => document.documentElement.classList.remove("admin-mobile-nav-open");
   }, [mobileOpen]);
 
-  const currentArea = adminAreas.find((area) => area.path === location.pathname)
+  const currentArea = adminAreas.find((area) => area.path.toLowerCase() === location.pathname.toLowerCase())
     ?? (location.pathname.startsWith("/goats/") ? adminAreas.find((area) => area.path === "/goats") : undefined);
 
   return (

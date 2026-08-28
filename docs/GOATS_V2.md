@@ -1,6 +1,6 @@
 # GOATS in the Wild V2 authority
 
-ThirdRailify-Admin is the sole persistence and moderation authority. The additive `commerce-migrations/0004_goats_community.sql` migration extends the existing Admin-only commerce D1 because GOATS references the authoritative `commerce_products` table and shares the established Admin session, CSRF, audit, and email boundaries. Public receives no D1 or R2 binding.
+ThirdRailify-Admin is the sole persistence and moderation authority. The additive `commerce-migrations/0004_goats_community.sql` migration extends the existing Admin-only commerce D1 because GOATS references the authoritative `commerce_products` table and shares the established Admin session, CSRF, audit, and email boundaries. The forward-only `commerce-migrations/0008_goats_profile_gif.sql` rebuilds only `community_media` so `image/gif` is valid exclusively when the row role is `profile`; existing records and indexes are copied intact. Public receives no D1 or R2 binding.
 
 ## State and APIs
 
@@ -8,7 +8,7 @@ The migration creates submissions, media metadata, reactions, comments, moderati
 
 The Admin UI routes are `/goats`, `/goats/pending`, `/goats/approved`, `/goats/rejected`, `/goats/comments`, `/goats/emails`, and `/goats/:id`. Approval is blocked without ready main media, valid product, consent, slug, required public fields, and confirmed coarse coordinates. Reject, approve, hide, and restore transitions write their moderation event and applicable idempotent outbox row in the same D1 batch.
 
-Public/internal APIs are fixed under `/api/goats/*`; signed writes require the shared encrypted `THIRDRAILIFY_COMMUNITY_API_SECRET`. Media stays under opaque `goats/private/<submission-id>/...` keys in the existing Admin-only `THIRDRAILIFY_PROFILE_MEDIA` bucket. Anonymous delivery succeeds only for approved/published media and never returns an object key. Pending/rejected delivery is Master Admin only.
+Public/internal APIs are fixed under `/api/goats/*`; signed writes require the shared encrypted `THIRDRAILIFY_COMMUNITY_API_SECRET`. Media stays under opaque `goats/private/<submission-id>/...` keys in the existing Admin-only `THIRDRAILIFY_PROFILE_MEDIA` bucket. JPG, PNG, and WebP remain valid for every image role; animated GIF is accepted only for profile media. GIF ingestion verifies dimensions and the complete block stream, preserves frame controls and the standard loop extension, and removes unrelated extension metadata without flattening animation. Anonymous delivery succeeds only for approved/published media and never returns an object key. Pending/rejected delivery is Master Admin only.
 
 ## Email and provider posture
 
