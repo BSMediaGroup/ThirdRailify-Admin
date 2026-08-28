@@ -26,6 +26,14 @@ export const adminAreas: AdminArea[] = [
     futureScope: ["Signed-ingest archive", "24-record retention", "Public visibility controls"],
   },
   {
+    path: "/inbox",
+    label: "Admin Inbox",
+    shortLabel: "Inbox",
+    icon: "emails",
+    summary: "Internal copies of actionable Admin notices and delivery alerts.",
+    futureScope: ["Unread state", "Action links", "Transactional notice history"],
+  },
+  {
     path: "/content",
     label: "Site Content",
     shortLabel: "Content",
@@ -172,15 +180,6 @@ export const adminAreas: AdminArea[] = [
     icon: "comments",
     summary: "Approved, pending, and hidden authenticated community comments.",
     futureScope: ["Approve, hide, and restore", "Listing context", "Moderation audit"],
-  },
-  {
-    path: "/goats/reactions",
-    parentPath: "/goats",
-    label: "Reaction Moderation",
-    shortLabel: "Reactions",
-    icon: "comments",
-    summary: "Approve or suppress likes and dislikes when moderation is required.",
-    futureScope: ["Approval queue", "Listing context", "Moderation audit"],
   },
   {
     path: "/goats/settings",

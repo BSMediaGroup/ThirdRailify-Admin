@@ -89,6 +89,28 @@ test("Admin overview fails soft per authority and disables nonessential motion",
   await fullAdminContext.close();
 });
 
+test("Admin inbox, sidebar queue counts, and account indicator render without overflow", async (t) => {
+  const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "44201"], { stdio: "ignore" });
+  t.after(() => server.kill()); await waitForServer();
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    const context = await browser.newContext({ viewport: { width, height } });
+    const page = await context.newPage(); const errors = [];
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); }); page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("**/api/**", (route) => routeFixture(route, () => {}));
+    await page.goto(`${ORIGIN}/inbox`); await page.getByRole("heading", { level: 1, name: "Inbox" }).waitFor();
+    assert.equal(await page.locator('.nav-link[href="/inbox"] .nav-badge').textContent(), "2");
+    assert.equal(await page.locator('.nav-link[href="/goats"] .nav-badge').textContent(), "4");
+    assert.equal(await page.getByRole("heading", { level: 2, name: "GOATS submission awaiting review" }).count(), 1);
+    assert.equal(await page.locator(".admin-account__badge").textContent(), "2");
+    await page.locator(".admin-account__trigger").click();
+    assert.equal(await page.getByRole("menuitem", { name: /Admin Inbox/ }).count(), 1);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `no horizontal overflow at ${width}x${height}`);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+});
+
 async function routeFixture(route, onStatus, options = {}) {
   const url = new URL(route.request().url()); const apiPath = url.pathname;
   if (apiPath === "/api/auth/config") return json(route, { configured: true, emailSignupConfigured: true, turnstileSiteKey: "fixture-site-key", oauthProviders: ["discord", "github", "twitter"], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: ORIGIN, environment: "test", cookieMode: "host-only" });
@@ -97,6 +119,9 @@ async function routeFixture(route, onStatus, options = {}) {
   if (apiPath === "/api/admin/watch") { options.onProtected?.(); return json(route, watch()); }
   if (apiPath === "/api/admin/commerce/overview") return json(route, commerce());
   if (apiPath === "/api/admin/goats/overview") { options.onProtected?.(); return json(route, goats()); }
+  if (apiPath === "/api/admin/inbox/summary") return json(route, inboxSummary());
+  if (apiPath === "/api/admin/inbox") return json(route, { ok: true, items: inboxSummary().latest, total: 2 });
+  if (apiPath.startsWith("/api/admin/inbox/") && route.request().method() === "POST") return json(route, { ok: true });
   if (apiPath === "/api/admin/banner") { options.onProtected?.(); return options.bannerUnavailable ? json(route, { ok: false, error: "fixture_unavailable", message: "Banner authority fixture unavailable." }, 503) : json(route, banner()); }
   return json(route, { ok: false, error: "not_found" }, 404);
 }
@@ -107,5 +132,6 @@ function watch() { return { ok: true, current: { freshness: "delayed", liveNow: 
 function commerce() { return { ok: true, databaseConfigured: true, encryptionConfigured: true, stripeSecretConfigured: true, printfulSecretConfigured: true, access: { isMasterAdmin: true, capabilities: ["commerce.view"] }, printfulCatalogueSnapshot: { available: false, configurationReady: true, actionPath: "", sourceTargetDistinct: true, source: { id: "source", name: "Legacy", type: "wix" }, target: { id: "target", name: "Third Railify API", type: "native" } }, posture: { checkout: "disabled", livePaymentCapture: "disabled", fulfillmentSubmission: "disabled" }, providers: [], business: { tradingName: "Third Railify Official", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicAddress: {}, publicContactEmail: "info@thirdrailify.com", supportEmail: "", publicPhone: "", websiteUrl: "", invoicePrefix: "", documentFooter: "", taxProviderState: "unavailable", invoiceAccentColor: "#f3c928", receiptAccentColor: "#f3c928" }, completeness: { businessProfile: "pending", tax: "setup_required", templates: "pending" }, counts: { products: 50, orders: 1, templates: 9 }, readiness: { ok: true, authority: "Commerce D1", phase: "pre_cutover", productionReady: false, mandatoryDomains: [], domains: {}, checkedAt: "2026-08-29T01:30:00Z" }, checkedAt: "2026-08-29T01:30:00Z" }; }
 function goats() { return { ok: true, counts: { pending: 2, approved: 11, rejected: 1, hidden: 0 }, email: { pending: 0, failed: 1 }, recent: [{ id: "goat-1", reference: "GOAT-001", displayName: "Rail Viewer", status: "pending", published: false, submittedAt: "2026-08-29T01:00:00Z", updatedAt: "2026-08-29T01:00:00Z", product: { id: "product-1", slug: "cap", name: "Third Railify Cap" }, rating: null, location: "London, Ontario", mediaCount: 2, mainMediaUrl: null, emailState: "failed", version: 1 }] }; }
 function banner() { return { ok: true, config: { normal: { enabled: true, messages: [{ text: "Watch Third Railify", ctaLabel: "Watch", href: "/watch", newTab: false }, { text: "Explore GOATS", ctaLabel: null, href: null, newTab: false }], mode: "crossfade", speed: "normal" }, live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: null, ctaLabel: "Watch live", animation: "sweep", intensity: "subtle" } }, revision: 4, updatedAt: "2026-08-29T01:15:00Z" }; }
+function inboxSummary() { return { ok: true, unread: 2, actionable: { goats: { submissions: 2, comments: 1, emailFailures: 1, total: 4 }, total: 4 }, latest: [{ id: "notice-1", category: "moderation", sourceType: "goat_submission", sourceId: "goat-1", title: "GOATS submission awaiting review", preview: "Rail Viewer submitted Third Railify Cap.", body: "Validate the submission before publication.", actionUrl: "/goats/goat-1", actionLabel: "Review submission", createdAt: "2026-08-29T01:00:00Z", resolvedAt: null, readAt: null, unread: true }, { id: "notice-2", category: "delivery", sourceType: "goat_email_failure", sourceId: "email-1", title: "GOATS email delivery needs attention", preview: "An Admin alert could not be delivered.", body: "Inspect the transactional outbox.", actionUrl: "/goats/emails", actionLabel: "Inspect delivery", createdAt: "2026-08-29T00:30:00Z", resolvedAt: null, readAt: null, unread: true }] }; }
 function json(route, body, statusCode = 200) { return route.fulfill({ status: statusCode, contentType: "application/json", body: JSON.stringify(body) }); }
 async function waitForServer() { for (let attempt = 0; attempt < 80; attempt += 1) { try { if ((await fetch(ORIGIN)).ok) return; } catch { /* Vite is starting. */ } await new Promise((resolve) => setTimeout(resolve, 100)); } throw new Error("Vite overview test server did not start."); }

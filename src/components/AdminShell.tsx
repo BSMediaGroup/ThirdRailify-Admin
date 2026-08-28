@@ -4,9 +4,13 @@ import boltMark from "../../assets/logos/boltv2straight.svg";
 import { adminAreas } from "../config/navigation";
 import { AdminIcon } from "./AdminIcon";
 import { AdminAccountWidget } from "../auth/AdminAccountWidget";
+import { useAuth } from "../auth/AuthProvider";
+import { getInboxSummary, type InboxSummary } from "../inbox/client";
 
 export type AdminShellOutletContext = {
   startLoading: (reason?: string) => () => void;
+  inboxSummary: InboxSummary | null;
+  refreshInbox: () => Promise<void>;
 };
 
 const topLevelAdminAreas = adminAreas.filter((area) => !area.parentPath);
@@ -16,10 +20,12 @@ const groupIsActive = (parentPath: string, pathname: string) => pathname === par
 export function AdminShell() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { account } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarPreference);
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(topLevelAdminAreas.filter((area) => groupIsActive(area.path, location.pathname)).map((area) => area.path)));
   const [loadingReason, setLoadingReason] = useState("");
+  const [inboxSummary, setInboxSummary] = useState<InboxSummary | null>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const loadingTokens = useRef(new Map<symbol, string>());
 
@@ -33,6 +39,20 @@ export function AdminShell() {
       setLoadingReason(loadingTokens.current.values().next().value || "");
     };
   }, []);
+
+  const refreshInbox = useCallback(async () => {
+    if (!account) { setInboxSummary(null); return; }
+    try { setInboxSummary(await getInboxSummary()); }
+    catch { setInboxSummary(null); }
+  }, [account]);
+
+  useEffect(() => {
+    void refreshInbox();
+    const interval = window.setInterval(() => void refreshInbox(), 60_000);
+    return () => window.clearInterval(interval);
+  }, [refreshInbox]);
+
+  useEffect(() => { void refreshInbox(); }, [location.pathname, refreshInbox]);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -70,6 +90,16 @@ export function AdminShell() {
   const currentArea = adminAreas.find((area) => area.path.toLowerCase() === location.pathname.toLowerCase())
     ?? (location.pathname.startsWith("/goats/") ? adminAreas.find((area) => area.path === "/goats") : undefined);
 
+  const badgeFor = (path: string) => {
+    if (!inboxSummary) return 0;
+    if (path === "/inbox") return inboxSummary.unread;
+    if (path === "/goats") return inboxSummary.actionable.goats.total;
+    if (path === "/goats/pending") return inboxSummary.actionable.goats.submissions;
+    if (path === "/goats/comments") return inboxSummary.actionable.goats.comments;
+    if (path === "/goats/emails") return inboxSummary.actionable.goats.emailFailures;
+    return 0;
+  };
+
   return (
     <div className={`admin-layout${collapsed ? " admin-layout--collapsed" : ""}`}>
       <a className="skip-link" href="#admin-main">Skip to content</a>
@@ -91,6 +121,7 @@ export function AdminShell() {
             if (!children.length) return <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
               <AdminIcon name={area.icon} />
               <span>{area.label}</span>
+              {badgeFor(area.path) ? <b className="nav-badge" aria-label={`${badgeFor(area.path)} unread`}>{formatBadge(badgeFor(area.path))}</b> : null}
             </NavLink>;
             const active = groupIsActive(area.path, location.pathname);
             const open = openGroups.has(area.path);
@@ -100,6 +131,7 @@ export function AdminShell() {
                 <NavLink to={area.path} end aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
                   <AdminIcon name={area.icon} />
                   <span>{area.label}</span>
+                  {badgeFor(area.path) ? <b className="nav-badge" aria-label={`${badgeFor(area.path)} items need attention`}>{formatBadge(badgeFor(area.path))}</b> : null}
                 </NavLink>
                 <button className="nav-group__toggle" type="button" aria-expanded={open} aria-controls={controlId} aria-label={`${open ? "Collapse" : "Expand"} ${area.shortLabel} navigation`} onClick={() => setOpenGroups((current) => { const next = new Set(current); if (next.has(area.path)) next.delete(area.path); else next.add(area.path); return next; })}>
                   <AdminIcon name="chevron" size={15} />
@@ -110,6 +142,7 @@ export function AdminShell() {
                   <NavLink key={child.path} to={child.path} aria-label={child.label} className={({ isActive }) => isActive ? "nav-link nav-link--nested nav-link--active" : "nav-link nav-link--nested"}>
                     <AdminIcon name={child.icon} size={17} />
                     <span>{child.label}</span>
+                    {badgeFor(child.path) ? <b className="nav-badge nav-badge--nested" aria-label={`${badgeFor(child.path)} items need attention`}>{formatBadge(badgeFor(child.path))}</b> : null}
                   </NavLink>
                 ))}
               </div>
@@ -134,19 +167,21 @@ export function AdminShell() {
             <AdminIcon name="collapse" size={16} />
           </button>
           <div className="topbar-title"><span>Admin /</span><strong>{currentArea?.shortLabel ?? "Not found"}</strong></div>
-          <AdminAccountWidget />
+          <AdminAccountWidget unreadCount={inboxSummary?.unread || 0} />
           <div className={`admin-shell-loading${loadingReason ? " is-active" : ""}`} role="status" aria-live="polite" aria-hidden={!loadingReason} aria-label={loadingReason || "Idle"}>
             <span className="admin-shell-loading__track" aria-hidden="true" />
             <span className="admin-shell-loading__bar" aria-hidden="true" />
           </div>
         </header>
         <main id="admin-main" className="admin-main" tabIndex={-1} aria-busy={Boolean(loadingReason)}>
-          <Outlet context={{ startLoading }} />
+          <Outlet context={{ startLoading, inboxSummary, refreshInbox }} />
         </main>
       </div>
     </div>
   );
 }
+
+function formatBadge(value: number) { return value > 99 ? "99+" : String(value); }
 
 function readSidebarPreference() {
   try { return window.localStorage.getItem("thirdrailify.admin.sidebar") === "collapsed"; }

@@ -4,6 +4,7 @@ import { adminAreas } from "./config/navigation";
 import { AreaPage } from "./pages/AreaPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { InboxPage } from "./pages/InboxPage";
 import { WatchAdminPage } from "./pages/WatchAdminPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { SiteContentPage } from "./pages/SiteContentPage";
@@ -22,19 +23,19 @@ import {
   GoatModerationPage,
   GoatsCommentsPage,
   GoatsEmailsPage,
-  GoatsReactionsPage,
   GoatsSettingsPage,
   GoatsOverviewPage,
   GoatsQueuePage,
 } from "./pages/GoatsAdminPages";
 
-const implementedPaths = new Set(["/", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
+const implementedPaths = new Set(["/", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
 
 export function App() {
   return (
     <Routes>
       <Route element={<AdminShell />}>
         <Route index element={<OverviewPage />} />
+        <Route path="inbox" element={<InboxPage />} />
         <Route path="access" element={<AccountsPage />} />
         <Route path="watch" element={<WatchAdminPage />} />
         <Route path="content" element={<SiteContentPage />} />
@@ -53,7 +54,7 @@ export function App() {
         <Route path="goats/approved" element={<GoatsQueuePage status="approved" />} />
         <Route path="goats/rejected" element={<GoatsQueuePage status="rejected" />} />
         <Route path="goats/comments" element={<GoatsCommentsPage />} />
-        <Route path="goats/reactions" element={<GoatsReactionsPage />} />
+        <Route path="goats/reactions" element={<Navigate to="/goats/approved" replace />} />
         <Route path="goats/settings" element={<GoatsSettingsPage />} />
         <Route path="goats/emails" element={<GoatsEmailsPage />} />
         <Route path="goats/:id" element={<GoatModerationPage />} />

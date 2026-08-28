@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { commerceEnvironment, createCommerceDatabases, insertTestProduct } from "./commerce-test-helpers.mjs";
 import { onRequest as onAdminGoatsRequest } from "../functions/api/admin/goats/[[path]].js";
+import { adminInboxMessages, adminInboxSummary, markAdminInboxRead } from "../functions/_shared/admin-inbox.js";
 import {
   createComment,
   adminComments,
-  adminReactions,
   adminSubmission,
   createDraft,
   cleanupExpiredDrafts,
@@ -13,13 +13,13 @@ import {
   finaliseDraft,
   mediaResponse,
   moderateComment,
-  moderateReaction,
   mutateReaction,
   publicComments,
   publicListingBySlug,
   publicListings,
   publicMapGeoJson,
   retryEmail,
+  resetSubmissionReactions,
   sanitizeImage,
   transitionSubmission,
   updateAdminEngagementSettings,
@@ -58,6 +58,9 @@ test("guest draft finalisation stays private until validated approval, then proj
   await uploadDraftMedia(env, draft.draftToken, "profile", 0, animatedGif, "image/gif", { rateKey: "guest-key" });
   const finalised = await finaliseDraft(env, draft.draftToken, { email: "private@example.test", displayName: "Test Goat", description: "A sufficiently long and truthful temporary community story.", city: "Toronto", region: "Ontario", countryCode: "CA", productId: product.id, rating: 5, consent: true, consentVersion: "goats-v2-2026-08" }, { rateKey: "guest-key", fetchImpl: geocoderFetch });
   assert.equal(finalised.status, "pending"); assert.equal((await publicListings(env)).items.length, 0);
+  const inbox = await adminInboxSummary(env, "master-admin"); assert.equal(inbox.unread, 1); assert.equal(inbox.actionable.goats.submissions, 1);
+  const inboxMessages = await adminInboxMessages(env, "master-admin"); assert.equal(inboxMessages.items[0].actionUrl.includes("/goats/"), true);
+  await markAdminInboxRead(env, "master-admin", inboxMessages.items[0].id); assert.equal((await adminInboxSummary(env, "master-admin")).unread, 0);
   const queuedBeforeRetry = Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM community_email_outbox").first()).count);
   await assert.rejects(finaliseDraft(env, draft.draftToken, { email: "private@example.test" }, { rateKey: "guest-key" }), /draft is invalid|expired/i);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM community_email_outbox").first()).count), queuedBeforeRetry);
@@ -100,6 +103,10 @@ test("guest draft finalisation stays private until validated approval, then proj
   assert.equal(sent.status, "sent");
   const duplicate = await retryEmail({ ...env, RESEND_API_KEY: "test-key", MAIL_FROM: "Test <test@example.test>" }, outbox.id, "master-admin", async () => { sends += 1; return Response.json({ id: "unexpected" }); });
   assert.equal(duplicate.duplicate, true); assert.equal(sends, 1);
+  await updateEmailTemplate(env, "goat_submission_admin_alert", { subject: "Review {{submission_reference}}", htmlBody: "<p>Review {{display_name}}</p>", textBody: "Review {{display_name}}", status: "ready" }, "master-admin");
+  const adminAlert = await harness.commerceDb.prepare("SELECT id FROM community_email_outbox WHERE template_key = 'goat_submission_admin_alert'").first();
+  await assert.rejects(retryEmail({ ...env, RESEND_API_KEY: "test-key", MAIL_FROM: "Test <test@example.test>" }, adminAlert.id, "master-admin", async () => new Response("failed", { status: 503 })), /failed/i);
+  const failedInbox = await adminInboxSummary(env, "master-admin"); assert.equal(failedInbox.actionable.goats.emailFailures, 1); assert.equal(failedInbox.latest.some((entry) => entry.sourceType === "goat_email_failure"), true);
 });
 
 test("collision-safe finalisation, product validation, draft expiry, and gallery limit fail safely", async (t) => {
@@ -140,7 +147,8 @@ test("global and per-listing interaction rules queue, approve, disable, and keep
     id, reference_code, public_slug, status, is_published, display_name, description, city, country_code,
     public_location_label, public_latitude, public_longitude, created_at, submitted_at, updated_at, approved_at
   ) VALUES (?, 'GOAT-MODES', 'goat-modes', 'approved', 1, 'Mode Goat', 'Editable approved story', 'Toronto', 'CA', 'Toronto, CA', 43.65, -79.38, '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z')`).bind(id).run();
-  await updateAdminEngagementSettings(env, { comments: "moderated", reactions: "moderated" }, "master-admin");
+  await assert.rejects(updateAdminEngagementSettings(env, { comments: "moderated", reactions: "moderated" }, "master-admin"), /approved by default|reactions/i);
+  await updateAdminEngagementSettings(env, { comments: "moderated", reactions: "auto" }, "master-admin");
 
   const comment = await createComment(env, "goat-modes", { accountId: "account-1", displayName: "Member" }, "Please approve this", { rateKey: "comment-mode" });
   assert.equal(comment.pendingApproval, true); assert.equal(comment.item, null); assert.equal((await publicComments(env, "goat-modes")).total, 0);
@@ -148,9 +156,11 @@ test("global and per-listing interaction rules queue, approve, disable, and keep
   await moderateComment(env, pendingComments.items[0].id, "approve", "master-admin"); assert.equal((await publicComments(env, "goat-modes")).total, 1);
 
   const reaction = await mutateReaction(env, "goat-modes", "account-1", 1, { rateKey: "reaction-mode" });
-  assert.equal(reaction.pendingApproval, true); assert.equal(reaction.likes, 0);
-  const pendingReactions = await adminReactions(env, "pending"); assert.equal(pendingReactions.items.length, 1);
-  await moderateReaction(env, id, "account-1", "approve", "master-admin"); assert.equal((await publicListingBySlug(env, "goat-modes")).item.counts.likes, 1);
+  assert.equal(reaction.pendingApproval, false); assert.equal(reaction.likes, 1);
+  assert.equal((await publicListingBySlug(env, "goat-modes")).item.counts.likes, 1);
+  const beforeReset = await adminSubmission(env, id);
+  const reset = await resetSubmissionReactions(env, id, beforeReset.item.version, "master-admin");
+  assert.deepEqual(reset.item.counts, { likes: 0, dislikes: 0 });
 
   const detail = await adminSubmission(env, id);
   const edited = await updateSubmission(env, id, detail.item.version, { displayName: "Mode Goat Edited", description: "Approved content remains editable after publication.", slug: "goat-modes", city: "Toronto", region: "Ontario", countryCode: "CA", latitude: 43.65, longitude: -79.38, commentMode: "disabled", reactionMode: "disabled" }, "master-admin");

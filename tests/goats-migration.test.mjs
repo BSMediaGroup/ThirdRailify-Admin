@@ -13,6 +13,14 @@ test("0004 adds empty community authority and idempotent email templates", async
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM community_submissions").first()).count, 0);
 });
 
+test("0012 adds per-admin inbox read state and removes reaction moderation mode", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const tables = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'admin_inbox_%' ORDER BY name").all();
+  assert.deepEqual(tables.results.map((row) => row.name), ["admin_inbox_messages", "admin_inbox_reads"]);
+  const mode = await harness.commerceDb.prepare("SELECT value_json FROM commerce_settings WHERE setting_key = 'community_reactions_mode'").first();
+  assert.equal(JSON.parse(mode.value_json), "auto");
+});
+
 test("community schema rejects invalid rating, reaction, duplicate user reaction, and published pending state", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); await insertTestProduct(harness.commerceDb);
   const base = `INSERT INTO community_submissions (id, reference_code, public_slug, status, is_published, display_name, description, product_id, product_slug_snapshot, product_name_snapshot, rating, city, country_code, public_location_label, public_latitude, public_longitude, consent_version, consented_at, created_at, submitted_at, updated_at, approved_at) VALUES`;

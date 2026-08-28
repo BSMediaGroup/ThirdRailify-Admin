@@ -14,6 +14,8 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0008_goats_profile_gif.sql", import.meta.url),
   new URL("../commerce-migrations/0009_commerce_collections.sql", import.meta.url),
   new URL("../commerce-migrations/0010_commerce_production_control_plane.sql", import.meta.url),
+  new URL("../commerce-migrations/0011_goats_geocoder.sql", import.meta.url),
+  new URL("../commerce-migrations/0012_admin_inbox_and_reaction_reset.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

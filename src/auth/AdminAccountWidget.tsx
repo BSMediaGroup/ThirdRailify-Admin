@@ -4,7 +4,7 @@ import { AdminIcon } from "../components/AdminIcon";
 import { useAuth } from "./AuthProvider";
 import type { AuthAccount } from "./types";
 
-export function AdminAccountWidget() {
+export function AdminAccountWidget({ unreadCount = 0 }: { unreadCount?: number }) {
   const { account, signOut } = useAuth(); const [open, setOpen] = useState(false); const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -27,7 +27,7 @@ export function AdminAccountWidget() {
   };
   return <div className="admin-account" ref={root}>
     <button className="admin-account__trigger" type="button" onClick={() => setOpen((value) => !value)} aria-label={`${account.displayName} account menu`} aria-haspopup="menu" aria-expanded={open}>
-      <AdminAvatar account={account} /><span><strong>{account.displayName}</strong><small>{accessLabel.toUpperCase()}</small></span><b aria-hidden="true">&#9662;</b>
+      <span className="admin-account__avatar-wrap"><AdminAvatar account={account} />{unreadCount ? <i className="admin-account__badge" aria-label={`${unreadCount} unread inbox messages`}>{unreadCount > 9 ? "9+" : unreadCount}</i> : null}</span><span><strong>{account.displayName}</strong><small>{accessLabel.toUpperCase()}</small></span><b aria-hidden="true">&#9662;</b>
     </button>
     {open && <div className="admin-account__menu" role="menu" aria-label="Admin account menu" onKeyDown={handleMenuKeyDown}>
       <div className="admin-account__identity">
@@ -41,6 +41,7 @@ export function AdminAccountWidget() {
         <div><dt>Access</dt><dd>{accessLabel}</dd></div>
       </dl>
       <div className="admin-account__actions">
+        <Link to="/inbox" role="menuitem" onClick={() => setOpen(false)}><AdminIcon name="emails" size={17} /><span>Admin Inbox</span>{unreadCount ? <b className="admin-account__inbox-count">{unreadCount > 99 ? "99+" : unreadCount}</b> : null}</Link>
         <Link to="/access" role="menuitem" onClick={() => setOpen(false)}><AdminIcon name="profile" size={17} /><span>Account / Access</span></Link>
         <Link to="/settings" role="menuitem" onClick={() => setOpen(false)}><AdminIcon name="settings" size={17} /><span>Settings</span></Link>
         <span className="admin-account__divider" role="separator" />

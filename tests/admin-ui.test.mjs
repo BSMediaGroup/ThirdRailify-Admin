@@ -49,14 +49,25 @@ test("GOATS email workspace uses the branded Commerce-grade editor and sandboxed
   assert.match(core, /THIRD RAILIFY OFFICIAL/);
 });
 
-test("GOATS approved records expose durable content, media, and interaction editors", async () => {
+test("GOATS approved records expose durable content, media, and reaction reset controls", async () => {
   const [app, page, client, navigation] = await Promise.all([read("src/App.tsx"), read("src/pages/GoatsAdminPages.tsx"), read("src/goats/client.ts"), read("src/config/navigation.ts")]);
-  for (const route of ["goats/reactions", "goats/settings"]) assert.match(app, new RegExp(`path="${route}`));
-  for (const label of ["Approved listings remain editable", "Add, replace, or remove images", "Approval required each time", "Save global defaults"]) assert.match(page, new RegExp(label));
+  assert.match(app, /path="goats\/reactions" element={<Navigate to="\/goats\/approved" replace/);
+  assert.match(app, /path="goats\/settings"/);
+  for (const label of ["Approved listings remain editable", "Add, replace, or remove images", "Reset all reactions", "Save global defaults"]) assert.match(page, new RegExp(label));
   assert.match(page, /media\.some\(\(media\) => media\.role === "profile"\)[\s\S]*Add profile/);
   assert.match(page, /media\.role === "profile" \? "image\/jpeg,image\/png,image\/webp,image\/gif"/);
-  assert.match(client, /uploadGoatMedia/); assert.match(client, /deleteGoatMedia/); assert.match(client, /saveGoatSettings/); assert.match(client, /moderateGoatReaction/);
-  assert.match(navigation, /path: "\/goats\/reactions"/); assert.match(navigation, /path: "\/goats\/settings"/);
+  assert.match(client, /uploadGoatMedia/); assert.match(client, /deleteGoatMedia/); assert.match(client, /saveGoatSettings/); assert.match(client, /resetGoatReactions/);
+  assert.doesNotMatch(navigation, /path: "\/goats\/reactions"/); assert.match(navigation, /path: "\/goats\/settings"/);
+});
+
+test("Admin inbox is linked from navigation, shell indicators, overview, and account menu", async () => {
+  const [app, navigation, shell, account, overview, inbox] = await Promise.all([read("src/App.tsx"), read("src/config/navigation.ts"), read("src/components/AdminShell.tsx"), read("src/auth/AdminAccountWidget.tsx"), read("src/pages/OverviewPage.tsx"), read("src/pages/InboxPage.tsx")]);
+  assert.match(app, /path="inbox" element={<InboxPage/);
+  assert.match(navigation, /path: "\/inbox"[\s\S]{0,100}label: "Admin Inbox"/);
+  assert.match(shell, /actionable\.goats\.submissions/); assert.match(shell, /nav-badge/);
+  assert.match(account, /Admin Inbox/); assert.match(account, /admin-account__badge/);
+  assert.match(overview, /Latest notices/); assert.match(overview, /Open full inbox/);
+  assert.match(inbox, /Mark all read/); assert.match(inbox, /Unread only/);
 });
 
 test("Watch authority failures render unknown archive state instead of false zero counts", async () => {

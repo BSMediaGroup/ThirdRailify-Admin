@@ -13,7 +13,6 @@ import {
   adminEngagementSettings,
   adminCommunityProducts,
   adminComments,
-  adminReactions,
   adminQueue,
   adminSubmission,
   cleanupExpiredDrafts,
@@ -24,7 +23,7 @@ import {
   uploadAdminMedia,
   deleteAdminMedia,
   moderateComment,
-  moderateReaction,
+  resetSubmissionReactions,
   retryEmail,
   transitionSubmission,
   updateEmailTemplate,
@@ -55,7 +54,6 @@ async function read(request, env, path) {
   if (path === "queue") return response(await adminQueue(env, url.searchParams.get("status")), request, env);
   if (path === "templates") return response(await emailTemplates(env), request, env);
   if (path === "comments") return response(await adminComments(env, url.searchParams.get("status")), request, env);
-  if (path === "reactions") return response(await adminReactions(env, url.searchParams.get("status")), request, env);
   if (path === "settings") return response(await adminEngagementSettings(env), request, env);
   if (path === "products") return response(await adminCommunityProducts(env), request, env);
   if (path.startsWith("media/")) return mediaResponse(env, path.slice("media/".length), request, { admin: true });
@@ -83,10 +81,10 @@ async function write(request, env, path, session, fetchImpl, waitUntil) {
   if (demoDelete) return response(await deleteDemoSubmission(env, decodePart(demoDelete[1]), body.version, session.accountId), request, env);
   const mediaDelete = path.match(/^submissions\/([^/]+)\/media\/([^/]+)\/delete$/);
   if (mediaDelete) return response(await deleteAdminMedia(env, decodePart(mediaDelete[1]), decodePart(mediaDelete[2]), session.accountId), request, env);
+  const reactionReset = path.match(/^submissions\/([^/]+)\/reactions\/reset$/);
+  if (reactionReset) return response(await resetSubmissionReactions(env, decodePart(reactionReset[1]), body.version, session.accountId), request, env);
   const comment = path.match(/^comments\/([^/]+)\/(approve|hide|restore)$/);
   if (comment) return response(await moderateComment(env, decodePart(comment[1]), comment[2], session.accountId), request, env);
-  const reaction = path.match(/^reactions\/([^/]+)\/([^/]+)\/(approve|hide|restore)$/);
-  if (reaction) return response(await moderateReaction(env, decodePart(reaction[1]), decodePart(reaction[2]), reaction[3], session.accountId), request, env);
   if (path === "settings") return response(await updateAdminEngagementSettings(env, body, session.accountId), request, env);
   const template = path.match(/^templates\/([^/]+)$/);
   if (template) return response(await updateEmailTemplate(env, decodePart(template[1]), body, session.accountId), request, env);

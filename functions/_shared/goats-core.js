@@ -13,6 +13,7 @@ import {
 } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
 import { resolveCoarseLocation } from "./goats-geocoder.js";
+import { adminInboxMessageStatement } from "./admin-inbox.js";
 
 export const GOATS_MEDIA_BINDING = "THIRDRAILIFY_PROFILE_MEDIA";
 export const MAX_GOAT_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -25,6 +26,8 @@ const ALLOWED_SORTS = new Set(["newest", "most-liked", "highest-rated"]);
 const ALLOWED_STATUSES = new Set(["pending", "approved", "rejected"]);
 const ALLOWED_ENGAGEMENT_MODES = new Set(["inherit", "disabled", "auto", "moderated"]);
 const ALLOWED_GLOBAL_ENGAGEMENT_MODES = new Set(["disabled", "auto", "moderated"]);
+const ALLOWED_REACTION_MODES = new Set(["inherit", "disabled", "auto"]);
+const ALLOWED_GLOBAL_REACTION_MODES = new Set(["disabled", "auto"]);
 const encoder = new TextEncoder();
 
 export async function publicCommunityConfig(env) {
@@ -43,7 +46,7 @@ export async function publicCommunityConfig(env) {
     consentVersion: typeof values.community_consent_version === "string" ? values.community_consent_version : GOATS_CONSENT_VERSION,
     engagement: {
       comments: globalEngagementMode(values.community_comments_mode),
-      reactions: globalEngagementMode(values.community_reactions_mode),
+      reactions: globalReactionMode(values.community_reactions_mode),
     },
     limits: { maxImageBytes: MAX_GOAT_IMAGE_BYTES, maxGalleryImages: MAX_GOAT_GALLERY_IMAGES },
   };
@@ -133,7 +136,7 @@ export async function publicListingBySlug(env, slug, accountId = "") {
   const item = publicListingProjection(row);
   item.engagement = {
     comments: await effectiveEngagementMode(env, row.comment_mode, "community_comments_mode"),
-    reactions: await effectiveEngagementMode(env, row.reaction_mode, "community_reactions_mode"),
+    reactions: await effectiveReactionMode(env, row.reaction_mode),
   };
   const media = await requireCommerceDb(env).prepare(
     "SELECT id, role, sort_order FROM community_media WHERE submission_id = ? AND processing_state = 'ready' ORDER BY CASE role WHEN 'main' THEN 0 WHEN 'profile' THEN 1 ELSE 2 END, sort_order",
@@ -252,6 +255,13 @@ export async function finaliseDraft(env, draftToken, input, context = {}) {
     ).bind(slug, email, displayName, description, product.id, product.slug, product.title, rating, location.city, location.region || null, location.countryCode, locationLabel, location.latitude, location.longitude, timestamp, GOATS_CONSENT_VERSION, timestamp, timestamp, timestamp, draft.id),
     moderationStatement(env, draft.id, null, "submitted", { productId: product.id, countryCode: location.countryCode, locationResolution: location.provider }, timestamp),
     outboxStatement(env, "goat_submission_received", email, draft.id, `submission-received:${draft.id}`, variables, timestamp),
+    adminInboxMessageStatement(env, {
+      category: "moderation", sourceType: "goat_submission", sourceId: draft.id,
+      title: "GOATS submission awaiting review",
+      preview: `${displayName} submitted ${product.title}.`,
+      bodyText: `Submission ${draft.reference_code} is waiting for product, media, location, consent, and story review.`,
+      actionUrl: `/goats/${draft.id}`, actionLabel: "Review submission",
+    }, timestamp),
   ];
   const adminRecipients = configuredAdminRecipients(env);
   for (const recipient of adminRecipients) {
@@ -264,7 +274,7 @@ export async function finaliseDraft(env, draftToken, input, context = {}) {
 
 export async function mutateReaction(env, slug, accountId, value, context = {}) {
   const listing = await publicListingRowBySlug(env, slug);
-  const mode = await effectiveEngagementMode(env, listing.reaction_mode, "community_reactions_mode");
+  const mode = await effectiveReactionMode(env, listing.reaction_mode);
   if (mode === "disabled") throw new AuthFailure(403, "reactions_disabled", "Reactions are disabled for this GOAT listing.");
   const actor = requiredText(accountId, 1, 160, "authentication_required");
   const reaction = Number(value);
@@ -280,11 +290,11 @@ export async function mutateReaction(env, slug, accountId, value, context = {}) 
       `INSERT INTO community_reactions (submission_id, account_id, value, moderation_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(submission_id, account_id) DO UPDATE SET value = excluded.value, moderation_state = excluded.moderation_state,
        moderated_by_account_id = NULL, moderated_at = NULL, updated_at = excluded.updated_at`,
-    ).bind(listing.id, actor, reaction, mode === "moderated" ? "pending" : "approved", timestamp, timestamp).run();
+    ).bind(listing.id, actor, reaction, "approved", timestamp, timestamp).run();
   }
   const counts = await db.prepare("SELECT SUM(CASE WHEN value = 1 AND moderation_state = 'approved' THEN 1 ELSE 0 END) AS likes, SUM(CASE WHEN value = -1 AND moderation_state = 'approved' THEN 1 ELSE 0 END) AS dislikes FROM community_reactions WHERE submission_id = ?").bind(listing.id).first();
   const removed = Number(current?.value || 0) === reaction;
-  return { ok: true, likes: Math.max(0, Number(counts?.likes || 0) + Number(listing.legacy_like_count || 0)), dislikes: Math.max(0, Number(counts?.dislikes || 0) + Number(listing.legacy_dislike_count || 0)), currentReaction: removed || mode === "moderated" ? 0 : reaction, pendingApproval: !removed && mode === "moderated" };
+  return { ok: true, likes: Math.max(0, Number(counts?.likes || 0) + Number(listing.legacy_like_count || 0)), dislikes: Math.max(0, Number(counts?.dislikes || 0) + Number(listing.legacy_dislike_count || 0)), currentReaction: removed ? 0 : reaction, pendingApproval: false };
 }
 
 export async function createComment(env, slug, actor, bodyValue, context = {}) {
@@ -296,10 +306,16 @@ export async function createComment(env, slug, actor, bodyValue, context = {}) {
   await enforceCommunityRateLimit(env, "comment", context.rateKey || accountId, 20, 60 * 60);
   const id = randomId();
   const timestamp = nowIso();
-  await requireCommerceDb(env).prepare(
+  const statements = [requireCommerceDb(env).prepare(
     `INSERT INTO community_comments (id, submission_id, account_id, author_display_name, author_avatar_url, body, status, moderation_state, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(id, listing.id, accountId, requiredText(actor?.displayName, 1, 80, "authentication_required"), safePublicUrl(actor?.avatarUrl), body, mode === "moderated" ? "hidden" : "visible", mode === "moderated" ? "pending" : "approved", timestamp, timestamp).run();
+  ).bind(id, listing.id, accountId, requiredText(actor?.displayName, 1, 80, "authentication_required"), safePublicUrl(actor?.avatarUrl), body, mode === "moderated" ? "hidden" : "visible", mode === "moderated" ? "pending" : "approved", timestamp, timestamp)];
+  if (mode === "moderated") statements.push(adminInboxMessageStatement(env, {
+    category: "moderation", sourceType: "goat_comment", sourceId: id,
+    title: "GOATS comment awaiting review", preview: `${actor.displayName} commented on ${listing.display_name}.`,
+    bodyText: body, actionUrl: "/goats/comments?status=pending", actionLabel: "Moderate comment",
+  }, timestamp));
+  await requireCommerceDb(env).batch(statements);
   return { ok: true, pendingApproval: mode === "moderated", item: mode === "moderated" ? null : commentProjection({ id, author_display_name: actor.displayName, author_avatar_url: safePublicUrl(actor.avatarUrl), body, created_at: timestamp, updated_at: timestamp }) };
 }
 
@@ -334,7 +350,7 @@ export async function mediaResponse(env, mediaId, request, options = {}) {
 
 export async function adminOverview(env) {
   const db = requireCommerceDb(env);
-  const [counts, email, recent] = await Promise.all([
+  const [counts, email, recent, comments] = await Promise.all([
     db.prepare("SELECT status, is_published, COUNT(*) AS count FROM community_submissions WHERE status <> 'draft' GROUP BY status, is_published").all(),
     db.prepare("SELECT status, COUNT(*) AS count FROM community_email_outbox GROUP BY status").all(),
     db.prepare(`SELECT s.*,
@@ -342,13 +358,17 @@ export async function adminOverview(env) {
       (SELECT id FROM community_media m WHERE m.submission_id = s.id AND m.role = 'main' ORDER BY m.created_at LIMIT 1) AS main_media_id,
       (SELECT status FROM community_email_outbox e WHERE e.submission_id = s.id ORDER BY e.created_at DESC LIMIT 1) AS email_state
       FROM community_submissions s WHERE s.status <> 'draft' ORDER BY s.updated_at DESC LIMIT 8`).all(),
+    db.prepare("SELECT COUNT(*) AS count FROM community_comments WHERE moderation_state = 'pending' AND status <> 'deleted'").first(),
   ]);
   const state = { pending: 0, approved: 0, rejected: 0, hidden: 0 };
   for (const row of counts?.results || []) {
     if (row.status === "approved" && Number(row.is_published) === 0) state.hidden += Number(row.count || 0);
     else state[row.status] = Number(row.count || 0);
   }
-  return { ok: true, counts: state, email: Object.fromEntries((email?.results || []).map((row) => [row.status, Number(row.count || 0)])), recent: (recent?.results || []).map(adminSummary) };
+  const emailState = Object.fromEntries((email?.results || []).map((row) => [row.status, Number(row.count || 0)]));
+  const actionable = { submissions: state.pending, comments: Number(comments?.count || 0), emailFailures: Number(emailState.failed || 0) };
+  actionable.total = actionable.submissions + actionable.comments + actionable.emailFailures;
+  return { ok: true, counts: state, email: emailState, actionable, recent: (recent?.results || []).map(adminSummary) };
 }
 
 export async function adminEngagementSettings(env) {
@@ -356,12 +376,12 @@ export async function adminEngagementSettings(env) {
     "SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('community_comments_mode','community_reactions_mode')",
   ).all();
   const values = Object.fromEntries((result?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, "auto")]));
-  return { ok: true, comments: globalEngagementMode(values.community_comments_mode), reactions: globalEngagementMode(values.community_reactions_mode) };
+  return { ok: true, comments: globalEngagementMode(values.community_comments_mode), reactions: globalReactionMode(values.community_reactions_mode) };
 }
 
 export async function updateAdminEngagementSettings(env, input, actorId) {
   const comments = validateGlobalEngagementMode(input.comments);
-  const reactions = validateGlobalEngagementMode(input.reactions);
+  const reactions = validateGlobalReactionMode(input.reactions);
   const timestamp = nowIso();
   await requireCommerceDb(env).batch([
     requireCommerceDb(env).prepare("INSERT INTO commerce_settings (setting_key, value_json, classification, updated_at) VALUES ('community_comments_mode', ?, 'safe', ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at").bind(JSON.stringify(comments), timestamp),
@@ -391,7 +411,10 @@ export async function adminQueue(env, statusValue = "pending") {
 
 export async function adminSubmission(env, id) {
   const db = requireCommerceDb(env);
-  const row = await db.prepare("SELECT * FROM community_submissions WHERE id = ? AND status <> 'draft' LIMIT 1").bind(cleanText(id, 36)).first();
+  const row = await db.prepare(`SELECT s.*,
+    (SELECT COUNT(*) FROM community_reactions r WHERE r.submission_id = s.id AND r.value = 1 AND r.moderation_state = 'approved') AS like_count,
+    (SELECT COUNT(*) FROM community_reactions r WHERE r.submission_id = s.id AND r.value = -1 AND r.moderation_state = 'approved') AS dislike_count
+    FROM community_submissions s WHERE s.id = ? AND s.status <> 'draft' LIMIT 1`).bind(cleanText(id, 36)).first();
   if (!row) throw new AuthFailure(404, "submission_not_found", "The submission was not found.");
   const [media, events, emails] = await Promise.all([
     db.prepare("SELECT id, role, sort_order, content_type, byte_size, width, height, processing_state, processing_error, created_at FROM community_media WHERE submission_id = ? ORDER BY role, sort_order").bind(row.id).all(),
@@ -414,7 +437,7 @@ export async function updateSubmission(env, id, expectedVersion, input, actorId)
   const rating = input.rating === "" || input.rating == null ? null : boundedInteger(input.rating, 1, 5, null);
   if (input.rating !== "" && input.rating != null && rating == null) throw new AuthFailure(400, "rating_invalid", "Rating must be an integer from one through five.");
   const commentMode = validateEngagementMode(input.commentMode ?? current.comment_mode);
-  const reactionMode = validateEngagementMode(input.reactionMode ?? current.reaction_mode);
+  const reactionMode = validateReactionMode(input.reactionMode ?? current.reaction_mode);
   let product = { id: current.product_id, slug: current.product_slug_snapshot, title: current.product_name_snapshot };
   if (input.productId !== undefined && cleanText(input.productId, 160) !== cleanText(current.product_id, 160)) {
     const selected = await requireCommerceDb(env).prepare("SELECT id, slug, title FROM commerce_products WHERE id = ? LIMIT 1").bind(cleanText(input.productId, 160)).first();
@@ -499,6 +522,7 @@ export async function transitionSubmission(env, id, expectedVersion, action, inp
   ).bind(transition.status, transition.published, action === "approve" ? timestamp : current.approved_at, action === "reject" ? timestamp : current.rejected_at, rejectionReason || null, cleanText(input.moderatorNote ?? current.moderator_note, 2000) || null, actorId, timestamp, nextVersion, current.id, current.version)];
   const variables = submissionVariables(env, { ...current, status: transition.status, rejection_reason: rejectionReason });
   statements.push(moderationStatement(env, current.id, actorId, transition.event, { version: nextVersion }, timestamp));
+  if (action === "approve" || action === "reject") statements.push(db.prepare("UPDATE admin_inbox_messages SET resolved_at = COALESCE(resolved_at, ?) WHERE source_type = 'goat_submission' AND source_id = ?").bind(timestamp, current.id));
   if (action === "approve") statements.push(outboxStatement(env, "goat_submission_approved", current.submitter_email, current.id, `submission-approved:${current.id}`, variables, timestamp));
   if (action === "reject") statements.push(outboxStatement(env, "goat_submission_rejected", current.submitter_email, current.id, `submission-rejected:${current.id}:${nextVersion}`, variables, timestamp));
   const results = await db.batch(statements);
@@ -516,6 +540,7 @@ export async function moderateComment(env, commentId, action, actorId) {
   await requireCommerceDb(env).batch([
     requireCommerceDb(env).prepare("UPDATE community_comments SET status = ?, moderation_state = ?, moderated_by_account_id = ?, moderated_at = ?, updated_at = ? WHERE id = ?").bind(status, moderationState, actorId, timestamp, timestamp, row.id),
     moderationStatement(env, row.submission_id, actorId, approved ? "comment_restored" : "comment_hidden", { commentId: row.id, action }, timestamp),
+    requireCommerceDb(env).prepare("UPDATE admin_inbox_messages SET resolved_at = COALESCE(resolved_at, ?) WHERE source_type = 'goat_comment' AND source_id = ?").bind(timestamp, row.id),
   ]);
   return { ok: true };
 }
@@ -530,24 +555,23 @@ export async function adminComments(env, statusValue = "visible") {
   return { ok: true, status: moderationState, items: (result?.results || []).map((row) => ({ id: row.id, submissionId: row.submission_id, listingSlug: row.public_slug, listingName: row.listing_name, displayName: row.author_display_name, body: row.body, status: row.moderation_state, createdAt: row.created_at })) };
 }
 
-export async function adminReactions(env, statusValue = "pending") {
-  const status = new Set(["approved", "pending", "hidden"]).has(statusValue) ? statusValue : "pending";
-  const result = await requireCommerceDb(env).prepare(
-    `SELECT r.submission_id, r.account_id, r.value, r.moderation_state, r.updated_at, s.public_slug, s.display_name AS listing_name
-     FROM community_reactions r JOIN community_submissions s ON s.id = r.submission_id
-     WHERE r.moderation_state = ? ORDER BY r.updated_at DESC LIMIT 200`,
-  ).bind(status).all();
-  return { ok: true, status, items: (result?.results || []).map((row) => ({ submissionId: row.submission_id, accountId: row.account_id, value: Number(row.value), status: row.moderation_state, updatedAt: row.updated_at, listingSlug: row.public_slug, listingName: row.listing_name })) };
-}
-
-export async function moderateReaction(env, submissionIdValue, accountIdValue, action, actorId) {
-  const submissionId = cleanText(submissionIdValue, 36); const accountId = cleanText(accountIdValue, 160);
-  const state = action === "approve" || action === "restore" ? "approved" : "hidden";
+export async function resetSubmissionReactions(env, id, expectedVersion, actorId) {
+  const current = await requireVersion(env, id, expectedVersion);
+  if (current.status !== "approved" || Number(current.is_published) !== 1) throw new AuthFailure(409, "reaction_reset_unavailable", "Only an approved and published listing can have its reactions reset.");
+  const db = requireCommerceDb(env);
+  const currentCounts = await db.prepare("SELECT SUM(CASE WHEN value = 1 THEN 1 ELSE 0 END) AS likes, SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END) AS dislikes FROM community_reactions WHERE submission_id = ?").bind(current.id).first();
+  const removed = {
+    likes: Number(currentCounts?.likes || 0) + Number(current.legacy_like_count || 0),
+    dislikes: Number(currentCounts?.dislikes || 0) + Number(current.legacy_dislike_count || 0),
+  };
   const timestamp = nowIso();
-  const result = await requireCommerceDb(env).prepare("UPDATE community_reactions SET moderation_state = ?, moderated_by_account_id = ?, moderated_at = ?, updated_at = ? WHERE submission_id = ? AND account_id = ?").bind(state, actorId, timestamp, timestamp, submissionId, accountId).run();
-  if (Number(result?.meta?.changes || 0) !== 1) throw new AuthFailure(404, "reaction_not_found", "The reaction was not found.");
-  await requireCommerceDb(env).prepare("INSERT INTO community_moderation_events (id, submission_id, actor_account_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'updated', ?, ?)").bind(randomId(), submissionId, actorId, JSON.stringify({ reactionAction: action, accountId }), timestamp).run();
-  return { ok: true, status: state };
+  const results = await db.batch([
+    db.prepare("DELETE FROM community_reactions WHERE submission_id = ?").bind(current.id),
+    db.prepare("UPDATE community_submissions SET legacy_like_count = 0, legacy_dislike_count = 0, updated_at = ?, version = version + 1 WHERE id = ? AND version = ? AND status = 'approved' AND is_published = 1").bind(timestamp, current.id, current.version),
+    moderationStatement(env, current.id, actorId, "updated", { action: "reactions_reset", ...removed }, timestamp),
+  ]);
+  if (Number(results?.[1]?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "version_conflict", "This listing changed in another tab. Reload before resetting reactions.");
+  return adminSubmission(env, current.id);
 }
 
 export async function deleteDemoSubmission(env, id, expectedVersion, actorId) {
@@ -625,11 +649,24 @@ export async function retryEmail(env, outboxId, actorId, fetchImpl = fetch) {
     const response = await fetchImpl("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Idempotency-Key": row.idempotency_key }, body: JSON.stringify({ from, to: [row.recipient_email], subject, html, text, reply_to: normalizeEmail(env?.MAIL_REPLY_TO) || undefined }) });
     if (!response.ok) throw new Error(`provider_${response.status}`);
     const payload = await response.json().catch(() => ({}));
-    await db.prepare("UPDATE community_email_outbox SET status = 'sent', attempts = attempts + 1, last_error = NULL, provider_message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status <> 'sent'").bind(cleanText(payload.id, 200) || null, nowIso(), nowIso(), row.id).run();
-    await db.prepare("INSERT INTO community_moderation_events (id, submission_id, actor_account_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'email_retried', ?, ?)").bind(randomId(), row.submission_id, actorId, JSON.stringify({ outboxId: row.id, result: "sent" }), nowIso()).run();
+    const timestamp = nowIso();
+    await db.batch([
+      db.prepare("UPDATE community_email_outbox SET status = 'sent', attempts = attempts + 1, last_error = NULL, provider_message_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status <> 'sent'").bind(cleanText(payload.id, 200) || null, timestamp, timestamp, row.id),
+      db.prepare("INSERT INTO community_moderation_events (id, submission_id, actor_account_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'email_retried', ?, ?)").bind(randomId(), row.submission_id, actorId, JSON.stringify({ outboxId: row.id, result: "sent" }), timestamp),
+      db.prepare("UPDATE admin_inbox_messages SET resolved_at = COALESCE(resolved_at, ?) WHERE source_type = 'goat_email_failure' AND source_id = ?").bind(timestamp, row.id),
+    ]);
     return { ok: true, status: "sent" };
   } catch (error) {
-    await db.prepare("UPDATE community_email_outbox SET status = 'failed', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ? AND status <> 'sent'").bind(cleanText(error instanceof Error ? error.message : "delivery_failed", 300), nowIso(), row.id).run();
+    const timestamp = nowIso();
+    const reason = cleanText(error instanceof Error ? error.message : "delivery_failed", 300);
+    await db.batch([
+      db.prepare("UPDATE community_email_outbox SET status = 'failed', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ? AND status <> 'sent'").bind(reason, timestamp, row.id),
+      adminInboxMessageStatement(env, {
+        category: "delivery", sourceType: "goat_email_failure", sourceId: row.id,
+        title: "GOATS email delivery needs attention", preview: `${row.template_key} could not be delivered to its recipient.`,
+        bodyText: reason, actionUrl: "/goats/emails", actionLabel: "Inspect delivery",
+      }, timestamp),
+    ]);
     throw new AuthFailure(503, "email_unavailable", "Transactional email delivery failed and remains retryable.");
   }
 }
@@ -790,6 +827,10 @@ function adminProjection(row, media, events, emails) {
     consent: { version: row.consent_version, timestamp: row.consented_at },
     moderatorNote: row.moderator_note,
     rejectionReason: row.rejection_reason,
+    counts: {
+      likes: Math.max(0, Number(row.like_count || 0) + Number(row.legacy_like_count || 0)),
+      dislikes: Math.max(0, Number(row.dislike_count || 0) + Number(row.legacy_dislike_count || 0)),
+    },
     media: media.map((item) => ({ id: item.id, role: item.role, sortOrder: Number(item.sort_order), contentType: item.content_type, byteSize: Number(item.byte_size), width: Number(item.width), height: Number(item.height), state: item.processing_state, error: item.processing_error, url: `/api/admin/goats/media/${item.id}` })),
     events: events.map((item) => ({ id: item.id, type: item.event_type, actorAccountId: item.actor_account_id, metadata: parseJson(item.metadata_json, {}), createdAt: item.created_at })),
     emails: emails.map((item) => ({ id: item.id, templateKey: item.template_key, status: item.status, attempts: Number(item.attempts), lastError: item.last_error, createdAt: item.created_at, updatedAt: item.updated_at, sentAt: item.sent_at })),
@@ -956,14 +997,36 @@ function validateGlobalEngagementMode(value) {
   return mode;
 }
 
+function validateReactionMode(value) {
+  const mode = cleanText(value, 20).toLowerCase();
+  if (!ALLOWED_REACTION_MODES.has(mode)) throw new AuthFailure(400, "engagement_mode_invalid", "Choose inherit, disabled, or approved by default for reactions.");
+  return mode;
+}
+
+function validateGlobalReactionMode(value) {
+  const mode = cleanText(value, 20).toLowerCase();
+  if (!ALLOWED_GLOBAL_REACTION_MODES.has(mode)) throw new AuthFailure(400, "engagement_mode_invalid", "Choose disabled or approved by default for reactions.");
+  return mode;
+}
+
 function globalEngagementMode(value) {
   return ALLOWED_GLOBAL_ENGAGEMENT_MODES.has(value) ? value : "auto";
+}
+
+function globalReactionMode(value) {
+  return ALLOWED_GLOBAL_REACTION_MODES.has(value) ? value : "auto";
 }
 
 async function effectiveEngagementMode(env, listingMode, settingKey) {
   if (listingMode && listingMode !== "inherit") return validateGlobalEngagementMode(listingMode);
   const row = await requireCommerceDb(env).prepare("SELECT value_json FROM commerce_settings WHERE setting_key = ?").bind(settingKey).first();
   return globalEngagementMode(parseJson(row?.value_json, "auto"));
+}
+
+async function effectiveReactionMode(env, listingMode) {
+  if (listingMode && listingMode !== "inherit") return validateGlobalReactionMode(listingMode === "moderated" ? "auto" : listingMode);
+  const row = await requireCommerceDb(env).prepare("SELECT value_json FROM commerce_settings WHERE setting_key = 'community_reactions_mode'").first();
+  return globalReactionMode(parseJson(row?.value_json, "auto"));
 }
 
 export function brandedGoatEmailHtml(content, templateKey, origin = "https://thirdrailify-admin.pages.dev") {

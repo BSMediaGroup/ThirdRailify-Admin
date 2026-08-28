@@ -1350,3 +1350,96 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .overview-module { transition: none; }
   .overview-module:hover { transform: none; }
 }
+/* Actionable Admin inbox and queue indicators */
+.nav-badge {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 5px;
+  place-items: center;
+  border: 1px solid #f3c928;
+  border-radius: 999px;
+  background: #f3c928;
+  color: #090907;
+  font: 700 10px/1 var(--font-mono, monospace);
+}
+.nav-group__row .nav-badge { margin-right: 2px; }
+.nav-badge--nested { min-width: 17px; height: 17px; padding: 0 4px; font-size: 9px; }
+.admin-layout--collapsed .nav-badge { position: absolute; top: 5px; right: 4px; min-width: 9px; width: 9px; height: 9px; padding: 0; color: transparent; overflow: hidden; }
+.admin-layout--collapsed .nav-group__row .nav-badge { right: 17px; }
+
+.admin-account__avatar-wrap { position: relative; display: inline-flex; flex: 0 0 auto; }
+.admin-account__badge {
+  position: absolute;
+  right: -4px;
+  bottom: -2px;
+  display: grid;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  place-items: center;
+  border: 2px solid #11110e;
+  border-radius: 999px;
+  background: #f3c928;
+  color: #090907;
+  font: 800 8px/1 var(--font-mono, monospace);
+  font-style: normal;
+}
+.admin-account__inbox-count { margin-left: auto; min-width: 22px; padding: 3px 6px; border-radius: 999px; background: #f3c928; color: #090907; text-align: center; font: 800 10px/1 var(--font-mono, monospace); }
+
+.inbox-page { display: grid; gap: 22px; }
+.inbox-heading { align-items: end; }
+.inbox-filters { display: flex; gap: 8px; }
+.inbox-filters button {
+  min-height: 42px;
+  padding: 0 17px;
+  border: 1px solid rgba(243,201,40,.22);
+  border-radius: 7px;
+  background: #10100d;
+  color: #aaa48f;
+  font: 650 12px/1 var(--font-mono, monospace);
+  text-transform: uppercase;
+}
+.inbox-filters button.is-active { border-color: #f3c928; color: #f3c928; }
+.inbox-list { display: grid; gap: 10px; }
+.inbox-message {
+  display: grid;
+  grid-template-columns: 10px minmax(0,1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 22px;
+  border: 1px solid rgba(181,171,137,.18);
+  border-radius: 10px;
+  background: #10100d;
+}
+.inbox-message.is-unread { border-color: rgba(243,201,40,.48); background: linear-gradient(100deg, rgba(243,201,40,.075), #10100d 34%); }
+.inbox-message__state { width: 8px; height: 8px; border: 1px solid #6f6a58; border-radius: 50%; }
+.inbox-message.is-unread .inbox-message__state { border-color: #f3c928; background: #f3c928; box-shadow: 0 0 12px rgba(243,201,40,.36); }
+.inbox-message > div { display: grid; gap: 6px; min-width: 0; }
+.inbox-message p { margin: 0; color: #c9a916; font: 700 10px/1 var(--font-mono, monospace); letter-spacing: .1em; text-transform: uppercase; }
+.inbox-message h2 { margin: 0; color: #f5f1e5; font-size: 20px; }
+.inbox-message strong { color: #d9d3bf; font-size: 14px; }
+.inbox-message span, .inbox-message small { color: #8f8a78; line-height: 1.5; }
+.inbox-message small { font: 500 10px/1.4 var(--font-mono, monospace); }
+.inbox-empty { display: grid; min-height: 250px; place-items: center; align-content: center; gap: 8px; border: 1px dashed rgba(243,201,40,.22); border-radius: 10px; color: #8f8a78; text-align: center; }
+.inbox-empty h2, .inbox-empty p { margin: 0; }
+.inbox-empty h2 { color: #f5f1e5; }
+
+.overview-inbox__list { display: grid; }
+.overview-inbox__list > a { display: grid; grid-template-columns: 8px minmax(0,1fr) auto auto; gap: 14px; align-items: center; min-height: 66px; border-bottom: 1px solid rgba(181,171,137,.14); color: inherit; text-decoration: none; }
+.overview-inbox__list > a > i { width: 7px; height: 7px; border: 1px solid #66604f; border-radius: 50%; }
+.overview-inbox__list > a.is-unread > i { border-color: #f3c928; background: #f3c928; }
+.overview-inbox__list span { display: grid; gap: 4px; min-width: 0; }
+.overview-inbox__list strong { color: #f4f0e4; }
+.overview-inbox__list small { overflow: hidden; color: #8f8977; text-overflow: ellipsis; white-space: nowrap; }
+.overview-inbox__list time { color: #746e5d; font: 500 10px/1 var(--font-mono, monospace); }
+.goats-reaction-reset > p { max-width: 760px; color: #9c9684; }
+
+@media (max-width: 760px) {
+  .inbox-heading { align-items: stretch; }
+  .inbox-message { grid-template-columns: 9px minmax(0,1fr); }
+  .inbox-message > button { grid-column: 2; justify-self: start; }
+  .overview-inbox__list > a { grid-template-columns: 8px minmax(0,1fr) auto; }
+  .overview-inbox__list time { display: none; }
+}

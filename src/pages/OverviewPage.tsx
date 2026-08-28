@@ -27,7 +27,7 @@ type Priority = { title: string; detail: string; to: string; label: string; tone
 const EMPTY_SNAPSHOT: Snapshot = { status: null, watch: null, commerce: null, goats: null, banner: null };
 
 export function OverviewPage() {
-  const { startLoading } = useOutletContext<AdminShellOutletContext>();
+  const { startLoading, inboxSummary } = useOutletContext<AdminShellOutletContext>();
   const { access, csrfToken } = useAuth();
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [errors, setErrors] = useState<SourceErrors>({});
@@ -108,6 +108,12 @@ export function OverviewPage() {
         <Posture label="OAuth providers" value={snapshot.status ? snapshot.status.configuration.oauthProviders.length ? snapshot.status.configuration.oauthProviders.map(providerLabel).join(" · ") : "None configured" : sourceFallback(loading, errors.status)} tone={snapshot.status?.configuration.oauthProviders.length ? "safe" : errors.status ? "danger" : "muted"} />
         <Posture label="Commerce D1" value={configuredLabel(snapshot.commerce?.databaseConfigured, loading, errors.commerce)} tone={configuredTone(snapshot.commerce?.databaseConfigured, errors.commerce)} />
       </div>
+    </section>
+
+    <section className="overview-section overview-inbox" aria-labelledby="overview-inbox-title">
+      <OverviewHeading eyebrow="Admin inbox" title="Latest notices" id="overview-inbox-title" detail={inboxSummary ? `${inboxSummary.unread} unread` : "Reading inbox"} />
+      {inboxSummary?.latest.length ? <div className="overview-inbox__list">{inboxSummary.latest.map((message) => <Link key={message.id} className={message.unread ? "is-unread" : ""} to={message.actionUrl || "/inbox"}><i /><span><strong>{message.title}</strong><small>{message.preview}</small></span><time>{formatTime(message.createdAt)}</time><AdminIcon name="arrow" size={14} /></Link>)}</div> : <ModuleState text={inboxSummary ? "No Admin notices have been recorded yet." : "Loading the Admin inbox…"} />}
+      <Link className="overview-section__link" to="/inbox">Open full inbox <AdminIcon name="arrow" size={15} /></Link>
     </section>
 
     <div className="overview-lower-grid">
