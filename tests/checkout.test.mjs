@@ -126,7 +126,7 @@ test("checkout creates one authoritative local order and inline Stripe test Sess
   assert.equal(params.get("line_items[0][price_data][currency]"), "cad"); assert.equal(params.get("line_items[0][price_data][unit_amount]"), "2500");
   assert.equal(params.get("line_items[0][price_data][product_data][name]"), "Canonical Rail Shirt"); assert.equal(params.get("line_items[0][quantity]"), "2");
   assert.equal(params.get("metadata[order_id]"), payload.orderId); assert.equal(params.get("client_reference_id"), payload.orderId); assert.equal(params.get("metadata[checkout_request_id]"), REQUEST_ID); assert.match(params.get("metadata[cart_digest]"), /^[0-9a-f]{64}$/);
-  assert.equal(params.get("success_url"), `${PUBLIC_ORIGIN}/shop?checkout=success&session_id={CHECKOUT_SESSION_ID}`); assert.equal(params.get("cancel_url"), `${PUBLIC_ORIGIN}/shop?checkout=canceled`);
+  assert.equal(params.get("success_url"), `${PUBLIC_ORIGIN}/checkout/success?session_id={CHECKOUT_SESSION_ID}`); assert.equal(params.get("cancel_url"), `${PUBLIC_ORIGIN}/shop?checkout=canceled`);
   assert.equal(params.has("automatic_tax[enabled]"), false); assert.equal([...params.keys()].some((key) => /shipping|discount/i.test(key)), false);
   const order = await harness.commerceDb.prepare("SELECT * FROM commerce_orders WHERE id = ?").bind(payload.orderId).first();
   assert.equal(order.customer_gross_amount, 5000); assert.equal(order.currency_code, "CAD"); assert.equal(order.environment, "test"); assert.equal(order.checkout_status, "checkout_created"); assert.equal(order.payment_status, "pending"); assert.equal(order.fulfillment_status, "disabled"); assert.equal(order.stripe_checkout_session_id, payload.sessionId); assert.ok(order.checkout_created_at);

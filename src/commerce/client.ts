@@ -52,11 +52,19 @@ export type MerchandisingPayload = {
   featured: MerchandisingProduct[]; updatedAt: string | null;
 };
 export type CommerceOrder = {
-  id: string; checkoutStatus: string; paymentStatus: string; fulfillmentStatus: string;
-  currencyCode: string; expectedAmount: number; stripeSessionId: string | null; stripePaymentIntentId: string | null;
+  id: string; test: boolean; checkoutStatus: string; paymentStatus: string; fulfillmentStatus: string;
+  currencyCode: string; expectedAmount: number; stripeSessionId: string | null; checkoutUrl: string | null; stripePaymentIntentId: string | null;
   createdAt: string; updatedAt: string; checkoutCreatedAt: string | null; paymentConfirmedAt: string | null;
+  hasPrintfulOrder: boolean;
+  items: Array<{ productId: string; variantId: string | null; productName: string; variantName: string | null; options: Record<string, string>; currencyCode: string; unitAmount: number; quantity: number; lineTotalAmount: number }>;
 };
-export type CommerceOrdersPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; orders: CommerceOrder[] };
+export type ControlledTestAcceptance = {
+  enabled: boolean; normalCheckoutEnabled: boolean; livePaymentsEnabled: boolean; fulfillmentEnabled: boolean;
+  stripe: { status: string; environment: string; integrationMode: string; currencyCode: string };
+  candidate: null | { productId: string; variantId: string; slug: string; title: string; variantLabel: string; options: Record<string, string>; unitAmount: number; currencyCode: string; sellable: boolean; mappingStatus: string; migrationStatus: string };
+};
+export type CommerceOrdersPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; controlledTest: ControlledTestAcceptance | null; orders: CommerceOrder[] };
+export type TestCheckoutPayload = { ok: true; orderId: string; sessionId: string; checkoutUrl: string };
 export type PrintfulStoreIdentity = { id: string; name: string; type: string };
 export type PrintfulSourceVerificationPayload = {
   ok: boolean; store: PrintfulStoreIdentity; configuredStoreId: string | null; configurationMatches: boolean;
@@ -299,6 +307,9 @@ export function saveCommerceTemplate(csrfToken: string, template: CommerceTempla
 }
 export function getMerchandisingProducts() { return adminApi<MerchandisingPayload>("/api/admin/commerce/products"); }
 export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
+export function generateControlledTestCheckout(csrfToken: string, body: { checkoutRequestId: string; productId: string; variantId: string; quantity: 1 }) {
+  return adminApi<TestCheckoutPayload>("/api/admin/commerce/test-checkout", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+}
 export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {
   return adminApi<MerchandisingPayload>("/api/admin/commerce/products/featured", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ featuredIds }) });
 }

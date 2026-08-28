@@ -52,18 +52,22 @@ export async function insertTestProduct(db, overrides = {}) {
     requiresShipping: 1,
     isFeatured: 0,
     featuredOrder: null,
+    targetPrintfulProductId: null,
+    migrationStatus: "not_started",
     ...overrides,
   };
   await db.prepare(
     `INSERT INTO commerce_products (
        id, source_provider, external_product_id, slug, title, currency_code, status,
        safe_metadata_json, created_at, updated_at, is_featured, featured_order, unit_amount,
-       checkout_environment, visibility, max_checkout_quantity, requires_shipping
-     ) VALUES (?, 'manual', NULL, ?, ?, ?, ?, '{}', 'now', 'now', ?, ?, ?, ?, ?, ?, ?)`,
+       checkout_environment, visibility, max_checkout_quantity, requires_shipping,
+       target_printful_product_id, migration_status
+     ) VALUES (?, 'manual', NULL, ?, ?, ?, ?, '{}', 'now', 'now', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     product.id, product.slug, product.title, product.currencyCode, product.status,
     product.isFeatured, product.featuredOrder, product.unitAmount, product.checkoutEnvironment,
     product.visibility, product.maxCheckoutQuantity, product.requiresShipping,
+    product.targetPrintfulProductId, product.migrationStatus,
   ).run();
   return product;
 }
@@ -162,6 +166,7 @@ export async function insertTestVariant(db, overrides = {}) {
     targetCatalogueProductId: "438",
     targetCatalogueVariantId: "11576",
     fulfillmentMappingStatus: "mapped",
+    migrationStatus: "selected",
     ...overrides,
   };
   await db.prepare(
@@ -170,15 +175,15 @@ export async function insertTestVariant(db, overrides = {}) {
        availability_status, unit_amount, currency_code, sku, size_label, color_label,
        option_values_json, target_printful_product_id, target_printful_sync_variant_id,
        target_catalogue_product_id, target_catalogue_variant_id,
-       fulfillment_provider, fulfillment_mapping_status, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CAD', ?, ?, ?, ?, ?, ?, ?, ?, 'printful', ?, 'now', 'now')`,
+       fulfillment_provider, fulfillment_mapping_status, migration_status, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CAD', ?, ?, ?, ?, ?, ?, ?, ?, 'printful', ?, ?, 'now', 'now')`,
   ).bind(
     variant.id, variant.productId, variant.localVariantKey, variant.status, variant.visibility,
     variant.isSellable, variant.availabilityStatus, variant.unitAmount, variant.sku,
     variant.sizeLabel, variant.colorLabel, variant.optionValuesJson,
     variant.targetPrintfulProductId, variant.targetPrintfulSyncVariantId,
     variant.targetCatalogueProductId, variant.targetCatalogueVariantId,
-    variant.fulfillmentMappingStatus,
+    variant.fulfillmentMappingStatus, variant.migrationStatus,
   ).run();
   return variant;
 }
@@ -201,5 +206,38 @@ export async function enableTestCheckout(db) {
     ).bind(JSON.stringify(metadata)),
     db.prepare("UPDATE commerce_settings SET value_json = 'true' WHERE setting_key IN ('checkout_enabled', 'stripe_api_configured', 'stripe_webhook_configured')"),
     db.prepare("UPDATE commerce_settings SET value_json = 'false' WHERE setting_key IN ('live_payment_capture_enabled', 'fulfillment_submission_enabled')"),
+  ]);
+}
+
+export async function enableControlledTestCheckout(db, productId = "product-test-001", variantId = "variant-test-001") {
+  const provider = await db.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
+  const metadata = {
+    ...JSON.parse(provider.safe_metadata_json),
+    api_configured: true,
+    webhook_configured: true,
+    checkout_enabled: false,
+    live_payments_enabled: false,
+  };
+  const timestamp = new Date().toISOString();
+  await db.batch([
+    db.prepare(
+      `UPDATE commerce_provider_connections
+       SET status = 'connected', environment = 'test', integration_mode = 'direct_merchant',
+           country_code = 'CA', currency_code = 'cad', safe_metadata_json = ?
+       WHERE provider = 'stripe'`,
+    ).bind(JSON.stringify(metadata)),
+    ...[
+      ["checkout_enabled", false],
+      ["stripe_api_configured", true],
+      ["stripe_webhook_configured", true],
+      ["live_payment_capture_enabled", false],
+      ["fulfillment_submission_enabled", false],
+      ["stripe_test_checkout_enabled", true],
+      ["stripe_test_checkout_product_id", productId],
+      ["stripe_test_checkout_variant_id", variantId],
+    ].map(([key, value]) => db.prepare(
+      `INSERT INTO commerce_settings (setting_key, value_json, classification, updated_at)
+       VALUES (?, ?, 'safe', ?) ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`,
+    ).bind(key, JSON.stringify(value), timestamp)),
   ]);
 }

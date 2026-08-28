@@ -11,7 +11,7 @@ Admin Commerce D1 -> /api/public/commerce/catalogue
 
 Commerce D1 owns replacement product and variant identities, integer CAD prices, public presentation, and readiness state. Public owns no Commerce D1 binding and receives only local IDs plus sanitized merchandising fields. Browser totals are display values; the checkout server revalidates product/variant association, state, quantity, currency, and exact D1 price.
 
-Displayability is deliberately separate from checkout and fulfillment readiness. The 49 accepted current-Wix products may be public while their Printful migration is paused or incomplete. The preserved target-native My Balloon product remains private. Checkout, live payment capture, and fulfillment submission stay gated for the later Stripe sandbox milestone; Wix remains production until explicit cutover.
+Displayability is deliberately separate from checkout and fulfillment readiness. The 49 accepted current-Wix products may be public while their Printful migration is paused or incomplete. The preserved target-native My Balloon product remains private. Normal checkout, live payment capture, and fulfillment submission stay disabled; the separate Master-only Stripe TEST acceptance gate does not imply customer cutover. Wix remains production until explicit cutover.
 
 ## Milestone posture
 
@@ -26,7 +26,8 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Stripe webhook endpoint | operational at `POST /api/webhooks/stripe`; one signed sandbox event accepted |
 | Stripe webhook signing | configured and verified by a valid signed sandbox Event |
 | Stripe environment | `test`; production readiness not established |
-| Checkout | `disabled` |
+| Normal checkout | `disabled` |
+| Controlled acceptance checkout | Master-only Stripe `test`, exact configured variant, quantity one |
 | Live payment capture | `disabled` |
 | Live payout readiness | not verified |
 | Fulfillment submission | `disabled` |
@@ -35,7 +36,15 @@ This repository contains the Admin-only control-plane foundation for a future St
 | Printify | `unavailable`; credential custody undecided |
 | Wix | `legacy production`; remains authoritative and untouched |
 
-The separate Admin-only commerce D1 is bound, and its encryption key plus Stripe TEST API/webhook credentials remain encrypted Cloudflare Secrets. The sandbox Checkout/order engine is implemented, but `checkout_enabled=false` and zero authoritative products mean no remote Checkout Session or order is created in this milestone. Live payments, tax, shipping calculation, fulfillment, refunds, payouts, and production merchant readiness remain outside this milestone.
+The separate Admin-only commerce D1 is bound, and its encryption key plus Stripe TEST API/webhook credentials remain encrypted Cloudflare Secrets. The 50-product/1,323-variant replacement catalogue is authoritative. `checkout_enabled=false` keeps normal checkout closed; `stripe_test_checkout_enabled` is a separate temporary acceptance flag. Live payments, tax, shipping calculation, fulfillment, refunds, payouts, and production merchant readiness remain outside this milestone.
+
+## Pre-cutover Stripe TEST acceptance
+
+`POST /api/admin/commerce/test-checkout` requires the existing Admin exact-origin session, Master role, CSRF proof, D1-backed route rate limit, checkout-core rate limit, and the dedicated test gate. It calls the same `createStripeCheckoutSession` core as normal checkout. The only special authority is passage through the pre-cutover gate; D1 product/variant association, active/public state, integer CAD amount, quantity, target-verified mapped state, immutable order-item snapshot, Stripe response validation, deterministic idempotency, and webhook linkage are unchanged.
+
+The configured acceptance candidate is `product-397267935` / `variant-5019554081`: **Third Rail Farm | Black Glossy Mug**, slug `third-rail-farm-black-glossy-mug`, variant **11 oz / Black**, CAD 15.00. Only this variant is temporarily `is_sellable=1`, with safe metadata marking it as the acceptance candidate. A core-level one-order ceiling prevents a second fresh controlled request while allowing an exact retry of the original request ID.
+
+Stripe receives `mode=payment`, quantity one, inline server-generated `price_data[currency]=cad`, and the D1 unit amount. No `Stripe-Account` header or Stripe Product/Price duplication is used. Metadata contains only local order/request correlation and a cart digest. Success returns to `/checkout/success?session_id={CHECKOUT_SESSION_ID}`; Public polls its same-origin proxy to an exact opaque-Session local status lookup. The redirect is never payment authority: only the signed `checkout.session.completed` handler can move `pending` to `paid`, and fulfillment remains disabled afterward.
 
 ## Authoritative payment flow
 

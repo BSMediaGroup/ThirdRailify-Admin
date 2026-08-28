@@ -79,3 +79,10 @@ test("Site Content exposes separate normal and fixture-labelled Live Now configu
   assert.match(client, /expectedRevision/);
   assert.match(client, /X-CSRF-Token/);
 });
+
+test("Orders exposes only the Master-controlled Stripe TEST acceptance and truthful fulfillment state", async () => {
+  const [page, client, core, route] = await Promise.all([read("src/pages/CommercePages.tsx"), read("src/commerce/client.ts"), read("functions/_shared/checkout-core.js"), read("functions/api/admin/commerce/[[path]].js")]);
+  for (const label of ["TEST CHECKOUT · STRIPE SANDBOX · NO REAL CHARGE", "Generate Test Checkout", "Single acceptance Session already created", "Printful order", "Open Stripe TEST Checkout"]) assert.match(page, new RegExp(label));
+  assert.match(page, /access\.isMasterAdmin/); assert.match(client, /\/api\/admin\/commerce\/test-checkout/); assert.match(route, /requireMasterAdmin\(env, request\)/);
+  assert.match(core, /gate === "controlled_test"/); assert.match(core, /stripe_test_checkout_already_created/); assert.match(core, /fulfillment_status = 'disabled'|fulfillment_status, currency_code/);
+});

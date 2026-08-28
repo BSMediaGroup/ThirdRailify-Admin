@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { AdminIcon } from "../components/AdminIcon";
 import { manageWatch, type WatchAction, type WatchAdminEpisode, type WatchAdminPayload } from "../watch/client";
+import rumbleIcon from "../../assets/icons/rumble.svg";
+import youtubeIcon from "../../assets/icons/youtube.svg";
 
 export function WatchAdminPage() {
   const { csrfToken, access } = useAuth();
@@ -87,7 +89,9 @@ function Metric({ label, value, detail, compact = false, suffix = "" }: { label:
 
 function EpisodeRow({ episode, busy, onChange }: { episode: WatchAdminEpisode; busy: boolean; onChange: (action: "show" | "hide") => void }) {
   const [imageFailed, setImageFailed] = useState(false);
-  return <article className="watch-admin-row"><div className="watch-admin-row__thumb">{episode.thumbnailUrl && !imageFailed ? <img src={episode.thumbnailUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} /> : <AdminIcon name="watch" size={34} />}</div><div className="watch-admin-row__main"><span>#{String(episode.archiveOrder).padStart(2, "0")} · {episode.platform}</span><h3>{episode.title}</h3><p>{formatDate(episode.archiveDate)} · <code>{episode.identityKey}</code></p></div><span className={`watch-admin-status${episode.visible ? " is-visible" : ""}`}>{episode.visible ? "Visible" : "Hidden"}</span><div className="watch-admin-row__actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => onChange(episode.visible ? "hide" : "show")}>{busy ? "Saving…" : episode.visible ? "Hide" : "Show"}</button>{episode.visible && episode.publicRoute ? <a className="button-link" href={episode.publicRoute} target="_blank" rel="noreferrer">Preview <AdminIcon name="external" size={15} /></a> : <span>Preview unavailable while hidden</span>}</div></article>;
+  const platformLabel = episode.platform === "rumble" ? "Rumble" : "YouTube";
+  const platformIcon = episode.platform === "rumble" ? rumbleIcon : youtubeIcon;
+  return <article className="watch-admin-row"><div className="watch-admin-row__thumb">{episode.thumbnailUrl && !imageFailed ? <img src={episode.thumbnailUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} /> : <AdminIcon name="watch" size={34} />}</div><div className="watch-admin-row__main"><span>#{String(episode.archiveOrder).padStart(2, "0")} · {episode.platform}</span><h3>{episode.title}</h3><p>{formatDate(episode.archiveDate)} · <code>{episode.identityKey}</code></p></div><span className={`watch-admin-status${episode.visible ? " is-visible" : ""}`}>{episode.visible ? "Visible" : "Hidden"}</span><div className="watch-admin-row__actions"><a className={`watch-admin-source-link is-${episode.platform}`} href={episode.watchUrl} target="_blank" rel="noopener noreferrer" aria-label={`Watch on ${platformLabel}`} title={`Watch on ${platformLabel}`}><img src={platformIcon} alt="" /></a><button className="secondary-button" type="button" disabled={busy} onClick={() => onChange(episode.visible ? "hide" : "show")}>{busy ? "Saving…" : episode.visible ? "Hide" : "Show"}</button>{episode.visible && episode.publicRoute ? <a className="button-link" href={episode.publicRoute} target="_blank" rel="noreferrer">Preview <AdminIcon name="external" size={15} /></a> : <span>Preview unavailable while hidden</span>}</div></article>;
 }
 
 function currentSummary(data: WatchAdminPayload | null, archiveUnavailable: boolean) {

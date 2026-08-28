@@ -236,6 +236,8 @@ test("unknown, mismatched, wrong-amount, wrong-currency, and unpaid Sessions nev
   const cases = [
     ["evt_synthetic_unknown_session", completedSession(order, { id: "cs_test_unknown_999" }), "checkout_order_unlinked"],
     ["evt_synthetic_reference_mismatch", completedSession(order, { client_reference_id: "ord_other", metadata: { order_id: order.orderId } }), "checkout_order_reference_mismatch"],
+    ["evt_synthetic_metadata_order_missing", completedSession(order, { metadata: { checkout_request_id: "33333333-3333-4333-8333-333333333333" } }), "checkout_order_reference_missing"],
+    ["evt_synthetic_metadata_request_missing", completedSession(order, { metadata: { order_id: order.orderId } }), "checkout_request_mismatch"],
     ["evt_synthetic_amount_mismatch", completedSession(order, { amount_total: 4999 }), "checkout_amount_mismatch"],
     ["evt_synthetic_currency_mismatch", completedSession(order, { currency: "usd" }), "checkout_currency_mismatch"],
     ["evt_synthetic_unpaid", completedSession(order, { payment_status: "unpaid" }), "checkout_payment_incomplete"],

@@ -1,6 +1,6 @@
 # Watch V2 Admin workspace
 
-`/watch` is the authenticated Master Admin visibility workspace for the Public Watch archive. It reads the current broadcast summary and retained archive and presents a compact control-room header, retained/visible/hidden/unfilled/current-signal strip, current signal title/platform/timing, and a dense retained-episode list with stable content identity, public route, date, platform, thumbnail/fallback, and visibility state.
+`/watch` is the authenticated Master Admin visibility workspace for the Public Watch archive. It reads the current broadcast summary and retained archive and presents a compact control-room header, retained/visible/hidden/unfilled/current-signal strip, current signal title/platform/timing, and a dense retained-episode list with stable content identity, public route, date, platform, thumbnail/fallback, visibility state, and a direct source-provider action using the matching local Rumble or YouTube mark. The source action uses the authority-supplied validated `watchUrl` and remains available for hidden records; Public Preview remains visible-only.
 
 The only mutations are show/hide one retained episode and show/hide all retained episodes. Bulk hide requires confirmation. There is no manual episode creation, provider lookup, URL/ID entry, metadata editing, deletion, scrape, or synthetic archive injection. Empty state is supported; staging fills only as real completed broadcasts arrive through the existing signed Public ingest.
 

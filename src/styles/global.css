@@ -909,6 +909,11 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .watch-admin-status.is-visible { border-color: rgba(114,215,165,.32); color: var(--safe); }
 .watch-admin-row__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
 .watch-admin-row__actions .button-link { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.watch-admin-source-link { display: inline-grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.018); transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
+.watch-admin-source-link img { width: 20px; height: 20px; object-fit: contain; }
+.watch-admin-source-link:hover, .watch-admin-source-link:focus-visible { transform: translateY(-1px); }
+.watch-admin-source-link.is-rumble:hover, .watch-admin-source-link.is-rumble:focus-visible { border-color: rgba(170,222,73,.58); background: rgba(170,222,73,.07); }
+.watch-admin-source-link.is-youtube:hover, .watch-admin-source-link.is-youtube:focus-visible { border-color: rgba(255,0,51,.58); background: rgba(255,0,51,.07); }
 .watch-admin-empty { display: grid; min-height: 260px; place-content: center; justify-items: center; padding: 36px; color: var(--muted); text-align: center; }
 .watch-admin-empty svg { margin-bottom: 12px; color: var(--gold); }
 .watch-admin-empty strong { color: var(--ink); font-size: 1rem; }

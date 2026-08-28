@@ -9,7 +9,7 @@ const PREVIEW_ORIGIN = "http://127.0.0.1:4195";
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const VIEWPORTS = [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }];
 
-test("Watch Admin renders the truthful empty archive responsively", async (t) => {
+test("Watch Admin renders empty and retained archives with direct source links responsively", async (t) => {
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4195"], { stdio: "ignore" });
   t.after(() => server.kill());
   await waitForPreview();
@@ -19,6 +19,7 @@ test("Watch Admin renders the truthful empty archive responsively", async (t) =>
   for (const viewport of VIEWPORTS) {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
+    let archivePayload = emptyArchive();
     const consoleErrors = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
     page.on("pageerror", (error) => consoleErrors.push(error.message));
@@ -31,7 +32,7 @@ test("Watch Admin renders the truthful empty archive responsively", async (t) =>
         assert.equal(request.method(), "POST");
         assert.equal(request.headers()["x-csrf-token"], "browser-fixture-csrf");
         assert.deepEqual(request.postDataJSON(), { action: "read" });
-        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(emptyArchive()) });
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(archivePayload) });
       }
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: "not_found" }) });
     });
@@ -47,6 +48,21 @@ test("Watch Admin renders the truthful empty archive responsively", async (t) =>
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${viewport.width}px has no horizontal overflow`);
     assert.deepEqual(consoleErrors, [], `${viewport.width}px has no console errors`);
     if (process.env.WATCH_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", `thirdrailify-admin-watch-${viewport.width}.png`), fullPage: true });
+
+    archivePayload = populatedArchive();
+    await page.reload();
+    await page.getByRole("heading", { level: 3, name: "Rumble retained episode" }).waitFor();
+    const rumbleSource = page.getByRole("link", { name: "Watch on Rumble" });
+    const youtubeSource = page.getByRole("link", { name: "Watch on YouTube" });
+    assert.equal(await rumbleSource.getAttribute("href"), "https://rumble.com/vfixture-rumble.html");
+    assert.equal(await youtubeSource.getAttribute("href"), "https://www.youtube.com/watch?v=abc123DEF45");
+    assert.match(await rumbleSource.locator("img").getAttribute("src"), /rumble\.svg/);
+    assert.match(await youtubeSource.locator("img").getAttribute("src"), /youtube\.svg/);
+    assert.equal(await page.getByText("Preview unavailable while hidden", { exact: true }).count(), 1, "hidden episodes retain their source link but not a Public preview");
+    assert.equal(await page.getByRole("link", { name: /Preview/ }).count(), 1);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${viewport.width}px populated archive has no horizontal overflow`);
+    assert.deepEqual(consoleErrors, [], `${viewport.width}px populated archive has no console errors`);
+    if (process.env.WATCH_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", `thirdrailify-admin-watch-populated-${viewport.width}.png`), fullPage: true });
     await context.close();
   }
 });
@@ -75,4 +91,10 @@ function emptyArchive() {
     summary: { retained: 0, visible: 0, hidden: 0, remaining: 24, newest: null, oldest: null },
     episodes: [],
   };
+}
+
+function populatedArchive() {
+  const rumble = { id: "ep_rumble", identityKey: "rumble:vfixture-rumble", platform: "rumble", contentId: "vfixture-rumble", title: "Rumble retained episode", description: null, thumbnailUrl: null, thumbnailState: "fallback", watchUrl: "https://rumble.com/vfixture-rumble.html", archiveDate: "2026-08-28T00:00:00.000Z", visible: true, archiveOrder: 1, publicRoute: "https://thirdrailify.pages.dev/watch/v/ep_rumble" };
+  const youtube = { id: "ep_youtube", identityKey: "youtube:abc123DEF45", platform: "youtube", contentId: "abc123DEF45", title: "Hidden YouTube retained episode", description: null, thumbnailUrl: null, thumbnailState: "fallback", watchUrl: "https://www.youtube.com/watch?v=abc123DEF45", archiveDate: "2026-08-27T00:00:00.000Z", visible: false, archiveOrder: 2, publicRoute: null };
+  return { ok: true, current: null, summary: { retained: 2, visible: 1, hidden: 1, remaining: 22, newest: { id: rumble.id, title: rumble.title, date: rumble.archiveDate }, oldest: { id: youtube.id, title: youtube.title, date: youtube.archiveDate } }, episodes: [rumble, youtube] };
 }

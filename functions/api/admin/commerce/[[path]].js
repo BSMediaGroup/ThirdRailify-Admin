@@ -38,7 +38,7 @@ import {
 } from "../../../_shared/printful-catalogue.js";
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
-import { commerceOrdersPayload } from "../../../_shared/checkout-core.js";
+import { commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
 import {
   permanentMigrationPayload,
   resumeManuallyPausedPermanentPrintfulMigration,
@@ -53,7 +53,7 @@ export async function onRequest(context) {
     if (request.method === "OPTIONS") return handleOptions(request, env);
     const path = new URL(request.url).pathname.slice(ROUTE_PREFIX.length).replace(/^\/+|\/+$/g, "");
     if (request.method === "GET") return await handleGet(request, env, path);
-    if (request.method === "POST") return await handlePost(request, env, path);
+    if (request.method === "POST") return await handlePost(request, env, path, context.data?.commerceFetch || fetch, context.data?.schedulerRuntime || {});
     throw new AuthFailure(405, "method_not_allowed", "This method is not allowed.", { Allow: "GET, POST, OPTIONS" });
   } catch (error) {
     return errorResponse(error, request, env);
@@ -111,6 +111,20 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.payments.manage");
     payload = await verifyStripeAccount(env, session, fetchImpl);
     authEventType = "stripe_account_verified";
+  } else if (path === "test-checkout") {
+    await requireMasterAdmin(env, request);
+    const body = await readJsonBody(request);
+    const checkoutRequestId = String(body.checkoutRequestId || "");
+    const productId = String(body.productId || "");
+    const variantId = String(body.variantId || "");
+    if (Object.keys(body).some((key) => !new Set(["checkoutRequestId", "productId", "variantId", "quantity"]).has(key)) || Object.keys(body).length !== 4) {
+      throw new AuthFailure(400, "stripe_test_checkout_request_invalid", "The controlled test checkout request is invalid.");
+    }
+    payload = await createStripeCheckoutSession(env, request, {
+      checkoutRequestId,
+      items: [{ productId, variantId, quantity: body.quantity }],
+    }, fetchImpl, { gate: "controlled_test" });
+    authEventType = "stripe_test_checkout_created";
   } else if (path === "printful/verify") {
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
     payload = await verifyPrintfulStore(env, session, fetchImpl);

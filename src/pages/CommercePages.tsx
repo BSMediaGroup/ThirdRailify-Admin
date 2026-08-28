@@ -8,6 +8,7 @@ import {
   getBusinessProfile,
   getCommerceOverview,
   getCommerceOrders,
+  generateControlledTestCheckout,
   getCommerceTemplates,
   getMerchandisingProducts,
   executePermanentPrintfulMigration,
@@ -489,9 +490,12 @@ export function LegacyCommerceProductsPage() {
   </>;
 }
 export function CommerceOrdersPage() {
+  const { csrfToken, access } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CommerceOrdersPayload | null>(null);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     const stop = startLoading("Loading authoritative commerce orders"); setError("");
     try { setPayload(await getCommerceOrders()); }
@@ -499,11 +503,27 @@ export function CommerceOrdersPage() {
     finally { stop(); }
   }, [startLoading]);
   useEffect(() => { void load(); }, [load]);
+  const generate = useCallback(async () => {
+    const candidate = payload?.controlledTest?.candidate;
+    if (!csrfToken || !access.isMasterAdmin || !candidate || busy || payload.orders.length) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await generateControlledTestCheckout(csrfToken, { checkoutRequestId: crypto.randomUUID(), productId: candidate.productId, variantId: candidate.variantId, quantity: 1 });
+      setMessage(`Stripe TEST Checkout created for ${result.orderId}.`);
+      await load();
+    } catch (reason) { setError(errorMessage(reason, "The controlled Stripe TEST Checkout could not be created.")); }
+    finally { setBusy(false); }
+  }, [access.isMasterAdmin, busy, csrfToken, load, payload]);
+  const controlled = payload?.controlledTest;
+  const candidate = controlled?.candidate;
+  const canGenerate = Boolean(access.isMasterAdmin && csrfToken && controlled?.enabled && !controlled.normalCheckoutEnabled && !controlled.livePaymentsEnabled && !controlled.fulfillmentEnabled && candidate?.sellable && candidate.mappingStatus === "mapped" && candidate.migrationStatus === "target_verified" && !payload?.orders.length && !busy);
   return <>
     <CommerceHeading eyebrow="Commerce record authority" title="Orders" summary="Local orders are initialized from authoritative D1 product snapshots, linked to Stripe-hosted TEST Checkout, and marked paid only by a valid signed webhook. Fulfillment remains disabled." status="disabled" />
     {error && <div className="admin-alert" role="alert">{error}</div>}
+    {message && <div className="auth-success" role="status">{message}</div>}
     <section className="commerce-posture" aria-label="Order engine posture"><div><span>Checkout engine</span><strong>Implemented / gated</strong></div><div><span>Public checkout</span><strong>Disabled</strong></div><div><span>Payment mode</span><strong>Stripe TEST</strong></div><div><span>Fulfillment</span><strong>Disabled</strong></div></section>
-    {!payload && !error ? <CommerceState>Loading authoritative orders…</CommerceState> : payload ? payload.orders.length ? <section className="commerce-section" aria-labelledby="orders-list-title"><SectionTitle id="orders-list-title" eyebrow="Bounded payment state" title="Latest orders" /><div className="provider-card-grid">{payload.orders.map((order) => <article className="provider-card" key={order.id}><div><span>{order.id}</span><StatusBadge status={order.paymentStatus === "paid" ? "connected" : order.checkoutStatus === "checkout_failed" ? "error" : "pending"} label={order.paymentStatus === "paid" ? "Payment confirmed" : humanize(order.checkoutStatus)} /></div><dl><Fact term="Expected total" value={formatCad(order.expectedAmount)} /><Fact term="Checkout" value={humanize(order.checkoutStatus)} /><Fact term="Payment" value={humanize(order.paymentStatus)} /><Fact term="Fulfillment" value={humanize(order.fulfillmentStatus)} /><Fact term="Created" value={formatSynchronizedAt(order.createdAt)} /></dl></article>)}</div></section> : <CommerceState><strong>0 authoritative orders.</strong><span>Public checkout is disabled and no synthetic order or revenue record has been created.</span></CommerceState> : null}
+    {payload && access.isMasterAdmin ? <section className="commerce-section test-checkout-card" aria-labelledby="test-checkout-title"><SectionTitle id="test-checkout-title" eyebrow="TEST CHECKOUT · STRIPE SANDBOX · NO REAL CHARGE" title="Pre-cutover payment acceptance" /><div className="provider-detail-grid"><DetailCard title="Controlled acceptance candidate" status={controlled?.enabled ? "pending" : "disabled"} statusLabel={controlled?.enabled ? "Master-only gate enabled" : "Gate disabled"} lead={candidate?.title || "No candidate configured"}><dl><Fact term="Product" value={candidate?.title || "Unavailable"} /><Fact term="Variant" value={candidate?.variantLabel || "Unavailable"} /><Fact term="Price" value={candidate ? formatCad(candidate.unitAmount) : "Unavailable"} /><Fact term="Stripe environment" value="TEST" /><Fact term="Target mapping" value={candidate ? humanize(candidate.mappingStatus) : "Unavailable"} /><Fact term="Normal checkout" value={controlled?.normalCheckoutEnabled ? "Unexpectedly enabled" : "Disabled"} /><Fact term="Live payments" value={controlled?.livePaymentsEnabled ? "Unexpectedly enabled" : "Disabled"} /><Fact term="Fulfillment" value={controlled?.fulfillmentEnabled ? "Unexpectedly enabled" : "Disabled"} /></dl><button className="button-link" type="button" onClick={() => void generate()} disabled={!canGenerate}>{busy ? "Generating…" : payload.orders.length ? "Single acceptance Session already created" : "Generate Test Checkout"}</button></DetailCard></div></section> : null}
+    {!payload && !error ? <CommerceState>Loading authoritative orders…</CommerceState> : payload ? payload.orders.length ? <section className="commerce-section" aria-labelledby="orders-list-title"><SectionTitle id="orders-list-title" eyebrow="Bounded payment state" title="Latest orders" /><div className="provider-card-grid">{payload.orders.map((order) => <article className="provider-card" key={order.id}><div><span>{order.test ? "TEST · " : ""}{order.id}</span><StatusBadge status={order.paymentStatus === "paid" ? "connected" : order.checkoutStatus === "checkout_failed" ? "error" : "pending"} label={order.paymentStatus === "paid" ? "Payment confirmed" : humanize(order.checkoutStatus)} /></div><dl>{order.items.map((item) => <div key={`${item.productId}:${item.variantId || ""}`}><dt>Product / variant</dt><dd>{item.productName}{item.variantName ? ` · ${item.variantName}` : ""} · qty {item.quantity}</dd></div>)}<Fact term="CAD total" value={formatCad(order.expectedAmount)} /><Fact term="Checkout Session" value={order.stripeSessionId ? "Created" : "Not created"} /><Fact term="Payment" value={humanize(order.paymentStatus)} /><Fact term="Fulfillment" value={`${humanize(order.fulfillmentStatus)} / not started`} /><Fact term="Printful order" value={order.hasPrintfulOrder ? "Unexpectedly present" : "None"} /><Fact term="Created" value={formatSynchronizedAt(order.createdAt)} /></dl>{order.checkoutUrl && order.paymentStatus !== "paid" ? <a className="button-link" href={order.checkoutUrl} target="_blank" rel="noopener noreferrer">Open Stripe TEST Checkout</a> : null}</article>)}</div></section> : <CommerceState><strong>0 authoritative orders.</strong><span>Normal checkout is disabled. Only the Master-controlled Stripe TEST acceptance action can create the single pre-cutover order.</span></CommerceState> : null}
   </>;
 }
 
