@@ -115,7 +115,7 @@ export type PermanentPrintfulMigrationPayload = {
     id: string; status: "ready" | "running" | "waiting" | "completed" | "completed_with_blocked_products" | "blocked";
     phase: string; currentProduct: { id: string; title: string; legacySourceProductId: string; migrationStatus: string } | null;
     fileProgress: { resolved: number; total: number } | null;
-    completedProducts: number; totalProducts: number; productsCreated: number; productsAdopted: number;
+    completedProducts: number; processedProducts: number; remainingProducts: number; totalProducts: number; productsCreated: number; productsAdopted: number;
     variantsMapped: number; providerFailures: number; providerRequestCount: number;
     providerState: "ready" | "waiting" | "paused" | "blocked" | "completed"; retryAt: number | null; manuallyPaused?: boolean;
     lastError: { code: string; message: string; at: string } | null;
@@ -131,7 +131,7 @@ export type PermanentPrintfulMigrationPayload = {
   };
   safety: {
     checkoutEnabled: boolean; livePaymentCaptureEnabled: boolean; fulfillmentEnabled: boolean;
-    printfulOrderMode: string; commerceOrders: number; wixSourceReadOnly: boolean;
+    printfulOrderMode: string; commerceOrders: number; prohibitedCommerceOrders: number; wixSourceReadOnly: boolean; failClosed: boolean;
     printfulOrdersCreated: number; printfulWebhooksMutated: number;
   };
 };

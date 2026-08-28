@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   assertMigrationScopes,
+  assertPermanentCatalogueAuthority,
   assertNoSourceFileIds,
   buildTargetCreatePayload,
   derivativeFilename,
@@ -128,6 +129,49 @@ test("an explicit continuation clears only the durable manual pause gate and pre
   assert.deepEqual({ status: job.status, productsCreated: job.products_created, productsVerified: job.products_verified, variantsMapped: job.variants_mapped, providerFailures: job.provider_failures, next: job.next_provider_request_at, throttle: job.throttle_until }, { status: "running", productsCreated: 7, productsVerified: 7, variantsMapped: 174, providerFailures: 14, next: null, throttle: null });
   assert.equal(JSON.parse(job.safe_state_json).manualPause, undefined);
   assert.equal(await resumeManuallyPausedPermanentPrintfulMigration(env), false);
+});
+
+test("permanent product migration admits only the exact sandbox acceptance evidence and fails closed on every live-commerce authority", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  await importPermanentCatalogue(harness.commerceDb, JSON.parse(await readFile(importUrl, "utf8")));
+  const env = commerceEnvironment(harness, { PRINTFUL_API_TOKEN: "target-token", PRINTFUL_WIX_SOURCE_TOKEN: "source-token", PRINTFUL_STORE_ID: "18668025", PRINTFUL_WIX_SOURCE_STORE_ID: "16847493" });
+  const assertSafe = () => assertPermanentCatalogueAuthority(harness.commerceDb, env);
+  await harness.commerceDb.prepare(`INSERT INTO commerce_orders
+    (id,payment_status,fulfillment_status,currency_code,customer_gross_amount,stripe_checkout_session_id,
+     environment,checkout_status,created_at,updated_at)
+    VALUES ('ord_e47b94a4-4252-438b-8ca7-c47470029940','paid','disabled','CAD',1500,
+      'cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC','test','checkout_created','now','now')`).run();
+  await assert.doesNotReject(assertSafe, "the exact non-fulfillable Stripe TEST acceptance row is evidence, not order-write authority");
+
+  for (const setting of ["checkout_enabled", "live_payment_capture_enabled", "fulfillment_submission_enabled"]) {
+    await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key=?").bind(setting).run();
+    await assert.rejects(assertSafe, (error) => error.code === "commerce_migration_safety_gate_open", `${setting}=true must reject`);
+    await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='false' WHERE setting_key=?").bind(setting).run();
+  }
+  await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='null' WHERE setting_key='checkout_enabled'").run();
+  await assert.rejects(assertSafe, (error) => error.code === "commerce_migration_safety_gate_open", "an ambiguous checkout value must reject");
+  await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='false' WHERE setting_key='checkout_enabled'").run();
+  await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='\"live\"' WHERE setting_key='printful_order_mode'").run();
+  await assert.rejects(assertSafe, (error) => error.code === "commerce_migration_safety_gate_open", "live Printful order mode must reject");
+  await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='\"draft_only\"' WHERE setting_key='printful_order_mode'").run();
+
+  const providers = await harness.commerceDb.prepare("SELECT provider,safe_metadata_json FROM commerce_provider_connections WHERE provider IN ('stripe','printful','wix')").all();
+  const original = Object.fromEntries(providers.results.map((row) => [row.provider, row.safe_metadata_json]));
+  for (const [provider, mutation] of [
+    ["stripe", (value) => ({ ...value, checkout_enabled: true })],
+    ["stripe", (value) => { const next = { ...value }; delete next.live_payments_enabled; return next; }],
+    ["printful", (value) => ({ ...value, fulfillment_enabled: true })],
+    ["printful", (value) => ({ ...value, mode: "live" })],
+    ["wix", (value) => ({ ...value, must_remain_untouched: false })],
+  ]) {
+    await harness.commerceDb.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=? WHERE provider=?").bind(JSON.stringify(mutation(JSON.parse(original[provider]))), provider).run();
+    await assert.rejects(assertSafe, (error) => error.code === "commerce_migration_safety_gate_open", `${provider} unsafe or ambiguous metadata must reject`);
+    await harness.commerceDb.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=? WHERE provider=?").bind(original[provider], provider).run();
+  }
+
+  await harness.commerceDb.prepare(`INSERT INTO commerce_orders (id,environment,created_at,updated_at)
+    VALUES ('ord_live_must_block','live','now','now')`).run();
+  await assert.rejects(assertSafe, (error) => error.code === "commerce_migration_safety_gate_open", "any non-acceptance order row must reject");
 });
 
 test("durable migration verifies stores/scopes, recovers 429 and 419, creates once, and maps by external ID", async (t) => {

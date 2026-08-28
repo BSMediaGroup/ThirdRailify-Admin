@@ -1,4 +1,5 @@
 import { AuthFailure, errorResponse, jsonResponse } from "../../_shared/auth-core.js";
+import { searchCoarseLocations } from "../../_shared/goats-geocoder.js";
 import {
   createComment,
   createDraft,
@@ -24,7 +25,7 @@ export async function onRequest(context) {
   const { request, env } = context;
   try {
     const path = new URL(request.url).pathname.slice(ROUTE_PREFIX.length).replace(/^\/+|\/+$/g, "");
-    if (request.method === "GET" || request.method === "HEAD") return await handleRead(request, env, path);
+    if (request.method === "GET" || request.method === "HEAD") return await handleRead(request, env, path, context.data?.goatsFetch || fetch);
     if (request.method === "POST" || request.method === "DELETE") return await handleInternal(request, env, path, context.data?.goatsFetch || fetch, context.waitUntil?.bind(context));
     throw new AuthFailure(405, "method_not_allowed", "This method is not allowed.", { Allow: "GET,HEAD,POST,DELETE" });
   } catch (error) {
@@ -32,10 +33,11 @@ export async function onRequest(context) {
   }
 }
 
-async function handleRead(request, env, path) {
+async function handleRead(request, env, path, fetchImpl = fetch) {
   const url = new URL(request.url);
   if (path === "config") return cached(await publicCommunityConfig(env), PUBLIC_CACHE);
   if (path === "products") return cached(await publicProducts(env), PUBLIC_CACHE);
+  if (path === "locations") return cached(await searchCoarseLocations(env, { query: url.searchParams.get("q"), countryCode: url.searchParams.get("country") }, { fetchImpl }), "public, max-age=300, s-maxage=3600");
   if (!path || path === "listings") return cached(await publicListings(env, queryInput(url)), PUBLIC_CACHE);
   if (path === "map") return cached(await publicMapGeoJson(env, queryInput(url)), PUBLIC_CACHE);
   if (path.startsWith("media/")) return mediaResponse(env, path.slice("media/".length), request);

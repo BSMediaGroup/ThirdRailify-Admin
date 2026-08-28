@@ -49,6 +49,7 @@ test("a running Printful migration remains checkpointed until an explicit authen
     await button.click();
     await page.getByText("CATALOGUE MIGRATED WITH BLOCKED PRODUCTS RECORDED", { exact: true }).waitFor();
     assert.equal(continuationCalls, 1);
+    assert.equal(await page.getByRole("button", { name: /PERMANENT PRINTFUL MIGRATION/ }).count(), 0, "terminal migrations expose no misleading continuation control");
     assert.deepEqual(consoleErrors, []);
     await context.close();
   }
@@ -82,8 +83,8 @@ function migration(status) {
   const complete = status === "completed_with_blocked_products";
   return {
     ok: true,
-    migration: { id: "permanent-printful-2026-08", status, phase: complete ? "completed" : "source_files", currentProduct: complete ? null : { id: "product-400904088", title: "Third Railify™ | Throw Blanket", legacySourceProductId: "400904088", migrationStatus: "resolving_files" }, fileProgress: complete ? null : { resolved: 0, total: 3 }, completedProducts: complete ? 36 : 10, totalProducts: 49, productsCreated: complete ? 36 : 10, productsAdopted: 0, variantsMapped: complete ? 1000 : 185, providerFailures: 21, providerRequestCount: 409, providerState: complete ? "completed" : "ready", retryAt: null, lastError: null, canResume: false, checkpointState: complete ? "verified" : "checkpointed", scopes: ["file_library", "orders", "sync_products", "webhooks"], targetVerified: true, sourceVerified: true, blockedProducts: Array.from({ length: 13 }, (_, index) => ({ productId: `blocked-${index}` })) },
+    migration: { id: "permanent-printful-2026-08", status, phase: complete ? "completed" : "source_files", currentProduct: complete ? null : { id: "product-400904088", title: "Third Railify™ | Throw Blanket", legacySourceProductId: "400904088", migrationStatus: "resolving_files" }, fileProgress: complete ? null : { resolved: 0, total: 3 }, completedProducts: complete ? 36 : 10, processedProducts: complete ? 49 : 23, remainingProducts: complete ? 0 : 26, totalProducts: 49, productsCreated: complete ? 36 : 10, productsAdopted: 0, variantsMapped: complete ? 1000 : 185, providerFailures: 21, providerRequestCount: 409, providerState: complete ? "completed" : "ready", retryAt: null, lastError: null, canResume: false, checkpointState: complete ? "verified" : "checkpointed", scopes: ["file_library", "orders", "sync_products", "webhooks"], targetVerified: true, sourceVerified: true, blockedProducts: Array.from({ length: 13 }, (_, index) => ({ productId: `blocked-${index}` })) },
     catalogue: { plannedProductCreates: 49, targetNativeKeeps: 1, eligibleVariants: 1317, deferredVariants: 5, d1Products: 50, d1Variants: 1323, verifiedProducts: complete ? 36 : 10, mappedVariants: complete ? 1000 : 185, blockedProducts: 13, fileMappings: { unique: 29, originalExact: 0, targetExisting: 0, printfulPreviewRehydrated: 29, unresolved: 13 } },
-    safety: { checkoutEnabled: false, livePaymentCaptureEnabled: false, fulfillmentEnabled: false, printfulOrderMode: "draft_only", commerceOrders: 0, wixSourceReadOnly: true, printfulOrdersCreated: 0, printfulWebhooksMutated: 0 },
+    safety: { checkoutEnabled: false, livePaymentCaptureEnabled: false, fulfillmentEnabled: false, printfulOrderMode: "draft_only", commerceOrders: 0, prohibitedCommerceOrders: 0, wixSourceReadOnly: true, failClosed: true, printfulOrdersCreated: 0, printfulWebhooksMutated: 0 },
   };
 }

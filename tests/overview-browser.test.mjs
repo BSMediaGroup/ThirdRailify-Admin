@@ -24,6 +24,20 @@ test("Admin overview reports real cross-system state responsively without deferr
     assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
     assert.equal((await page.locator(".overview-pulse__credential").innerText()).includes("MASTER"), true);
     assert.equal((await page.locator(".overview-pulse__credential").innerText()).includes("ACCOUNT LEVEL / SERVER VERIFIED"), true);
+    const shieldAlignment = await page.locator(".overview-pulse__shield").evaluate((node) => {
+      const shield = node.getBoundingClientRect(); const icon = node.querySelector("svg")?.getBoundingClientRect();
+      return icon ? { x: Math.abs((shield.left + shield.width / 2) - (icon.left + icon.width / 2)), y: Math.abs((shield.top + shield.height / 2) - (icon.top + icon.height / 2)) } : null;
+    });
+    assert.equal(Boolean(shieldAlignment && shieldAlignment.x <= 1 && shieldAlignment.y <= 1), true, `shield icon centered at ${width}x${height}`);
+    const rolePresentation = await page.locator(".overview-pulse__credential strong").evaluate((node) => {
+      const style = getComputedStyle(node); const box = node.getBoundingClientRect();
+      return { text: node.textContent?.trim(), overflow: style.overflow, textOverflow: style.textOverflow, whiteSpace: style.whiteSpace, width: box.width, scrollWidth: node.scrollWidth };
+    });
+    assert.equal(rolePresentation.text, "Master");
+    assert.equal(rolePresentation.overflow, "visible");
+    assert.equal(rolePresentation.textOverflow, "clip");
+    assert.equal(rolePresentation.whiteSpace, "normal");
+    assert.equal(rolePresentation.scrollWidth <= Math.ceil(rolePresentation.width), true, `account level is fully readable at ${width}x${height}`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `no horizontal overflow at ${width}x${height}`);
     assert.deepEqual(errors, [], `no page errors at ${width}x${height}`);
     const copy = await page.locator("body").innerText(); const normalizedCopy = copy.replace(/\s+/g, " ");
@@ -62,11 +76,12 @@ test("Admin overview fails soft per authority and disables nonessential motion",
   await context.close();
 
   let protectedReads = 0;
-  const fullAdminContext = await browser.newContext({ viewport: { width: 768, height: 1024 } });
+  const fullAdminContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const fullAdminPage = await fullAdminContext.newPage();
   await fullAdminPage.route("**/api/**", (route) => routeFixture(route, () => {}, { fullAdmin: true, onProtected: () => { protectedReads += 1; } }));
   await fullAdminPage.goto(ORIGIN); await fullAdminPage.getByText("2/2", { exact: true }).waitFor();
   assert.equal((await fullAdminPage.locator(".overview-pulse__credential").innerText()).includes("FULL ADMIN"), true);
+  assert.equal(await fullAdminPage.locator(".overview-pulse__credential strong").evaluate((node) => getComputedStyle(node).overflow === "visible" && node.scrollWidth <= Math.ceil(node.getBoundingClientRect().width)), true, "Full Admin role is fully readable on phone");
   assert.equal(await fullAdminPage.getByText("Restricted", { exact: true }).count(), 3);
   assert.equal(protectedReads, 0, "Full Admin overview does not request Master-only authorities");
   assert.equal(await fullAdminPage.getByText("Partial operational snapshot", { exact: true }).count(), 0, "restricted modules are not reported as service failures");

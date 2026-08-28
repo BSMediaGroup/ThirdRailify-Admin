@@ -31,6 +31,8 @@ const TRANSIENT_RETRY_MS = 2_000;
 const MAX_TRANSIENT_ATTEMPTS = 3;
 const MAX_SOURCE_FILE_REPRESENTATIVES = 3;
 const MAX_PREVIEW_BYTES = 20 * 1024 * 1024;
+const ACCEPTED_STRIPE_TEST_ORDER_ID = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
+const ACCEPTED_STRIPE_TEST_SESSION_ID = "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC";
 const TARGET_WRITE_SCOPE_ALIASES = new Set(["sync_products", "sync_products/write", "products", "products/write"]);
 const RECOVERABLE_BLOCK_CODES = new Set(["printful_source_file_original_url_missing", "printful_source_file_url_unavailable", "printful_source_file_resolution_incomplete"]);
 const PRODUCT_BLOCK_CODES = new Set([
@@ -50,7 +52,7 @@ const PRODUCT_BLOCK_CODES = new Set([
 export async function permanentMigrationPayload(env) {
   const db = requireCommerceDb(env);
   const job = await requireMigrationJob(db);
-  const [products, variants, settings, orders, fileMappings] = await Promise.all([
+  const [products, variants, settings, orders, providers, fileMappings] = await Promise.all([
     db.prepare(`SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN migration_status = 'target_native' THEN 1 ELSE 0 END) AS target_native,
@@ -64,7 +66,8 @@ export async function permanentMigrationPayload(env) {
       SUM(CASE WHEN availability_status = 'discontinued' AND is_sellable = 1 THEN 1 ELSE 0 END) AS discontinued_sellable
       FROM commerce_product_variants`).first(),
     db.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled', 'live_payment_capture_enabled', 'fulfillment_submission_enabled', 'printful_order_mode') ORDER BY setting_key").all(),
-    db.prepare("SELECT COUNT(*) AS total FROM commerce_orders").first(),
+    commerceOrderCounts(db),
+    db.prepare("SELECT provider, safe_metadata_json FROM commerce_provider_connections WHERE provider IN ('stripe','printful','wix')").all(),
     db.prepare(`SELECT COUNT(*) AS total,
       SUM(CASE WHEN json_extract(safe_metadata_json, '$.resolutionMethod') IN ('source_v2_url','source_v1_url','sync_variant_url','local_exact_artwork','original_url') THEN 1 ELSE 0 END) AS original_exact,
       SUM(CASE WHEN json_extract(safe_metadata_json, '$.resolutionMethod') = 'target_existing_file' THEN 1 ELSE 0 END) AS target_existing,
@@ -92,6 +95,9 @@ export async function permanentMigrationPayload(env) {
     ? "completed_with_blocked_products"
     : job.status;
   const settingMap = Object.fromEntries(settings.results.map((row) => [row.setting_key, safeJson(row.value_json, null)]));
+  const providerMap = providerSafetyMap(providers.results);
+  const safety = permanentMigrationSafety(settingMap, providerMap, orders.prohibited);
+  const processedProducts = number(job.products_verified) + blockedProducts.length;
   return {
     ok: true,
     migration: {
@@ -101,6 +107,8 @@ export async function permanentMigrationPayload(env) {
       currentProduct: current ? { id: current.id, title: current.title, legacySourceProductId: current.legacy_printful_source_product_id, migrationStatus: current.migration_status } : null,
       fileProgress: fileProgress ? { resolved: number(fileProgress.resolved), total: number(fileProgress.total) } : null,
       completedProducts: number(job.products_verified),
+      processedProducts,
+      remainingProducts: Math.max(0, EXPECTED_PRODUCTS - processedProducts),
       totalProducts: EXPECTED_PRODUCTS,
       productsCreated: number(job.products_created),
       productsAdopted: number(job.products_adopted),
@@ -139,12 +147,8 @@ export async function permanentMigrationPayload(env) {
       },
     },
     safety: {
-      checkoutEnabled: settingMap.checkout_enabled === true,
-      livePaymentCaptureEnabled: settingMap.live_payment_capture_enabled === true,
-      fulfillmentEnabled: settingMap.fulfillment_submission_enabled === true,
-      printfulOrderMode: settingMap.printful_order_mode,
+      ...safety,
       commerceOrders: number(orders.total),
-      wixSourceReadOnly: true,
       printfulOrdersCreated: 0,
       printfulWebhooksMutated: 0,
     },
@@ -1082,10 +1086,10 @@ async function transientProviderFailure(db, job, leaseToken, operation, status, 
   await updateJob(db, leaseToken, { status: "waiting", next_provider_request_at: now + TRANSIENT_RETRY_MS * attempts, last_http_status: status, safe_state_json: JSON.stringify({ ...state, transientAttempts }), updated_at: iso(now) });
 }
 
-async function assertPermanentCatalogueAuthority(db, env) {
+export async function assertPermanentCatalogueAuthority(db, env) {
   if (String(env?.PRINTFUL_STORE_ID) !== PRINTFUL_TARGET_STORE_ID || String(env?.PRINTFUL_WIX_SOURCE_STORE_ID) !== PRINTFUL_SOURCE_STORE_ID) throw migrationError("printful_store_configuration_invalid", "The configured source and target Printful Store IDs are not the accepted permanent migration identities.");
   targetCredential(env); sourceCredential(env);
-  const [products, active, deferred, maxVariants, targetNative, settings, orders] = await Promise.all([
+  const [products, active, deferred, maxVariants, targetNative, settings] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS total FROM commerce_products").first(),
     db.prepare("SELECT COUNT(*) AS total FROM commerce_product_variants WHERE availability_status = 'active' AND legacy_source_variant_id IS NOT NULL").first(),
     db.prepare("SELECT COUNT(*) AS total FROM commerce_product_variants WHERE migration_status = 'deferred' AND availability_status = 'temporarily_out_of_stock' AND is_sellable = 0").first(),
@@ -1095,13 +1099,52 @@ async function assertPermanentCatalogueAuthority(db, env) {
       GROUP BY product_id)`).first(),
     db.prepare("SELECT COUNT(*) AS total FROM commerce_products WHERE id = 'product-target-native-459991347' AND target_printful_product_id = '459991347' AND migration_status = 'target_native' AND visibility = 'private'").first(),
     db.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled','live_payment_capture_enabled','fulfillment_submission_enabled','printful_order_mode')").all(),
-    db.prepare("SELECT COUNT(*) AS total FROM commerce_orders").first(),
   ]);
   const values = Object.fromEntries(settings.results.map((row) => [row.setting_key, safeJson(row.value_json, null)]));
   if (number(products.total) !== EXPECTED_D1_PRODUCTS || number(active.total) !== EXPECTED_ACTIVE_VARIANTS || number(deferred.total) !== EXPECTED_DEFERRED_VARIANTS || number(maxVariants.maximum) > MAX_VARIANTS_PER_PRODUCT || number(targetNative.total) !== 1) throw migrationError("commerce_catalogue_authority_invalid", "Commerce D1 does not contain the exact accepted permanent catalogue authority.");
-  if (values.checkout_enabled !== false || values.live_payment_capture_enabled !== false || values.fulfillment_submission_enabled !== false || values.printful_order_mode !== "draft_only" || number(orders.total) !== 0) throw migrationError("commerce_migration_safety_gate_open", "Checkout, payment capture, fulfillment, order, or Printful order-mode safety is not fail-closed.");
+  const [orders, providers] = await Promise.all([
+    commerceOrderCounts(db),
+    db.prepare("SELECT provider, safe_metadata_json FROM commerce_provider_connections WHERE provider IN ('stripe','printful','wix')").all(),
+  ]);
+  const safety = permanentMigrationSafety(values, providerSafetyMap(providers.results), orders.prohibited);
+  if (!safety.failClosed) throw migrationError("commerce_migration_safety_gate_open", "Checkout, payment capture, fulfillment, order, or Printful order-mode safety is not fail-closed.");
   const createProducts = await db.prepare("SELECT COUNT(*) AS total FROM commerce_products WHERE legacy_printful_source_product_id IS NOT NULL AND target_printful_external_id IS NOT NULL").first();
   if (number(createProducts.total) !== EXPECTED_PRODUCTS) throw migrationError("commerce_catalogue_selection_invalid", "Commerce D1 does not contain exactly 49 selected migration products.");
+}
+
+function commerceOrderCounts(db) {
+  return db.prepare(`SELECT COUNT(*) AS total,
+    SUM(CASE WHEN id <> ? OR environment <> 'test' OR checkout_status <> 'checkout_created'
+      OR payment_status <> 'paid' OR fulfillment_status <> 'disabled'
+      OR printful_order_id IS NOT NULL OR COALESCE(stripe_checkout_session_id, '') <> ?
+      THEN 1 ELSE 0 END) AS prohibited FROM commerce_orders`)
+    .bind(ACCEPTED_STRIPE_TEST_ORDER_ID, ACCEPTED_STRIPE_TEST_SESSION_ID).first();
+}
+
+function providerSafetyMap(rows) {
+  return Object.fromEntries((rows || []).map((row) => [row.provider, safeJson(row.safe_metadata_json, {})]));
+}
+
+function permanentMigrationSafety(settings, providers, prohibitedCommerceOrders) {
+  const stripe = providers.stripe || {};
+  const printful = providers.printful || {};
+  const wix = providers.wix || {};
+  const printfulModes = [printful.mode, printful.order_mode].filter((value) => value !== undefined);
+  const checkoutFailClosed = settings.checkout_enabled === false && stripe.checkout_enabled === false;
+  const paymentFailClosed = settings.live_payment_capture_enabled === false && stripe.live_payments_enabled === false;
+  const fulfillmentFailClosed = settings.fulfillment_submission_enabled === false && printful.fulfillment_enabled === false;
+  const orderModeFailClosed = settings.printful_order_mode === "draft_only" && printfulModes.length > 0 && printfulModes.every((value) => value === "draft_only");
+  const wixSourceReadOnly = wix.must_remain_untouched === true;
+  const prohibitedCommerceOrderCount = number(prohibitedCommerceOrders);
+  return {
+    checkoutEnabled: !checkoutFailClosed,
+    livePaymentCaptureEnabled: !paymentFailClosed,
+    fulfillmentEnabled: !fulfillmentFailClosed,
+    printfulOrderMode: orderModeFailClosed ? "draft_only" : "unsafe_or_unknown",
+    wixSourceReadOnly,
+    prohibitedCommerceOrders: prohibitedCommerceOrderCount,
+    failClosed: checkoutFailClosed && paymentFailClosed && fulfillmentFailClosed && orderModeFailClosed && wixSourceReadOnly && prohibitedCommerceOrderCount === 0,
+  };
 }
 
 async function blockMigration(db, job, leaseToken, error, now) {

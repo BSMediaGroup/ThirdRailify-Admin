@@ -12,6 +12,7 @@ import {
   verifyTurnstile,
 } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
+import { resolveCoarseLocation } from "./goats-geocoder.js";
 
 export const GOATS_MEDIA_BINDING = "THIRDRAILIFY_PROFILE_MEDIA";
 export const MAX_GOAT_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -237,18 +238,19 @@ export async function finaliseDraft(env, draftToken, input, context = {}) {
   const product = await requirePublicProduct(env, input.productId);
   const main = await requireCommerceDb(env).prepare("SELECT id FROM community_media WHERE submission_id = ? AND role = 'main' AND processing_state = 'ready' LIMIT 1").bind(draft.id).first();
   if (!main) throw new AuthFailure(400, "main_image_required", "A validated main image is required.");
+  const location = await resolveCoarseLocation(env, { city, region, countryCode: country }, context);
   const slug = await uniqueSlug(env, cleanText(input.slug, 120) || displayName);
   const timestamp = nowIso();
-  const locationLabel = [city, region, country].filter(Boolean).join(", ");
+  const locationLabel = location.label;
   const variables = { display_name: displayName, submission_reference: draft.reference_code, product_name: product.title, submitted_date: timestamp, status: "pending", support_url: supportUrl(env) };
   const statements = [
     requireCommerceDb(env).prepare(
       `UPDATE community_submissions SET public_slug = ?, status = 'pending', draft_token_hash = NULL, draft_expires_at = NULL,
        submitter_email = ?, display_name = ?, description = ?, product_id = ?, product_slug_snapshot = ?, product_name_snapshot = ?, rating = ?,
-       city = ?, region = ?, country_code = ?, public_location_label = ?, consent_version = ?, consented_at = ?, submitted_at = ?, updated_at = ?, version = version + 1
+       city = ?, region = ?, country_code = ?, public_location_label = ?, public_latitude = ?, public_longitude = ?, location_confirmed_at = ?, consent_version = ?, consented_at = ?, submitted_at = ?, updated_at = ?, version = version + 1
        WHERE id = ? AND status = 'draft'`,
-    ).bind(slug, email, displayName, description, product.id, product.slug, product.title, rating, city, region || null, country, locationLabel, GOATS_CONSENT_VERSION, timestamp, timestamp, timestamp, draft.id),
-    moderationStatement(env, draft.id, null, "submitted", { productId: product.id, countryCode: country }, timestamp),
+    ).bind(slug, email, displayName, description, product.id, product.slug, product.title, rating, location.city, location.region || null, location.countryCode, locationLabel, location.latitude, location.longitude, timestamp, GOATS_CONSENT_VERSION, timestamp, timestamp, timestamp, draft.id),
+    moderationStatement(env, draft.id, null, "submitted", { productId: product.id, countryCode: location.countryCode, locationResolution: location.provider }, timestamp),
     outboxStatement(env, "goat_submission_received", email, draft.id, `submission-received:${draft.id}`, variables, timestamp),
   ];
   const adminRecipients = configuredAdminRecipients(env);

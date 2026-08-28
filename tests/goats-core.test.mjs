@@ -30,6 +30,7 @@ import {
 
 const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const animatedGif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAIfkEAQAAAAAsAAAAAAEAAQAAAgJEAQA7", "base64");
+const geocoderFetch = async (url) => { const query = new URL(url).searchParams.get("q") || ""; const australia = /sydney/i.test(query); return Response.json({ features: [{ type: "Feature", geometry: { type: "Point", coordinates: australia ? [151.2093, -33.8688] : [-79.3832, 43.6532] }, properties: australia ? { type: "city", name: "Sydney", city: "Sydney", state: "New South Wales", country: "Australia", countrycode: "AU" } : { type: "city", name: "Toronto", city: "Toronto", state: "Ontario", country: "Canada", countrycode: "CA" } }] }); };
 
 test("GOATS moderation API rejects an unauthenticated browser before returning private records", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
@@ -55,7 +56,7 @@ test("guest draft finalisation stays private until validated approval, then proj
   await uploadDraftMedia(env, draft.draftToken, "main", 0, tinyPng, "image/png", { rateKey: "guest-key" });
   await assert.rejects(uploadDraftMedia(env, draft.draftToken, "gallery", 0, animatedGif, "image/gif", { rateKey: "guest-key" }), /valid JPG/);
   await uploadDraftMedia(env, draft.draftToken, "profile", 0, animatedGif, "image/gif", { rateKey: "guest-key" });
-  const finalised = await finaliseDraft(env, draft.draftToken, { email: "private@example.test", displayName: "Test Goat", description: "A sufficiently long and truthful temporary community story.", city: "Toronto", region: "Ontario", countryCode: "CA", productId: product.id, rating: 5, consent: true, consentVersion: "goats-v2-2026-08" }, { rateKey: "guest-key" });
+  const finalised = await finaliseDraft(env, draft.draftToken, { email: "private@example.test", displayName: "Test Goat", description: "A sufficiently long and truthful temporary community story.", city: "Toronto", region: "Ontario", countryCode: "CA", productId: product.id, rating: 5, consent: true, consentVersion: "goats-v2-2026-08" }, { rateKey: "guest-key", fetchImpl: geocoderFetch });
   assert.equal(finalised.status, "pending"); assert.equal((await publicListings(env)).items.length, 0);
   const queuedBeforeRetry = Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM community_email_outbox").first()).count);
   await assert.rejects(finaliseDraft(env, draft.draftToken, { email: "private@example.test" }, { rateKey: "guest-key" }), /draft is invalid|expired/i);
@@ -66,8 +67,8 @@ test("guest draft finalisation stays private until validated approval, then proj
   assert.equal(pendingProfile.content_type, "image/gif");
   await assert.rejects(mediaResponse(env, pendingMedia.id, new Request(`https://thirdrailify-admin.pages.dev/api/goats/media/${pendingMedia.id}`)), /not found/i);
   assert.equal((await mediaResponse(env, pendingMedia.id, new Request(`https://thirdrailify-admin.pages.dev/api/admin/goats/media/${pendingMedia.id}`), { admin: true })).status, 200);
-  await assert.rejects(transitionSubmission(env, pending.id, pending.version, "approve", {}, "master-admin"), /coordinates|location/i);
-  await harness.commerceDb.prepare("UPDATE community_submissions SET public_latitude = 43.653, public_longitude = -79.383, location_confirmed_at = 'now' WHERE id = ?").bind(pending.id).run();
+  assert.deepEqual([pending.public_longitude, pending.public_latitude], [-79.38, 43.65]);
+  assert.ok(pending.location_confirmed_at);
   const approved = await transitionSubmission(env, pending.id, pending.version, "approve", {}, "master-admin");
   assert.equal(approved.item.status, "approved");
   await assert.rejects(transitionSubmission(env, pending.id, pending.version, "approve", {}, "master-admin"), /changed|transition/i);
@@ -77,7 +78,7 @@ test("guest draft finalisation stays private until validated approval, then proj
   const listing = await publicListingBySlug(env, pending.public_slug);
   assert.equal(listing.item.displayName, "Test Goat"); assert.equal(JSON.stringify(listing).includes("private@example.test"), false); assert.equal(JSON.stringify(listing).includes("object_key"), false); assert.equal(JSON.stringify(listing).includes("moderator"), false);
   const gallery = await publicListings(env); assert.deepEqual(gallery.facets.countries, [{ code: "CA", count: 1 }]);
-  const geo = await publicMapGeoJson(env); assert.equal(geo.features.length, 1); assert.deepEqual(geo.features[0].geometry.coordinates, [-79.383, 43.653]); assert.equal(JSON.stringify(geo).includes("private@example.test"), false);
+  const geo = await publicMapGeoJson(env); assert.equal(geo.features.length, 1); assert.deepEqual(geo.features[0].geometry.coordinates, [-79.38, 43.65]); assert.equal(JSON.stringify(geo).includes("private@example.test"), false);
   await assert.rejects(mutateReaction(env, pending.public_slug, "", 1, { rateKey: "anonymous" }), /required field|authentication/i);
   const reactions = await mutateReaction(env, pending.public_slug, "account-1", 1, { rateKey: "account-1" }); assert.deepEqual({ likes: reactions.likes, current: reactions.currentReaction }, { likes: 1, current: 1 });
   const toggled = await mutateReaction(env, pending.public_slug, "account-1", 1, { rateKey: "account-1" }); assert.deepEqual({ likes: toggled.likes, current: toggled.currentReaction }, { likes: 0, current: 0 });
@@ -112,8 +113,8 @@ test("collision-safe finalisation, product validation, draft expiry, and gallery
     await uploadDraftMedia(env, draft.draftToken, "main", 0, tinyPng, "image/png", { rateKey }); return draft;
   };
   const input = { email: "goat@example.test", displayName: "Same Name", description: "A sufficiently long collision-safe community story.", city: "Sydney", countryCode: "AU", productId: product.id, rating: 4, consent: true, consentVersion: "goats-v2-2026-08" };
-  const first = await makeDraft("collision-1"); await finaliseDraft(env, first.draftToken, input, { rateKey: "collision-1" });
-  const second = await makeDraft("collision-2"); await assert.rejects(finaliseDraft(env, second.draftToken, { ...input, productId: "not-a-product" }, { rateKey: "collision-2" }), /product/i); await finaliseDraft(env, second.draftToken, input, { rateKey: "collision-2" });
+  const first = await makeDraft("collision-1"); await finaliseDraft(env, first.draftToken, input, { rateKey: "collision-1", fetchImpl: geocoderFetch });
+  const second = await makeDraft("collision-2"); await assert.rejects(finaliseDraft(env, second.draftToken, { ...input, productId: "not-a-product" }, { rateKey: "collision-2", fetchImpl: geocoderFetch }), /product/i); await finaliseDraft(env, second.draftToken, input, { rateKey: "collision-2", fetchImpl: geocoderFetch });
   const slugs = await harness.commerceDb.prepare("SELECT public_slug FROM community_submissions WHERE status = 'pending' ORDER BY public_slug").all(); assert.deepEqual(slugs.results.map((row) => row.public_slug), ["same-name", "same-name-2"]);
   const rejectedRow = await harness.commerceDb.prepare("SELECT id, version FROM community_submissions WHERE public_slug = 'same-name-2'").first(); await transitionSubmission(env, rejectedRow.id, rejectedRow.version, "reject", { rejectionReason: "Please submit a clearer main image.", moderatorNote: "Private note must never enter email variables." }, "master-admin");
   const rejectedEmail = await harness.commerceDb.prepare("SELECT variables_json FROM community_email_outbox WHERE submission_id = ? AND template_key = 'goat_submission_rejected'").bind(rejectedRow.id).first(); assert.equal(JSON.parse(rejectedEmail.variables_json).rejection_reason, "Please submit a clearer main image."); assert.equal(rejectedEmail.variables_json.includes("Private note"), false);
