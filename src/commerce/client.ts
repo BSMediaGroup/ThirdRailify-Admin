@@ -94,6 +94,10 @@ export type PrintfulSourceVerificationPayload = {
   ok: boolean; store: PrintfulStoreIdentity; configuredStoreId: string | null; configurationMatches: boolean;
 };
 export type MerchandisingProductPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; product: MerchandisingProduct };
+export type CommerceMediaAsset = { url: string; sha256: string; contentType: string; bytes: number };
+export type CommerceMediaLimits = { maxBytes: number; maxProductImages: number; maxAdditionalImages: number; acceptedTypes: string[] };
+export type CommerceMediaIngestPayload = { ok: true; productId: string; primaryImageUrl: string | null; additionalImages: string[]; assets: CommerceMediaAsset[] };
+export type CommerceMediaUploadPayload = { ok: true; productId: string; asset: CommerceMediaAsset; limits: CommerceMediaLimits; uploadedAt: string };
 export type CommerceCollection = {
   id: string; slug: string; title: string; description: string; visibility: "public" | "hidden"; status: "active";
   displayOrder: number; revision: number; assignedProductCount: number; publicProductCount: number;
@@ -367,8 +371,16 @@ export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {
 export function saveMerchandisingProduct(csrfToken: string, productId: string, body: Record<string, unknown>) {
   return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
+export function getCommerceMediaLimits() {
+  return adminApi<{ ok: true; limits: CommerceMediaLimits }>("/api/admin/commerce/media/config");
+}
 export function ingestMerchandisingProductMedia(csrfToken: string, productId: string, imageUrls: string[]) {
-  return adminApi<{ ok: true; productId: string; primaryImageUrl: string | null; additionalImages: string[]; assets: Array<{ url: string; sha256: string; contentType: string; bytes: number }> }>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/media/ingest`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ imageUrls }) });
+  return adminApi<CommerceMediaIngestPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/media/ingest`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ imageUrls }) });
+}
+export function uploadMerchandisingProductMedia(csrfToken: string, productId: string, file: File) {
+  const body = new FormData();
+  body.set("image", file);
+  return adminApi<CommerceMediaUploadPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/media/ingest`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body });
 }
 export function saveMerchandisingVariant(csrfToken: string, productId: string, variantId: string, body: Record<string, unknown>) {
   return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });

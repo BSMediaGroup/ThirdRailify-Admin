@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import { onRequestGet as catalogueRequest } from "../functions/api/public/commerce/catalogue.js";
 import { onRequestGet as productRequest } from "../functions/api/public/commerce/products/[slug].js";
-import { commerceMediaResponse } from "../functions/_shared/commerce-media.js";
+import { commerceMediaResponse, MAX_COMMERCE_IMAGE_BYTES } from "../functions/_shared/commerce-media.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { applySqlBatches, commerceEnvironment, createCommerceDatabases, importPermanentCatalogue, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
@@ -14,6 +14,7 @@ async function masterSession(env) { await ensureEnvironmentMasters(env); const m
 function productBody(overrides = {}) { return { title: "Authoritative Tee", slug: "authoritative-tee", description: "A real product description.", primaryImageUrl: "https://images.example.test/tee.png", additionalImages: ["https://images.example.test/tee-back.png"], categories: ["Apparel"], tags: ["tee"], featured: true, visibility: "public", status: "active", displayOrder: 12, maxQuantity: 5, unitAmount: 2500, currencyCode: "CAD", ...overrides }; }
 function variantBody(overrides = {}) { return { displayLabel: "Medium / Black", size: "M", color: "Black", options: { Size: "M", Color: "Black" }, unitAmount: 3050, currencyCode: "CAD", status: "active", visibility: "public", sellable: false, availability: "active", ...overrides }; }
 function collectionBody(overrides = {}) { return { title: "Signal Collection", slug: "signal-collection", description: "A stable collection.", visibility: "public", displayOrder: 80, ...overrides }; }
+function mediaUploadRequest(url, { bytes, type = "image/png", name = "product.png", origin = ADMIN_ORIGIN, cookie, csrfToken } = {}) { const body = new FormData(); body.set("image", new Blob([bytes || new Uint8Array()], { type }), name); const headers = { Origin: origin }; if (cookie) headers.Cookie = cookie; if (csrfToken) headers["X-CSRF-Token"] = csrfToken; return new Request(url, { method: "POST", headers, body }); }
 
 test("Admin product and variant merchandising requires auth, exact origin, CSRF, capability, validation, and audit", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { master, created, cookie } = await masterSession(env);
@@ -43,6 +44,25 @@ test("product media ingestion copies validated bytes into first-party R2 and ser
   const delivered = await commerceMediaResponse(new Request(payload.primaryImageUrl), env); assert.equal(delivered.status, 200); assert.equal(delivered.headers.get("content-type"), "image/png"); assert.equal(delivered.headers.get("cross-origin-resource-policy"), "cross-origin"); assert.match(delivered.headers.get("cache-control"), /immutable/); assert.deepEqual(new Uint8Array(await delivered.arrayBuffer()), png);
   const repeated = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { imageUrls: [payload.primaryImageUrl] } }), env, data: { commerceFetch: () => { throw new Error("first-party media must not be refetched"); } } }); assert.equal(repeated.status, 200); assert.equal(objects.size, 1);
   const audit = await harness.commerceDb.prepare("SELECT action FROM commerce_audit WHERE action='commerce.product_media_ingested'").first(); assert.equal(audit.action, "commerce.product_media_ingested");
+});
+
+test("direct product media uploads enforce Admin security and byte validation while ignoring caller filenames", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const objects = new Map();
+  const bucket = { async head(key) { return objects.get(key) || null; }, async put(key, body, options) { const bytes = new Uint8Array(body); objects.set(key, { body: bytes, size: bytes.byteLength, httpEtag: '"fixture"', httpMetadata: options.httpMetadata }); }, async get(key) { return objects.get(key) || null; } };
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_PROFILE_MEDIA: bucket, THIRDRAILIFY_PROFILE_MEDIA_ORIGIN: ADMIN_ORIGIN }); const { created, cookie } = await masterSession(env); await insertTestProduct(harness.commerceDb);
+  const png = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+  const url = `${ADMIN_ORIGIN}/api/admin/commerce/products/product-test-001/media/ingest`;
+  const unauthenticated = await commerceRequest({ request: mediaUploadRequest(url, { bytes: png, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(unauthenticated.status, 401);
+  const noCsrf = await commerceRequest({ request: mediaUploadRequest(url, { bytes: png, cookie }), env, data: {} }); assert.equal(noCsrf.status, 403);
+  const wrongOrigin = await commerceRequest({ request: mediaUploadRequest(url, { bytes: png, cookie, csrfToken: created.csrfToken, origin: "https://evil.example" }), env, data: {} }); assert.equal(wrongOrigin.status, 403);
+  const unsupported = await commerceRequest({ request: mediaUploadRequest(url, { bytes: png, type: "image/gif", name: "fake.gif", cookie, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(unsupported.status, 415); assert.equal((await unsupported.json()).error, "commerce_media_format_invalid");
+  const malformed = await commerceRequest({ request: mediaUploadRequest(url, { bytes: new TextEncoder().encode("not really a png"), name: "fake.png", cookie, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(malformed.status, 415); assert.equal((await malformed.json()).error, "commerce_media_format_invalid");
+  const oversized = await commerceRequest({ request: mediaUploadRequest(url, { bytes: new Uint8Array(MAX_COMMERCE_IMAGE_BYTES + 1), name: "huge.png", cookie, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(oversized.status, 413); assert.equal((await oversized.json()).error, "commerce_media_too_large");
+  const uploaded = await commerceRequest({ request: mediaUploadRequest(url, { bytes: png, name: "../../caller-path.exe.png", cookie, csrfToken: created.csrfToken }), env, data: {} }); assert.equal(uploaded.status, 200); const payload = await uploaded.json();
+  assert.deepEqual(payload.limits, { maxBytes: 10 * 1024 * 1024, maxProductImages: 25, maxAdditionalImages: 24, acceptedTypes: ["image/jpeg", "image/png", "image/webp"] });
+  assert.match(payload.asset.url, /^https:\/\/thirdrailify-admin\.pages\.dev\/commerce-media\/[a-f0-9]{64}\.png$/); assert.equal(payload.asset.contentType, "image/png"); assert.equal(payload.asset.bytes, png.byteLength);
+  assert.equal(objects.size, 1); const [objectKey] = objects.keys(); assert.match(objectKey, /^commerce\/catalogue\/[a-f0-9]{64}\.png$/); assert.doesNotMatch(objectKey, /caller|path|exe|\.\./);
+  const audit = await harness.commerceDb.prepare("SELECT action,metadata_json FROM commerce_audit WHERE action='commerce.product_media_uploaded'").first(); assert.equal(audit.action, "commerce.product_media_uploaded"); assert.match(audit.metadata_json, /direct_upload/);
 });
 
 test("Admin product listing paginates after search and filters with bounded page sizes and correct totals", async (t) => {

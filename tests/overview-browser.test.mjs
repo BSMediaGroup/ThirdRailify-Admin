@@ -105,6 +105,22 @@ test("Admin inbox, sidebar queue counts, and account indicator render without ov
     assert.equal(await page.locator(".admin-account__badge").textContent(), "2");
     await page.locator(".admin-account__trigger").click();
     assert.equal(await page.getByRole("menuitem", { name: /Admin Inbox/ }).count(), 1);
+    const signOutAlignment = await page.getByRole("menuitem", { name: "Sign out" }).evaluate((button) => {
+      const buttonBox = button.getBoundingClientRect();
+      const iconBox = button.querySelector("svg")?.getBoundingClientRect();
+      const labelBox = button.querySelector("span")?.getBoundingClientRect();
+      const style = getComputedStyle(button);
+      return {
+        justifyContent: style.justifyContent,
+        textAlign: style.textAlign,
+        iconOffset: iconBox ? iconBox.left - buttonBox.left : Number.POSITIVE_INFINITY,
+        labelFollowsIcon: Boolean(iconBox && labelBox && labelBox.left > iconBox.right),
+      };
+    });
+    assert.equal(signOutAlignment.justifyContent, "flex-start", `Sign out is left-justified at ${width}x${height}`);
+    assert.equal(signOutAlignment.textAlign, "left", `Sign out text is left-aligned at ${width}x${height}`);
+    assert.equal(signOutAlignment.iconOffset < 20, true, `Sign out starts at the menu's left padding at ${width}x${height}`);
+    assert.equal(signOutAlignment.labelFollowsIcon, true, `Sign out label follows its icon at ${width}x${height}`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `no horizontal overflow at ${width}x${height}`);
     assert.deepEqual(errors, []);
     await context.close();

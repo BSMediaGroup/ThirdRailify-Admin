@@ -61,11 +61,12 @@ test("GOATS approved records expose durable content, media, and reaction reset c
 });
 
 test("Admin inbox is linked from navigation, shell indicators, overview, and account menu", async () => {
-  const [app, navigation, shell, account, overview, inbox] = await Promise.all([read("src/App.tsx"), read("src/config/navigation.ts"), read("src/components/AdminShell.tsx"), read("src/auth/AdminAccountWidget.tsx"), read("src/pages/OverviewPage.tsx"), read("src/pages/InboxPage.tsx")]);
+  const [app, navigation, shell, account, overview, inbox, styles] = await Promise.all([read("src/App.tsx"), read("src/config/navigation.ts"), read("src/components/AdminShell.tsx"), read("src/auth/AdminAccountWidget.tsx"), read("src/pages/OverviewPage.tsx"), read("src/pages/InboxPage.tsx"), read("src/styles/global.css")]);
   assert.match(app, /path="inbox" element={<InboxPage/);
   assert.match(navigation, /path: "\/inbox"[\s\S]{0,100}label: "Admin Inbox"/);
   assert.match(shell, /actionable\.goats\.submissions/); assert.match(shell, /nav-badge/);
   assert.match(account, /Admin Inbox/); assert.match(account, /admin-account__badge/);
+  assert.match(styles, /\.admin-account__actions button \{[^}]*justify-content: flex-start/);
   assert.match(overview, /Latest notices/); assert.match(overview, /Open full inbox/);
   assert.match(inbox, /Mark all read/); assert.match(inbox, /Unread only/);
 });

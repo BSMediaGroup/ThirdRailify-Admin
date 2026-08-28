@@ -210,6 +210,17 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 - Replaced the complete-catalogue featured checkbox wall with current-featured ordering/removal and a separate searchable, filtered, paginated add/find browser. Responsive and keyboard-focused coverage includes 1440, 1024, 768, and 390 pixel layouts.
 - No D1 migration, provider request, catalogue migration continuation, checkout/payment/fulfillment change, deployment, or Public repository change is part of this milestone.
 
+## 2026-08-29 — Admin account menu alignment
+
+- Restored the Admin account menu's Sign out action to the same left-justified icon-and-label layout as the other menu actions. The account-menu-scoped rule now overrides the global centered button layout, with live Chromium regression coverage at 1440 and 390 widths.
+
+## 2026-08-29 — direct Product Editor media uploads
+
+- Extended the existing authenticated commerce-media ingestion endpoint with a narrow `multipart/form-data` upload operation. Direct uploads reuse the Admin-owned `THIRDRAILIFY_PROFILE_MEDIA` R2 binding, exact-origin/session/CSRF/capability/rate protections, JPG/PNG/WebP byte sniffing, the existing 10 MB limit, SHA-256 content addressing, immutable `/commerce-media/*` URLs, and commerce/auth audit conventions.
+- Replaced the Product Editor's primary URL field and additional-image textarea with a responsive Product Media workspace: live previews and deliberate broken-image states, upload/replace, HTTPS URL ingestion, multi-file picker and drag/drop, independent per-file results, gallery removal/reordering, Set as Primary, deduplication, and a secondary Advanced URL list.
+- Kept upload storage separate from product association. Successful uploads update only the editor's dirty working state until `Save product`; replacing or removing an association never deletes an R2 object, and saving performs no Printful, Wix, checkout, payment, fulfillment, or other provider operation.
+- Added focused server and 1440/768/390 browser coverage for security, format/size validation, opaque naming, legacy URL ingestion, upload failure isolation, working-state preservation, primary promotion, gallery ordering/removal, and canonical URL persistence. No D1 migration, Public edit, provider request, deployment, or Printful migration continuation is part of this milestone.
+
 ## 2026-08-29 — first-party catalogue media and modal editors
 
 - Copied all 464 unique current catalogue images (466 product image references across 49 public products) into immutable, content-addressed Admin R2 objects and replaced the Commerce D1 browser projection with the first-party `/commerce-media/*` route. Product image edits now ingest validated JPG/PNG/WebP HTTPS sources into R2 before merchandising data is saved.

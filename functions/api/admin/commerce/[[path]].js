@@ -50,7 +50,7 @@ import {
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
-import { ingestCommerceProductMedia } from "../../../_shared/commerce-media.js";
+import { commerceMediaLimits, ingestCommerceProductMedia, uploadCommerceProductMedia } from "../../../_shared/commerce-media.js";
 import {
   createTaxRegistration,
   issueOrderDocumentAccess,
@@ -120,6 +120,9 @@ async function handleGet(request, env, path) {
   } else if (path === "orders") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOrdersPayload(env, session);
+  } else if (path === "media/config") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = commerceMediaLimits();
   } else if (/^orders\/[^/]+\/documents\/(receipt|invoice)$/.test(path)) {
     await requireCommerceCapability(env, session, "commerce.view");
     const [, orderId, , documentType] = path.split("/");
@@ -261,10 +264,16 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     payload = await updateFeaturedProducts(env, session, body);
     authEventType = "commerce_featured_products_updated";
   } else if (/^products\/[^/]+\/media\/ingest$/.test(path)) {
-    const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
-    payload = await ingestCommerceProductMedia(env, session, decodePathPart(path.split("/")[1]), body, fetchImpl);
-    authEventType = "commerce_product_media_ingested";
+    const productId = decodePathPart(path.split("/")[1]);
+    if (String(request.headers.get("content-type") || "").toLowerCase().startsWith("multipart/form-data")) {
+      payload = await uploadCommerceProductMedia(env, session, productId, request);
+      authEventType = "commerce_product_media_uploaded";
+    } else {
+      const body = await readJsonBody(request);
+      payload = await ingestCommerceProductMedia(env, session, productId, body, fetchImpl);
+      authEventType = "commerce_product_media_ingested";
+    }
   } else if (path === "collections") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");

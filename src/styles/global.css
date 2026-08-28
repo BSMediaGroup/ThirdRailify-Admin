@@ -385,7 +385,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .admin-account__overview dd { margin: 0; overflow: hidden; color: var(--ink); font-size: .67rem; text-overflow: ellipsis; white-space: nowrap; }
 .admin-account__actions { display: grid; }
 .admin-account__actions a,
-.admin-account__actions button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; text-align: left; }
+.admin-account__actions button { display: flex; width: 100%; min-height: 38px; align-items: center; justify-content: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; text-align: left; }
 .admin-account__actions a:hover,
 .admin-account__actions button:hover,
 .admin-account__actions a:focus-visible,
@@ -1158,6 +1158,67 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .commerce-integration-metadata > div { padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
 .commerce-integration-metadata dt { color: var(--quiet); font-size: .58rem; text-transform: uppercase; }
 .commerce-integration-metadata dd { margin: 4px 0 0; overflow-wrap: anywhere; font-size: .72rem; }
+.product-media-editor { min-width: 0; margin: 0; padding: 18px; border: 1px solid rgba(243,201,40,.38); border-radius: 11px; background: linear-gradient(145deg,rgba(243,201,40,.045),rgba(255,255,255,.012)); }
+.product-media-editor > legend { padding: 0 8px; color: var(--gold); font: 700 .72rem "Geist Mono",monospace; letter-spacing: .08em; text-transform: uppercase; }
+.product-media-editor__intro,.product-media-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.product-media-editor__intro { margin-bottom: 14px; }
+.product-media-editor__intro strong,.product-media-editor__intro p { display: block; margin: 0; }
+.product-media-editor__intro p { max-width: 700px; margin-top: 4px; color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.product-media-editor__intro > span { flex: 0 0 auto; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--quiet); font: .58rem "Geist Mono",monospace; }
+.product-media-primary,.product-media-additional { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 9px; background: #090908; }
+.product-media-additional { position: relative; margin-top: 11px; transition: border-color .16s ease,box-shadow .16s ease; }
+.product-media-additional:has(.product-media-dropzone.is-dragging) { border-color: var(--gold); box-shadow: inset 0 0 0 1px rgba(243,201,40,.26); }
+.product-media-section-heading { align-items: center; }
+.product-media-section-heading h3,.product-media-section-heading p { margin: 0; }
+.product-media-section-heading h3 { margin-top: 3px; font-size: 1.15rem; }
+.product-media-section-heading h3 span { color: var(--quiet); font: .58rem "Geist Mono",monospace; }
+.product-media-primary-badge { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid rgba(243,201,40,.4); border-radius: 999px; color: var(--gold); font: 700 .58rem "Geist Mono",monospace; text-transform: uppercase; }
+.product-media-primary__body { display: grid; grid-template-columns: 168px minmax(0,1fr); gap: 16px; margin-top: 12px; }
+.product-media-thumbnail { width: 92px; height: 92px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #151510; }
+.product-media-thumbnail.is-large { width: 168px; height: 168px; }
+.product-media-thumbnail img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.product-media-thumbnail > span { display: grid; place-items: center; gap: 5px; padding: 7px; color: var(--quiet); text-align: center; }
+.product-media-thumbnail small { font-size: .55rem; line-height: 1.25; }
+.product-media-primary__details { display: flex; min-width: 0; flex-direction: column; justify-content: center; }
+.product-media-primary__details > strong,.product-media-primary__details > small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.product-media-primary__details > small { margin-top: 4px; color: var(--quiet); font: .6rem "Geist Mono",monospace; white-space: nowrap; }
+.product-media-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 12px; }
+.product-media-action,.product-media-url-entry button,.product-media-advanced button { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: rgba(255,255,255,.02); color: var(--paper); font: 700 .64rem var(--body); cursor: pointer; }
+.product-media-action:hover,.product-media-action:focus-visible,.product-media-url-entry button:hover,.product-media-url-entry button:focus-visible { border-color: var(--gold); color: var(--gold); outline: 2px solid rgba(243,201,40,.2); outline-offset: 2px; }
+.product-media-action.is-danger { color: #f5a18d; }
+.product-media-action input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.product-media-action:has(input:disabled),.product-media-url-entry button:disabled { opacity: .4; cursor: default; }
+.product-media-url-entry { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 8px; margin-top: 10px; padding: 10px; border: 1px solid rgba(243,201,40,.22); border-radius: 8px; background: rgba(243,201,40,.025); }
+.product-media-url-entry label,.product-media-advanced label { display: grid; min-width: 0; gap: 5px; }
+.product-media-url-entry label > span,.product-media-advanced label > span { color: var(--quiet); font: .56rem "Geist Mono",monospace; text-transform: uppercase; }
+.product-media-url-entry input,.product-media-advanced textarea { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #060605; color: var(--paper); font: inherit; }
+.product-media-dropzone { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 7px; min-height: 70px; margin: 11px 0; padding: 12px; border: 1px dashed rgba(243,201,40,.3); border-radius: 8px; color: var(--muted); background: rgba(243,201,40,.018); text-align: center; pointer-events: none; }
+.product-media-dropzone.is-dragging { border-color: var(--gold); color: var(--gold); background: rgba(243,201,40,.075); }
+.product-media-dropzone span { font-size: .7rem; font-weight: 700; }
+.product-media-dropzone small { flex-basis: 100%; color: var(--quiet); font-size: .6rem; }
+.product-media-gallery { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.product-media-gallery > li { display: grid; min-width: 0; grid-template-columns: 92px minmax(0,1fr); grid-template-rows: 1fr auto; gap: 8px 10px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #0d0d0a; }
+.product-media-gallery__identity { min-width: 0; align-self: center; }
+.product-media-gallery__identity strong,.product-media-gallery__identity small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.product-media-gallery__identity strong { font-size: .7rem; }
+.product-media-gallery__identity small { margin-top: 4px; color: var(--quiet); font: .56rem "Geist Mono",monospace; white-space: nowrap; }
+.product-media-gallery__actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 5px; }
+.product-media-gallery__actions button { width: 34px; height: 32px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.product-media-gallery__actions button:hover:not(:disabled),.product-media-gallery__actions button:focus-visible { border-color: var(--gold); color: var(--gold); outline: none; }
+.product-media-gallery__actions button.is-danger { color: #f5a18d; }
+.product-media-gallery__actions button:disabled { opacity: .28; cursor: default; }
+.product-media-empty { display: grid; min-height: 110px; place-items: center; align-content: center; gap: 7px; border: 1px solid var(--line); border-radius: 8px; color: var(--quiet); font-size: .68rem; }
+.product-media-advanced-toggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 11px; padding: 4px 0; border: 0; background: transparent; color: var(--quiet); font: .6rem "Geist Mono",monospace; cursor: pointer; }
+.product-media-advanced-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.product-media-advanced { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 8px; margin-top: 7px; }
+.product-media-error { margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(242,141,117,.45); border-radius: 7px; color: #f5a18d; background: rgba(242,141,117,.055); font-size: .68rem; }
+.product-media-upload-status { display: grid; gap: 5px; margin-top: 10px; }
+.product-media-upload-status > div { display: grid; min-width: 0; grid-template-columns: 20px minmax(120px,.45fr) minmax(0,1fr); align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: #0b0b09; }
+.product-media-upload-status > div > span { display: grid; place-items: center; color: var(--gold); }
+.product-media-upload-status > div.is-error > span,.product-media-upload-status > div.is-error small { color: #f5a18d; }
+.product-media-upload-status strong,.product-media-upload-status small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-media-upload-status strong { font-size: .64rem; }
+.product-media-upload-status small { color: var(--quiet); font-size: .6rem; }
 @media (max-width: 1100px) { .commerce-product-filters { grid-template-columns: repeat(3,minmax(0,1fr)); } .commerce-product-row { grid-template-columns: 58px minmax(170px,1.6fr) minmax(100px,.7fr) minmax(100px,.7fr) minmax(120px,1fr) auto; } .featured-products-manager__grid { grid-template-columns: 1fr; } }
 
 @media (max-width: 760px) {
@@ -1172,6 +1233,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .commerce-product-row__actions { justify-content: start; }
   .commerce-pagination { grid-template-columns: auto minmax(0,1fr) auto; }
   .commerce-pagination > span { grid-column: 1/-1; grid-row: 2; text-align: center; }
+  .product-media-gallery { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 520px) {
@@ -1204,6 +1266,18 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .commerce-pagination > div { display: none; }
   .commerce-pagination button { min-width: 0; width: 100%; }
   .commerce-presentation-controls > div,.featured-finder__tools { grid-template-columns: 1fr; }
+  .product-media-editor { padding: 13px; }
+  .product-media-editor__intro,.product-media-section-heading { align-items: stretch; flex-direction: column; }
+  .product-media-editor__intro > span { align-self: flex-start; }
+  .product-media-primary__body { grid-template-columns: 1fr; }
+  .product-media-thumbnail.is-large { width: 100%; height: min(70vw,260px); }
+  .product-media-actions { display: grid; grid-template-columns: 1fr; }
+  .product-media-action { width: 100%; }
+  .product-media-url-entry,.product-media-advanced { grid-template-columns: 1fr; }
+  .product-media-gallery > li { grid-template-columns: 74px minmax(0,1fr); }
+  .product-media-gallery .product-media-thumbnail { width: 74px; height: 74px; }
+  .product-media-upload-status > div { grid-template-columns: 20px minmax(0,1fr); }
+  .product-media-upload-status small { grid-column: 2; white-space: normal; }
   .featured-current,.featured-finder { padding: 13px; }
   .featured-current li { grid-template-columns: 25px 46px minmax(0,1fr) auto; }
   .featured-current li > .merchandising-order-actions { grid-column: 3; }
