@@ -13,7 +13,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 ## Current state
 
 - Vite 5, React 18, TypeScript, and React Router.
-- Branded responsive sidebar with a discreet topbar-triggered desktop icon-only collapse, a full mobile drawer, a header-aligned authenticated account menu, server-hydrated overview, future-area route shells, and a branded 404.
+- Branded responsive sidebar with a discreet topbar-triggered desktop icon-only collapse, a full mobile drawer, a header-aligned authenticated account menu, a fail-soft cross-authority operational overview, future-area route shells, and a branded 404.
 - American Captain display typography rendered at its real weight with lightly relaxed heading tracking and line-height.
 - Routes for Overview, Watch / Broadcast, Site Content, expandable Shop (Products, Collections, Orders), Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.
 - D1-backed email/password accounts, verification/reset email, Discord/Google/GitHub/X OAuth, explicit Turnstile, hashed sessions, one-time public handoff, rate limiting, and bounded audit records.
@@ -53,6 +53,7 @@ npm run typecheck
 npm run test:printful
 npm run test:functions
 npm run test:browser:fulfillment
+npm run test:browser:overview
 npm run goats:import:dry-run -- C:\path\to\wix-goats-export.json
 npm run goats:wix:build-import
 npm run test:goats:wix-import
@@ -66,7 +67,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 
 | Path | Current purpose |
 | --- | --- |
-| `/` | Authenticated account/configuration posture and deferred-module boundaries |
+| `/` | Cross-authority Watch, Commerce, GOATS, Site Content, account, runtime-posture, and operational-priority overview |
 | `/watch` | Master-only current broadcast summary and retained-episode visibility controls; no manual archive creation |
 | `/content` | Master-only normal promo and automatic Live Now banner presentation editor with safe previews |
 | `/products` | D1-backed featured-product selection and stable hero ordering for the bounded snapshot catalogue |

@@ -82,6 +82,23 @@ test("Site Content exposes separate normal and fixture-labelled Live Now configu
   assert.match(client, /X-CSRF-Token/);
 });
 
+test("Overview is a fail-soft operational snapshot rather than a deferred foundation page", async () => {
+  const [page, styles, navigation, scripts] = await Promise.all([read("src/pages/OverviewPage.tsx"), read("src/styles/global.css"), read("src/config/navigation.ts"), read("package.json")]);
+  for (const authority of ["/api/admin/status", "getCommerceOverview", "manageWatch", "getGoatsOverview", "readBannerSettings"]) assert.match(page, new RegExp(authority.replaceAll("/", "\\/")));
+  for (const label of ["Operational workspaces", "Runtime posture", "Operational priorities", "Recent GOATS", "Partial operational snapshot"]) assert.match(page, new RegExp(label));
+  assert.match(page, /Missing values remain unavailable rather than being replaced with zero/);
+  assert.match(page, /Master Admin access is required/);
+  assert.match(page, /overview-pulse__credential/);
+  assert.match(page, /Account level \/ server verified/);
+  assert.match(page, /access\.isMasterAdmin \? "Master" : "Full Admin"/);
+  assert.doesNotMatch(page, /Authenticated foundation|Still intentionally deferred|Products and orders remain provider-neutral shells/);
+  assert.match(styles, /\.overview-module-grid/);
+  assert.match(styles, /\.overview-pulse__shield::before/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.overview-hero::after/);
+  assert.match(navigation, /summary: "Cross-system operational state, queues, and direct workspace routes\."/);
+  assert.match(scripts, /"test:browser:overview"/);
+});
+
 test("Orders exposes only the Master-controlled Stripe TEST acceptance and truthful fulfillment state", async () => {
   const [page, client, core, route, shell] = await Promise.all([read("src/pages/CommercePages.tsx"), read("src/commerce/client.ts"), read("functions/_shared/checkout-core.js"), read("functions/api/admin/commerce/[[path]].js"), read("src/components/AdminShell.tsx")]);
   for (const label of ["TEST CHECKOUT · STRIPE SANDBOX · NO REAL CHARGE", "Generate Test Checkout", "Single acceptance Session already created", "Printful order", "Open Stripe TEST Checkout"]) assert.match(page, new RegExp(label));

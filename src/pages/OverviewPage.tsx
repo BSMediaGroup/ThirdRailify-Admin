@@ -75,8 +75,14 @@ export function OverviewPage() {
       </div>
       <aside className="overview-pulse" aria-label="Operational snapshot summary">
         <div className="overview-pulse__top"><span><i className={errorCount ? "is-warning" : ""} />System pulse</span><small>{loading ? "Reading authorities" : refreshedAt ? formatTime(refreshedAt) : "Not checked"}</small></div>
-        <div className="overview-pulse__readout"><strong>{loading && !hasSnapshot ? "—" : `${reportingSources}/${expectedSources}`}</strong><span>sources reporting</span></div>
-        <dl><div><dt>Session</dt><dd>{access.isMasterAdmin ? "Master Admin" : "Full Admin"}</dd></div><div><dt>Attention</dt><dd>{hasSnapshot ? priorities.length : "—"}</dd></div><div><dt>Authority</dt><dd>Server resolved</dd></div></dl>
+        <div className="overview-pulse__body">
+          <div className="overview-pulse__credential">
+            <span className="overview-pulse__shield" aria-hidden="true"><AdminIcon name="shield" size={28} /></span>
+            <div><small>Session role</small><strong>{access.isMasterAdmin ? "Master" : "Full Admin"}</strong><span>Account level / server verified</span></div>
+          </div>
+          <div className="overview-pulse__readout"><strong>{loading && !hasSnapshot ? "—" : `${reportingSources}/${expectedSources}`}</strong><span>sources reporting</span></div>
+        </div>
+        <dl><div><dt>Access</dt><dd>{access.isMasterAdmin ? "All workspaces" : "Core workspaces"}</dd></div><div><dt>Attention</dt><dd>{hasSnapshot ? priorities.length : "—"}</dd></div><div><dt>Authority</dt><dd>Server</dd></div></dl>
       </aside>
     </section>
 
@@ -162,7 +168,7 @@ function OverviewHeading({ eyebrow, title, id, detail }: { eyebrow: string; titl
 function Fact({ label, value }: { label: string; value: string | number }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
 function ModuleState({ text }: { text: string }) { return <div className="overview-module__fallback"><span aria-hidden="true">—</span><p>{text}</p></div>; }
 function Posture({ label, value, tone }: { label: string; value: string; tone: string }) { return <article className={`overview-posture__item is-${tone}`}><i /><span>{label}</span><strong>{value}</strong></article>; }
-function RecentGoat({ item }: { item: GoatAdminSummary }) { return <Link to={`/goats/${item.id}`}><span>{item.mainMediaUrl ? <img src={item.mainMediaUrl} alt="" /> : <i><AdminIcon name="goats" size={18} /></i>}</span><div><strong>{item.displayName}</strong><small>{item.product.name || "Product unavailable"} · {formatDate(item.submittedAt)}</small></div><b className={`goats-status goats-status--${item.status}`}>{item.status}{item.status === "approved" && !item.published ? " / hidden" : ""}</b></Link>; }
+function RecentGoat({ item }: { item: GoatAdminSummary }) { const [imageFailed, setImageFailed] = useState(false); return <Link to={`/goats/${item.id}`}><span>{item.mainMediaUrl && !imageFailed ? <img src={item.mainMediaUrl} alt="" onError={() => setImageFailed(true)} /> : <i><AdminIcon name="goats" size={18} /></i>}</span><div><strong>{item.displayName}</strong><small>{item.product.name || "Product unavailable"} · {formatDate(item.submittedAt)}</small></div><b className={`goats-status goats-status--${item.status}`}>{item.status}{item.status === "approved" && !item.published ? " / hidden" : ""}</b></Link>; }
 
 function operationalPriorities(snapshot: Snapshot, errors: SourceErrors): Priority[] {
   const priorities: Priority[] = [];
@@ -183,7 +189,7 @@ function sourceFallback(loading: boolean, error?: string) { return loading ? "Ch
 function configuredLabel(value: boolean | undefined, loading: boolean, error?: string) { return value === true ? "Configured" : value === false ? "Not configured" : sourceFallback(loading, error); }
 function configuredTone(value: boolean | undefined, error?: string) { return error ? error === "restricted" ? "muted" : "danger" : value === true ? "safe" : value === false ? "attention" : "muted"; }
 function displayNumber(value: number | null | undefined) { return typeof value === "number" ? value : "—"; }
-function numberOrNull(value: unknown) { const number = Number(value); return Number.isFinite(number) && number >= 0 ? number : null; }
+function numberOrNull(value: unknown) { if (value === null || value === undefined || value === "") return null; const number = Number(value); return Number.isFinite(number) && number >= 0 ? number : null; }
 function enabledLabel(value: boolean) { return value ? "Enabled" : "Disabled"; }
 function presentationLabel(value: string) { return value === "live" ? "Live now" : value === "upcoming" ? "Upcoming" : value === "archive" ? "Latest episode" : value.replaceAll("_", " "); }
 function providerLabel(provider: string) { return provider === "twitter" ? "X" : provider.charAt(0).toUpperCase() + provider.slice(1); }

@@ -14,8 +14,8 @@ export const adminAreas: AdminArea[] = [
     label: "Overview",
     shortLabel: "Overview",
     icon: "overview",
-    summary: "Scaffold posture and implementation boundaries.",
-    futureScope: ["Authenticated system health", "Approval queues", "Owned operational metrics"],
+    summary: "Cross-system operational state, queues, and direct workspace routes.",
+    futureScope: ["Authenticated system posture", "Live authority summaries", "Actionable moderation queues"],
   },
   {
     path: "/watch",
@@ -213,8 +213,8 @@ export const adminAreas: AdminArea[] = [
     label: "Users / Access",
     shortLabel: "Access",
     icon: "users",
-    summary: "Future identity, roles, sessions, and audit posture.",
-    futureScope: ["Real authentication", "Least-privilege roles", "Session and audit controls"],
+    summary: "Authenticated accounts, roles, sessions, and audit posture.",
+    futureScope: ["D1 identity authority", "Least-privilege roles", "Session and audit controls"],
   },
   {
     path: "/integrations",
