@@ -1,9 +1,12 @@
 import { AuthFailure, cleanText, nowIso, randomId, sendAccountEmail } from "./auth-core.js";
 import {
+  commerceOverview,
   commerceAccessForSession,
   COMMERCE_TEMPLATE_VARIABLES,
   decryptCommerceSecret,
   encryptCommerceSecret,
+  isStripeTestCredentialConfigured,
+  isStripeWebhookSigningConfigured,
   maskTaxIdentifier,
   requireCommerceDb,
   validateTemplate,
@@ -15,6 +18,8 @@ export { COMMERCE_TEMPLATE_VARIABLES };
 const TAX_TYPES = new Set(["gst_hst", "qst", "pst", "rst", "other"]);
 const TAX_STATUSES = new Set(["unverified", "pending", "verified", "active", "inactive", "expired", "not_registered", "unavailable"]);
 const ACCEPTED_TEST_ORDER_ID = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
+const ACCEPTED_TEST_SESSION_ID = "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC";
+const ACCEPTED_TEST_EVENT_ID = "evt_1U9OysB2jGrq9Tn1apdsFgi2";
 
 export async function taxRegistrationsPayload(env, session) {
   const access = await commerceAccessForSession(env, session);
@@ -128,6 +133,260 @@ export async function productionReadinessPayload(env, session) {
   const mandatory = ["business", "tax", "payments", "catalogue", "shipping", "fulfillment", "communications", "documents", "checkout"];
   return { ok: true, access, authority: "Commerce D1", phase: "pre_cutover", productionReady: mandatory.every((key) => domains[key].ready), mandatoryDomains: mandatory, domains, checkedAt: nowIso() };
 }
+
+export async function paymentsControlPlanePayload(env, session) {
+  const overview = await commerceOverview(env, session);
+  const access = overview.access;
+  const canSeeTechnicalIds = access.isMasterAdmin || access.capabilities.includes("commerce.payments.manage");
+  const apiCredentialConfigured = isStripeTestCredentialConfigured(env);
+  const webhookSigningSecretConfigured = isStripeWebhookSigningConfigured(env);
+  const stripeOverview = overview.providers.find((provider) => provider.provider === "stripe") || null;
+
+  if (!overview.databaseConfigured) {
+    return emptyPaymentsControlPlane({ overview, stripeOverview, access, apiCredentialConfigured, webhookSigningSecretConfigured });
+  }
+
+  const db = requireCommerceDb(env);
+  const [readiness, profile, settingsResult, providerRow, paypalRow, acceptedOrder, acceptedWebhook, paymentRows, webhookCounts, latestProcessed, latestFailed] = await Promise.all([
+    productionReadinessPayload(env, session),
+    db.prepare("SELECT trading_name,country_code,province_code,currency_code,public_contact_email,support_email,legal_business_name_ciphertext,private_address_ciphertext,business_registration_number_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
+    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled','live_payment_capture_enabled','fulfillment_submission_enabled','stripe_api_configured','stripe_webhook_configured','stripe_test_checkout_enabled','transactional_email_enabled')").all(),
+    db.prepare("SELECT integration_mode,status,environment,external_account_id,country_code,currency_code,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider='stripe'").first(),
+    db.prepare("SELECT integration_mode,status,environment,country_code,currency_code,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider='paypal'").first(),
+    db.prepare(`SELECT o.id,o.environment,o.currency_code,o.customer_gross_amount,o.refund_amount,o.payment_status,
+                       o.checkout_status,o.stripe_checkout_session_id,o.stripe_payment_intent_id,o.created_at,
+                       o.checkout_created_at,o.payment_confirmed_at,o.fulfillment_status,o.printful_order_id,
+                       i.product_name,i.variant_name,i.quantity
+                FROM commerce_orders o
+                LEFT JOIN commerce_order_items i ON i.order_id=o.id AND i.line_number=1
+                WHERE o.id=?`).bind(ACCEPTED_TEST_ORDER_ID).first(),
+    db.prepare(`SELECT provider_event_id,event_type,event_created_at,received_at,livemode,related_object_id,
+                       related_object_type,processing_status,processed_at,result_code,payload_sha256
+                FROM commerce_webhook_events
+                WHERE provider='stripe' AND provider_event_id=?`).bind(ACCEPTED_TEST_EVENT_ID).first(),
+    db.prepare(`SELECT environment,
+                       SUM(CASE WHEN payment_status IN ('paid','partially_refunded','refunded') THEN 1 ELSE 0 END) successful_payments,
+                       SUM(CASE WHEN payment_status IN ('paid','partially_refunded','refunded') THEN customer_gross_amount ELSE 0 END) gross_amount,
+                       SUM(CASE WHEN payment_status IN ('partially_refunded','refunded') THEN 1 ELSE 0 END) refunded_payments,
+                       SUM(CASE WHEN payment_status IN ('paid','partially_refunded','refunded') THEN refund_amount ELSE 0 END) refund_amount,
+                       SUM(CASE WHEN payment_status IN ('paid','partially_refunded','refunded') THEN customer_gross_amount-refund_amount ELSE 0 END) net_after_refunds
+                FROM commerce_orders
+                WHERE customer_payment_provider='stripe'
+                GROUP BY environment`).all(),
+    db.prepare(`SELECT COUNT(*) total_count,
+                       SUM(CASE WHEN processing_status='processed' THEN 1 ELSE 0 END) processed_count,
+                       SUM(CASE WHEN processing_status='error' THEN 1 ELSE 0 END) failure_count,
+                       SUM(CASE WHEN livemode=0 THEN 1 ELSE 0 END) test_count,
+                       SUM(CASE WHEN livemode=1 THEN 1 ELSE 0 END) live_count
+                FROM commerce_webhook_events WHERE provider='stripe'`).first(),
+    db.prepare(`SELECT provider_event_id,event_type,event_created_at,received_at,livemode,related_object_id,
+                       related_object_type,processing_status,processed_at,result_code
+                FROM commerce_webhook_events WHERE provider='stripe' AND processing_status='processed'
+                ORDER BY received_at DESC LIMIT 1`).first(),
+    db.prepare(`SELECT provider_event_id,event_type,event_created_at,received_at,livemode,related_object_id,
+                       related_object_type,processing_status,processed_at,result_code
+                FROM commerce_webhook_events WHERE provider='stripe' AND processing_status='error'
+                ORDER BY received_at DESC LIMIT 1`).first(),
+  ]);
+
+  const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
+  const metadata = json(providerRow?.safe_metadata_json, {});
+  const apiVerified = Boolean(providerRow?.status === "connected" && providerRow?.environment === "test" && providerRow?.integration_mode === "direct_merchant" && metadata.api_configured === true && settings.stripe_api_configured === true);
+  const webhookAcceptanceVerified = Boolean(metadata.webhook_configured === true && settings.stripe_webhook_configured === true);
+  const canonicalTestAccepted = acceptedTestEvidenceValid(acceptedOrder, acceptedWebhook);
+  const businessDomain = readiness.domains.business;
+  const taxDomain = readiness.domains.tax;
+  const communicationsDomain = readiness.domains.communications;
+  const documentsDomain = readiness.domains.documents;
+  const fulfillmentDomain = readiness.domains.fulfillment;
+  const checkoutEnabled = settings.checkout_enabled === true;
+  const livePaymentsEnabled = settings.live_payment_capture_enabled === true;
+  const fulfillmentEnabled = settings.fulfillment_submission_enabled === true;
+  const controlledTestEnabled = settings.stripe_test_checkout_enabled === true;
+  const summaries = paymentSummaries(paymentRows?.results || []);
+  const merchantCountryReady = profile?.country_code === "CA" && providerRow?.country_code?.toUpperCase() === "CA";
+  const merchantCurrencyReady = profile?.currency_code === "CAD" && providerRow?.currency_code?.toUpperCase() === "CAD";
+  const stripeState = apiVerified && webhookAcceptanceVerified && canonicalTestAccepted ? "verified" : apiCredentialConfigured || webhookSigningSecretConfigured ? "configured" : "unverified";
+
+  return {
+    ok: true,
+    databaseConfigured: true,
+    access,
+    authority: "Commerce D1 and server runtime configuration",
+    overall: {
+      stripeState,
+      technicalConfiguration: apiVerified && webhookAcceptanceVerified ? "verified" : apiCredentialConfigured || webhookSigningSecretConfigured ? "configured" : "unverified",
+      testAcceptance: canonicalTestAccepted ? "verified" : "unverified",
+      productionPayments: livePaymentsEnabled && checkoutEnabled ? "configured" : "disabled",
+      payoutReadiness: "unverified",
+      productionReady: readiness.domains.payments.ready === true && checkoutEnabled,
+    },
+    merchant: merchantProjection(profile, businessDomain),
+    stripe: {
+      provider: "stripe",
+      displayName: cleanText(metadata.account_display_name, 160) || profile?.trading_name || "Third Railify Official",
+      integrationMode: providerRow?.integration_mode === "direct_merchant" ? "direct_merchant" : "unavailable",
+      environment: providerRow?.environment === "live" ? "live" : "test",
+      accountCreated: metadata.account_created === true,
+      accountId: canSeeTechnicalIds ? safeProviderId(providerRow?.external_account_id, "acct_") : null,
+      accountIdRestricted: !canSeeTechnicalIds && Boolean(providerRow?.external_account_id),
+      countryCode: cleanCode(providerRow?.country_code, 2),
+      currencyCode: cleanCode(providerRow?.currency_code, 3),
+      apiCredentialConfigured,
+      apiVerified,
+      webhookSigningSecretConfigured,
+      webhookAcceptanceVerified,
+      checkoutEnabled,
+      livePaymentsEnabled,
+      chargesEnabledInTest: apiVerified && typeof metadata.charges_enabled === "boolean" ? metadata.charges_enabled : null,
+      payoutsEnabledInTest: apiVerified && typeof metadata.payouts_enabled === "boolean" ? metadata.payouts_enabled : null,
+      detailsSubmittedInTest: apiVerified && typeof metadata.details_submitted === "boolean" ? metadata.details_submitted : null,
+      lastVerifiedAt: cleanText(providerRow?.last_synchronized_at, 80) || null,
+    },
+    paypal: paypalProjection(paypalRow),
+    gates: [
+      paymentGate("direct_merchant", "Stripe direct merchant architecture", providerRow?.integration_mode === "direct_merchant" ? "ready" : "action_required", providerRow?.integration_mode === "direct_merchant" ? "Dedicated merchant account; no Connect or connected-account flow." : "The stored provider mode is not direct merchant."),
+      paymentGate("api_credential", "Server API credential", apiCredentialConfigured ? "ready" : "action_required", apiCredentialConfigured ? "A recognizable TEST credential is present in server-only runtime custody." : "The server TEST credential is not configured."),
+      paymentGate("api_verification", "Stripe TEST API verification", apiVerified ? "ready" : "unverified", apiVerified ? "Persisted CA/CAD account verification evidence is present." : "Credential presence has not been promoted to verified account evidence."),
+      paymentGate("webhook_secret", "Webhook signing secret", webhookSigningSecretConfigured ? "ready" : "action_required", webhookSigningSecretConfigured ? "A valid-shaped signing secret is present in server-only runtime custody." : "The server signing secret is not configured."),
+      paymentGate("test_acceptance", "Controlled TEST checkout", canonicalTestAccepted ? "ready" : "unverified", canonicalTestAccepted ? "The canonical TEST order and signed payment-confirmation event agree." : "Canonical TEST payment acceptance is not proven."),
+      paymentGate("webhook_acceptance", "Webhook TEST acceptance", webhookAcceptanceVerified ? "ready" : "unverified", webhookAcceptanceVerified ? "Persisted signed sandbox receipt proof is present; provider endpoint state was not queried." : "No accepted signed sandbox event proves the webhook path."),
+      paymentGate("business", "Business profile", businessDomain.ready ? "ready" : "action_required", businessDomain.summary, "/commerce/business"),
+      paymentGate("merchant_country", "Merchant country", merchantCountryReady ? "ready" : "action_required", merchantCountryReady ? "Business and Stripe evidence agree on Canada." : "Stored business and provider country evidence does not agree on Canada.", "/commerce/business"),
+      paymentGate("commerce_currency", "Commerce currency", merchantCurrencyReady ? "ready" : "action_required", merchantCurrencyReady ? "Business and Stripe evidence agree on CAD." : "Stored business and provider currency evidence does not agree on CAD.", "/commerce/business"),
+      paymentGate("tax", "Tax configuration", taxDomain.ready ? "ready" : "action_required", taxDomain.summary, "/commerce/tax"),
+      paymentGate("communications", "Customer receipts and email", communicationsDomain.ready ? "ready" : communicationsDomain.details.sendEnabled === false ? "disabled" : "action_required", communicationsDomain.summary, "/commerce/emails"),
+      paymentGate("documents", "Receipt and invoice readiness", documentsDomain.ready ? "ready" : "action_required", documentsDomain.summary, "/commerce/tax"),
+      paymentGate("fulfillment", "Fulfillment", fulfillmentEnabled && fulfillmentDomain.ready ? "ready" : "disabled", fulfillmentDomain.summary, "/commerce/fulfillment"),
+      paymentGate("checkout", "Public checkout", checkoutEnabled ? "ready" : "disabled", checkoutEnabled ? "Normal checkout is enabled." : "Normal checkout remains explicitly disabled."),
+      paymentGate("live_payments", "Live payment capture", livePaymentsEnabled ? "ready" : "disabled", livePaymentsEnabled ? "Live payment capture is enabled." : "Live payment capture remains explicitly disabled."),
+      paymentGate("payouts", "Payout readiness", "unverified", "Third Railify does not store Stripe balance, schedule, bank, or payout execution state."),
+    ],
+    productionActivation: {
+      checkout: { enabled: checkoutEnabled, state: checkoutEnabled ? "configured" : "disabled" },
+      livePayments: { enabled: livePaymentsEnabled, state: livePaymentsEnabled ? "configured" : "disabled" },
+      fulfillment: { enabled: fulfillmentEnabled, state: fulfillmentEnabled ? "configured" : "disabled" },
+      controlledTestCheckout: { enabled: controlledTestEnabled, state: controlledTestEnabled ? "configured" : "disabled" },
+      mutableFromThisRoute: false,
+    },
+    testEvidence: canonicalTestAccepted ? serializeTestEvidence(acceptedOrder, acceptedWebhook) : null,
+    webhookHealth: {
+      endpointImplemented: true,
+      signingSecretConfigured: webhookSigningSecretConfigured,
+      acceptanceVerified: webhookAcceptanceVerified,
+      externallyVerified: false,
+      environment: "test",
+      counts: {
+        total: safeCount(webhookCounts?.total_count),
+        processed: safeCount(webhookCounts?.processed_count),
+        failed: safeCount(webhookCounts?.failure_count),
+        test: safeCount(webhookCounts?.test_count),
+        live: safeCount(webhookCounts?.live_count),
+        duplicates: null,
+      },
+      latestProcessed: serializeWebhookEvidence(latestProcessed),
+      latestFailed: serializeWebhookEvidence(latestFailed),
+      idempotency: { implemented: true, evidence: "Unique provider and event ID ledger; duplicate count is not persisted." },
+    },
+    paymentSummary: {
+      currencyCode: "CAD",
+      live: summaries.live,
+      test: summaries.test,
+      processingFees: { available: false, reason: "Stripe processing fees are not included because no authoritative fee projection is available." },
+    },
+    paymentMethods: [
+      { id: "card", label: "Card payments", state: "configured", detail: "Stripe-hosted Checkout architecture supported; production checkout is disabled." },
+      { id: "apple_pay", label: "Apple Pay", state: "unverified", detail: "Provider-managed eligibility depends on Stripe, device, and domain configuration; enablement is not proven." },
+      { id: "google_pay", label: "Google Pay", state: "unverified", detail: "Provider-managed eligibility depends on Stripe, device, and domain configuration; enablement is not proven." },
+    ],
+    payoutState: {
+      state: "unverified",
+      management: "managed_in_stripe",
+      balanceIntegrationAvailable: false,
+      payoutIntegrationAvailable: false,
+      bankDestinationStored: false,
+      nextPayout: null,
+      availableBalance: null,
+      pendingBalance: null,
+      schedule: null,
+      testCapabilityObserved: apiVerified && typeof metadata.payouts_enabled === "boolean" ? metadata.payouts_enabled : null,
+    },
+    dependencies: [
+      dependency("business", "Business information", businessDomain, "/commerce/business"),
+      dependency("tax", "Tax configuration", taxDomain, "/commerce/tax"),
+      dependency("documents", "Receipts and invoices", documentsDomain, "/commerce/tax"),
+      dependency("communications", "Customer emails", communicationsDomain, "/commerce/emails"),
+      dependency("fulfillment", "Fulfillment", fulfillmentDomain, "/commerce/fulfillment"),
+    ],
+    technical: {
+      checkoutArchitecture: "stripe_hosted_checkout_sessions",
+      directMerchant: providerRow?.integration_mode === "direct_merchant",
+      stripeConnect: false,
+      connectedAccounts: false,
+      stripeAccountHeader: false,
+      destinationCharges: false,
+      applicationFees: false,
+      transfers: false,
+      publishableKeyRequired: false,
+      providerMutationAvailable: false,
+    },
+    checkedAt: nowIso(),
+  };
+}
+
+function emptyPaymentsControlPlane({ overview, stripeOverview, access, apiCredentialConfigured, webhookSigningSecretConfigured }) {
+  return {
+    ok: true,
+    databaseConfigured: false,
+    access,
+    authority: "Server runtime configuration; Commerce D1 unavailable",
+    overall: { stripeState: apiCredentialConfigured || webhookSigningSecretConfigured ? "configured" : "unavailable", technicalConfiguration: "unverified", testAcceptance: "unverified", productionPayments: "disabled", payoutReadiness: "unverified", productionReady: false },
+    merchant: { displayName: overview.business.tradingName, countryCode: overview.business.countryCode, provinceCode: overview.business.provinceCode, currencyCode: overview.business.currencyCode, publicContactEmail: overview.business.publicContactEmail || null, supportEmail: overview.business.supportEmail || null, completeness: "unavailable", legalIdentityStored: false, privateAddressStored: false, businessRegistrationStored: false },
+    stripe: { provider: "stripe", displayName: "Third Railify Official", integrationMode: "direct_merchant", environment: "test", accountCreated: stripeOverview?.accountCreated === true, accountId: null, accountIdRestricted: false, countryCode: stripeOverview?.countryCode || "CA", currencyCode: stripeOverview?.currencyCode || "CAD", apiCredentialConfigured, apiVerified: false, webhookSigningSecretConfigured, webhookAcceptanceVerified: false, checkoutEnabled: false, livePaymentsEnabled: false, chargesEnabledInTest: null, payoutsEnabledInTest: null, detailsSubmittedInTest: null, lastVerifiedAt: null },
+    paypal: { provider: "paypal", state: "deferred", integrationMode: "direct_merchant", environment: "deferred", countryCode: "CA", currencyCode: "CAD", credentialConfigured: false, donationsEnabled: false, membershipEnabled: false, shopCheckoutEnabled: false, providerMutationAvailable: false, lastVerifiedAt: null },
+    gates: [paymentGate("authority", "Commerce D1 authority", "action_required", "Commerce D1 is unavailable, so persisted payments evidence cannot be verified."), paymentGate("checkout", "Public checkout", "disabled", "Normal checkout remains disabled."), paymentGate("live_payments", "Live payment capture", "disabled", "Live payment capture remains disabled."), paymentGate("payouts", "Payout readiness", "unverified", "No Stripe balance, payout, or bank state is available.")],
+    productionActivation: { checkout: { enabled: false, state: "disabled" }, livePayments: { enabled: false, state: "disabled" }, fulfillment: { enabled: false, state: "disabled" }, controlledTestCheckout: { enabled: false, state: "disabled" }, mutableFromThisRoute: false },
+    testEvidence: null,
+    webhookHealth: { endpointImplemented: true, signingSecretConfigured: webhookSigningSecretConfigured, acceptanceVerified: false, externallyVerified: false, environment: "test", counts: { total: null, processed: null, failed: null, test: null, live: null, duplicates: null }, latestProcessed: null, latestFailed: null, idempotency: { implemented: true, evidence: "Unique provider and event ID ledger requires Commerce D1." } },
+    paymentSummary: { currencyCode: "CAD", live: unavailablePaymentSummary(), test: unavailablePaymentSummary(), processingFees: { available: false, reason: "Stripe processing fees are not available." } },
+    paymentMethods: [{ id: "card", label: "Card payments", state: "configured", detail: "Stripe-hosted Checkout architecture supported; production checkout is disabled." }, { id: "apple_pay", label: "Apple Pay", state: "unverified", detail: "Provider-managed eligibility is not verified." }, { id: "google_pay", label: "Google Pay", state: "unverified", detail: "Provider-managed eligibility is not verified." }],
+    payoutState: { state: "unverified", management: "managed_in_stripe", balanceIntegrationAvailable: false, payoutIntegrationAvailable: false, bankDestinationStored: false, nextPayout: null, availableBalance: null, pendingBalance: null, schedule: null, testCapabilityObserved: null },
+    dependencies: [],
+    technical: { checkoutArchitecture: "stripe_hosted_checkout_sessions", directMerchant: true, stripeConnect: false, connectedAccounts: false, stripeAccountHeader: false, destinationCharges: false, applicationFees: false, transfers: false, publishableKeyRequired: false, providerMutationAvailable: false },
+    checkedAt: nowIso(),
+  };
+}
+
+function acceptedTestEvidenceValid(order, webhook) {
+  return Boolean(order?.id === ACCEPTED_TEST_ORDER_ID && order.environment === "test" && order.currency_code === "CAD" && Number(order.customer_gross_amount) === 1500 && order.payment_status === "paid" && order.fulfillment_status === "disabled" && !order.printful_order_id && order.stripe_checkout_session_id === ACCEPTED_TEST_SESSION_ID && webhook?.provider_event_id === ACCEPTED_TEST_EVENT_ID && webhook.event_type === "checkout.session.completed" && Number(webhook.livemode) === 0 && webhook.related_object_id === ACCEPTED_TEST_SESSION_ID && webhook.related_object_type === "checkout.session" && webhook.processing_status === "processed" && webhook.result_code === "payment_confirmed" && typeof webhook.payload_sha256 === "string" && webhook.payload_sha256.length === 64);
+}
+
+function serializeTestEvidence(order, webhook) {
+  return { orderId: order.id, environment: "test", amount: safeMoney(order.customer_gross_amount), refundAmount: safeMoney(order.refund_amount), currencyCode: "CAD", paymentStatus: order.payment_status, checkoutStatus: order.checkout_status, fulfillmentStatus: order.fulfillment_status, productName: cleanText(order.product_name, 240) || null, variantName: cleanText(order.variant_name, 240) || null, quantity: safeCount(order.quantity), stripeSessionId: safeProviderId(order.stripe_checkout_session_id, "cs_test_"), paymentIntentId: safeProviderId(order.stripe_payment_intent_id, "pi_"), webhookEventId: safeProviderId(webhook.provider_event_id, "evt_"), webhookResult: cleanText(webhook.result_code, 80) || null, createdAt: cleanText(order.created_at, 80) || null, checkoutCreatedAt: cleanText(order.checkout_created_at, 80) || null, paymentConfirmedAt: cleanText(order.payment_confirmed_at, 80) || null, webhookReceivedAt: cleanText(webhook.received_at, 80) || null };
+}
+
+function paymentSummaries(rows) {
+  const result = { live: zeroPaymentSummary(), test: zeroPaymentSummary() };
+  for (const row of rows) {
+    if (row.environment !== "live" && row.environment !== "test") continue;
+    result[row.environment] = { available: true, successfulPayments: safeCount(row.successful_payments), grossAmount: safeMoney(row.gross_amount), refundedPayments: safeCount(row.refunded_payments), refundAmount: safeMoney(row.refund_amount), netAfterRefunds: safeSignedMoney(row.net_after_refunds) };
+  }
+  return result;
+}
+
+function zeroPaymentSummary() { return { available: true, successfulPayments: 0, grossAmount: 0, refundedPayments: 0, refundAmount: 0, netAfterRefunds: 0 }; }
+function unavailablePaymentSummary() { return { available: false, successfulPayments: null, grossAmount: null, refundedPayments: null, refundAmount: null, netAfterRefunds: null }; }
+function safeCount(value) { const number = Number(value); return Number.isSafeInteger(number) && number >= 0 ? number : 0; }
+function safeMoney(value) { const number = Number(value); return Number.isSafeInteger(number) && number >= 0 ? number : 0; }
+function safeSignedMoney(value) { const number = Number(value); return Number.isSafeInteger(number) ? number : null; }
+function safeProviderId(value, prefix) { const id = cleanText(value, 255); return id && id.startsWith(prefix) && /^[A-Za-z0-9_]+$/.test(id) ? id : null; }
+function cleanCode(value, length) { const code = cleanText(value, length).toUpperCase(); return code.length === length ? code : null; }
+function paymentGate(id, label, state, detail, href = null) { return { id, label, state, detail, href }; }
+function dependency(id, label, domainValue, href) { return { id, label, state: domainValue.ready ? "ready" : domainValue.details?.enabled === false || domainValue.details?.sendEnabled === false ? "disabled" : "action_required", detail: domainValue.summary, href }; }
+function merchantProjection(profile, businessDomain) { return { displayName: cleanText(profile?.trading_name, 160) || "Third Railify Official", countryCode: cleanCode(profile?.country_code, 2), provinceCode: cleanCodeRange(profile?.province_code, 2, 3), currencyCode: cleanCode(profile?.currency_code, 3), publicContactEmail: cleanText(profile?.public_contact_email, 254) || null, supportEmail: cleanText(profile?.support_email, 254) || null, completeness: businessDomain.ready ? "ready" : "incomplete", legalIdentityStored: Boolean(profile?.legal_business_name_ciphertext), privateAddressStored: Boolean(profile?.private_address_ciphertext), businessRegistrationStored: Boolean(profile?.business_registration_number_ciphertext) }; }
+function cleanCodeRange(value, minimum, maximum) { const code = cleanText(value, maximum).toUpperCase(); return code.length >= minimum && code.length <= maximum ? code : null; }
+function paypalProjection(row) { const metadata = json(row?.safe_metadata_json, {}); return { provider: "paypal", state: ["disabled", "deferred", "setup_required"].includes(row?.status) ? row.status : "deferred", integrationMode: row?.integration_mode === "direct_merchant" ? "direct_merchant" : "unavailable", environment: cleanText(row?.environment, 20) || "deferred", countryCode: cleanCode(row?.country_code, 2), currencyCode: cleanCode(row?.currency_code, 3), credentialConfigured: metadata.credentials_configured === true, donationsEnabled: metadata.donations_active === true, membershipEnabled: metadata.vip_active === true, shopCheckoutEnabled: metadata.shop_processor === true, providerMutationAvailable: false, lastVerifiedAt: cleanText(row?.last_synchronized_at, 80) || null }; }
+function serializeWebhookEvidence(row) { return row ? { eventId: safeProviderId(row.provider_event_id, "evt_"), eventType: cleanText(row.event_type, 255) || null, eventCreatedAt: Number.isSafeInteger(Number(row.event_created_at)) ? Number(row.event_created_at) : null, receivedAt: cleanText(row.received_at, 80) || null, processedAt: cleanText(row.processed_at, 80) || null, environment: Number(row.livemode) === 1 ? "live" : "test", relatedObjectId: safeProviderId(row.related_object_id, "cs_"), relatedObjectType: cleanText(row.related_object_type, 120) || null, processingStatus: cleanText(row.processing_status, 40) || null, resultCode: cleanText(row.result_code, 80) || null } : null; }
 
 export async function templatePreviewPayload(env, session, templateKey, input) {
   await commerceAccessForSession(env, session);

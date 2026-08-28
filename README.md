@@ -85,7 +85,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/api/catalogue/merchandising` | Cacheable public read projection of product ID/slug/featured order only; no write path |
 | `/orders` | Read-only bounded local Checkout/payment/fulfillment states; no synthetic orders or revenue |
 | `/commerce` | Truthful commerce readiness and provider status overview |
-| `/commerce/payments` | Dedicated Stripe/PayPal/Wix posture plus the permission-gated, read-only Stripe TEST account verification action |
+| `/commerce/payments` | Stripe direct-merchant Payments & Payouts control plane with canonical TEST evidence, isolated TEST/LIVE summaries, webhook health, fail-closed activation gates, truthful Stripe-managed payout boundaries, and a disabled future PayPal donations scaffold |
 | `/api/commerce/checkout` | Exact-Public-origin customer POST/OPTIONS endpoint; server-priced Stripe-hosted TEST Checkout behind disabled product/configuration gates |
 | `/api/webhooks/stripe` | External Stripe sandbox delivery route; POST/raw-body/signature/D1 required, with no browser authentication and only invariant-checked existing-order payment confirmation |
 | `/commerce/business` | Structured public/private business profile; persistence fails closed without commerce D1 and encryption |
@@ -130,6 +130,8 @@ ThirdRailify-Admin/
 │   ├── pages/              Live Overview/Accounts, commerce control plane, future areas, and 404
 │   └── styles/             Tokens and responsive admin visual system
 ├── tests/
+│   ├── payments-control-plane.test.mjs  Direct-merchant authority, evidence, financial-isolation, permission, and no-provider-call coverage
+│   ├── payments-browser.test.mjs  390/768/1440 rendering, overflow, locks, links, and payout-boundary coverage
 │   ├── printful.test.mjs   Focused single-store, no-write, persistence, and Store-ID invariant coverage
 │   ├── printful-catalogue.test.mjs  Full GET-only source/target snapshot safety coverage
 │   ├── fulfillment-browser.test.mjs  390/768/1440 operator-state and explicit-download regression

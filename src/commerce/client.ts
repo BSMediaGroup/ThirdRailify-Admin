@@ -33,6 +33,28 @@ export type CommerceTemplate = {
   templateKey: string; templateKind: "email" | "document"; displayName: string; subject: string; preheader: string; heading: string; introduction: string; bodyBlocks: string[];
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; enabled: boolean; revision: number;
 };
+export type PaymentAuthorityState = "configured" | "verified" | "unverified" | "disabled" | "unavailable";
+export type PaymentGateState = "ready" | "action_required" | "disabled" | "unverified" | "not_applicable";
+export type PaymentGate = { id: string; label: string; state: PaymentGateState; detail: string; href: string | null };
+export type PaymentSummary = { available: boolean; successfulPayments: number | null; grossAmount: number | null; refundedPayments: number | null; refundAmount: number | null; netAfterRefunds: number | null };
+export type PaymentWebhookEvidence = { eventId: string | null; eventType: string | null; eventCreatedAt: number | null; receivedAt: string | null; processedAt: string | null; environment: "test" | "live"; relatedObjectId: string | null; relatedObjectType: string | null; processingStatus: string | null; resultCode: string | null };
+export type PaymentsControlPlanePayload = {
+  ok: boolean; databaseConfigured: boolean; access: CommerceAccess; authority: string;
+  overall: { stripeState: PaymentAuthorityState; technicalConfiguration: PaymentAuthorityState; testAcceptance: PaymentAuthorityState; productionPayments: PaymentAuthorityState; payoutReadiness: PaymentAuthorityState; productionReady: boolean };
+  merchant: { displayName: string; countryCode: string | null; provinceCode: string | null; currencyCode: string | null; publicContactEmail: string | null; supportEmail: string | null; completeness: "ready" | "incomplete" | "unavailable"; legalIdentityStored: boolean; privateAddressStored: boolean; businessRegistrationStored: boolean };
+  stripe: { provider: "stripe"; displayName: string; integrationMode: "direct_merchant" | "unavailable"; environment: "test" | "live"; accountCreated: boolean; accountId: string | null; accountIdRestricted: boolean; countryCode: string | null; currencyCode: string | null; apiCredentialConfigured: boolean; apiVerified: boolean; webhookSigningSecretConfigured: boolean; webhookAcceptanceVerified: boolean; checkoutEnabled: boolean; livePaymentsEnabled: boolean; chargesEnabledInTest: boolean | null; payoutsEnabledInTest: boolean | null; detailsSubmittedInTest: boolean | null; lastVerifiedAt: string | null };
+  paypal: { provider: "paypal"; state: "disabled" | "deferred" | "setup_required"; integrationMode: "direct_merchant" | "unavailable"; environment: string; countryCode: string | null; currencyCode: string | null; credentialConfigured: boolean; donationsEnabled: boolean; membershipEnabled: boolean; shopCheckoutEnabled: boolean; providerMutationAvailable: false; lastVerifiedAt: string | null };
+  gates: PaymentGate[];
+  productionActivation: { checkout: { enabled: boolean; state: PaymentAuthorityState }; livePayments: { enabled: boolean; state: PaymentAuthorityState }; fulfillment: { enabled: boolean; state: PaymentAuthorityState }; controlledTestCheckout: { enabled: boolean; state: PaymentAuthorityState }; mutableFromThisRoute: false };
+  testEvidence: null | { orderId: string; environment: "test"; amount: number; refundAmount: number; currencyCode: "CAD"; paymentStatus: string; checkoutStatus: string; fulfillmentStatus: string; productName: string | null; variantName: string | null; quantity: number; stripeSessionId: string | null; paymentIntentId: string | null; webhookEventId: string | null; webhookResult: string | null; createdAt: string | null; checkoutCreatedAt: string | null; paymentConfirmedAt: string | null; webhookReceivedAt: string | null };
+  webhookHealth: { endpointImplemented: boolean; signingSecretConfigured: boolean; acceptanceVerified: boolean; externallyVerified: boolean; environment: "test" | "live"; counts: { total: number | null; processed: number | null; failed: number | null; test: number | null; live: number | null; duplicates: number | null }; latestProcessed: PaymentWebhookEvidence | null; latestFailed: PaymentWebhookEvidence | null; idempotency: { implemented: boolean; evidence: string } };
+  paymentSummary: { currencyCode: "CAD"; live: PaymentSummary; test: PaymentSummary; processingFees: { available: false; reason: string } };
+  paymentMethods: Array<{ id: "card" | "apple_pay" | "google_pay"; label: string; state: PaymentAuthorityState; detail: string }>;
+  payoutState: { state: "unverified"; management: "managed_in_stripe"; balanceIntegrationAvailable: false; payoutIntegrationAvailable: false; bankDestinationStored: false; nextPayout: null; availableBalance: null; pendingBalance: null; schedule: null; testCapabilityObserved: boolean | null };
+  dependencies: Array<{ id: string; label: string; state: PaymentGateState; detail: string; href: string }>;
+  technical: { checkoutArchitecture: "stripe_hosted_checkout_sessions"; directMerchant: boolean; stripeConnect: false; connectedAccounts: false; stripeAccountHeader: false; destinationCharges: false; applicationFees: false; transfers: false; publishableKeyRequired: false; providerMutationAvailable: false };
+  checkedAt: string;
+};
 export type TemplatesPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; templates: CommerceTemplate[] };
 export type TaxRegistration = { id: string; registrationType: "gst_hst" | "qst" | "pst" | "rst" | "other"; jurisdiction: string; countryCode: string; provinceCode: string | null; maskedIdentifier: string; status: string; effectiveDate: string | null; expiresAt: string | null; notes: string; documentDisclosureEnabled: boolean; revision: number; updatedAt: string };
 export type TaxPayload = { ok: boolean; access: CommerceAccess; registrations: TaxRegistration[]; calculation: { provider: string; stripeTax: string; ratesConfigured: boolean }; readiness: { ready: boolean; status: string; reason: string } };
@@ -220,6 +242,7 @@ type SnapshotContinuationPayload = {
 };
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
+export function getPaymentsControlPlane() { return adminApi<PaymentsControlPlanePayload>("/api/admin/commerce/payments"); }
 export function verifyStripeConnection(csrfToken: string) {
   return adminApi<CommerceOverviewPayload>("/api/admin/commerce/stripe/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
 }
