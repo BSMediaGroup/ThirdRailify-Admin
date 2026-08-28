@@ -1150,6 +1150,57 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .collection-editor__actions > span { margin-right: auto; color: var(--quiet); font-size: .68rem; }
 .collection-editor__actions .button-link { margin: 0; }
 .collection-delete { color: #f28d75; }
+.collection-management { min-width: 0; }
+.collection-admin-heading > div:last-child { display: flex; align-items: center; gap: 8px; }
+.collection-admin-heading > div:last-child .button-link { margin: 0; }
+.collection-filters { grid-template-columns: minmax(220px,1.6fr) repeat(3,minmax(150px,.8fr)); }
+.collection-admin-list { display: grid; gap: 8px; margin-top: 14px; }
+.collection-admin-list > article { position: relative; display: grid; grid-template-columns: 58px minmax(210px,1.7fr) minmax(230px,.8fr) auto; align-items: center; gap: 13px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #0b0b09; }
+.collection-admin-list > article.is-selected { border-color: rgba(243,201,40,.52); background: rgba(243,201,40,.045); }
+.collection-admin-list > article.is-bulk { padding-left: 45px; }
+.collection-thumbnail { width: 58px; height: 58px; display: grid; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #151512; color: var(--quiet); }
+.collection-thumbnail img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.collection-thumbnail > span { display: grid; place-items: center; gap: 3px; }
+.collection-thumbnail small { color: var(--quiet); font: .48rem "Geist Mono",monospace; text-transform: uppercase; }
+.collection-admin-list__identity,.collection-admin-list__identity strong,.collection-admin-list__identity small,.collection-admin-list__identity span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-admin-list__identity small { margin-top: 3px; color: var(--gold); font: .58rem "Geist Mono",monospace; }
+.collection-admin-list__identity span { margin-top: 5px; color: var(--quiet); font-size: .64rem; }
+.collection-admin-list article dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin: 0; }
+.collection-admin-list article dl div { min-width: 0; }
+.collection-admin-list article dt { color: var(--quiet); font-size: .56rem; text-transform: uppercase; }
+.collection-admin-list article dd { margin: 3px 0 0; color: var(--paper); font-size: .84rem; }
+.collection-admin-list article dl small { display: block; margin-top: 2px; color: var(--quiet); font-size: .56rem; }
+.collection-order-manager > p { margin: 0 0 13px; color: var(--quiet); font-size: .68rem; }
+.collection-order-manager > ol { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; margin: 0; padding: 0; list-style: none; }
+.collection-order-manager > ol li { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #0b0b09; }
+.collection-order-manager li > span:nth-child(2),.collection-order-manager li strong,.collection-order-manager li small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-order-manager li small { margin-top: 2px; color: var(--quiet); font-size: .56rem; }
+.collection-media-authority { display: grid; grid-template-columns: 58px minmax(0,1fr); align-items: center; gap: 9px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #0b0b09; }
+.collection-media-authority > strong { grid-column: 1/-1; color: var(--paper); font-size: .72rem; }
+.collection-media-authority p { margin: 0; color: var(--quiet); font-size: .62rem; line-height: 1.45; }
+.collection-membership-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+.collection-membership-summary strong { color: var(--gold); font-size: .74rem; }
+.collection-membership-summary span { color: var(--quiet); font-size: .62rem; }
+.collection-membership-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.collection-membership-grid > section { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #090908; }
+.collection-membership-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.collection-membership-heading p,.collection-membership-heading h3 { margin: 0; }
+.collection-membership-heading h3 { margin-top: 3px; font-size: 1.05rem; }
+.collection-membership-heading > span { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--gold); font: .56rem "Geist Mono",monospace; }
+.collection-product-results { display: grid; gap: 6px; margin-top: 10px; }
+.collection-product-results > article,.collection-product-results > label { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 7px; background: #0d0d0a; }
+.collection-product-results > label { grid-template-columns: auto minmax(0,1fr); cursor: pointer; }
+.collection-product-results > label.is-selected { border-color: rgba(243,201,40,.5); background: rgba(243,201,40,.05); }
+.collection-product-results input { accent-color: var(--gold); }
+.collection-product-identity { display: grid; grid-template-columns: 46px minmax(0,1fr); align-items: center; gap: 8px; min-width: 0; }
+.collection-product-identity .commerce-product-row__image { width: 46px; height: 46px; }
+.collection-product-identity > span:last-child,.collection-product-identity strong,.collection-product-identity small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-product-identity small { margin-top: 3px; color: var(--quiet); font-size: .56rem; }
+.collection-membership-grid .commerce-pagination { grid-template-columns: auto minmax(0,1fr) auto; }
+.collection-membership-grid .commerce-pagination > span { display: none; }
+.collection-add-selected { width: 100%; margin: 10px 0 0; }
+.collection-editor .merchandising-savebar > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.collection-editor .merchandising-savebar .button-link { margin: 0; }
 .commerce-toggle { display: flex; align-items: center; gap: 9px; min-height: 43px; color: var(--muted); font-size: .76rem; }
 .commerce-toggle input { width: 18px; height: 18px; accent-color: var(--gold); }
 .commerce-variant-manager { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
@@ -1234,6 +1285,10 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .commerce-pagination { grid-template-columns: auto minmax(0,1fr) auto; }
   .commerce-pagination > span { grid-column: 1/-1; grid-row: 2; text-align: center; }
   .product-media-gallery { grid-template-columns: 1fr; }
+  .collection-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .collection-admin-list > article { grid-template-columns: 58px minmax(0,1fr) auto; align-items: start; }
+  .collection-admin-list article dl { grid-column: 2; }
+  .collection-membership-grid,.collection-order-manager > ol { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 520px) {
@@ -1282,6 +1337,20 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
   .featured-current li { grid-template-columns: 25px 46px minmax(0,1fr) auto; }
   .featured-current li > .merchandising-order-actions { grid-column: 3; }
   .featured-current li > .commerce-icon-action { grid-column: 4; grid-row: 1/3; }
+  .collection-admin-heading > div:last-child,.collection-membership-summary { align-items: stretch; flex-direction: column; }
+  .collection-admin-heading > div:last-child { width: 100%; }
+  .collection-admin-heading > div:last-child > button { width: 100%; }
+  .collection-filters { grid-template-columns: 1fr; }
+  .collection-admin-list > article,.collection-admin-list > article.is-bulk { grid-template-columns: 52px minmax(0,1fr); padding: 10px; padding-left: 42px; }
+  .collection-admin-list > article .collection-thumbnail { width: 52px; height: 52px; }
+  .collection-admin-list article dl,.collection-admin-list article .commerce-product-row__actions { grid-column: 2; }
+  .collection-admin-list article .commerce-product-row__actions { display: grid; grid-template-columns: repeat(2,42px); justify-content: start; }
+  .collection-media-authority { grid-column: 1; }
+  .collection-assignment { padding: 11px; }
+  .collection-membership-grid > section { padding: 9px; }
+  .collection-membership-grid .commerce-pagination > div { display: none; }
+  .collection-editor .merchandising-savebar > div { display: grid; grid-template-columns: 1fr; }
+  .collection-editor .merchandising-savebar > div > button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

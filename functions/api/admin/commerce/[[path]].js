@@ -14,7 +14,11 @@ import {
 import {
   businessProfilePayload,
   archiveCollection,
+  bulkUpdateCollections,
   bulkUpdateMerchandisingProducts,
+  collectionDetailPayload,
+  collectionListPayload,
+  collectionProductsListPayload,
   collectionsPayload,
   collectionOptionsPayload,
   commerceOverview,
@@ -31,6 +35,7 @@ import {
   updateBusinessProfile,
   updateCollection,
   updateCollectionOrder,
+  updateCollectionMemberships,
   updateCollectionProducts,
   updateFeaturedProducts,
   updateMerchandisingProduct,
@@ -111,9 +116,18 @@ async function handleGet(request, env, path) {
   } else if (path === "collections/options") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await collectionOptionsPayload(env, session);
+  } else if (path === "collections/list") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await collectionListPayload(env, session, Object.fromEntries(new URL(request.url).searchParams));
+  } else if (/^collections\/[^/]+\/products\/list$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await collectionProductsListPayload(env, session, decodePathPart(path.split("/")[1]), Object.fromEntries(new URL(request.url).searchParams));
   } else if (path === "collections") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await collectionsPayload(env, session);
+  } else if (/^collections\/[^/]+$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await collectionDetailPayload(env, session, decodePathPart(path.split("/")[1]));
   } else if (path.startsWith("products/")) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductPayload(env, session, decodePathPart(path.slice("products/".length)));
@@ -274,6 +288,11 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
       payload = await ingestCommerceProductMedia(env, session, productId, body, fetchImpl);
       authEventType = "commerce_product_media_ingested";
     }
+  } else if (path === "collections/bulk") {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await bulkUpdateCollections(env, session, body);
+    authEventType = "commerce_collections_bulk_updated";
   } else if (path === "collections") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");
@@ -284,6 +303,11 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.business.manage");
     payload = await updateCollectionOrder(env, session, body);
     authEventType = "commerce_collections_reordered";
+  } else if (/^collections\/[^/]+\/products\/bulk$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await updateCollectionMemberships(env, session, decodePathPart(path.split("/")[1]), body);
+    authEventType = "commerce_collection_memberships_updated";
   } else if (/^collections\/[^/]+\/products$/.test(path)) {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");

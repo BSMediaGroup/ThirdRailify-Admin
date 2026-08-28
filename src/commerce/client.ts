@@ -101,13 +101,22 @@ export type CommerceMediaUploadPayload = { ok: true; productId: string; asset: C
 export type CommerceCollection = {
   id: string; slug: string; title: string; description: string; visibility: "public" | "hidden"; status: "active";
   displayOrder: number; revision: number; assignedProductCount: number; publicProductCount: number;
-  productIds: string[]; createdAt: string; updatedAt: string;
+  thumbnailUrl: string | null; productIds?: string[]; createdAt: string; updatedAt: string;
 };
 export type CollectionsPayload = {
   ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; collections: CommerceCollection[];
   products: MerchandisingProduct[]; updatedAt: string | null;
 };
 export type CollectionOptionsPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; collections: CommerceCollection[]; updatedAt: string | null };
+export type CollectionListFilters = { page?: number; pageSize?: 20 | 50 | 75 | 100; query?: string; visibility?: "all" | "public" | "hidden"; contents?: "all" | "empty" | "contains_products"; sort?: "display" | "title_asc" | "title_desc" | "product_count" | "updated_desc" };
+export type CollectionListPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; items: CommerceCollection[]; page: number; pageSize: 20 | 50 | 75 | 100; totalItems: number; totalPages: number; startIndex: number; endIndex: number; filters: Required<Pick<CollectionListFilters, "query" | "visibility" | "contents" | "sort">>; totals: { collections: number; publicCollections: number; hiddenCollections: number; emptyCollections: number }; updatedAt: string | null };
+export type CollectionDetailPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; collection: CommerceCollection };
+export type CollectionProduct = { id: string; slug: string; title: string; primaryImageUrl: string | null; status: string; visibility: string; assigned: boolean; priceLabel: string; updatedAt: string };
+export type CollectionProductListFilters = { page?: number; pageSize?: 20 | 50 | 75 | 100; query?: string; visibility?: "all" | "public" | "hidden"; membership?: "all" | "assigned" | "available" };
+export type CollectionProductListPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; collectionId: string; items: CollectionProduct[]; page: number; pageSize: 20 | 50 | 75 | 100; totalItems: number; totalPages: number; startIndex: number; endIndex: number; filters: Required<Pick<CollectionProductListFilters, "query" | "visibility" | "membership">> };
+export type CollectionBulkOperation = "show" | "hide";
+export type CollectionBulkResult = { ok: true; operation: CollectionBulkOperation; selection: "explicit" | "matching"; matched: number; requested: number; updated: number; unchanged: number; rejected: number; errors: string[]; updatedIds: string[] };
+export type CollectionMembershipResult = { ok: true; collectionId: string; revision: number; operation: "add" | "remove"; requested: number; updated: number; unchanged: number; updatedIds: string[] };
 export type PrintfulCatalogueSnapshot = {
   role: string; store: PrintfulStoreIdentity;
   counts: { products: number; variants: number; synced: number; ignored: number; ignoredProducts: number; unavailable: number; missingPrices: number; malformedPrices: number; malformedOrMissingPrices: number; missingFiles: number; variantsWithoutFiles: number };
@@ -360,6 +369,11 @@ export function bulkUpdateMerchandisingProducts(csrfToken: string, body: { opera
 }
 export function getCollections() { return adminApi<CollectionsPayload>("/api/admin/commerce/collections"); }
 export function getCollectionOptions() { return adminApi<CollectionOptionsPayload>("/api/admin/commerce/collections/options"); }
+export function getCollectionList(filters: CollectionListFilters = {}) { const query = new URLSearchParams(); Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); }); return adminApi<CollectionListPayload>(`/api/admin/commerce/collections/list?${query.toString()}`); }
+export function getCollectionDetail(collectionId: string) { return adminApi<CollectionDetailPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}`); }
+export function getCollectionProducts(collectionId: string, filters: CollectionProductListFilters = {}) { const query = new URLSearchParams(); Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); }); return adminApi<CollectionProductListPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/products/list?${query.toString()}`); }
+export function bulkUpdateCollections(csrfToken: string, body: { operation: CollectionBulkOperation; collectionIds: string[] } | { operation: CollectionBulkOperation; matching: Omit<CollectionListFilters, "page" | "pageSize">; confirmMatching: true; expectedCount: number }) { return adminApi<CollectionBulkResult>("/api/admin/commerce/collections/bulk", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
+export function updateCollectionMemberships(csrfToken: string, collectionId: string, body: { operation: "add" | "remove"; productIds: string[]; revision: number }) { return adminApi<CollectionMembershipResult>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/products/bulk`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
 export function getCommerceOrders() { return adminApi<CommerceOrdersPayload>("/api/admin/commerce/orders"); }
 export function getOrderDocument(orderId: string, type: "receipt" | "invoice") { return adminApi<DocumentPreviewPayload>(`/api/admin/commerce/orders/${encodeURIComponent(orderId)}/documents/${type}`); }
 export function generateControlledTestCheckout(csrfToken: string, body: { checkoutRequestId: string; productId: string; variantId: string; quantity: 1 }) {
@@ -385,13 +399,13 @@ export function uploadMerchandisingProductMedia(csrfToken: string, productId: st
 export function saveMerchandisingVariant(csrfToken: string, productId: string, variantId: string, body: Record<string, unknown>) {
   return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
-export function createCommerceCollection(csrfToken: string, body: Record<string, unknown>) { return adminApi<CollectionsPayload>("/api/admin/commerce/collections", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
-export function saveCommerceCollection(csrfToken: string, collectionId: string, body: Record<string, unknown>) { return adminApi<CollectionsPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
-export function saveCommerceCollectionOrder(csrfToken: string, collectionIds: string[]) { return adminApi<CollectionsPayload>("/api/admin/commerce/collections/order", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ collectionIds }) }); }
-export function saveCommerceCollectionProducts(csrfToken: string, collectionId: string, revision: number, productIds: string[]) { return adminApi<CollectionsPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/products`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ revision, productIds }) }); }
+export function createCommerceCollection(csrfToken: string, body: Record<string, unknown>) { return adminApi<CollectionDetailPayload>("/api/admin/commerce/collections", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
+export function saveCommerceCollection(csrfToken: string, collectionId: string, body: Record<string, unknown>) { return adminApi<CollectionDetailPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
+export function saveCommerceCollectionOrder(csrfToken: string, collectionIds: string[]) { return adminApi<CollectionOptionsPayload>("/api/admin/commerce/collections/order", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ collectionIds }) }); }
+export function saveCommerceCollectionProducts(csrfToken: string, collectionId: string, revision: number, productIds: string[]) { return adminApi<CollectionDetailPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/products`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ revision, productIds }) }); }
 export function saveProductCollections(csrfToken: string, productId: string, collectionIds: string[]) { return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/collections`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ collectionIds }) }); }
-export function archiveCommerceCollection(csrfToken: string, collectionId: string, revision: number) { return adminApi<CollectionsPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/archive`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ revision, confirmArchive: true }) }); }
-export function deleteCommerceCollection(csrfToken: string, collectionId: string) { return adminApi<CollectionsPayload>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/delete`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmDelete: true }) }); }
+export function archiveCommerceCollection(csrfToken: string, collectionId: string, revision: number) { return adminApi<{ ok: true; collectionId: string; archived: true; assignmentsPreserved: true }>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/archive`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ revision, confirmArchive: true }) }); }
+export function deleteCommerceCollection(csrfToken: string, collectionId: string) { return adminApi<{ ok: true; collectionId: string; deleted: true; productsDeleted: 0 }>(`/api/admin/commerce/collections/${encodeURIComponent(collectionId)}/delete`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmDelete: true }) }); }
 
 export function cadTextToMinorUnits(value: string) {
   const normalized = value.trim();

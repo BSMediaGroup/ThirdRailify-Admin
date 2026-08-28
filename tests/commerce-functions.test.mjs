@@ -176,3 +176,52 @@ test("featured merchandising is Master-only, ordered, persisted, audited, and pu
   const projection = await publicResponse.json(); assert.equal(publicResponse.status, 200); assert.deepEqual(Object.keys(projection.products[0]).sort(), ["featured", "featuredOrder", "id", "slug"]); assert.doesNotMatch(JSON.stringify(projection), /price|image|safe_metadata|credential/i);
   const audit = await harness.commerceDb.prepare("SELECT metadata_json FROM commerce_audit WHERE action = 'products.featured_updated'").first(); assert.ok(audit); assert.match(audit.metadata_json, /featuredCount/);
 });
+
+test("collection management is paginated, filter-first, authenticated, audited, and membership-safe", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  const db = harness.commerceDb; const timestamp = "2026-08-29T10:00:00.000Z";
+  await insertTestProduct(db, { id: "collection-product-a", slug: "collection-product-a", title: "Collection Product Alpha", visibility: "public" });
+  await insertTestProduct(db, { id: "collection-product-b", slug: "collection-product-b", title: "Collection Product Beta", visibility: "private" });
+  await db.batch(Array.from({ length: 105 }, (_, index) => {
+    const suffix = String(index + 1).padStart(3, "0");
+    return db.prepare(`INSERT INTO commerce_collections (id, slug, title, description, visibility, status, display_order, revision, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 'active', ?, 1, ?, ?)`)
+      .bind(`collection-managed-${suffix}`, `managed-${suffix}`, `Managed ${suffix}`, index === 4 ? "Needle description" : `Managed description ${suffix}`, index % 3 === 0 ? "hidden" : "public", 1000 + index, timestamp, timestamp);
+  }));
+  await db.batch([
+    db.prepare("INSERT INTO commerce_product_collections (product_id, collection_id, assigned_at) VALUES (?, ?, ?)").bind("collection-product-a", "collection-managed-001", timestamp),
+    db.prepare("INSERT INTO commerce_product_collections (product_id, collection_id, assigned_at) VALUES (?, ?, ?)").bind("collection-product-b", "collection-managed-001", timestamp),
+  ]);
+
+  async function get(path) { const response = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/${path}`, { method: "GET", origin: ADMIN_ORIGIN, cookie }), env, data: {} }); return { response, payload: await response.json() }; }
+  const defaultPage = await get("collections/list?query=Managed");
+  assert.equal(defaultPage.response.status, 200); assert.equal(defaultPage.payload.pageSize, 20); assert.equal(defaultPage.payload.items.length, 20); assert.equal(defaultPage.payload.totalItems, 105); assert.equal(defaultPage.payload.startIndex, 1); assert.equal(defaultPage.payload.endIndex, 20);
+  for (const size of [20, 50, 75, 100]) { const result = await get(`collections/list?query=Managed&pageSize=${size}`); assert.equal(result.payload.pageSize, size); assert.equal(result.payload.items.length, Math.min(size, 105)); }
+  const capped = await get("collections/list?query=Managed&pageSize=1000"); assert.equal(capped.payload.pageSize, 20);
+  const stale = await get("collections/list?query=Needle&page=99&pageSize=20"); assert.equal(stale.payload.page, 1); assert.equal(stale.payload.totalItems, 1); assert.equal(stale.payload.items[0].slug, "managed-005");
+  const hidden = await get("collections/list?query=Managed&visibility=hidden&pageSize=50"); assert.equal(hidden.payload.totalItems, 35); assert.ok(hidden.payload.items.every((item) => item.visibility === "hidden"));
+  const nonEmpty = await get("collections/list?query=Managed&contents=contains_products"); assert.equal(nonEmpty.payload.totalItems, 1); assert.equal(nonEmpty.payload.items[0].assignedProductCount, 2);
+  const descending = await get("collections/list?query=Managed&sort=title_desc"); assert.equal(descending.payload.items[0].title, "Managed 105");
+
+  const bulkUrl = `${ADMIN_ORIGIN}/api/admin/commerce/collections/bulk`;
+  const unauthenticated = await commerceRequest({ request: jsonRequest(bulkUrl, { origin: ADMIN_ORIGIN, csrfToken: created.csrfToken, body: { operation: "hide", collectionIds: ["collection-managed-002"] } }), env, data: {} }); assert.equal(unauthenticated.status, 401);
+  const wrongOrigin = await commerceRequest({ request: jsonRequest(bulkUrl, { origin: "https://evil.example", cookie, csrfToken: created.csrfToken, body: { operation: "hide", collectionIds: ["collection-managed-002"] } }), env, data: {} }); assert.equal(wrongOrigin.status, 403);
+  const missingCsrf = await commerceRequest({ request: jsonRequest(bulkUrl, { origin: ADMIN_ORIGIN, cookie, body: { operation: "hide", collectionIds: ["collection-managed-002"] } }), env, data: {} }); assert.equal(missingCsrf.status, 403);
+  const invalid = await commerceRequest({ request: jsonRequest(bulkUrl, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { operation: "hide", collectionIds: ["collection-missing"] } }), env, data: {} }); assert.equal(invalid.status, 400);
+  const before = await db.prepare("SELECT description, display_order FROM commerce_collections WHERE id = 'collection-managed-002'").first();
+  const hiddenMutation = await commerceRequest({ request: jsonRequest(bulkUrl, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { operation: "hide", collectionIds: ["collection-managed-002"] } }), env, data: {} }); assert.equal(hiddenMutation.status, 200); assert.equal((await hiddenMutation.json()).updated, 1);
+  const after = await db.prepare("SELECT visibility, description, display_order FROM commerce_collections WHERE id = 'collection-managed-002'").first(); assert.equal(after.visibility, "hidden"); assert.equal(after.description, before.description); assert.equal(after.display_order, before.display_order);
+  const showMatching = await commerceRequest({ request: jsonRequest(bulkUrl, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { operation: "show", matching: { query: "Managed 00", visibility: "hidden", contents: "all", sort: "display" }, confirmMatching: true, expectedCount: 4 } }), env, data: {} }); assert.equal(showMatching.status, 200); assert.equal((await showMatching.json()).matched, 4);
+
+  const revisionRow = await db.prepare("SELECT revision FROM commerce_collections WHERE id = 'collection-managed-003'").first();
+  const membershipUrl = `${ADMIN_ORIGIN}/api/admin/commerce/collections/collection-managed-003/products/bulk`;
+  const add = await commerceRequest({ request: jsonRequest(membershipUrl, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { operation: "add", productIds: ["collection-product-a", "collection-product-b"], revision: revisionRow.revision } }), env, data: {} }); assert.equal(add.status, 200); const addPayload = await add.json(); assert.equal(addPayload.updated, 2);
+  const duplicate = await commerceRequest({ request: jsonRequest(membershipUrl, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { operation: "add", productIds: ["collection-product-a"], revision: addPayload.revision } }), env, data: {} }); assert.equal(duplicate.status, 200); const duplicatePayload = await duplicate.json(); assert.equal(duplicatePayload.updated, 0);
+  const membershipCount = await db.prepare("SELECT COUNT(*) count FROM commerce_product_collections WHERE collection_id = 'collection-managed-003'").first(); assert.equal(membershipCount.count, 2);
+  const finder = await get("collections/collection-managed-003/products/list?membership=assigned&pageSize=20"); assert.equal(finder.payload.totalItems, 2); assert.ok(finder.payload.items.every((product) => product.assigned));
+  const productState = await db.prepare("SELECT visibility FROM commerce_products WHERE id = 'collection-product-b'").first(); assert.equal(productState.visibility, "private");
+  const deleteNonEmpty = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/collections/collection-managed-003/delete`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { confirmDelete: true } }), env, data: {} }); assert.equal(deleteNonEmpty.status, 409);
+  assert.ok(await db.prepare("SELECT id FROM commerce_products WHERE id = 'collection-product-a'").first());
+  const audits = await db.prepare("SELECT action FROM commerce_audit WHERE action IN ('commerce.collections_bulk_updated', 'commerce.collection_memberships_updated') ORDER BY action").all(); assert.ok(audits.results.length >= 3);
+});

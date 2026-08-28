@@ -19,11 +19,15 @@ import {
   getOrderDocument,
   getMerchandisingProductList,
   getCollectionOptions,
+  getCollectionList,
+  getCollectionDetail,
+  getCollectionProducts,
+  bulkUpdateCollections,
+  updateCollectionMemberships,
   bulkUpdateMerchandisingProducts,
   getCommerceMediaLimits,
   ingestMerchandisingProductMedia,
   uploadMerchandisingProductMedia,
-  getCollections,
   executePermanentPrintfulMigration,
   getPermanentPrintfulMigration,
   saveBusinessProfile,
@@ -34,7 +38,6 @@ import {
   createCommerceCollection,
   saveCommerceCollection,
   saveCommerceCollectionOrder,
-  saveCommerceCollectionProducts,
   archiveCommerceCollection,
   deleteCommerceCollection,
   cadTextToMinorUnits,
@@ -43,8 +46,11 @@ import {
   type CommerceOverviewPayload,
   type CommerceOrdersPayload,
   type CommerceStatus,
-  type CollectionsPayload,
   type CommerceCollection,
+  type CollectionListPayload,
+  type CollectionListFilters,
+  type CollectionProductListPayload,
+  type CollectionBulkOperation,
   type CommerceTemplate,
   type MerchandisingListPayload,
   type MerchandisingProduct,
@@ -635,69 +641,213 @@ function paginationItems(page: number, totalPages: number): Array<number | strin
 function bulkOperationLabel(operation: ProductBulkOperation) { return operation === "show" ? "Show in store" : operation === "hide" ? "Hide from store" : operation === "feature" ? "Feature" : "Unfeature"; }
 
 
+
 export function CommerceCollectionsPage() {
   const { csrfToken } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
-  const [payload, setPayload] = useState<CollectionsPayload | null>(null);
+  const [payload, setPayload] = useState<CollectionListPayload | null>(null);
+  const [orderCollections, setOrderCollections] = useState<CommerceCollection[]>([]);
+  const [query, setQuery] = useState("");
+  const [visibility, setVisibility] = useState<"all" | "public" | "hidden">("all");
+  const [contents, setContents] = useState<"all" | "empty" | "contains_products">("all");
+  const [sort, setSort] = useState<NonNullable<CollectionListFilters["sort"]>>("display");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<20 | 50 | 75 | 100>(20);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [allMatching, setAllMatching] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [orderIds, setOrderIds] = useState<string[]>([]);
   const [savingOrder, setSavingOrder] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
   const load = useCallback(async () => {
-    const stop = startLoading("Loading authoritative collections"); setError("");
-    try { const next = await getCollections(); setPayload(next); setOrderIds(next.collections.map((collection) => collection.id)); }
-    catch (reason) { setError(errorMessage(reason, "Collections are unavailable.")); }
+    const stop = startLoading("Loading authoritative collections");
+    setError("");
+    try {
+      const next = await getCollectionList({ query, visibility, contents, sort, page, pageSize });
+      setPayload(next);
+      if (next.page !== page) setPage(next.page);
+    } catch (reason) { setError(errorMessage(reason, "Collections could not be loaded.")); }
     finally { stop(); }
-  }, [startLoading]);
-  useEffect(() => { void load(); }, [load]);
+  }, [contents, page, pageSize, query, sort, startLoading, visibility]);
+  const loadOrder = useCallback(async () => {
+    try {
+      const next = await getCollectionOptions();
+      setOrderCollections(next.collections);
+      setOrderIds(next.collections.map((collection) => collection.id));
+    } catch (reason) { setError(errorMessage(reason, "Collection order could not be loaded.")); }
+  }, []);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 180); return () => window.clearTimeout(timer); }, [load, refreshKey]);
+  useEffect(() => { void loadOrder(); }, [loadOrder, refreshKey]);
+  useEffect(() => { setSelectedIds([]); setAllMatching(false); setPage(1); }, [query, visibility, contents, sort, pageSize]);
+
   const canManage = Boolean(payload?.access?.capabilities.includes("commerce.business.manage"));
-  const authoritativeOrder = payload?.collections.map((collection) => collection.id) || [];
+  const matchingFilters = { query, visibility, contents, sort };
+  const selectedCount = allMatching ? payload?.totalItems || 0 : selectedIds.length;
+  const authoritativeOrder = orderCollections.map((collection) => collection.id);
+  const ordered = orderIds.map((id) => orderCollections.find((collection) => collection.id === id)).filter((collection): collection is CommerceCollection => Boolean(collection));
   const orderDirty = orderIds.join("\u0000") !== authoritativeOrder.join("\u0000");
-  const ordered = orderIds.map((id) => payload?.collections.find((collection) => collection.id === id)).filter((collection): collection is CommerceCollection => Boolean(collection));
+  const refresh = (notice: string) => { setMessage(notice); setRefreshKey((value) => value + 1); };
   const move = (id: string, offset: -1 | 1) => setOrderIds((current) => { const index = current.indexOf(id); const target = index + offset; if (index < 0 || target < 0 || target >= current.length) return current; const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; return next; });
-  const saveOrder = async () => { if (!csrfToken || !canManage) return; setSavingOrder(true); setError(""); try { const next = await saveCommerceCollectionOrder(csrfToken, orderIds); setPayload(next); setOrderIds(next.collections.map((collection) => collection.id)); setMessage("Collection display order saved."); } catch (reason) { setError(errorMessage(reason, "Collection order could not be saved.")); } finally { setSavingOrder(false); } };
-  const selected = payload?.collections.find((collection) => collection.id === selectedId) || null;
+  const saveOrder = async () => {
+    if (!csrfToken || !canManage) return;
+    setSavingOrder(true); setError("");
+    try { const next = await saveCommerceCollectionOrder(csrfToken, orderIds); setOrderCollections(next.collections); setOrderIds(next.collections.map((collection) => collection.id)); refresh("Collection storefront order saved."); }
+    catch (reason) { setError(errorMessage(reason, "Collection order could not be saved.")); }
+    finally { setSavingOrder(false); }
+  };
+  const applyBulk = async (operation: CollectionBulkOperation) => {
+    if (!csrfToken || !canManage || !payload || !selectedCount) return;
+    if (allMatching && !window.confirm(`${operation === "show" ? "Show" : "Hide"} all ${payload.totalItems} collections matching the current filters?`)) return;
+    setBusy(true); setError("");
+    try {
+      const result = await bulkUpdateCollections(csrfToken, allMatching ? { operation, matching: matchingFilters, confirmMatching: true, expectedCount: payload.totalItems } : { operation, collectionIds: selectedIds });
+      setSelectedIds([]); setAllMatching(false);
+      refresh(`${operation === "show" ? "Show on storefront" : "Hide from storefront"} completed: ${result.updated} changed, ${result.unchanged} already set.`);
+    } catch (reason) { setError(errorMessage(reason, "Collections could not be updated.")); }
+    finally { setBusy(false); }
+  };
+  const toggleVisibility = async (collection: CommerceCollection) => {
+    if (!csrfToken || !canManage) return;
+    setBusy(true); setError("");
+    try { await bulkUpdateCollections(csrfToken, { operation: collection.visibility === "public" ? "hide" : "show", collectionIds: [collection.id] }); refresh(`${collection.title} is now ${collection.visibility === "public" ? "hidden" : "shown"} on the storefront.`); }
+    catch (reason) { setError(errorMessage(reason, "Collection visibility could not be updated.")); }
+    finally { setBusy(false); }
+  };
+
   return <>
-    <CommerceHeading eyebrow="Commerce D1 authority" title="Shop / Collections" summary="Create, describe, order, hide, archive, and assign the stable collections projected to the Public shop. All Products remains a virtual aggregate." status={payload?.databaseConfigured ? "connected" : "unavailable"} />
+    <CommerceHeading eyebrow="Commerce D1 authority" title="Shop / Collections" summary="Search, filter, order, publish, and assign the stable collections projected to the Public shop. All Products remains a virtual aggregate." status={payload?.databaseConfigured ? "connected" : "unavailable"} />
     {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
     {!payload && !error ? <CommerceState>Loading collection authority…</CommerceState> : payload ? <div className="collection-admin-workspace">
-      <section className="commerce-posture" aria-label="Collection totals"><div><span>Active collections</span><strong>{payload.collections.length}</strong></div><div><span>Public</span><strong>{payload.collections.filter((collection) => collection.visibility === "public").length}</strong></div><div><span>Assignments</span><strong>{payload.collections.reduce((total, collection) => total + collection.assignedProductCount, 0)}</strong></div><div><span>All Products</span><strong>Virtual</strong></div></section>
-      <section className="commerce-section" aria-labelledby="collection-list-title"><div className="collection-admin-heading"><SectionTitle id="collection-list-title" eyebrow="Stable Public discovery" title="Collections" /><button className="button-link" type="button" onClick={() => { setCreating(true); setSelectedId(null); setMessage(""); }} disabled={!canManage}>Create collection</button></div>
-        <ol className="collection-admin-list">{ordered.map((collection, index) => <li key={collection.id}><span className="collection-admin-list__order">{String(index + 1).padStart(2, "0")}</span><div><strong>{collection.title}</strong><small>/{collection.slug} · {collection.visibility === "public" ? "Visible" : "Hidden"}</small></div><dl><div><dt>Assigned</dt><dd>{collection.assignedProductCount}</dd></div><div><dt>Public</dt><dd>{collection.publicProductCount}</dd></div></dl><div className="merchandising-order-actions"><button type="button" onClick={() => move(collection.id, -1)} disabled={index === 0 || !canManage} aria-label={`Move ${collection.title} up`}>↑</button><button type="button" onClick={() => move(collection.id, 1)} disabled={index === ordered.length - 1 || !canManage} aria-label={`Move ${collection.title} down`}>↓</button></div><button className="commerce-row-action" type="button" onClick={() => { setSelectedId(collection.id); setCreating(false); setMessage(""); }}>Manage</button></li>)}</ol>
-        {orderDirty ? <div className="featured-dirty-rail" role="status"><p><strong>Collection order changed</strong><span>Public discovery will keep the current order until saved.</span></p><div><button className="text-button" type="button" onClick={() => setOrderIds(authoritativeOrder)} disabled={savingOrder}>Discard changes</button><button className="button-link" type="button" onClick={() => void saveOrder()} disabled={savingOrder || !canManage}>{savingOrder ? "Saving…" : "Save order"}</button></div></div> : null}
+      <section className="commerce-posture" aria-label="Collection totals"><div><span>Active collections</span><strong>{payload.totals.collections}</strong></div><div><span>Public</span><strong>{payload.totals.publicCollections}</strong></div><div><span>Hidden</span><strong>{payload.totals.hiddenCollections}</strong></div><div><span>Empty</span><strong>{payload.totals.emptyCollections}</strong></div></section>
+      <section className="commerce-section collection-management" aria-labelledby="collection-list-title">
+        <div className="collection-admin-heading"><SectionTitle id="collection-list-title" eyebrow="Stable Public discovery" title="Collections" /><div><button className="text-button" type="button" aria-pressed={bulkMode} onClick={() => { setBulkMode((value) => !value); setSelectedIds([]); setAllMatching(false); }}>Bulk edit</button><button className="button-link" type="button" onClick={() => { setCreating(true); setSelectedId(null); setMessage(""); }} disabled={!canManage}>Create collection</button></div></div>
+        <div className="commerce-product-filters collection-filters"><Field label="Search title, slug, description"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a collection" /></Field><Field label="Storefront visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)}><option value="all">All visibility</option><option value="public">Public</option><option value="hidden">Hidden</option></select></Field><Field label="Product membership"><select value={contents} onChange={(event) => setContents(event.target.value as typeof contents)}><option value="all">All collections</option><option value="contains_products">Contains products</option><option value="empty">Empty</option></select></Field><Field label="Sort"><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="display">Storefront order</option><option value="title_asc">Title A–Z</option><option value="title_desc">Title Z–A</option><option value="product_count">Product count</option><option value="updated_desc">Recently updated</option></select></Field></div>
+        <div className="commerce-results-bar"><span>{payload.totalItems ? `${payload.startIndex}–${payload.endIndex} of ${payload.totalItems} collections` : "No matching collections"}</span><Field label="Rows per page"><select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as typeof pageSize)}>{[20,50,75,100].map((size) => <option key={size} value={size}>{size}</option>)}</select></Field></div>
+        {bulkMode && <div className="commerce-bulk-toolbar" aria-label="Bulk collection actions"><strong aria-live="polite">{selectedCount} selected</strong><div><button type="button" className="text-button" onClick={() => { setAllMatching(false); setSelectedIds((current) => [...new Set([...current, ...payload.items.map((collection) => collection.id)])]); }}>Select current page</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(false); }}>Clear selection</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(true); }}>Select all {payload.totalItems} matching</button></div><div className="commerce-bulk-toolbar__actions"><button type="button" onClick={() => void applyBulk("show")} disabled={!selectedCount || busy}>Show on storefront</button><button type="button" onClick={() => void applyBulk("hide")} disabled={!selectedCount || busy}>Hide from storefront</button></div>{allMatching && <small>All {payload.totalItems} collections matching the current filters will be affected after confirmation.</small>}</div>}
+        <div className="collection-admin-list" role="list">{payload.items.map((collection) => { const selected = allMatching || selectedIds.includes(collection.id); const visible = collection.visibility === "public"; return <article key={collection.id} role="listitem" className={(bulkMode ? "is-bulk " : "") + (selected ? "is-selected" : "")}>{bulkMode && <label className="commerce-product-row__select"><input type="checkbox" aria-label={`Select ${collection.title}`} checked={selected} disabled={allMatching} onChange={() => setSelectedIds((current) => current.includes(collection.id) ? current.filter((id) => id !== collection.id) : [...current, collection.id])} /></label>}<CollectionThumbnail url={collection.thumbnailUrl} label={`${collection.title} derived product thumbnail`} /><div className="collection-admin-list__identity"><strong>{collection.title}</strong><small>/{collection.slug}</small><span>{collection.description || "No description"}</span></div><dl><div><dt>Products</dt><dd>{collection.assignedProductCount}</dd><small>{collection.publicProductCount} storefront-ready</small></div><div><dt>Position</dt><dd>{collection.displayOrder}</dd><small>{visible ? "Public" : "Hidden"}</small></div></dl><div className="commerce-product-row__actions"><button className="commerce-icon-action" type="button" title={visible ? "Hide from storefront" : "Show on storefront"} aria-label={`${visible ? "Hide" : "Show"} ${collection.title} ${visible ? "from" : "on"} storefront`} aria-pressed={visible} onClick={() => void toggleVisibility(collection)} disabled={!canManage || busy}><AdminIcon name={visible ? "eye" : "eyeOff"} size={18} /></button><button className="commerce-row-action commerce-row-action--icon" type="button" title="Edit collection" aria-label="Edit collection" onClick={() => { setSelectedId(collection.id); setCreating(false); setMessage(""); }}><AdminIcon name="edit" size={18} /></button></div></article>; })}</div>
+        {!payload.items.length && <CommerceState>{payload.totals.collections ? "No collections match the current search and filters." : "No collections exist yet. Create one to establish storefront discovery."}</CommerceState>}
+        <ProductPagination page={payload.page} totalPages={payload.totalPages} onPage={setPage} label="Collection pages" />
       </section>
-      {(creating || selected) ? <CollectionEditor key={selected?.id || "new"} collection={selected} products={payload.products} csrfToken={csrfToken} canManage={canManage} onClose={() => { setCreating(false); setSelectedId(null); }} onPayload={(next, notice, selectId) => { setPayload(next); setOrderIds(next.collections.map((collection) => collection.id)); setMessage(notice); if (selectId) setSelectedId(selectId); setCreating(false); }} onError={setError} /> : null}
+      <section className="commerce-section collection-order-manager" aria-labelledby="collection-order-title"><div className="collection-admin-heading"><SectionTitle id="collection-order-title" eyebrow="Accessible ordering" title="Storefront order" /><span>{ordered.length} active collections</span></div><p>Hidden collections retain their deterministic position but are omitted from the Public projection.</p><ol>{ordered.map((collection, index) => <li key={collection.id}><span className="collection-admin-list__order">{String(index + 1).padStart(2, "0")}</span><span><strong>{collection.title}</strong><small>/{collection.slug} · {collection.visibility === "public" ? "Public" : "Hidden"}</small></span><span className="merchandising-order-actions"><button type="button" title={`Move ${collection.title} up`} aria-label={`Move ${collection.title} up`} onClick={() => move(collection.id, -1)} disabled={index === 0 || savingOrder}><AdminIcon name="moveUp" size={16} /></button><button type="button" title={`Move ${collection.title} down`} aria-label={`Move ${collection.title} down`} onClick={() => move(collection.id, 1)} disabled={index === ordered.length - 1 || savingOrder}><AdminIcon name="moveDown" size={16} /></button></span></li>)}</ol>{!ordered.length && <CommerceState>No active collections are available to order.</CommerceState>}{orderDirty && <div className="featured-dirty-rail" role="status"><p><strong>Collection order changed</strong><span>Save to publish unique deterministic display positions.</span></p><div><button className="text-button" type="button" onClick={() => setOrderIds(authoritativeOrder)} disabled={savingOrder}>Discard</button><button className="button-link" type="button" onClick={() => void saveOrder()} disabled={!canManage || savingOrder}>{savingOrder ? "Saving…" : "Save collection order"}</button></div></div>}</section>
+      {(creating || selectedId) && <CollectionManagementEditor key={selectedId || "new"} collectionId={selectedId} csrfToken={csrfToken} canManage={canManage} onClose={() => { setCreating(false); setSelectedId(null); }} onChanged={refresh} onError={setError} />}
     </div> : null}
   </>;
 }
 
-function CollectionEditor({ collection, products, csrfToken, canManage, onClose, onPayload, onError }: { collection: CommerceCollection | null; products: MerchandisingProduct[]; csrfToken: string | null; canManage: boolean; onClose: () => void; onPayload: (payload: CollectionsPayload, message: string, selectId?: string) => void; onError: (message: string) => void }) {
-  const initial = collectionDraft(collection);
-  const [form, setForm] = useState(initial);
-  const [query, setQuery] = useState(""); const [filter, setFilter] = useState("all"); const [saving, setSaving] = useState(false);
-  const update = (key: string, value: string | string[]) => setForm((current) => ({ ...current, [key]: value }));
-  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
-  const filteredProducts = products.filter((product) => { const assigned = form.productIds.includes(product.id); const needle = query.trim().toLowerCase(); return (!needle || `${product.title} ${product.slug}`.toLowerCase().includes(needle)) && (filter === "all" || (filter === "assigned" ? assigned : !assigned)); });
-  const save = async (event: FormEvent) => { event.preventDefault(); if (!csrfToken || !canManage) return; setSaving(true); onError(""); try {
-    if (!collection) { const next = await createCommerceCollection(csrfToken, { title: form.title, slug: form.slug, description: form.description, visibility: form.visibility, displayOrder: Number(form.displayOrder) }); const created = next.collections.find((item) => item.slug === form.slug); onPayload(next, "Collection created with a stable Public slug.", created?.id); return; }
-    let next = await saveCommerceCollection(csrfToken, collection.id, { title: form.title, description: form.description, visibility: form.visibility, displayOrder: Number(form.displayOrder), revision: collection.revision });
-    const updated = next.collections.find((item) => item.id === collection.id); if (!updated) throw new Error("Collection was not returned after save.");
-    next = await saveCommerceCollectionProducts(csrfToken, collection.id, updated.revision, form.productIds); onPayload(next, "Collection details and product assignments saved.", collection.id);
-  } catch (reason) { onError(errorMessage(reason, "Collection changes could not be saved.")); } finally { setSaving(false); } };
-  const archive = async () => { if (!collection || !csrfToken || !canManage || !window.confirm(`Archive ${collection.title}? Product assignments will be preserved.`)) return; setSaving(true); try { onPayload(await archiveCommerceCollection(csrfToken, collection.id, collection.revision), "Collection archived; products were preserved."); onClose(); } catch (reason) { onError(errorMessage(reason, "Collection could not be archived.")); } finally { setSaving(false); } };
-  const hardDelete = async () => { if (!collection || collection.assignedProductCount || !csrfToken || !canManage || !window.confirm(`Permanently delete the empty collection ${collection.title}?`)) return; setSaving(true); try { onPayload(await deleteCommerceCollection(csrfToken, collection.id), "Empty collection permanently deleted."); onClose(); } catch (reason) { onError(errorMessage(reason, "Collection could not be deleted.")); } finally { setSaving(false); } };
-  return <CommerceEditorModal titleId="collection-editor-title" onClose={onClose}><section className="commerce-product-editor collection-editor"><header><div><p className="eyebrow">{collection ? "Collection editor" : "New collection"}</p><h2 id="collection-editor-title">{collection?.title || "Create a collection"}</h2></div><button className="commerce-editor-close" type="button" onClick={onClose} data-autofocus>Close editor</button></header>
-    <form onSubmit={(event) => void save(event)}><div className="commerce-form-grid"><Field label="Title"><input value={form.title} onChange={(event) => { const title = event.target.value; setForm((current) => ({ ...current, title, slug: collection ? current.slug : collectionSlugFromTitle(title) })); }} maxLength={160} required /></Field>{collection ? <Field label="Stable Public slug" hint="Title edits never change this deep-link slug."><code>/{collection.slug}</code></Field> : <Field label="Stable Public slug"><input value={form.slug} onChange={(event) => update("slug", collectionSlugFromTitle(event.target.value))} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" required /></Field>}<Field label="Description" className="commerce-field--wide"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} rows={4} maxLength={2000} /></Field><Field label="Public discovery"><select value={form.visibility} onChange={(event) => update("visibility", event.target.value)}><option value="public">Shown</option><option value="hidden">Hidden (assignments preserved)</option></select></Field><Field label="Display order"><input type="number" min={0} max={999999} value={form.displayOrder} onChange={(event) => update("displayOrder", event.target.value)} /></Field></div>
-      {collection ? <fieldset className="collection-assignment"><legend>Product assignments</legend><div className="collection-assignment__tools"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search products" aria-label="Search products for assignment" /><select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filter product assignments"><option value="all">All products</option><option value="assigned">Assigned</option><option value="available">Available</option></select></div><div className="collection-assignment__list">{filteredProducts.map((product) => <label key={product.id} className={form.productIds.includes(product.id) ? "is-selected" : ""}><input type="checkbox" checked={form.productIds.includes(product.id)} onChange={() => update("productIds", form.productIds.includes(product.id) ? form.productIds.filter((id) => id !== product.id) : [...form.productIds, product.id])} /><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i>TR</i>}</span><span><strong>{product.title}</strong><small>{product.visibility === "public" && product.status === "active" ? "Public" : "Hidden"} · {product.price.label}</small></span></label>)}</div></fieldset> : <p className="commerce-action-note">Save the collection before assigning products.</p>}
-      <div className="collection-editor__actions"><span>{dirty ? "Unsaved collection changes" : "Collection is up to date"}</span><button className="button-link" type="submit" disabled={!dirty || !canManage || !csrfToken || saving}>{saving ? "Saving…" : collection ? "Save collection" : "Create collection"}</button>{collection ? <button className="commerce-editor-secondary" type="button" onClick={() => void archive()} disabled={saving}>Archive collection</button> : null}{collection && collection.assignedProductCount === 0 ? <button className="commerce-editor-danger" type="button" onClick={() => void hardDelete()} disabled={saving}>Delete empty collection</button> : null}</div>
-    </form>
+function CollectionThumbnail({ url, label }: { url: string | null; label: string }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [url]);
+  return <span className="collection-thumbnail">{url && !broken ? <img src={url} alt={label} onError={() => setBroken(true)} /> : <span aria-hidden="true"><AdminIcon name="media" size={20} /><small>{url ? "Unavailable" : "Derived"}</small></span>}</span>;
+}
+
+function collectionManagementDraft(collection: CommerceCollection | null) { return collection ? { title: collection.title, slug: collection.slug, description: collection.description, visibility: collection.visibility, displayOrder: String(collection.displayOrder) } : { title: "", slug: "", description: "", visibility: "public", displayOrder: "1000" }; }
+function collectionManagementSlug(value: string) { return value.toLowerCase().replace(/™/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 180); }
+
+function CollectionManagementEditor({ collectionId, csrfToken, canManage, onClose, onChanged, onError }: { collectionId: string | null; csrfToken: string | null; canManage: boolean; onClose: () => void; onChanged: (notice: string) => void; onError: (message: string) => void }) {
+  const [collection, setCollection] = useState<CommerceCollection | null>(null);
+  const [form, setForm] = useState(() => collectionManagementDraft(null));
+  const [loading, setLoading] = useState(Boolean(collectionId));
+  const [saving, setSaving] = useState(false);
+  const [membershipBusy, setMembershipBusy] = useState(false);
+  const [membershipRefresh, setMembershipRefresh] = useState(0);
+  const [currentProducts, setCurrentProducts] = useState<CollectionProductListPayload | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [finder, setFinder] = useState<CollectionProductListPayload | null>(null);
+  const [finderPage, setFinderPage] = useState(1);
+  const [finderQuery, setFinderQuery] = useState("");
+  const [finderVisibility, setFinderVisibility] = useState<"all" | "public" | "hidden">("all");
+  const [finderSelection, setFinderSelection] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!collectionId) return;
+    let active = true;
+    setLoading(true);
+    void getCollectionDetail(collectionId).then((result) => { if (!active) return; setCollection(result.collection); setForm(collectionManagementDraft(result.collection)); }).catch((reason) => { if (active) onError(errorMessage(reason, "Collection details could not be loaded.")); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [collectionId, onError]);
+  const loadCurrent = useCallback(async () => {
+    if (!collectionId) return;
+    try { const next = await getCollectionProducts(collectionId, { membership: "assigned", page: currentPage, pageSize: 20 }); setCurrentProducts(next); if (next.page !== currentPage) setCurrentPage(next.page); }
+    catch (reason) { onError(errorMessage(reason, "Current collection products could not be loaded.")); }
+  }, [collectionId, currentPage, onError]);
+  const loadFinder = useCallback(async () => {
+    if (!collectionId) return;
+    try { const next = await getCollectionProducts(collectionId, { membership: "available", query: finderQuery, visibility: finderVisibility, page: finderPage, pageSize: 20 }); setFinder(next); if (next.page !== finderPage) setFinderPage(next.page); }
+    catch (reason) { onError(errorMessage(reason, "Product finder could not be loaded.")); }
+  }, [collectionId, finderPage, finderQuery, finderVisibility, onError]);
+  useEffect(() => { void loadCurrent(); }, [loadCurrent, membershipRefresh]);
+  useEffect(() => { const timer = window.setTimeout(() => void loadFinder(), 180); return () => window.clearTimeout(timer); }, [loadFinder, membershipRefresh]);
+
+  const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const dirty = collection ? JSON.stringify(form) !== JSON.stringify(collectionManagementDraft(collection)) : Boolean(form.title || form.slug || form.description || form.displayOrder !== "1000" || form.visibility !== "public");
+  const requestClose = () => { if (!dirty || window.confirm("Discard unsaved collection changes?")) onClose(); };
+  const save = async (event: FormEvent) => {
+    event.preventDefault(); if (!csrfToken || !canManage) return;
+    setSaving(true); onError("");
+    try {
+      const result = collection
+        ? await saveCommerceCollection(csrfToken, collection.id, { title: form.title, description: form.description, visibility: form.visibility, displayOrder: Number(form.displayOrder), revision: collection.revision })
+        : await createCommerceCollection(csrfToken, { title: form.title, slug: form.slug, description: form.description, visibility: form.visibility, displayOrder: Number(form.displayOrder) });
+      setCollection(result.collection); setForm(collectionManagementDraft(result.collection));
+      onChanged(collection ? "Collection details saved." : "Collection created with a stable Public slug. Reopen it to assign products.");
+      if (!collection) onClose();
+    } catch (reason) { onError(errorMessage(reason, "Collection changes could not be saved.")); }
+    finally { setSaving(false); }
+  };
+  const applyMembership = async (operation: "add" | "remove", productIds: string[]) => {
+    if (!collection || !csrfToken || !canManage || !productIds.length) return;
+    setMembershipBusy(true); onError("");
+    try {
+      const result = await updateCollectionMemberships(csrfToken, collection.id, { operation, productIds, revision: collection.revision });
+      const detail = await getCollectionDetail(collection.id);
+      setCollection(detail.collection);
+      setFinderSelection([]);
+      setMembershipRefresh((value) => value + 1);
+      onChanged(`${result.updated} product${result.updated === 1 ? "" : "s"} ${operation === "add" ? "added to" : "removed from"} the collection.`);
+    } catch (reason) { onError(errorMessage(reason, "Collection membership could not be updated.")); }
+    finally { setMembershipBusy(false); }
+  };
+  const archive = async () => {
+    if (!collection || !csrfToken || !canManage || !window.confirm(`Archive ${collection.title}? Product assignments will be preserved.`)) return;
+    setSaving(true);
+    try { await archiveCommerceCollection(csrfToken, collection.id, collection.revision); onChanged("Collection archived; products and assignments were preserved."); onClose(); }
+    catch (reason) { onError(errorMessage(reason, "Collection could not be archived.")); }
+    finally { setSaving(false); }
+  };
+  const hardDelete = async () => {
+    if (!collection || collection.assignedProductCount || !csrfToken || !canManage || !window.confirm(`Permanently delete the empty collection ${collection.title}? Products will not be deleted.`)) return;
+    setSaving(true);
+    try { await deleteCommerceCollection(csrfToken, collection.id); onChanged("Empty collection permanently deleted; no products were deleted."); onClose(); }
+    catch (reason) { onError(errorMessage(reason, "Collection could not be deleted.")); }
+    finally { setSaving(false); }
+  };
+
+  return <CommerceEditorModal titleId="collection-editor-title" onClose={requestClose}><section className="commerce-product-editor collection-editor"><header><div><p className="eyebrow">{collectionId ? "Collection editor" : "New collection"}</p><h2 id="collection-editor-title">{collection?.title || (loading ? "Loading collection…" : "Create a collection")}</h2></div><button className="commerce-editor-close" type="button" onClick={requestClose} data-autofocus>Close editor</button></header>
+    {loading ? <CommerceState>Loading authoritative collection details…</CommerceState> : <form onSubmit={(event) => void save(event)}>
+      <div className="commerce-form-grid">
+        <Field label="Title"><input value={form.title} onChange={(event) => { const title = event.target.value; setForm((current) => ({ ...current, title, slug: collection ? current.slug : collectionManagementSlug(title) })); }} maxLength={160} required /></Field>
+        {collection ? <Field label="Stable Public slug" hint="Title edits never rewrite this established deep link."><code>/{collection.slug}</code></Field> : <Field label="Stable Public slug"><input value={form.slug} onChange={(event) => update("slug", collectionManagementSlug(event.target.value))} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={180} required /></Field>}
+        <Field label="Description" className="commerce-field--wide"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} rows={4} maxLength={2000} /></Field>
+        <fieldset className="commerce-presentation-controls commerce-field--wide"><legend>Storefront presentation</legend><p>Visibility controls collection discovery only. Product visibility remains unchanged.</p><label className="commerce-featured-switch"><input type="checkbox" role="switch" aria-label="Show collection on storefront" checked={form.visibility === "public"} onChange={(event) => update("visibility", event.target.checked ? "public" : "hidden")} /><span className="commerce-featured-switch__track" aria-hidden="true"><i /></span><span><strong>{form.visibility === "public" ? "Shown on storefront" : "Hidden from storefront"}</strong><small>Hidden collections keep their products, memberships, and order position.</small></span></label></fieldset>
+        <Field label="Display order"><input type="number" min={0} max={999999} value={form.displayOrder} onChange={(event) => update("displayOrder", event.target.value)} /></Field>
+        <div className="collection-media-authority"><strong>Collection cover</strong><CollectionThumbnail url={collection?.thumbnailUrl || null} label="Derived collection preview" /><p>No standalone collection image field exists. This preview derives from the first assigned product, preserving the current media authority.</p></div>
+      </div>
+      {collection ? <fieldset className="collection-assignment"><legend>Product membership</legend><div className="collection-membership-summary"><strong>{collection.assignedProductCount} current products</strong><span>Membership changes save immediately through the same authority used by Product Editors.</span></div><div className="collection-membership-grid">
+        <section aria-labelledby="current-products-title"><div className="collection-membership-heading"><div><p className="eyebrow">Current products</p><h3 id="current-products-title">Assigned to this collection</h3></div><span>{currentProducts?.totalItems || 0}</span></div><div className="collection-product-results" role="list">{currentProducts?.items.map((product) => <article key={product.id} role="listitem"><CollectionProductIdentity product={product} /><button className="commerce-icon-action" type="button" title={`Remove ${product.title} from collection`} aria-label={`Remove ${product.title} from collection`} onClick={() => void applyMembership("remove", [product.id])} disabled={membershipBusy}><AdminIcon name="close" size={17} /></button></article>)}</div>{currentProducts && !currentProducts.items.length && <p className="merchandising-empty">This collection is empty. Use the finder to add products.</p>}{currentProducts && <ProductPagination page={currentProducts.page} totalPages={currentProducts.totalPages} onPage={setCurrentPage} label="Current collection product pages" />}</section>
+        <section aria-labelledby="add-products-title"><div className="collection-membership-heading"><div><p className="eyebrow">Add products</p><h3 id="add-products-title">Catalogue finder</h3></div><span>{finderSelection.length} selected</span></div><div className="collection-assignment__tools"><input type="search" value={finderQuery} onChange={(event) => { setFinderQuery(event.target.value); setFinderPage(1); }} placeholder="Search title or slug" aria-label="Search products to add" /><select value={finderVisibility} onChange={(event) => { setFinderVisibility(event.target.value as typeof finderVisibility); setFinderPage(1); }} aria-label="Filter products to add"><option value="all">All product states</option><option value="public">Public</option><option value="hidden">Hidden</option></select></div><div className="collection-product-results" role="list">{finder?.items.map((product) => <label key={product.id} className={finderSelection.includes(product.id) ? "is-selected" : ""}><input type="checkbox" checked={finderSelection.includes(product.id)} onChange={() => setFinderSelection((current) => current.includes(product.id) ? current.filter((id) => id !== product.id) : [...current, product.id])} /><CollectionProductIdentity product={product} /></label>)}</div>{finder && !finder.items.length && <p className="merchandising-empty">No available products match this finder.</p>}{finder && <ProductPagination page={finder.page} totalPages={finder.totalPages} onPage={setFinderPage} label="Available product pages" />}<button className="button-link collection-add-selected" type="button" onClick={() => void applyMembership("add", finderSelection)} disabled={!finderSelection.length || membershipBusy}>{membershipBusy ? "Updating…" : `Add selected (${finderSelection.length})`}</button></section>
+      </div></fieldset> : <p className="commerce-action-note">Create the collection first, then reopen it to assign products.</p>}
+      <div className="merchandising-savebar"><p>{dirty ? "Unsaved collection details. Membership changes are saved independently." : "Collection details are up to date."}</p><div><button className="button-link" type="submit" disabled={!dirty || !canManage || !csrfToken || saving}>{saving ? "Saving…" : collection ? "Save collection" : "Create collection"}</button>{collection ? <button className="commerce-editor-secondary" type="button" onClick={() => void archive()} disabled={saving}>Archive collection</button> : null}{collection && collection.assignedProductCount === 0 ? <button className="commerce-editor-danger" type="button" onClick={() => void hardDelete()} disabled={saving}>Delete empty collection</button> : null}</div></div>
+    </form>}
   </section></CommerceEditorModal>;
 }
 
-function collectionDraft(collection: CommerceCollection | null) { return collection ? { title: collection.title, slug: collection.slug, description: collection.description, visibility: collection.visibility, displayOrder: String(collection.displayOrder), productIds: [...collection.productIds] } : { title: "", slug: "", description: "", visibility: "public", displayOrder: "1000", productIds: [] as string[] }; }
-function collectionSlugFromTitle(value: string) { return value.toLowerCase().replace(/™/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 180); }
+function CollectionProductIdentity({ product }: { product: CollectionProductListPayload["items"][number] }) { return <span className="collection-product-identity"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" && product.status === "active" ? "Public" : "Hidden"} · {product.priceLabel}</small></span></span>; }
 
 function ProductMerchandisingEditor({ product, collections, csrfToken, canManage, onClose, onSaved, onError }: { product: MerchandisingProduct; collections: CommerceCollection[]; csrfToken: string | null; canManage: boolean; onClose: () => void; onSaved: (product: MerchandisingProduct, message: string) => void; onError: (message: string) => void }) {
   const [form, setForm] = useState(() => productForm(product));

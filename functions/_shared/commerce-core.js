@@ -23,6 +23,8 @@ const PRINTFUL_WIX_SOURCE_STORE_ID = "16847493";
 const PRINTFUL_API_TARGET_STORE_ID = "18668025";
 const PRODUCT_PAGE_SIZES = Object.freeze([20, 50, 75, 100]);
 const PRODUCT_BULK_OPERATIONS = Object.freeze(["show", "hide", "feature", "unfeature"]);
+const COLLECTION_PAGE_SIZES = Object.freeze([20, 50, 75, 100]);
+const COLLECTION_BULK_OPERATIONS = Object.freeze(["show", "hide"]);
 
 export const COMMERCE_CAPABILITIES = Object.freeze([
   "commerce.view",
@@ -525,6 +527,160 @@ export async function bulkUpdateMerchandisingProducts(env, session, input) {
   return result;
 }
 
+export async function collectionListPayload(env, session, input = {}) {
+  const options = normalizeCollectionListOptions(input);
+  const access = session ? await commerceAccessForSession(env, session) : null;
+  if (!isCommerceDbConfigured(env)) return emptyCollectionListPayload(access, options);
+  const db = requireCommerceDb(env);
+  const { where, bindings } = collectionListWhere(options);
+  const countRow = await db.prepare(`SELECT COUNT(*) total FROM commerce_collections c WHERE ${where}`).bind(...bindings).first();
+  const totalItems = Number(countRow?.total || 0);
+  const totalPages = totalItems ? Math.ceil(totalItems / options.pageSize) : 0;
+  const page = totalPages ? Math.min(options.page, totalPages) : 1;
+  const start = (page - 1) * options.pageSize;
+  const [result, totals] = await Promise.all([
+    db.prepare(`SELECT c.id, c.slug, c.title, c.description, c.visibility, c.status, c.display_order, c.revision,
+                       c.created_at, c.updated_at,
+                       (SELECT COUNT(*) FROM commerce_product_collections pc WHERE pc.collection_id = c.id) assigned_product_count,
+                       (SELECT COUNT(*) FROM commerce_product_collections pc
+                          JOIN commerce_products p ON p.id = pc.product_id
+                         WHERE pc.collection_id = c.id AND p.status = 'active' AND p.visibility = 'public'
+                           AND (json_extract(p.safe_metadata_json, '$.publicImage') IS NOT NULL OR json_extract(p.safe_metadata_json, '$.public_image') IS NOT NULL OR json_extract(p.safe_metadata_json, '$.public_image_captured') = 1)
+                           AND (p.unit_amount IS NOT NULL OR json_extract(p.safe_metadata_json, '$.public_price_captured') = 1 OR EXISTS (SELECT 1 FROM commerce_product_variants v WHERE v.product_id = p.id AND v.unit_amount IS NOT NULL))) public_product_count,
+                       (SELECT COALESCE(json_extract(p.safe_metadata_json, '$.publicImage'), json_extract(p.safe_metadata_json, '$.public_image'))
+                          FROM commerce_product_collections pc
+                          JOIN commerce_products p ON p.id = pc.product_id
+                         WHERE pc.collection_id = c.id
+                           AND COALESCE(json_extract(p.safe_metadata_json, '$.publicImage'), json_extract(p.safe_metadata_json, '$.public_image')) IS NOT NULL
+                         ORDER BY CAST(COALESCE(json_extract(p.safe_metadata_json, '$.displayOrder'), 1000) AS INTEGER), p.slug LIMIT 1) thumbnail_url
+                  FROM commerce_collections c WHERE ${where}
+                  ORDER BY ${collectionSortSql(options.sort)} LIMIT ? OFFSET ?`).bind(...bindings, options.pageSize, start).all(),
+    db.prepare(`SELECT COUNT(*) collections,
+                       SUM(CASE WHEN visibility = 'public' THEN 1 ELSE 0 END) public_collections,
+                       SUM(CASE WHEN visibility = 'hidden' THEN 1 ELSE 0 END) hidden_collections,
+                       SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM commerce_product_collections pc WHERE pc.collection_id = commerce_collections.id) THEN 1 ELSE 0 END) empty_collections
+                  FROM commerce_collections WHERE status = 'active'`).first(),
+  ]);
+  const items = (result?.results || []).map(serializeCollectionListRow);
+  return {
+    ok: true, databaseConfigured: true, access, items, page, pageSize: options.pageSize, totalItems, totalPages,
+    startIndex: totalItems ? start + 1 : 0, endIndex: totalItems ? start + items.length : 0,
+    filters: { query: options.query, visibility: options.visibility, contents: options.contents, sort: options.sort },
+    totals: { collections: Number(totals?.collections || 0), publicCollections: Number(totals?.public_collections || 0), hiddenCollections: Number(totals?.hidden_collections || 0), emptyCollections: Number(totals?.empty_collections || 0) },
+    updatedAt: items.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, "") || null,
+  };
+}
+
+export async function collectionDetailPayload(env, session, collectionId) {
+  const access = session ? await commerceAccessForSession(env, session) : null;
+  const db = requireCommerceDb(env);
+  const id = collectionIdValue(collectionId);
+  const row = await db.prepare(`SELECT c.id, c.slug, c.title, c.description, c.visibility, c.status, c.display_order, c.revision,
+                                       c.created_at, c.updated_at,
+                                       (SELECT COUNT(*) FROM commerce_product_collections pc WHERE pc.collection_id = c.id) assigned_product_count,
+                                       (SELECT COUNT(*) FROM commerce_product_collections pc JOIN commerce_products p ON p.id = pc.product_id
+                                         WHERE pc.collection_id = c.id AND p.status = 'active' AND p.visibility = 'public'
+                                           AND (json_extract(p.safe_metadata_json, '$.publicImage') IS NOT NULL OR json_extract(p.safe_metadata_json, '$.public_image') IS NOT NULL OR json_extract(p.safe_metadata_json, '$.public_image_captured') = 1)
+                                           AND (p.unit_amount IS NOT NULL OR json_extract(p.safe_metadata_json, '$.public_price_captured') = 1 OR EXISTS (SELECT 1 FROM commerce_product_variants v WHERE v.product_id = p.id AND v.unit_amount IS NOT NULL))) public_product_count,
+                                       (SELECT COALESCE(json_extract(p.safe_metadata_json, '$.publicImage'), json_extract(p.safe_metadata_json, '$.public_image')) FROM commerce_product_collections pc JOIN commerce_products p ON p.id = pc.product_id WHERE pc.collection_id = c.id AND COALESCE(json_extract(p.safe_metadata_json, '$.publicImage'), json_extract(p.safe_metadata_json, '$.public_image')) IS NOT NULL ORDER BY p.slug LIMIT 1) thumbnail_url
+                                  FROM commerce_collections c WHERE c.id = ? AND c.status = 'active'`).bind(id).first();
+  if (!row) throw new AuthFailure(404, "commerce_collection_not_found", "The commerce collection was not found.");
+  return { ok: true, databaseConfigured: true, access, collection: serializeCollectionListRow(row) };
+}
+
+export async function collectionProductsListPayload(env, session, collectionId, input = {}) {
+  const access = session ? await commerceAccessForSession(env, session) : null;
+  const db = requireCommerceDb(env);
+  const id = collectionIdValue(collectionId);
+  if (!await db.prepare("SELECT id FROM commerce_collections WHERE id = ? AND status = 'active'").bind(id).first()) throw new AuthFailure(404, "commerce_collection_not_found", "The commerce collection was not found.");
+  const options = normalizeCollectionProductOptions(input);
+  const where = ["1 = 1"];
+  const bindings = [];
+  if (options.query) { const pattern = `%${escapeSqlLike(options.query)}%`; where.push("(p.title LIKE ? ESCAPE '\\' OR p.slug LIKE ? ESCAPE '\\')"); bindings.push(pattern, pattern); }
+  if (options.visibility === "public") where.push("p.status = 'active' AND p.visibility = 'public'");
+  if (options.visibility === "hidden") where.push("NOT (p.status = 'active' AND p.visibility = 'public')");
+  const membership = "EXISTS (SELECT 1 FROM commerce_product_collections pc WHERE pc.product_id = p.id AND pc.collection_id = ?)";
+  if (options.membership === "assigned") { where.push(membership); bindings.push(id); }
+  if (options.membership === "available") { where.push(`NOT ${membership}`); bindings.push(id); }
+  const whereSql = where.join(" AND ");
+  const countRow = await db.prepare(`SELECT COUNT(*) total FROM commerce_products p WHERE ${whereSql}`).bind(...bindings).first();
+  const totalItems = Number(countRow?.total || 0);
+  const totalPages = totalItems ? Math.ceil(totalItems / options.pageSize) : 0;
+  const page = totalPages ? Math.min(options.page, totalPages) : 1;
+  const start = (page - 1) * options.pageSize;
+  const result = await db.prepare(`SELECT p.id, p.slug, p.title, p.status, p.visibility, p.unit_amount, p.safe_metadata_json, p.updated_at,
+                                          EXISTS (SELECT 1 FROM commerce_product_collections pc WHERE pc.product_id = p.id AND pc.collection_id = ?) assigned
+                                     FROM commerce_products p WHERE ${whereSql}
+                                     ORDER BY p.title COLLATE NOCASE, p.slug, p.id LIMIT ? OFFSET ?`).bind(id, ...bindings, options.pageSize, start).all();
+  const items = (result?.results || []).map((row) => {
+    const metadata = safeJson(row.safe_metadata_json, {});
+    const amount = Number.isSafeInteger(Number(row.unit_amount)) ? Number(row.unit_amount) : null;
+    return { id: cleanText(row.id, 160), slug: cleanText(row.slug, 180), title: cleanText(row.title, 240), primaryImageUrl: validateStoredHttpsUrl(metadata.publicImage || metadata.public_image), status: cleanText(row.status, 40), visibility: cleanText(row.visibility, 20), assigned: Boolean(row.assigned), priceLabel: amount === null ? "Price unavailable" : formatCadMinor(amount), updatedAt: cleanText(row.updated_at, 80) };
+  });
+  return { ok: true, databaseConfigured: true, access, collectionId: id, items, page, pageSize: options.pageSize, totalItems, totalPages, startIndex: totalItems ? start + 1 : 0, endIndex: totalItems ? start + items.length : 0, filters: { query: options.query, visibility: options.visibility, membership: options.membership } };
+}
+
+export async function bulkUpdateCollections(env, session, input) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["operation", "collectionIds", "matching", "confirmMatching", "expectedCount"].includes(key))) throw new AuthFailure(400, "commerce_collection_bulk_fields_invalid", "The bulk collection mutation fields are invalid.");
+  const operation = cleanText(input.operation, 40);
+  if (!COLLECTION_BULK_OPERATIONS.includes(operation)) throw new AuthFailure(400, "commerce_collection_bulk_operation_invalid", "The bulk collection operation is invalid.");
+  const usesMatching = input.matching !== undefined;
+  const usesIds = input.collectionIds !== undefined;
+  if (usesMatching === usesIds) throw new AuthFailure(400, "commerce_collection_bulk_selection_invalid", "Choose explicit collection IDs or one confirmed matching selection.");
+  const db = requireCommerceDb(env);
+  let ids;
+  let selection;
+  if (usesMatching) {
+    if (!input.matching || typeof input.matching !== "object" || Array.isArray(input.matching) || Object.keys(input.matching).some((key) => !["query", "search", "visibility", "contents", "sort"].includes(key))) throw new AuthFailure(400, "commerce_collection_bulk_selection_invalid", "The matching collection selection is invalid.");
+    if (input.confirmMatching !== true || !Number.isSafeInteger(input.expectedCount) || input.expectedCount < 1 || input.expectedCount > 1000) throw new AuthFailure(400, "commerce_collection_bulk_confirmation_required", "Confirm the current filtered result count before applying this bulk operation.");
+    const options = normalizeCollectionListOptions({ ...input.matching, page: 1, pageSize: 100 });
+    const { where, bindings } = collectionListWhere(options);
+    const result = await db.prepare(`SELECT c.id FROM commerce_collections c WHERE ${where} ORDER BY ${collectionSortSql(options.sort)} LIMIT 1001`).bind(...bindings).all();
+    ids = (result?.results || []).map((row) => cleanText(row.id, 160));
+    if (ids.length !== input.expectedCount) throw new AuthFailure(409, "commerce_collection_bulk_match_changed", "The matching collection count changed. Review and confirm the current result set again.");
+    selection = "matching";
+  } else {
+    ids = validatedIdentifiers(input.collectionIds, 1000, "commerce_collection_bulk_ids_invalid");
+    if (!ids.length) throw new AuthFailure(400, "commerce_collection_bulk_ids_invalid", "Choose at least one collection.");
+    const found = await db.prepare(`SELECT id FROM commerce_collections WHERE status = 'active' AND id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all();
+    if ((found?.results || []).length !== ids.length) throw new AuthFailure(400, "commerce_collection_unknown", "Every bulk collection ID must reference an active collection.");
+    selection = "explicit";
+  }
+  const visibility = operation === "show" ? "public" : "hidden";
+  const timestamp = nowIso();
+  const result = await db.prepare(`UPDATE commerce_collections SET visibility = ?, revision = revision + 1, updated_at = ?, updated_by_account_id = ? WHERE status = 'active' AND visibility <> ? AND id IN (${ids.map(() => "?").join(",")})`).bind(visibility, timestamp, session?.accountId || null, visibility, ...ids).run();
+  const updated = Number(result?.meta?.changes || 0);
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collections_bulk_updated", targetType: "commerce_collections", result: "success", metadata: { operation, selection, matched: ids.length, updated, unchanged: ids.length - updated, collectionIds: ids } });
+  return { ok: true, operation, selection, matched: ids.length, requested: ids.length, updated, unchanged: ids.length - updated, rejected: 0, errors: [], updatedIds: ids };
+}
+
+export async function updateCollectionMemberships(env, session, collectionId, input) {
+  const db = requireCommerceDb(env); const id = collectionIdValue(collectionId);
+  requireExactFields(input, ["operation", "productIds", "revision"], "commerce_collection_membership_fields_invalid");
+  const operation = ["add", "remove"].includes(input.operation) ? input.operation : invalidMerch("commerce_collection_membership_operation_invalid", "The collection membership operation is invalid.");
+  const productIds = validatedIdentifiers(input.productIds, 100, "commerce_collection_products_invalid");
+  if (!productIds.length) throw new AuthFailure(400, "commerce_collection_products_invalid", "Choose at least one product.");
+  const revision = boundedMerchInteger(input.revision, 1, Number.MAX_SAFE_INTEGER, "commerce_collection_revision_invalid");
+  await requireCurrentCollection(db, id, revision);
+  await requireKnownProducts(db, productIds);
+  const existingResult = await db.prepare(`SELECT product_id FROM commerce_product_collections WHERE collection_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})`).bind(id, ...productIds).all();
+  const existing = new Set((existingResult?.results || []).map((row) => row.product_id));
+  const changedIds = operation === "add" ? productIds.filter((productId) => !existing.has(productId)) : productIds.filter((productId) => existing.has(productId));
+  const timestamp = nowIso();
+  if (!changedIds.length) {
+    await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_memberships_updated", targetType: "commerce_collection", targetId: id, result: "success", metadata: { operation, requested: productIds.length, updated: 0, unchanged: productIds.length, productIds } });
+    return { ok: true, collectionId: id, revision, operation, requested: productIds.length, updated: 0, unchanged: productIds.length, updatedIds: [] };
+  }
+  const statements = [];
+  if (operation === "add") for (const productId of changedIds) statements.push(db.prepare("INSERT OR IGNORE INTO commerce_product_collections (product_id, collection_id, assigned_at, assigned_by_account_id) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM commerce_collections WHERE id = ? AND status = 'active' AND revision = ?)").bind(productId, id, timestamp, session?.accountId || null, id, revision));
+  if (operation === "remove") statements.push(db.prepare(`DELETE FROM commerce_product_collections WHERE collection_id = ? AND product_id IN (${changedIds.map(() => "?").join(",")}) AND EXISTS (SELECT 1 FROM commerce_collections WHERE id = ? AND status = 'active' AND revision = ?)` ).bind(id, ...changedIds, id, revision));
+  statements.push(db.prepare("UPDATE commerce_collections SET revision = revision + 1, updated_at = ?, updated_by_account_id = ? WHERE id = ? AND status = 'active' AND revision = ?").bind(timestamp, session?.accountId || null, id, revision));
+  const results = await db.batch(statements);
+  if (Number(results.at(-1)?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving.");
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_memberships_updated", targetType: "commerce_collection", targetId: id, result: "success", metadata: { operation, requested: productIds.length, updated: changedIds.length, unchanged: productIds.length - changedIds.length, productIds } });
+  return { ok: true, collectionId: id, revision: revision + 1, operation, requested: productIds.length, updated: changedIds.length, unchanged: productIds.length - changedIds.length, updatedIds: changedIds };
+}
+
 export async function collectionsPayload(env, session) {
   const access = session ? await commerceAccessForSession(env, session) : null;
   if (!isCommerceDbConfigured(env)) return { ok: true, databaseConfigured: false, access, collections: [], products: [], updatedAt: null };
@@ -559,8 +715,12 @@ export async function collectionsPayload(env, session) {
 }
 
 export async function collectionOptionsPayload(env, session) {
-  const payload = await collectionsPayload(env, session);
-  return { ok: payload.ok, databaseConfigured: payload.databaseConfigured, access: payload.access, collections: payload.collections, updatedAt: payload.updatedAt };
+  const access = session ? await commerceAccessForSession(env, session) : null;
+  if (!isCommerceDbConfigured(env)) return { ok: true, databaseConfigured: false, access, collections: [], updatedAt: null };
+  const result = await requireCommerceDb(env).prepare(`SELECT id, slug, title, description, visibility, status, display_order, revision, created_at, updated_at
+                                                         FROM commerce_collections WHERE status = 'active' ORDER BY display_order, slug, id LIMIT 1000`).all();
+  const collections = (result?.results || []).map((row) => serializeCollectionListRow({ ...row, assigned_product_count: 0, public_product_count: 0, thumbnail_url: null }));
+  return { ok: true, databaseConfigured: true, access, collections, updatedAt: collections.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, "") || null };
 }
 
 export async function createCollection(env, session, input) {
@@ -579,7 +739,7 @@ export async function createCollection(env, session, input) {
       .bind(id, slug, title, description, visibility, displayOrder, timestamp, timestamp, session?.accountId || null).run();
   } catch (error) { throwCollectionConflict(error); }
   await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_created", targetType: "commerce_collection", targetId: id, result: "success", metadata: { slug, visibility, displayOrder } });
-  return collectionsPayload(env, session);
+  return collectionDetailPayload(env, session, id);
 }
 
 export async function updateCollection(env, session, collectionId, input) {
@@ -598,20 +758,20 @@ export async function updateCollection(env, session, collectionId, input) {
     if (Number(result?.meta?.changes || 0) !== 1) { await requireCurrentCollection(db, id, revision); throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving."); }
   } catch (error) { if (error instanceof AuthFailure) throw error; throwCollectionConflict(error); }
   await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_updated", targetType: "commerce_collection", targetId: id, result: "success", metadata: { visibility, displayOrder, revision } });
-  return collectionsPayload(env, session);
+  return collectionDetailPayload(env, session, id);
 }
 
 export async function updateCollectionOrder(env, session, input) {
   const db = requireCommerceDb(env);
   requireExactFields(input, ["collectionIds"], "commerce_collection_order_fields_invalid");
-  const collectionIds = validatedIdentifiers(input.collectionIds, 200, "commerce_collection_order_invalid");
+  const collectionIds = validatedIdentifiers(input.collectionIds, 1000, "commerce_collection_order_invalid");
   const current = await db.prepare("SELECT id FROM commerce_collections WHERE status='active' ORDER BY id").all();
   const currentIds = (current?.results || []).map((row) => row.id).sort();
   if (collectionIds.length !== currentIds.length || [...collectionIds].sort().some((id, index) => id !== currentIds[index])) throw new AuthFailure(400, "commerce_collection_order_incomplete", "Collection order must include every active collection exactly once.");
   const timestamp = nowIso();
   await db.batch(collectionIds.map((id, index) => db.prepare("UPDATE commerce_collections SET display_order=?, revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=? AND status='active'").bind((index + 1) * 10, timestamp, session?.accountId || null, id)));
   await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collections_reordered", targetType: "commerce_collections", result: "success", metadata: { collectionIds } });
-  return collectionsPayload(env, session);
+  return collectionOptionsPayload(env, session);
 }
 
 export async function updateCollectionProducts(env, session, collectionId, input) {
@@ -627,7 +787,7 @@ export async function updateCollectionProducts(env, session, collectionId, input
   statements.push(db.prepare("UPDATE commerce_collections SET revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=? AND revision=?").bind(timestamp, session?.accountId || null, id, revision));
   await db.batch(statements);
   await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_products_updated", targetType: "commerce_collection", targetId: id, result: "success", metadata: { productCount: productIds.length, productIds } });
-  return collectionsPayload(env, session);
+  return collectionDetailPayload(env, session, id);
 }
 
 export async function updateProductCollections(env, session, productId, input) {
@@ -655,7 +815,7 @@ export async function archiveCollection(env, session, collectionId, input) {
   const result = await db.prepare("UPDATE commerce_collections SET status='archived', visibility='hidden', revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=? AND status='active' AND revision=?").bind(nowIso(), session?.accountId || null, id, revision).run();
   if (Number(result?.meta?.changes || 0) !== 1) { await requireCurrentCollection(db, id, revision); throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving."); }
   await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_archived", targetType: "commerce_collection", targetId: id, result: "success", metadata: { assignmentsPreserved: true } });
-  return collectionsPayload(env, session);
+  return { ok: true, collectionId: id, archived: true, assignmentsPreserved: true };
 }
 
 export async function deleteCollection(env, session, collectionId, input) {
@@ -668,7 +828,7 @@ export async function deleteCollection(env, session, collectionId, input) {
   if (Number(assigned?.count || 0) > 0) throw new AuthFailure(409, "commerce_collection_not_empty", "Remove every product assignment before deleting this collection.");
   await db.prepare("DELETE FROM commerce_collections WHERE id=?").bind(id).run();
   await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_deleted", targetType: "commerce_collection", targetId: id, result: "success", metadata: { assignedProductCount: 0 } });
-  return collectionsPayload(env, session);
+  return { ok: true, collectionId: id, deleted: true, productsDeleted: 0 };
 }
 
 export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
@@ -1798,6 +1958,44 @@ function safeStoredStringArray(value, fallback) { try { const parsed = typeof va
 function collectionSlug(value) { const slug = cleanText(value, 180).toLowerCase(); if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new AuthFailure(400, "commerce_collection_slug_invalid", "Collection slugs may contain lowercase letters, numbers, and single hyphens only."); return slug; }
 function collectionVisibility(value) { return ["public", "hidden"].includes(value) ? value : invalidMerch("commerce_collection_visibility_invalid", "Collection visibility is invalid."); }
 function collectionIdValue(value) { const id = cleanText(value, 160); if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id)) throw new AuthFailure(400, "commerce_collection_id_invalid", "The commerce collection identity is invalid."); return id; }
+function normalizeCollectionListOptions(input = {}) {
+  const pageSizeCandidate = Number(input.pageSize ?? 20);
+  const pageSize = COLLECTION_PAGE_SIZES.includes(pageSizeCandidate) ? pageSizeCandidate : 20;
+  const pageCandidate = Number(input.page ?? 1);
+  const page = Number.isSafeInteger(pageCandidate) && pageCandidate > 0 ? pageCandidate : 1;
+  const query = cleanText(input.query ?? input.search, 120);
+  const visibility = ["all", "public", "hidden"].includes(input.visibility) ? input.visibility : "all";
+  const contents = ["all", "empty", "contains_products"].includes(input.contents) ? input.contents : "all";
+  const sort = ["display", "title_asc", "title_desc", "product_count", "updated_desc"].includes(input.sort) ? input.sort : "display";
+  return { page, pageSize, query, visibility, contents, sort };
+}
+function normalizeCollectionProductOptions(input = {}) {
+  const base = normalizeCollectionListOptions(input);
+  const membership = ["all", "assigned", "available"].includes(input.membership) ? input.membership : "all";
+  const visibility = ["all", "public", "hidden"].includes(input.visibility) ? input.visibility : "all";
+  return { page: base.page, pageSize: base.pageSize, query: base.query, membership, visibility };
+}
+function collectionListWhere(options) {
+  const where = ["c.status = 'active'"];
+  const bindings = [];
+  if (options.query) { const pattern = `%${escapeSqlLike(options.query)}%`; where.push("(c.title LIKE ? ESCAPE '\\' OR c.slug LIKE ? ESCAPE '\\' OR c.description LIKE ? ESCAPE '\\')"); bindings.push(pattern, pattern, pattern); }
+  if (options.visibility !== "all") { where.push("c.visibility = ?"); bindings.push(options.visibility); }
+  if (options.contents === "empty") where.push("NOT EXISTS (SELECT 1 FROM commerce_product_collections pc_filter WHERE pc_filter.collection_id = c.id)");
+  if (options.contents === "contains_products") where.push("EXISTS (SELECT 1 FROM commerce_product_collections pc_filter WHERE pc_filter.collection_id = c.id)");
+  return { where: where.join(" AND "), bindings };
+}
+function collectionSortSql(sort) {
+  if (sort === "title_asc") return "c.title COLLATE NOCASE ASC, c.slug ASC, c.id ASC";
+  if (sort === "title_desc") return "c.title COLLATE NOCASE DESC, c.slug DESC, c.id DESC";
+  if (sort === "product_count") return "assigned_product_count DESC, c.title COLLATE NOCASE ASC, c.id ASC";
+  if (sort === "updated_desc") return "c.updated_at DESC, c.title COLLATE NOCASE ASC, c.id ASC";
+  return "c.display_order ASC, c.slug ASC, c.id ASC";
+}
+function serializeCollectionListRow(row) {
+  return { id: cleanText(row.id, 160), slug: cleanText(row.slug, 180), title: cleanText(row.title, 160), description: cleanText(row.description, 2000), visibility: row.visibility, status: row.status, displayOrder: Number(row.display_order), revision: Number(row.revision), assignedProductCount: Number(row.assigned_product_count || 0), publicProductCount: Number(row.public_product_count || 0), thumbnailUrl: validateStoredHttpsUrl(row.thumbnail_url), createdAt: cleanText(row.created_at, 80), updatedAt: cleanText(row.updated_at, 80) };
+}
+function emptyCollectionListPayload(access, options) { return { ok: true, databaseConfigured: false, access, items: [], page: 1, pageSize: options.pageSize, totalItems: 0, totalPages: 0, startIndex: 0, endIndex: 0, filters: { query: options.query, visibility: options.visibility, contents: options.contents, sort: options.sort }, totals: { collections: 0, publicCollections: 0, hiddenCollections: 0, emptyCollections: 0 }, updatedAt: null }; }
+function escapeSqlLike(value) { return String(value).replace(/[\\%_]/g, (character) => `\\${character}`); }
 function validatedIdentifiers(value, maximum, code) { if (!Array.isArray(value) || value.length > maximum) throw new AuthFailure(400, code, "The identity list is invalid."); const ids = value.map((item) => cleanText(item, 160)); if (ids.some((id) => !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id))) throw new AuthFailure(400, code, "The identity list is invalid."); if (new Set(ids).size !== ids.length) throw new AuthFailure(400, code, "Duplicate identities are not allowed."); return ids; }
 async function requireKnownProducts(db, ids) { if (!ids.length) return; const result = await db.prepare(`SELECT id FROM commerce_products WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all(); if ((result?.results || []).length !== ids.length) throw new AuthFailure(400, "commerce_product_unknown", "Every assignment must reference a known product."); }
 async function requireCurrentCollection(db, id, revision) { const row = await db.prepare("SELECT id, revision, status FROM commerce_collections WHERE id=?").bind(id).first(); if (!row || row.status !== "active") throw new AuthFailure(404, "commerce_collection_not_found", "The commerce collection was not found."); if (Number(row.revision) !== Number(revision)) throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving."); return row; }

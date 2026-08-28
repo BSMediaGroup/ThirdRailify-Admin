@@ -127,6 +127,7 @@ test("Shop is an expandable Products, Collections, Orders group with dirty-only 
   assert.equal((navigation.match(/path: "\/orders"/g) || []).length, 1);
   assert.match(app, /path="collections" element=\{<CommerceCollectionsPage/); assert.match(app, /path="shop" element=\{<Navigate to="\/products"/);
   assert.match(page, /featuredDirty && <div className="featured-order-save"/); assert.match(page, /Featured order changed/); assert.match(page, />Discard<\/button>/); assert.match(page, /Select all \{payload\.totalItems\} matching/); assert.match(page, /Rows per page/);
-  for (const label of ["Create collection", "Stable Public slug", "Product assignments", "Archive collection", "Delete empty collection", "Assigned", "Public"]) assert.match(page, new RegExp(label));
-  assert.match(styles, /\.featured-dirty-rail/); assert.match(styles, /\.collection-assignment__list/); assert.match(headers, /img-src[^;]*https:\/\/static\.wixstatic\.com/);
+  for (const label of ["Create collection", "Stable Public slug", "Product membership", "Current products", "Add products", "Show collection on storefront", "Archive collection", "Delete empty collection", "Rows per page", "Edit collection"]) assert.match(page, new RegExp(label));
+  assert.match(page, /getCollectionList/); assert.match(page, /bulkUpdateCollections/); assert.match(page, /updateCollectionMemberships/); assert.match(page, /No standalone collection image field exists/);
+  assert.match(styles, /\.featured-dirty-rail/); assert.match(styles, /\.collection-membership-grid/); assert.match(styles, /\.collection-admin-list > article/); assert.match(headers, /img-src[^;]*https:\/\/static\.wixstatic\.com/);
 });
