@@ -606,6 +606,29 @@ export async function revokeAccountSessions(env, accountId) {
     .run();
 }
 
+export async function cleanupExpiredAuthState(env, actorId, cutoff = nowIso()) {
+  const cutoffTime = Date.parse(String(cutoff));
+  if (!Number.isFinite(cutoffTime)) throw new AuthFailure(400, "cleanup_cutoff_invalid", "The auth cleanup cutoff is invalid.");
+  const timestamp = nowIso(cutoffTime);
+  const db = requireAuthDb(env);
+  const tables = [
+    "sessions",
+    "auth_handoffs",
+    "oauth_transactions",
+    "email_verification_tokens",
+    "password_reset_tokens",
+  ];
+  const results = await db.batch(tables.map((table) => db.prepare(`DELETE FROM ${table} WHERE expires_at <= ?`).bind(timestamp)));
+  const deleted = Object.fromEntries(tables.map((table, index) => [table, Number(results?.[index]?.meta?.changes || 0)]));
+  await writeAudit(env, {
+    actorAccountId: actorId,
+    eventType: "auth_expired_state_cleaned",
+    result: "success",
+    metadata: { cutoff: timestamp, deleted },
+  });
+  return { ok: true, cutoff: timestamp, deleted, totalDeleted: Object.values(deleted).reduce((total, value) => total + value, 0) };
+}
+
 export async function createHandoff(env, accountId, targetOrigin, returnTo) {
   const allowedOrigins = configuredOrigins(env);
   if (!allowedOrigins.has(targetOrigin)) throw new AuthFailure(400, "invalid_target_origin", "The login destination is not allowed.");

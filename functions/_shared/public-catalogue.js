@@ -2,14 +2,15 @@ import { AuthFailure, cleanText } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
 
 export async function publicCataloguePayload(env) {
-  const products = await loadPublicProducts(requireCommerceDb(env));
+  const { products, collections } = await loadPublicCatalogue(requireCommerceDb(env));
   return {
     ok: true,
     source: "commerce-d1",
     currency: "CAD",
     checkoutEnabled: false,
+    collections,
     products,
-    updatedAt: products.reduce((latest, product) => !latest || product.updatedAt > latest ? product.updatedAt : latest, "") || null,
+    updatedAt: [...products, ...collections].reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, "") || null,
   };
 }
 
@@ -18,12 +19,19 @@ export async function publicProductPayload(env, slug) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug)) {
     throw new AuthFailure(404, "product_not_found", "The product was not found.");
   }
-  const products = await loadPublicProducts(requireCommerceDb(env), normalizedSlug);
+  const { products } = await loadPublicCatalogue(requireCommerceDb(env), normalizedSlug);
   if (!products.length) throw new AuthFailure(404, "product_not_found", "The product was not found.");
   return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled: false, product: products[0] };
 }
 
-async function loadPublicProducts(db, slug = null) {
+async function loadPublicCatalogue(db, slug = null) {
+  const collectionResult = await db.prepare(
+    `SELECT id, slug, title, description, display_order, updated_at
+     FROM commerce_collections
+     WHERE status = 'active' AND visibility = 'public'
+     ORDER BY display_order, slug`,
+  ).all();
+  const collectionRows = collectionResult?.results || [];
   const productStatement = db.prepare(
     `SELECT id, slug, title, safe_metadata_json, is_featured, featured_order,
             unit_amount, currency_code, max_checkout_quantity, requires_shipping, updated_at
@@ -33,9 +41,9 @@ async function loadPublicProducts(db, slug = null) {
   );
   const productResult = await (slug ? productStatement.bind(slug) : productStatement).all();
   const rows = productResult?.results || [];
-  if (!rows.length) return [];
+  if (!rows.length) return { products: [], collections: collectionRows.map((row) => serializePublicCollection(row, [])) };
   const ids = rows.map((row) => row.id);
-  const variantResult = await db.prepare(
+  const [variantResult, membershipResult] = await Promise.all([db.prepare(
     `SELECT id, product_id, size_label, color_label, option_values_json,
             unit_amount, currency_code, availability_status, safe_metadata_json
      FROM commerce_product_variants
@@ -43,13 +51,25 @@ async function loadPublicProducts(db, slug = null) {
        AND status = 'active' AND visibility = 'public' AND is_ignored = 0
        AND availability_status <> 'discontinued'
      ORDER BY product_id, local_variant_key, id`,
-  ).bind(...ids).all();
+  ).bind(...ids).all(),
+  db.prepare(`SELECT pc.product_id, c.id, c.slug, c.title
+              FROM commerce_product_collections pc
+              JOIN commerce_collections c ON c.id = pc.collection_id
+              WHERE pc.product_id IN (${ids.map(() => "?").join(",")})
+                AND c.status = 'active' AND c.visibility = 'public'
+              ORDER BY pc.product_id, c.display_order, c.slug`).bind(...ids).all()]);
   const variantsByProduct = new Map(ids.map((id) => [id, []]));
   for (const row of variantResult?.results || []) variantsByProduct.get(row.product_id)?.push(serializePublicVariant(row));
-  return rows.map((row) => serializePublicProduct(row, variantsByProduct.get(row.id) || [])).filter(Boolean);
+  const collectionsByProduct = new Map(ids.map((id) => [id, []]));
+  for (const row of membershipResult?.results || []) collectionsByProduct.get(row.product_id)?.push({ id: row.id, slug: row.slug, title: row.title });
+  const products = rows.map((row) => serializePublicProduct(row, variantsByProduct.get(row.id) || [], collectionsByProduct.get(row.id) || [])).filter(Boolean);
+  const publicProductIds = new Set(products.map((product) => product.id));
+  const collectionProducts = new Map(collectionRows.map((row) => [row.id, []]));
+  for (const row of membershipResult?.results || []) if (publicProductIds.has(row.product_id)) collectionProducts.get(row.id)?.push(row.product_id);
+  return { products, collections: collectionRows.map((row) => serializePublicCollection(row, collectionProducts.get(row.id) || [])) };
 }
 
-function serializePublicProduct(row, variants) {
+function serializePublicProduct(row, variants, collections) {
   if (String(row.currency_code || "").toUpperCase() !== "CAD") return null;
   const metadata = safeObject(row.safe_metadata_json);
   const fallbackAmount = boundedAmount(row.unit_amount);
@@ -67,7 +87,8 @@ function serializePublicProduct(row, variants) {
     title: cleanText(row.title, 240),
     description: cleanText(metadata.description, 12000),
     images,
-    categories: safeStringArray(metadata.categories, 20, 120),
+    categories: collections.map((collection) => cleanText(collection.title, 160)),
+    collectionSlugs: collections.map((collection) => cleanText(collection.slug, 180)),
     tags: safeStringArray(metadata.tags, 30, 80),
     featured: row.is_featured === 1,
     featuredOrder: row.is_featured === 1 && Number.isSafeInteger(Number(row.featured_order)) ? Number(row.featured_order) : null,
@@ -83,6 +104,14 @@ function serializePublicProduct(row, variants) {
     variants,
     available: variants.length ? variants.some((variant) => variant.availability === "active") : true,
     updatedAt: cleanText(row.updated_at, 80),
+  };
+}
+
+function serializePublicCollection(row, productIds) {
+  return {
+    title: cleanText(row.title, 160), slug: cleanText(row.slug, 180), description: cleanText(row.description, 2000),
+    displayOrder: boundedInteger(row.display_order, 0, 999999, 1000), productCount: productIds.length,
+    productIds: [...productIds], updatedAt: cleanText(row.updated_at, 80),
   };
 }
 

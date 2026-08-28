@@ -4,6 +4,7 @@ import { onRequest as authRequest } from "../functions/api/auth/[[path]].js";
 import { onRequest as accountsRequest } from "../functions/api/admin/accounts/[[path]].js";
 import {
   AuthFailure,
+  cleanupExpiredAuthState,
   consumeHandoff,
   createSession,
   enforceRateLimit,
@@ -196,6 +197,21 @@ test("auth API covers masters, signup, verification, reset, OAuth, handoff, and 
   assert.equal(masterPayload.account.locked, true);
   assert.ok(masterPayload.csrfToken);
   assert.equal(JSON.stringify(masterPayload).includes(env.ADMIN_SECRET_1), false);
+
+  const cleanupWithoutCsrf = await callAccounts(
+    "maintenance/cleanup-expired-auth",
+    { method: "POST", origin: ADMIN_ORIGIN, cookie: masterCookie },
+    env,
+  );
+  assert.equal(cleanupWithoutCsrf.status, 403, "expired-auth cleanup requires CSRF protection");
+
+  const cleanupResponse = await callAccounts(
+    "maintenance/cleanup-expired-auth",
+    { method: "POST", origin: ADMIN_ORIGIN, cookie: masterCookie, csrfToken: masterPayload.csrfToken },
+    env,
+  );
+  assert.equal(cleanupResponse.status, 200, "a Master can run expired-auth cleanup");
+  assert.equal((await cleanupResponse.json()).ok, true);
 
   const profileWithoutCsrf = await callAuth(
     "profile",
@@ -469,6 +485,41 @@ test("D1-backed rate limiting stores only hashed composite keys and blocks bound
   assert.ok(row.key_hash);
   assert.equal(row.key_hash.includes("198.51.100.23"), false);
   assert.equal(row.key_hash.includes("rate-user@example.test"), false);
+});
+
+test("auth cleanup deletes only records whose established expiry is at or before the cutoff", async (t) => {
+  const harness = await createAuthDatabase();
+  t.after(harness.dispose);
+  const env = authEnvironment(harness.db);
+  const account = "cleanup-account";
+  await harness.db.prepare(
+    "INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  ).bind(account, "cleanup@example.test", "Cleanup", "user", "none", "active", "2026-08-28T00:00:00.000Z", "2026-08-28T00:00:00.000Z", "2026-08-28T00:00:00.000Z", "email").run();
+  const cutoff = "2026-08-28T12:00:00.000Z";
+  const rows = [
+    ["expired", "2026-08-28T11:59:59.999Z"],
+    ["boundary", cutoff],
+    ["active", "2026-08-28T12:00:00.001Z"],
+  ];
+  for (const [suffix, expiresAt] of rows) {
+    await harness.db.batch([
+      harness.db.prepare("INSERT INTO sessions (id,account_id,token_hash,csrf_token_hash,created_at,expires_at,last_seen_at,source_origin) VALUES (?,?,?,?,?,?,?,?)").bind(`session-${suffix}`, account, `session-hash-${suffix}`, `csrf-${suffix}`, cutoff, expiresAt, cutoff, ADMIN_ORIGIN),
+      harness.db.prepare("INSERT INTO auth_handoffs (id,code_hash,account_id,target_origin,return_to,created_at,expires_at) VALUES (?,?,?,?,?,?,?)").bind(`handoff-${suffix}`, `handoff-hash-${suffix}`, account, PUBLIC_ORIGIN, "/", cutoff, expiresAt),
+      harness.db.prepare("INSERT INTO oauth_transactions (id,state_hash,provider,target_origin,return_to,created_at,expires_at) VALUES (?,?,?,?,?,?,?)").bind(`oauth-${suffix}`, `oauth-hash-${suffix}`, "github", PUBLIC_ORIGIN, "/", cutoff, expiresAt),
+      harness.db.prepare("INSERT INTO email_verification_tokens (id,account_id,token_hash,target_origin,return_to,created_at,expires_at) VALUES (?,?,?,?,?,?,?)").bind(`verify-${suffix}`, account, `verify-hash-${suffix}`, PUBLIC_ORIGIN, "/", cutoff, expiresAt),
+      harness.db.prepare("INSERT INTO password_reset_tokens (id,account_id,token_hash,target_origin,return_to,created_at,expires_at) VALUES (?,?,?,?,?,?,?)").bind(`reset-${suffix}`, account, `reset-hash-${suffix}`, PUBLIC_ORIGIN, "/", cutoff, expiresAt),
+    ]);
+  }
+  const result = await cleanupExpiredAuthState(env, "env-master-1", cutoff);
+  assert.equal(result.totalDeleted, 10);
+  for (const table of ["sessions", "auth_handoffs", "oauth_transactions", "email_verification_tokens", "password_reset_tokens"]) {
+    const remaining = await harness.db.prepare(`SELECT id, expires_at FROM ${table} WHERE id LIKE ? ORDER BY id`).bind(`%-active`).all();
+    assert.deepEqual(remaining.results.map((row) => row.expires_at), ["2026-08-28T12:00:00.001Z"]);
+    assert.equal(result.deleted[table], 2);
+  }
+  const audit = await harness.db.prepare("SELECT event_type, metadata_json FROM auth_audit WHERE event_type = 'auth_expired_state_cleaned'").first();
+  assert.equal(audit.event_type, "auth_expired_state_cleaned");
+  assert.equal(JSON.parse(audit.metadata_json).cutoff, cutoff);
 });
 
 async function callAuth(path, options, env, authFetch) {

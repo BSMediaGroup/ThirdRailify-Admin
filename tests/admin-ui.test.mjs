@@ -90,3 +90,14 @@ test("Orders exposes only the Master-controlled Stripe TEST acceptance and truth
   assert.match(core, /gate === "controlled_test"/); assert.match(core, /stripe_test_checkout_already_created/); assert.match(core, /fulfillment_status = 'disabled'|fulfillment_status, currency_code/); assert.match(core, /webhookReceiptCount/); assert.match(core, /webhookVerified/);
   assert.match(shell, /area\.path\.toLowerCase\(\) === location\.pathname\.toLowerCase\(\)/); assert.match(shell, /navigate\(`\$\{canonical\}/);
 });
+
+test("Shop is an expandable Products, Collections, Orders group with dirty-only ordering UX", async () => {
+  const [navigation, app, page, styles, headers] = await Promise.all([read("src/config/navigation.ts"), read("src/App.tsx"), read("src/pages/CommercePages.tsx"), read("src/styles/global.css"), read("public/_headers")]);
+  assert.match(navigation, /path: "\/shop"[\s\S]{0,120}label: "Shop"/);
+  for (const [path, label] of [["/products", "Products"], ["/collections", "Collections"], ["/orders", "Orders"]]) assert.match(navigation, new RegExp(`path: "${path.replaceAll("/", "\\/")}"[\\s\\S]{0,90}parentPath: "\\/shop"[\\s\\S]{0,100}label: "${label}"`));
+  assert.equal((navigation.match(/path: "\/orders"/g) || []).length, 1);
+  assert.match(app, /path="collections" element=\{<CommerceCollectionsPage/); assert.match(app, /path="shop" element=\{<Navigate to="\/products"/);
+  assert.match(page, /featuredDirty \? <div className="featured-dirty-rail"/); assert.match(page, /Featured order changed/); assert.match(page, /Discard changes/); assert.doesNotMatch(page, /Save featured order/);
+  for (const label of ["Create collection", "Stable Public slug", "Product assignments", "Archive collection", "Delete empty collection", "Assigned", "Public"]) assert.match(page, new RegExp(label));
+  assert.match(styles, /\.featured-dirty-rail/); assert.match(styles, /\.collection-assignment__list/); assert.match(headers, /img-src[^;]*https:\/\/static\.wixstatic\.com/);
+});

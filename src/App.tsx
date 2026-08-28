@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { AdminShell } from "./components/AdminShell";
 import { adminAreas } from "./config/navigation";
 import { AreaPage } from "./pages/AreaPage";
@@ -11,6 +11,7 @@ import {
   BusinessInformationPage,
   CommerceOrdersPage,
   CommerceOverviewPage,
+  CommerceCollectionsPage,
   CommerceProductsPage,
   CustomerEmailsPage,
   FulfillmentIntegrationsPage,
@@ -27,7 +28,7 @@ import {
   GoatsQueuePage,
 } from "./pages/GoatsAdminPages";
 
-const implementedPaths = new Set(["/", "/watch", "/content", "/access", "/products", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
+const implementedPaths = new Set(["/", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats"]);
 
 export function App() {
   return (
@@ -37,7 +38,9 @@ export function App() {
         <Route path="access" element={<AccountsPage />} />
         <Route path="watch" element={<WatchAdminPage />} />
         <Route path="content" element={<SiteContentPage />} />
+        <Route path="shop" element={<Navigate to="/products" replace />} />
         <Route path="products" element={<CommerceProductsPage />} />
+        <Route path="collections" element={<CommerceCollectionsPage />} />
         <Route path="orders" element={<CommerceOrdersPage />} />
         <Route path="commerce" element={<CommerceOverviewPage />} />
         <Route path="commerce/payments" element={<PaymentsPayoutsPage />} />

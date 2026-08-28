@@ -11,13 +11,14 @@ export type AdminShellOutletContext = {
 
 const topLevelAdminAreas = adminAreas.filter((area) => !area.parentPath);
 const childAdminAreas = (parentPath: string) => adminAreas.filter((area) => area.parentPath === parentPath);
+const groupIsActive = (parentPath: string, pathname: string) => pathname === parentPath || pathname.startsWith(`${parentPath}/`) || childAdminAreas(parentPath).some((child) => pathname === child.path || pathname.startsWith(`${child.path}/`));
 
 export function AdminShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarPreference);
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(topLevelAdminAreas.filter((area) => location.pathname === area.path || location.pathname.startsWith(`${area.path}/`)).map((area) => area.path)));
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(topLevelAdminAreas.filter((area) => groupIsActive(area.path, location.pathname)).map((area) => area.path)));
   const [loadingReason, setLoadingReason] = useState("");
   const menuButton = useRef<HTMLButtonElement>(null);
   const loadingTokens = useRef(new Map<symbol, string>());
@@ -35,7 +36,7 @@ export function AdminShell() {
 
   useEffect(() => {
     setMobileOpen(false);
-    const activeGroup = topLevelAdminAreas.find((area) => childAdminAreas(area.path).length && (location.pathname === area.path || location.pathname.startsWith(`${area.path}/`)));
+    const activeGroup = topLevelAdminAreas.find((area) => childAdminAreas(area.path).length && groupIsActive(area.path, location.pathname));
     if (activeGroup) setOpenGroups((current) => current.has(activeGroup.path) ? current : new Set([...current, activeGroup.path]));
     window.scrollTo(0, 0);
   }, [location.pathname]);
@@ -91,7 +92,7 @@ export function AdminShell() {
               <AdminIcon name={area.icon} />
               <span>{area.label}</span>
             </NavLink>;
-            const active = location.pathname === area.path || location.pathname.startsWith(`${area.path}/`);
+            const active = groupIsActive(area.path, location.pathname);
             const open = openGroups.has(area.path);
             const controlId = `${area.shortLabel.toLowerCase()}-navigation`;
             return <div key={area.path} className={`nav-group${open ? " nav-group--open" : ""}${active ? " nav-group--active" : ""}`}>

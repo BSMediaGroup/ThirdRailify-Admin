@@ -15,7 +15,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Vite 5, React 18, TypeScript, and React Router.
 - Branded responsive sidebar with a discreet topbar-triggered desktop icon-only collapse, a full mobile drawer, a header-aligned authenticated account menu, server-hydrated overview, future-area route shells, and a branded 404.
 - American Captain display typography rendered at its real weight with lightly relaxed heading tracking and line-height.
-- Routes for Overview, Watch / Broadcast, Site Content, Shop / Products, Orders, Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.
+- Routes for Overview, Watch / Broadcast, Site Content, expandable Shop (Products, Collections, Orders), Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.
 - D1-backed email/password accounts, verification/reset email, Discord/Google/GitHub/X OAuth, explicit Turnstile, hashed sessions, one-time public handoff, rate limiting, and bounded audit records.
 - Fail-closed loading, signed-out, regular-user, Full Admin, and Master Admin gates with no protected dashboard flash.
 - Functional `/access` account registry with self-service display-name editing, avatar upload/URL import, search/filters, and Master-only promotion, demotion, status, and session-revocation controls.
@@ -119,7 +119,7 @@ ThirdRailify-Admin/
 │   ├── api/                Shared auth, signed Admin/GOATS APIs, public projections, and signed Stripe webhook receiver
 │   └── u/                  Immutable R2-backed profile-media delivery
 ├── commerce-import/        Sanitized catalogue evidence and design-only variant schema
-├── commerce-migrations/    Commerce, Stripe/order/product authority, and additive GOATS community schema
+├── commerce-migrations/    Commerce, Stripe/order/product/collection authority, and additive GOATS community schema
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
 │   ├── auth/               Gate, session provider, modal, Turnstile, and account widget
@@ -138,6 +138,7 @@ ThirdRailify-Admin/
 ├── CLOUDFLARE_COMMERCE_SETUP.md
 ├── CLOUDFLARE_AUTH_SETUP.md
 ├── CLOUDFLARE_SETUP.md
+├── COMMERCE_SUPPORT_RUNBOOK.md
 ├── COMMERCE_ARCHITECTURE.md
 ├── STRIPE_CANADA_FEASIBILITY.md
 ├── WIX_COMMERCE_AUDIT.md
@@ -146,6 +147,8 @@ ThirdRailify-Admin/
 ```
 
 Additive banner files in this structure are `commerce-migrations/0006_site_banner.sql`, `functions/_shared/banner-core.js`, the Public/protected banner Functions, `src/banner/client.ts`, `src/pages/SiteContentPage.tsx`, and focused Function/browser tests. Banner content uses the existing Admin-owned commerce D1; auth D1 is used only for the existing session, rate-limit, and audit conventions.
+
+`commerce-migrations/0009_commerce_collections.sql` is the additive collection authority. It preserves the existing category slugs while adding stable collection metadata and normalized product membership. `/collections` and product editing reuse the existing authenticated commerce capability, exact-Origin, CSRF, rate-limit, revision, parameterized-D1, and audit boundaries; Public receives only active visible collection metadata and displayable memberships.
 
 `docs/WATCH_V2.md` documents the Watch management route, signed server boundary, and Public archive ownership.
 
@@ -174,6 +177,8 @@ The display system uses the seeded American Captain asset at its real weight wit
 - Catalogue snapshot phases are same-origin, session/CSRF/capability/rate-limit protected. Short-lived HMAC evidence lets the browser orchestrate bounded Pages invocations without trusting browser-supplied catalogue data; only the final verified assembly is audited as completed. No phase uses repository files or persists provider payloads.
 - Private business/legal/tax values require the separate commerce D1 and server-only AES-256-GCM key. Missing storage/key, malformed envelopes, wrong keys, and tampering fail closed. The dedicated Stripe account's secret key/webhook secret and the Printful token remain Admin-only Cloudflare encrypted secrets; no browser or Public payload receives them.
 - Structured email/document templates allow bounded fields only and reject scripts or executable HTML. There is no send path in this milestone.
+- Expired sessions, handoffs, OAuth transactions, email-verification tokens, and password-reset tokens have one Master-only, exact-origin, CSRF-protected maintenance action. It deletes only rows whose existing `expires_at` is at or before execution, writes a bounded auth audit event, and does not touch accounts, identities, rate limits, or audit history.
+- `COMMERCE_SUPPORT_RUNBOOK.md` documents the exact read-only order/support evidence and the absent refund, cancellation, replacement, claim, shipment, email, and fulfilment mutations. It grants no provider-write or remedy authority.
 - `noindex` is not access control. The application gate and signed APIs are mandatory; any outer Cloudflare Access policy must preserve narrowly required public auth/callback routes.
 
 ## Cloudflare and domain safety

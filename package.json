@@ -16,6 +16,7 @@
     "test:browser:watch": "node --test --test-concurrency=1 tests/watch-browser.test.mjs",
     "test:browser:banner": "node --test --test-concurrency=1 tests/banner-browser.test.mjs",
     "test:browser:orders": "node --test --test-concurrency=1 tests/orders-browser.test.mjs",
+    "test:browser:commerce": "node --test --test-concurrency=1 tests/commerce-browser.test.mjs",
     "test:admin-ui": "node --test tests/admin-ui.test.mjs",
     "typecheck": "tsc -b --pretty false",
     "commerce:migration:build": "node scripts/build-commerce-migration-artifacts.mjs",

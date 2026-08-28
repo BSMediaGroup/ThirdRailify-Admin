@@ -13,7 +13,11 @@ import {
 } from "../../../_shared/auth-core.js";
 import {
   businessProfilePayload,
+  archiveCollection,
+  collectionsPayload,
   commerceOverview,
+  createCollection,
+  deleteCollection,
   grantCommerceCapability,
   merchandisingProductsPayload,
   merchandisingProductPayload,
@@ -22,9 +26,13 @@ import {
   revokeCommerceCapability,
   templatesPayload,
   updateBusinessProfile,
+  updateCollection,
+  updateCollectionOrder,
+  updateCollectionProducts,
   updateFeaturedProducts,
   updateMerchandisingProduct,
   updateMerchandisingVariant,
+  updateProductCollections,
   updateTemplate,
   verifyPrintfulStore,
   verifyStripeAccount,
@@ -76,6 +84,9 @@ async function handleGet(request, env, path) {
   } else if (path === "products") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductsPayload(env, session);
+  } else if (path === "collections") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await collectionsPayload(env, session);
   } else if (path.startsWith("products/")) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductPayload(env, session, decodePathPart(path.slice("products/".length)));
@@ -186,6 +197,41 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.business.manage");
     payload = await updateFeaturedProducts(env, session, body);
     authEventType = "commerce_featured_products_updated";
+  } else if (path === "collections") {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await createCollection(env, session, body);
+    authEventType = "commerce_collection_created";
+  } else if (path === "collections/order") {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await updateCollectionOrder(env, session, body);
+    authEventType = "commerce_collections_reordered";
+  } else if (/^collections\/[^/]+\/products$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await updateCollectionProducts(env, session, decodePathPart(path.split("/")[1]), body);
+    authEventType = "commerce_collection_products_updated";
+  } else if (/^collections\/[^/]+\/archive$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await archiveCollection(env, session, decodePathPart(path.split("/")[1]), body);
+    authEventType = "commerce_collection_archived";
+  } else if (/^collections\/[^/]+\/delete$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await deleteCollection(env, session, decodePathPart(path.split("/")[1]), body);
+    authEventType = "commerce_collection_deleted";
+  } else if (/^collections\/[^/]+$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await updateCollection(env, session, decodePathPart(path.split("/")[1]), body);
+    authEventType = "commerce_collection_updated";
+  } else if (/^products\/[^/]+\/collections$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.business.manage");
+    payload = await updateProductCollections(env, session, decodePathPart(path.split("/")[1]), body);
+    authEventType = "commerce_product_collections_updated";
   } else if (/^products\/[^/]+\/variants\/[^/]+$/.test(path)) {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");

@@ -224,7 +224,7 @@ export async function merchandisingProductsPayload(env, session) {
     return { ok: true, databaseConfigured: false, access, products: [], featured: [], updatedAt: null };
   }
   const db = requireCommerceDb(env);
-  const [result, variantResult] = await Promise.all([
+  const [result, variantResult, membershipResult] = await Promise.all([
     db.prepare(`SELECT id, slug, title, status, visibility, currency_code, unit_amount,
                        max_checkout_quantity, requires_shipping, is_featured, featured_order,
                        migration_status, safe_metadata_json, source_provider,
@@ -241,6 +241,11 @@ export async function merchandisingProductsPayload(env, session) {
                        legacy_source_variant_id, legacy_wix_external_product_id,
                        legacy_wix_external_variant_id, safe_metadata_json, updated_at
                 FROM commerce_product_variants ORDER BY product_id, local_variant_key, id`).all(),
+    db.prepare(`SELECT pc.product_id, c.id, c.title, c.slug, c.visibility, c.display_order
+                FROM commerce_product_collections pc
+                JOIN commerce_collections c ON c.id = pc.collection_id
+                WHERE c.status = 'active'
+                ORDER BY pc.product_id, c.display_order, c.slug`).all(),
   ]);
   const variants = new Map();
   for (const row of variantResult?.results || []) {
@@ -248,7 +253,13 @@ export async function merchandisingProductsPayload(env, session) {
     list.push(serializeMerchandisingVariant(row));
     variants.set(row.product_id, list);
   }
-  const products = (result?.results || []).map((row) => serializeMerchandisingProduct(row, variants.get(row.id) || []));
+  const memberships = new Map();
+  for (const row of membershipResult?.results || []) {
+    const list = memberships.get(row.product_id) || [];
+    list.push({ id: cleanText(row.id, 160), title: cleanText(row.title, 160), slug: cleanText(row.slug, 180), visibility: row.visibility, displayOrder: Number(row.display_order) });
+    memberships.set(row.product_id, list);
+  }
+  const products = (result?.results || []).map((row) => serializeMerchandisingProduct(row, variants.get(row.id) || [], memberships.get(row.id) || []));
   return {
     ok: true,
     databaseConfigured: true,
@@ -279,6 +290,8 @@ export async function updateMerchandisingProduct(env, session, productId, input)
   const primaryImageUrl = validateMerchandisingUrl(input.primaryImageUrl);
   const additionalImages = validateStringArray(input.additionalImages, 24, 4096, "commerce_product_images_invalid").map(validateMerchandisingUrl).filter(Boolean);
   const categories = validateStringArray(input.categories, 20, 120, "commerce_product_categories_invalid");
+  const collectionRows = categories.length ? await db.prepare(`SELECT id, title FROM commerce_collections WHERE status = 'active' AND title IN (${categories.map(() => "?").join(",")}) COLLATE NOCASE`).bind(...categories).all() : { results: [] };
+  if ((collectionRows?.results || []).length !== categories.length) throw new AuthFailure(400, "commerce_product_collection_unknown", "Every product collection must reference an active collection.");
   const tags = validateStringArray(input.tags, 30, 80, "commerce_product_tags_invalid");
   const visibility = ["private", "public"].includes(input.visibility) ? input.visibility : invalidMerch("commerce_product_visibility_invalid", "Product visibility is invalid.");
   const status = ["active", "disabled"].includes(input.status) ? input.status : invalidMerch("commerce_product_status_invalid", "Product status is invalid.");
@@ -292,11 +305,14 @@ export async function updateMerchandisingProduct(env, session, productId, input)
   const metadataJson = JSON.stringify(metadata);
   if (metadataJson.length > 16384) throw new AuthFailure(400, "commerce_product_metadata_too_large", "Product merchandising metadata is too large.");
   try {
-    await db.prepare(`UPDATE commerce_products SET title = ?, slug = ?, safe_metadata_json = ?, is_featured = ?,
+    const statements = [db.prepare(`UPDATE commerce_products SET title = ?, slug = ?, safe_metadata_json = ?, is_featured = ?,
                       featured_order = CASE WHEN ? = 1 THEN COALESCE(featured_order, ?) ELSE NULL END,
                       visibility = ?, status = ?, max_checkout_quantity = ?, unit_amount = ?, updated_at = ?
                       WHERE id = ?`)
-      .bind(title, slug, metadataJson, featured, featured, displayOrder, visibility, status, maxQuantity, unitAmount, timestamp, id).run();
+      .bind(title, slug, metadataJson, featured, featured, displayOrder, visibility, status, maxQuantity, unitAmount, timestamp, id),
+      db.prepare("DELETE FROM commerce_product_collections WHERE product_id = ?").bind(id)];
+    for (const row of collectionRows?.results || []) statements.push(db.prepare("INSERT INTO commerce_product_collections (product_id, collection_id, assigned_at, assigned_by_account_id) VALUES (?, ?, ?, ?)").bind(id, row.id, timestamp, session?.accountId || null));
+    await db.batch(statements);
   } catch (error) {
     if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "commerce_product_slug_duplicate", "The product slug is already in use.");
     throw error;
@@ -361,6 +377,147 @@ export async function updateFeaturedProducts(env, session, input) {
     metadata: { featuredCount: featuredIds.length, productIds: featuredIds },
   });
   return merchandisingProductsPayload(env, session);
+}
+
+export async function collectionsPayload(env, session) {
+  const access = session ? await commerceAccessForSession(env, session) : null;
+  if (!isCommerceDbConfigured(env)) return { ok: true, databaseConfigured: false, access, collections: [], products: [], updatedAt: null };
+  const db = requireCommerceDb(env);
+  const [collectionResult, membershipResult, productPayload] = await Promise.all([
+    db.prepare(`SELECT id, slug, title, description, visibility, status, display_order, revision,
+                       created_at, updated_at
+                FROM commerce_collections WHERE status = 'active'
+                ORDER BY display_order, slug`).all(),
+    db.prepare("SELECT product_id, collection_id FROM commerce_product_collections ORDER BY collection_id, product_id").all(),
+    merchandisingProductsPayload(env, session),
+  ]);
+  const productById = new Map(productPayload.products.map((product) => [product.id, product]));
+  const idsByCollection = new Map();
+  for (const row of membershipResult?.results || []) {
+    const list = idsByCollection.get(row.collection_id) || [];
+    list.push(cleanText(row.product_id, 160));
+    idsByCollection.set(row.collection_id, list);
+  }
+  const collections = (collectionResult?.results || []).map((row) => {
+    const productIds = idsByCollection.get(row.id) || [];
+    return {
+      id: cleanText(row.id, 160), slug: cleanText(row.slug, 180), title: cleanText(row.title, 160),
+      description: cleanText(row.description, 2000), visibility: row.visibility, status: row.status,
+      displayOrder: Number(row.display_order), revision: Number(row.revision),
+      assignedProductCount: productIds.length,
+      publicProductCount: productIds.filter((id) => productById.get(id)?.readiness.displayable).length,
+      productIds, createdAt: cleanText(row.created_at, 80), updatedAt: cleanText(row.updated_at, 80),
+    };
+  });
+  return { ok: true, databaseConfigured: true, access, collections, products: productPayload.products, updatedAt: collections.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, "") || null };
+}
+
+export async function createCollection(env, session, input) {
+  const db = requireCommerceDb(env);
+  requireExactFields(input, ["title", "slug", "description", "visibility", "displayOrder"], "commerce_collection_fields_invalid");
+  const title = requiredPlainText(input.title, 160, "commerce_collection_title_invalid");
+  const slug = collectionSlug(input.slug);
+  const description = plainMerchText(input.description, 2000);
+  const visibility = collectionVisibility(input.visibility);
+  const displayOrder = boundedMerchInteger(input.displayOrder, 0, 999999, "commerce_collection_display_order_invalid");
+  const id = `collection-${randomId()}`;
+  const timestamp = nowIso();
+  try {
+    await db.prepare(`INSERT INTO commerce_collections (id, slug, title, description, visibility, status, display_order, revision, created_at, updated_at, updated_by_account_id)
+                      VALUES (?, ?, ?, ?, ?, 'active', ?, 1, ?, ?, ?)`)
+      .bind(id, slug, title, description, visibility, displayOrder, timestamp, timestamp, session?.accountId || null).run();
+  } catch (error) { throwCollectionConflict(error); }
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_created", targetType: "commerce_collection", targetId: id, result: "success", metadata: { slug, visibility, displayOrder } });
+  return collectionsPayload(env, session);
+}
+
+export async function updateCollection(env, session, collectionId, input) {
+  const db = requireCommerceDb(env); const id = collectionIdValue(collectionId);
+  requireExactFields(input, ["title", "description", "visibility", "displayOrder", "revision"], "commerce_collection_fields_invalid");
+  const title = requiredPlainText(input.title, 160, "commerce_collection_title_invalid");
+  const description = plainMerchText(input.description, 2000);
+  const visibility = collectionVisibility(input.visibility);
+  const displayOrder = boundedMerchInteger(input.displayOrder, 0, 999999, "commerce_collection_display_order_invalid");
+  const revision = boundedMerchInteger(input.revision, 1, Number.MAX_SAFE_INTEGER, "commerce_collection_revision_invalid");
+  const timestamp = nowIso();
+  try {
+    const result = await db.prepare(`UPDATE commerce_collections SET title=?, description=?, visibility=?, display_order=?, revision=revision+1, updated_at=?, updated_by_account_id=?
+                                     WHERE id=? AND status='active' AND revision=?`)
+      .bind(title, description, visibility, displayOrder, timestamp, session?.accountId || null, id, revision).run();
+    if (Number(result?.meta?.changes || 0) !== 1) { await requireCurrentCollection(db, id, revision); throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving."); }
+  } catch (error) { if (error instanceof AuthFailure) throw error; throwCollectionConflict(error); }
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_updated", targetType: "commerce_collection", targetId: id, result: "success", metadata: { visibility, displayOrder, revision } });
+  return collectionsPayload(env, session);
+}
+
+export async function updateCollectionOrder(env, session, input) {
+  const db = requireCommerceDb(env);
+  requireExactFields(input, ["collectionIds"], "commerce_collection_order_fields_invalid");
+  const collectionIds = validatedIdentifiers(input.collectionIds, 200, "commerce_collection_order_invalid");
+  const current = await db.prepare("SELECT id FROM commerce_collections WHERE status='active' ORDER BY id").all();
+  const currentIds = (current?.results || []).map((row) => row.id).sort();
+  if (collectionIds.length !== currentIds.length || [...collectionIds].sort().some((id, index) => id !== currentIds[index])) throw new AuthFailure(400, "commerce_collection_order_incomplete", "Collection order must include every active collection exactly once.");
+  const timestamp = nowIso();
+  await db.batch(collectionIds.map((id, index) => db.prepare("UPDATE commerce_collections SET display_order=?, revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=? AND status='active'").bind((index + 1) * 10, timestamp, session?.accountId || null, id)));
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collections_reordered", targetType: "commerce_collections", result: "success", metadata: { collectionIds } });
+  return collectionsPayload(env, session);
+}
+
+export async function updateCollectionProducts(env, session, collectionId, input) {
+  const db = requireCommerceDb(env); const id = collectionIdValue(collectionId);
+  requireExactFields(input, ["productIds", "revision"], "commerce_collection_assignment_fields_invalid");
+  const productIds = validatedIdentifiers(input.productIds, 2000, "commerce_collection_products_invalid");
+  const revision = boundedMerchInteger(input.revision, 1, Number.MAX_SAFE_INTEGER, "commerce_collection_revision_invalid");
+  await requireCurrentCollection(db, id, revision);
+  await requireKnownProducts(db, productIds);
+  const timestamp = nowIso();
+  const statements = [db.prepare("DELETE FROM commerce_product_collections WHERE collection_id=?").bind(id)];
+  for (const productId of productIds) statements.push(db.prepare("INSERT INTO commerce_product_collections (product_id, collection_id, assigned_at, assigned_by_account_id) VALUES (?, ?, ?, ?)").bind(productId, id, timestamp, session?.accountId || null));
+  statements.push(db.prepare("UPDATE commerce_collections SET revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=? AND revision=?").bind(timestamp, session?.accountId || null, id, revision));
+  await db.batch(statements);
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_products_updated", targetType: "commerce_collection", targetId: id, result: "success", metadata: { productCount: productIds.length, productIds } });
+  return collectionsPayload(env, session);
+}
+
+export async function updateProductCollections(env, session, productId, input) {
+  const db = requireCommerceDb(env); const id = cleanText(productId, 160);
+  requireExactFields(input, ["collectionIds"], "commerce_product_collection_fields_invalid");
+  const collectionIds = validatedIdentifiers(input.collectionIds, 200, "commerce_product_collections_invalid");
+  if (!await db.prepare("SELECT id FROM commerce_products WHERE id=?").bind(id).first()) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
+  if (collectionIds.length) {
+    const found = await db.prepare(`SELECT id FROM commerce_collections WHERE status='active' AND id IN (${collectionIds.map(() => "?").join(",")})`).bind(...collectionIds).all();
+    if ((found?.results || []).length !== collectionIds.length) throw new AuthFailure(400, "commerce_collection_unknown", "Every collection assignment must reference an active collection.");
+  }
+  const timestamp = nowIso();
+  const statements = [db.prepare("DELETE FROM commerce_product_collections WHERE product_id=?").bind(id)];
+  for (const collectionId of collectionIds) statements.push(db.prepare("INSERT INTO commerce_product_collections (product_id, collection_id, assigned_at, assigned_by_account_id) VALUES (?, ?, ?, ?)").bind(id, collectionId, timestamp, session?.accountId || null));
+  await db.batch(statements);
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.product_collections_updated", targetType: "commerce_product", targetId: id, result: "success", metadata: { collectionCount: collectionIds.length, collectionIds } });
+  return merchandisingProductPayload(env, session, id);
+}
+
+export async function archiveCollection(env, session, collectionId, input) {
+  const db = requireCommerceDb(env); const id = collectionIdValue(collectionId);
+  requireExactFields(input, ["revision", "confirmArchive"], "commerce_collection_archive_fields_invalid");
+  if (input.confirmArchive !== true) throw new AuthFailure(400, "commerce_collection_archive_confirmation_required", "Explicit collection archive confirmation is required.");
+  const revision = boundedMerchInteger(input.revision, 1, Number.MAX_SAFE_INTEGER, "commerce_collection_revision_invalid");
+  const result = await db.prepare("UPDATE commerce_collections SET status='archived', visibility='hidden', revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=? AND status='active' AND revision=?").bind(nowIso(), session?.accountId || null, id, revision).run();
+  if (Number(result?.meta?.changes || 0) !== 1) { await requireCurrentCollection(db, id, revision); throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving."); }
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_archived", targetType: "commerce_collection", targetId: id, result: "success", metadata: { assignmentsPreserved: true } });
+  return collectionsPayload(env, session);
+}
+
+export async function deleteCollection(env, session, collectionId, input) {
+  const db = requireCommerceDb(env); const id = collectionIdValue(collectionId);
+  requireExactFields(input, ["confirmDelete"], "commerce_collection_delete_fields_invalid");
+  if (input.confirmDelete !== true) throw new AuthFailure(400, "commerce_collection_delete_confirmation_required", "Explicit collection deletion confirmation is required.");
+  const collection = await db.prepare("SELECT id FROM commerce_collections WHERE id=?").bind(id).first();
+  if (!collection) throw new AuthFailure(404, "commerce_collection_not_found", "The commerce collection was not found.");
+  const assigned = await db.prepare("SELECT COUNT(*) count FROM commerce_product_collections WHERE collection_id=?").bind(id).first();
+  if (Number(assigned?.count || 0) > 0) throw new AuthFailure(409, "commerce_collection_not_empty", "Remove every product assignment before deleting this collection.");
+  await db.prepare("DELETE FROM commerce_collections WHERE id=?").bind(id).run();
+  await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.collection_deleted", targetType: "commerce_collection", targetId: id, result: "success", metadata: { assignedProductCount: 0 } });
+  return collectionsPayload(env, session);
 }
 
 export async function verifyStripeAccount(env, session, fetchImpl = fetch) {
@@ -1316,11 +1473,11 @@ function serializeTemplate(row) {
   };
 }
 
-function serializeMerchandisingProduct(row, variants = []) {
+function serializeMerchandisingProduct(row, variants = [], collections = []) {
   const metadata = safeJson(row.safe_metadata_json, {});
   const primaryImageUrl = validateStoredHttpsUrl(metadata.publicImage || metadata.public_image);
   const additionalImages = safeStoredStringArray(metadata.publicImages, []);
-  const categories = safeStoredStringArray(metadata.categories, []);
+  const categories = collections.length ? collections.map((collection) => collection.title) : safeStoredStringArray(metadata.categories, []);
   const tags = safeStoredStringArray(metadata.tags, []);
   const prices = variants.map((variant) => variant.unitAmount).filter(Number.isSafeInteger);
   if (!prices.length && Number.isSafeInteger(Number(row.unit_amount))) prices.push(Number(row.unit_amount));
@@ -1338,6 +1495,7 @@ function serializeMerchandisingProduct(row, variants = []) {
     primaryImageUrl,
     additionalImages,
     categories,
+    collectionIds: collections.map((collection) => collection.id),
     tags,
     status: cleanText(row.status, 40),
     visibility: cleanText(row.visibility, 20),
@@ -1404,6 +1562,13 @@ function validateStringArray(value, maximum, itemLength, code) { if (!Array.isAr
 function validateOptionValues(value) { if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length > 12) throw new AuthFailure(400, "commerce_variant_options_invalid", "Variant options are invalid."); const entries = Object.entries(value).map(([key, item]) => [plainMerchText(key, 80), plainMerchText(item, 120)]).filter(([key, item]) => key && item); if (entries.length !== Object.keys(value).length) throw new AuthFailure(400, "commerce_variant_options_invalid", "Variant options are invalid."); return Object.fromEntries(entries); }
 function validateStoredHttpsUrl(value) { const text = cleanText(value, 4096); if (!text) return null; try { const url = new URL(text); return url.protocol === "https:" && !url.username && !url.password ? url.href : null; } catch { return null; } }
 function safeStoredStringArray(value, fallback) { try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) && parsed.length ? parsed.map((item) => cleanText(item, 4096)).filter(Boolean) : Array.isArray(fallback) ? fallback.map((item) => cleanText(item, 4096)).filter(Boolean) : []; } catch { return Array.isArray(fallback) ? fallback.map((item) => cleanText(item, 4096)).filter(Boolean) : []; } }
+function collectionSlug(value) { const slug = cleanText(value, 180).toLowerCase(); if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new AuthFailure(400, "commerce_collection_slug_invalid", "Collection slugs may contain lowercase letters, numbers, and single hyphens only."); return slug; }
+function collectionVisibility(value) { return ["public", "hidden"].includes(value) ? value : invalidMerch("commerce_collection_visibility_invalid", "Collection visibility is invalid."); }
+function collectionIdValue(value) { const id = cleanText(value, 160); if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id)) throw new AuthFailure(400, "commerce_collection_id_invalid", "The commerce collection identity is invalid."); return id; }
+function validatedIdentifiers(value, maximum, code) { if (!Array.isArray(value) || value.length > maximum) throw new AuthFailure(400, code, "The identity list is invalid."); const ids = value.map((item) => cleanText(item, 160)); if (ids.some((id) => !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id))) throw new AuthFailure(400, code, "The identity list is invalid."); if (new Set(ids).size !== ids.length) throw new AuthFailure(400, code, "Duplicate identities are not allowed."); return ids; }
+async function requireKnownProducts(db, ids) { if (!ids.length) return; const result = await db.prepare(`SELECT id FROM commerce_products WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all(); if ((result?.results || []).length !== ids.length) throw new AuthFailure(400, "commerce_product_unknown", "Every assignment must reference a known product."); }
+async function requireCurrentCollection(db, id, revision) { const row = await db.prepare("SELECT id, revision, status FROM commerce_collections WHERE id=?").bind(id).first(); if (!row || row.status !== "active") throw new AuthFailure(404, "commerce_collection_not_found", "The commerce collection was not found."); if (Number(row.revision) !== Number(revision)) throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving."); return row; }
+function throwCollectionConflict(error) { if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "commerce_collection_slug_or_title_duplicate", "Collection title and slug must both be unique."); throw error; }
 
 function validateBusinessProfile(input, current) {
   const tradingName = cleanText(input?.tradingName ?? current?.trading_name, 160);

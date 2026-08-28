@@ -1,6 +1,7 @@
 import {
   AuthFailure,
   corsHeaders,
+  cleanupExpiredAuthState,
   ensureEnvironmentMasters,
   errorResponse,
   isEnvironmentMasterId,
@@ -32,6 +33,12 @@ export async function onRequest(context) {
     }
     if (request.method !== "POST") {
       throw new AuthFailure(405, "method_not_allowed", "This method is not allowed.", { Allow: "GET, POST, OPTIONS" });
+    }
+    if (path === "maintenance/cleanup-expired-auth") {
+      requireAdminOrigin(request, env);
+      const session = await requireMasterAdmin(env, request);
+      await requireCsrf(request, session);
+      return jsonResponse(await cleanupExpiredAuthState(env, session.accountId), { headers: corsHeaders(request, env) });
     }
     const match = path.match(/^([^/]+)\/(promote|demote|disable|enable|revoke-sessions)$/);
     if (!match || !MUTATIONS.has(match[2])) throw new AuthFailure(404, "not_found", "The account action was not found.");
