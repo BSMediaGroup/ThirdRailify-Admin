@@ -82,6 +82,7 @@ export type PermanentPrintfulMigrationPayload = {
     variantsMapped: number; providerFailures: number; providerRequestCount: number;
     providerState: "ready" | "waiting" | "blocked" | "completed"; retryAt: number | null;
     lastError: { code: string; message: string; at: string } | null;
+    canResume: boolean; checkpointState: "checkpointed" | "checkpointed_resumable" | "verified";
     scopes: string[] | null; targetVerified: boolean; sourceVerified: boolean;
     updatedAt: string; completedAt: string | null;
   };

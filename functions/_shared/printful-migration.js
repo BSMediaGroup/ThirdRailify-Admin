@@ -11,6 +11,7 @@ export const PRINTFUL_MIGRATION_ENDPOINTS = Object.freeze({
   stores: "https://api.printful.com/stores",
   scopes: "https://api.printful.com/v2/oauth-scopes",
   sourceProduct: (id) => `https://api.printful.com/sync/products/${encodeURIComponent(id)}`,
+  sourceVariant: (id) => `https://api.printful.com/sync/variant/${encodeURIComponent(id)}`,
   sourceFile: (id) => `https://api.printful.com/files/${encodeURIComponent(id)}`,
   targetProduct: (externalId) => `https://api.printful.com/store/products/@${encodeURIComponent(externalId)}`,
   targetProducts: "https://api.printful.com/store/products",
@@ -26,7 +27,9 @@ const LEASE_MS = 60_000;
 const PROCESSING_POLL_MS = 5_000;
 const TRANSIENT_RETRY_MS = 2_000;
 const MAX_TRANSIENT_ATTEMPTS = 3;
+const MAX_SOURCE_FILE_REPRESENTATIVES = 3;
 const TARGET_WRITE_SCOPE_ALIASES = new Set(["sync_products", "sync_products/write", "products", "products/write"]);
+const RECOVERABLE_BLOCK_CODES = new Set(["printful_source_file_original_url_missing", "printful_source_file_url_unavailable"]);
 
 export async function permanentMigrationPayload(env) {
   const db = requireCommerceDb(env);
@@ -81,6 +84,8 @@ export async function permanentMigrationPayload(env) {
       providerState: job.status === "waiting" ? "waiting" : job.status === "blocked" ? "blocked" : job.status === "completed" ? "completed" : "ready",
       retryAt: number(job.throttle_until || job.next_provider_request_at) || null,
       lastError: safeState.lastError || null,
+      canResume: job.status === "blocked" && RECOVERABLE_BLOCK_CODES.has(safeState.lastError?.code),
+      checkpointState: job.status === "blocked" && RECOVERABLE_BLOCK_CODES.has(safeState.lastError?.code) ? "checkpointed_resumable" : job.status === "completed" ? "verified" : "checkpointed",
       scopes: safeState.scopes || null,
       targetVerified: safeState.targetVerified === true,
       sourceVerified: safeState.sourceVerified === true,
@@ -117,7 +122,20 @@ export async function runPermanentPrintfulMigrationStep(env, session, fetchImpl 
   const now = typeof runtime.now === "function" ? runtime.now : Date.now;
   const leaseToken = randomId();
   let job = await requireMigrationJob(db);
-  if (job.status === "completed" || job.status === "blocked") return permanentMigrationPayload(env);
+  if (job.status === "blocked") {
+    const resumed = await resumeRecoverableBlockedJob(db, job, now());
+    if (!resumed) return permanentMigrationPayload(env);
+    job = await requireMigrationJob(db);
+    await writeCommerceAudit(env, {
+      actorAccountId: session?.accountId,
+      action: "printful.catalogue_migration_resumed",
+      targetType: "commerce_catalogue_migration",
+      targetId: PERMANENT_MIGRATION_ID,
+      result: "success",
+      metadata: { phase: job.phase, productId: job.current_product_id, preservedProductsVerified: number(job.products_verified), preservedVariantsMapped: number(job.variants_mapped) },
+    });
+  }
+  if (job.status === "completed") return permanentMigrationPayload(env);
   const claimed = await db.prepare(`UPDATE commerce_catalogue_migrations
     SET step_lease_token = ?, step_lease_expires_at = ?, revision = revision + 1,
         status = CASE WHEN status = 'ready' THEN 'running' ELSE status END,
@@ -245,11 +263,42 @@ async function resolveNextSourceFile(db, env, job, product, leaseToken, fetchImp
     ORDER BY CAST(json_extract(file.value, '$.sourceFileId') AS INTEGER) LIMIT 1`)
     .bind(PRINTFUL_SOURCE_STORE_ID, product.id).first();
   if (!unresolved) {
+    const state = safeJson(job.safe_state_json, {});
+    if (state.sourceFileResolution) await setSafeState(db, leaseToken, withoutKeys(state, ["sourceFileResolution"]), now());
     await updateJob(db, leaseToken, { phase: "target_lookup", status: "running", updated_at: iso(now()) });
     return;
   }
-  const response = await providerRequest(db, env, job, leaseToken, { url: PRINTFUL_MIGRATION_ENDPOINTS.sourceFile(unresolved.source_file_id), credential: sourceCredential(env), operation: "source_file", allowedStatuses: [200] }, fetchImpl, now);
-  const file = normalizeSourceFile(response.payload, unresolved.source_file_id, unresolved.expected_filename);
+  const sourceFileId = String(unresolved.source_file_id);
+  const representatives = await sourceFileRepresentatives(db, product.id, sourceFileId);
+  const state = safeJson((await requireMigrationJob(db)).safe_state_json, {});
+  const resolution = state.sourceFileResolution?.sourceFileId === sourceFileId
+    ? state.sourceFileResolution
+    : { sourceFileId, attemptedVariantIds: [], fileLibraryAttempted: false };
+  const attempted = new Set(Array.isArray(resolution.attemptedVariantIds) ? resolution.attemptedVariantIds.map(String) : []);
+  const representative = representatives.find((variant) => !attempted.has(variant.legacySourceVariantId));
+  let file = null;
+  let nextResolution = resolution;
+  if (representative) {
+    const response = await providerRequest(db, env, job, leaseToken, { url: PRINTFUL_MIGRATION_ENDPOINTS.sourceVariant(representative.legacySourceVariantId), credential: sourceCredential(env), operation: "source_variant_file", allowedStatuses: [200] }, fetchImpl, now);
+    file = normalizeSourceVariantFile(response.payload, {
+      sourceFileId,
+      expectedFilename: unresolved.expected_filename,
+      legacySyncVariantId: representative.legacySourceVariantId,
+      legacySyncProductId: product.legacy_printful_source_product_id,
+      catalogueVariantId: representative.catalogueVariantId,
+    });
+    nextResolution = { ...resolution, attemptedVariantIds: [...attempted, representative.legacySourceVariantId] };
+  } else if (!resolution.fileLibraryAttempted) {
+    const response = await providerRequest(db, env, job, leaseToken, { url: PRINTFUL_MIGRATION_ENDPOINTS.sourceFile(sourceFileId), credential: sourceCredential(env), operation: "source_file", allowedStatuses: [200] }, fetchImpl, now);
+    nextResolution = { ...resolution, fileLibraryAttempted: true };
+    file = normalizeSourceFile(response.payload, sourceFileId, unresolved.expected_filename, { optionalUrl: true });
+  } else {
+    throw migrationError("printful_source_file_url_unavailable", `Source file ${sourceFileId} does not expose a usable original HTTPS URL through its eligible Sync Variants or File Library record.`);
+  }
+  if (!file) {
+    await setSafeState(db, leaseToken, { ...state, sourceFileResolution: nextResolution }, now());
+    return;
+  }
   await db.prepare(`INSERT INTO commerce_printful_file_mappings
     (source_store_id, source_file_id, source_url, filename, file_status, safe_metadata_json, resolved_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -257,6 +306,17 @@ async function resolveNextSourceFile(db, env, job, product, leaseToken, fetchImp
       source_url = excluded.source_url, filename = excluded.filename, file_status = excluded.file_status,
       safe_metadata_json = excluded.safe_metadata_json, resolved_at = excluded.resolved_at, updated_at = excluded.updated_at`)
     .bind(PRINTFUL_SOURCE_STORE_ID, file.id, file.url, file.filename, file.status, JSON.stringify(file.metadata), iso(now()), iso(now())).run();
+  await setSafeState(db, leaseToken, withoutKeys(state, ["sourceFileResolution"]), now());
+}
+
+async function sourceFileRepresentatives(db, productId, sourceFileId) {
+  const rows = await db.prepare(`SELECT DISTINCT variant.legacy_source_variant_id, variant.target_catalogue_variant_id
+    FROM commerce_product_variants AS variant, json_each(variant.file_mapping_json) AS file
+    WHERE variant.product_id = ? AND variant.migration_status = 'selected' AND variant.availability_status = 'active'
+      AND json_extract(file.value, '$.sourceFileId') = ? AND variant.legacy_source_variant_id IS NOT NULL
+    ORDER BY CAST(variant.legacy_source_variant_id AS INTEGER), variant.legacy_source_variant_id
+    LIMIT ?`).bind(productId, sourceFileId, MAX_SOURCE_FILE_REPRESENTATIVES).all();
+  return rows.results.map((row) => ({ legacySourceVariantId: String(row.legacy_source_variant_id), catalogueVariantId: String(row.target_catalogue_variant_id) }));
 }
 
 async function lookupTargetProduct(db, env, job, product, leaseToken, fetchImpl, now) {
@@ -347,18 +407,40 @@ export function assertMigrationScopes(scopes) {
   return authority;
 }
 
-export function normalizeSourceFile(payload, expectedId, expectedFilename) {
+export function normalizeSourceFile(payload, expectedId, expectedFilename, options = {}) {
   const raw = payload?.code === 200 ? payload.result : null;
   if (!raw || String(raw.id) !== String(expectedId)) throw migrationError("printful_source_file_invalid", `Source file ${expectedId} returned invalid identity metadata.`);
   const status = cleanText(raw.status, 40).toLowerCase();
   if (!new Set(["ok", "accepted"]).has(status)) throw migrationError("printful_source_file_not_ready", `Source file ${expectedId} is not in an acceptable state.`);
   const url = safeHttps(raw.url);
-  if (!url) throw migrationError("printful_source_file_original_url_missing", `Source file ${expectedId} does not expose a usable original HTTPS URL.`);
+  if (!url) {
+    if (options.optionalUrl === true) return null;
+    throw migrationError("printful_source_file_original_url_missing", `Source file ${expectedId} does not expose a usable original HTTPS URL.`);
+  }
   const filename = safeFilename(raw.filename || expectedFilename);
   if (!filename) throw migrationError("printful_source_file_filename_invalid", `Source file ${expectedId} has no safe filename.`);
   const bounds = { size: [raw.size, 0, 10_000_000_000], width: [raw.width, 0, 100_000], height: [raw.height, 0, 100_000], dpi: [raw.dpi, 0, 10_000] };
   for (const [field, [value, min, max]] of Object.entries(bounds)) if (value !== null && value !== undefined && (!Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max)) throw migrationError("printful_source_file_metadata_invalid", `Source file ${expectedId} has invalid ${field} metadata.`);
-  return { id: String(raw.id), url, filename, status, metadata: { mimeType: cleanText(raw.mime_type, 160) || null, size: nullableNumber(raw.size), width: nullableNumber(raw.width), height: nullableNumber(raw.height), dpi: nullableNumber(raw.dpi), hash: cleanText(raw.hash, 160) || null } };
+  return { id: String(raw.id), url, filename, status, metadata: { resolvedVia: "file_library", mimeType: cleanText(raw.mime_type, 160) || null, size: nullableNumber(raw.size), width: nullableNumber(raw.width), height: nullableNumber(raw.height), dpi: nullableNumber(raw.dpi), hash: cleanText(raw.hash, 160) || null } };
+}
+
+export function normalizeSourceVariantFile(payload, expected) {
+  const raw = payload?.code === 200 ? payload.result?.sync_variant : null;
+  if (!raw || String(raw.id) !== String(expected.legacySyncVariantId)) throw migrationError("printful_source_variant_file_identity_invalid", `Source Sync Variant ${expected.legacySyncVariantId} returned invalid identity metadata.`);
+  if (String(raw.sync_product_id) !== String(expected.legacySyncProductId) || (raw.variant_id !== null && raw.variant_id !== undefined && String(raw.variant_id) !== String(expected.catalogueVariantId))) throw migrationError("printful_source_variant_file_product_conflict", `Source Sync Variant ${expected.legacySyncVariantId} no longer belongs to the accepted source product and catalogue variant.`);
+  if (!Array.isArray(raw.files)) throw migrationError("printful_source_variant_file_response_invalid", `Source Sync Variant ${expected.legacySyncVariantId} returned invalid file metadata.`);
+  const matches = raw.files.filter((file) => String(file?.id) === String(expected.sourceFileId));
+  const original = matches.find((file) => safeHttps(file?.url));
+  if (!original) return null;
+  const filename = safeFilename(original.filename || expected.expectedFilename);
+  if (!filename) throw migrationError("printful_source_file_filename_invalid", `Source file ${expected.sourceFileId} has no safe filename.`);
+  return {
+    id: String(expected.sourceFileId),
+    url: safeHttps(original.url),
+    filename,
+    status: "ok",
+    metadata: { resolvedVia: "sync_variant", legacySyncVariantId: String(expected.legacySyncVariantId), fileType: cleanText(original.type, 120) || null },
+  };
 }
 
 export function validateSourceProduct(result, product, expected) {
@@ -537,6 +619,25 @@ async function blockMigration(db, job, leaseToken, error, now) {
   await db.batch(statements);
 }
 
+async function resumeRecoverableBlockedJob(db, job, now) {
+  const state = safeJson(job.safe_state_json, {});
+  if (job.phase !== "blocked" || !job.current_product_id || !RECOVERABLE_BLOCK_CODES.has(state.lastError?.code)) return false;
+  const product = await migrationProduct(db, job.current_product_id);
+  if (!product || product.migration_status !== "blocked" || product.target_printful_product_id) return false;
+  const resumedState = withoutKeys(state, ["lastError", "sourceFileResolution", "transientAttempts"]);
+  const results = await db.batch([
+    db.prepare(`UPDATE commerce_catalogue_migrations SET status = 'running', phase = 'source_files', safe_state_json = ?,
+      step_lease_token = NULL, step_lease_expires_at = NULL, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND status = 'blocked' AND phase = 'blocked' AND current_product_id = ?`)
+      .bind(JSON.stringify(resumedState), iso(now), PERMANENT_MIGRATION_ID, job.current_product_id),
+    db.prepare(`UPDATE commerce_products SET migration_status = 'resolving_files', status = 'restricted', updated_at = ?
+      WHERE id = ? AND migration_status = 'blocked' AND target_printful_product_id IS NULL`)
+      .bind(iso(now), job.current_product_id),
+  ]);
+  if (results.some((entry) => number(entry?.meta?.changes) !== 1)) throw migrationError("commerce_migration_resume_conflict", "The blocked migration checkpoint could not be resumed exactly once.");
+  return true;
+}
+
 async function setSafeState(db, leaseToken, state, now) {
   await updateJob(db, leaseToken, { safe_state_json: JSON.stringify(state), status: "running", updated_at: iso(now) });
 }
@@ -609,6 +710,7 @@ function targetCredential(env) { return credential(env?.PRINTFUL_API_TOKEN, "pri
 function sourceCredential(env) { return credential(env?.PRINTFUL_WIX_SOURCE_TOKEN, "printful_wix_source_token_unavailable"); }
 function credential(value, code) { const token = typeof value === "string" ? value.trim() : ""; if (!token || token.length > 4096 || /\s|[\u0000-\u001f\u007f]/.test(token)) throw new AuthFailure(503, code, "The required server-only Printful credential is unavailable."); return token; }
 function safeJson(value, fallback) { if (value && typeof value === "object") return value; try { return JSON.parse(String(value || "")); } catch { return fallback; } }
+function withoutKeys(value, keys) { const copy = { ...(value || {}) }; for (const key of keys) delete copy[key]; return copy; }
 function safeHttps(value) { try { const url = new URL(cleanText(value, 4096)); return url.protocol === "https:" ? url.toString() : null; } catch { return null; } }
 function safeFilename(value) { const text = String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").replaceAll("\\", "/").split("/").pop().trim(); return text && text.length <= 500 ? text : null; }
 function cleanOptions(value) { return Array.isArray(value) ? value.slice(0, 100).map((option) => ({ id: cleanText(option?.id, 120), value: option?.value })).filter((option) => option.id && option.value !== null && option.value !== undefined && ["string", "number", "boolean"].includes(typeof option.value)) : []; }
