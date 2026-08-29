@@ -16,7 +16,7 @@
     "test:wheels": "node --test --test-concurrency=1 tests/wheels-migration.test.mjs tests/wheels-core.test.mjs tests/wheel-media.test.mjs",
     "test:browser:wheels": "node --test --test-concurrency=1 tests/wheels-browser.test.mjs",
     "test:browser:fulfillment": "node --test --test-concurrency=1 tests/fulfillment-browser.test.mjs",
-    "test:fulfillment": "node --test --test-concurrency=1 tests/fulfillment-control-plane.test.mjs",
+    "test:fulfillment": "node --test --test-concurrency=1 tests/fulfillment-lifecycle-migration.test.mjs tests/printful-fulfillment.test.mjs tests/printful-webhook.test.mjs tests/fulfillment-control-plane.test.mjs",
     "test:checkout-foundation": "node --test --test-concurrency=1 tests/shipping-checkout.test.mjs tests/checkout.test.mjs tests/printful-draft-acceptance.test.mjs",
     "test:browser:goats": "node --test --test-concurrency=1 tests/goats-browser.test.mjs",
     "test:browser:watch": "node --test --test-concurrency=1 tests/watch-browser.test.mjs",

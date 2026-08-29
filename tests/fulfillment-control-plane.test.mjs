@@ -27,7 +27,7 @@ test("Fulfillment & Shipping projects canonical local authority without secrets,
   assert.equal(payload.readiness.paymentAuthority.state, "test_evidence_only"); assert.equal(payload.readiness.production.state, "blocked"); assert.equal(payload.readiness.fulfillment.state, "disabled");
   assert.equal(payload.shipping.customerData.state, "implemented_no_evidence"); assert.deepEqual(payload.shipping.customerData.persistedFields, ["encrypted_recipient", "destination_country", "destination_region", "shipping_method", "shipping_amount", "currency", "source_quote"]);
   assert.equal(payload.shipping.rates.state, "implemented_disabled"); assert.equal(payload.shipping.rates.providerQuotePathImplemented, true); assert.equal(payload.shipping.rates.providerQuoteCalled, false);
-  assert.equal(payload.tracking.state, "not_implemented"); assert.deepEqual(payload.tracking.persistedFields, []); assert.equal(payload.tracking.providerPollingPerformed, false);
+  assert.equal(payload.tracking.state, "implemented_no_evidence"); assert.ok(payload.tracking.persistedFields.includes("encrypted_tracking_number")); assert.equal(payload.tracking.providerPollingPerformed, false);
   assert.equal(payload.mapping.mappedProviderProducts, 1); assert.equal(payload.mapping.mappedProviderVariants, 1); assert.equal(payload.mapping.nonSellableVariants, 1); assert.equal(payload.mapping.potentiallyFulfillableVariants, 0);
   assert.equal(payload.migration.manuallyPaused, true); assert.equal(payload.migration.mutableFromThisRoute, false); assert.equal(payload.evidence.counts.providerOrders, 0); assert.deepEqual(payload.evidence.recent, []);
   assert.equal(payload.draftPreview.eligible, false); assert.equal(payload.draftPreview.item.mappedProviderVariant, "target-variant-authority");

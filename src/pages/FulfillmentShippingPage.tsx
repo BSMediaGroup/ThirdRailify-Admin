@@ -35,7 +35,7 @@ export function FulfillmentShippingPage() {
         <div className="fulfillment-hero__intro">
           <p className="eyebrow">Server-derived readiness</p><h2 id="fulfillment-readiness-title">Production remains blocked</h2>
           <p>Provider submission is unavailable. A real customer order cannot be fulfilled until customer delivery capture, a shipping-rate strategy, eligible sellable mappings, and the canonical activation gates are complete.</p>
-          <div className="fulfillment-hero__answers"><Answer label="Create a provider order?" value="Controlled TEST draft only" /><Answer label="Fulfill a customer order?" value="No — confirmation unavailable" /><Answer label="Provider evidence" value={payload.evidence.counts.providerOrders ? `${payload.evidence.counts.providerOrders} unconfirmed draft record(s)` : "No provider drafts recorded"} /></div>
+          <div className="fulfillment-hero__answers"><Answer label="Create a provider order?" value="Controlled TEST draft only" /><Answer label="Fulfill a customer order?" value="No — confirmation unavailable" /><Answer label="Provider evidence" value={payload.operations.counts.total ? `${payload.operations.counts.total} normalized provider order(s)` : "No provider orders recorded"} /></div>
         </div>
         <div className="fulfillment-readiness-grid">
           {READINESS_LABELS.map(([key, label]) => <Readiness key={key} label={label} value={payload.readiness[key]} />)}
@@ -61,6 +61,36 @@ export function FulfillmentShippingPage() {
             <Capability title="Tracking & shipment records" state={payload.tracking.state} detail={payload.tracking.persistedFields.length ? `${payload.tracking.persistedFields.length} normalized fields detected.` : "No tracking number, carrier, URL, shipment ID, shipped timestamp, or delivered timestamp is persisted."} />
           </div>
         </Panel>
+      </section>
+
+      <section className="fulfillment-section" aria-labelledby="lifecycle-capabilities-title">
+        <SectionHeading eyebrow="Normalized local authority" title="Lifecycle capabilities" id="lifecycle-capabilities-title" text="Local order, provider order, shipment, and tracking evidence are separate D1 authorities. Code capability is not provider verification." />
+        <div className="fulfillment-capability-grid">
+          <Capability title="Lifecycle schema" state={payload.lifecycle.schema.state} detail={`Authority migration: ${payload.lifecycle.schema.migration}.`} />
+          <Capability title="Printful order model" state={payload.lifecycle.providerOrderModel.state} detail="Normalized provider state is stored separately from payment and legacy order fields." />
+          <Capability title="Draft recording" state={payload.lifecycle.draftRecording.state} detail="The controlled confirm=false response reconciles idempotently by local external ID and provider order ID." />
+          <Capability title="Webhook receiver" state={payload.lifecycle.webhookReceiver.state} detail="Signed V2 beta HMAC receiver is deployed fail-closed; it never relies on an Admin session." />
+          <Capability title="Webhook verification configuration" state={payload.lifecycle.webhookVerification.state} detail="Verification keys are server-only and are not configured or provider-verified in this deployment." />
+          <Capability title="Provider webhook subscription" state={payload.lifecycle.providerSubscription.state} detail="No Printful webhook configuration was created, queried, changed, or simulated in this milestone." />
+          <Capability title="Shipment normalization" state={payload.lifecycle.shipmentNormalization.state} detail="Packages, split item coverage, reshipments, returned packages, and delivered evidence remain distinct." />
+          <Capability title="Tracking storage" state={payload.lifecycle.trackingStorage.state} detail="Tracking references and URLs are encrypted; list projections expose availability only." />
+          <Capability title="Carrier delivery polling" state={payload.lifecycle.carrierDeliveryPolling.state} detail="No carrier polling or automatic Printful reconciliation loop exists." />
+        </div>
+      </section>
+
+      <section className="fulfillment-section" aria-labelledby="provider-orders-title">
+        <SectionHeading eyebrow="Commerce D1 operations" title="Provider orders" id="provider-orders-title" text="Bounded normalized rows only. TEST evidence is visually distinct and never inflates LIVE shipment metrics." action={<Link className="fulfillment-link" to="/orders">Open Orders <AdminIcon name="arrow" size={14} /></Link>} />
+        <div className="fulfillment-metrics">
+          <Metric label="TEST provider orders" value={payload.operations.counts.testOrders} /><Metric label="LIVE provider orders" value={payload.operations.counts.liveOrders} />
+          <Metric label="TEST shipments" value={payload.operations.counts.testShipments} /><Metric label="LIVE shipments" value={payload.operations.counts.liveShipments} />
+          <Metric label="LIVE partial" value={payload.operations.counts.livePartial} tone="warn" /><Metric label="LIVE shipped" value={payload.operations.counts.liveShipped} tone="good" />
+        </div>
+        {payload.operations.rows.length ? <div className="fulfillment-provider-orders" role="list">{payload.operations.rows.map((row) => <article key={row.id} role="listitem" className={`is-${row.environment}`}>
+          <header><span className={`order-environment order-environment--${row.environment}`}>{row.environment.toUpperCase()}</span><StatusChip state={row.fulfillmentState} /></header>
+          <strong className="fulfillment-provider-orders__id">{row.providerOrderId}</strong>
+          <dl className="fulfillment-facts"><Fact term="Local order" value={row.orderId} /><Fact term="Provider" value={humanize(row.provider)} /><Fact term="Confirmation" value={humanize(row.confirmationState)} /><Fact term="Provider lifecycle" value={humanize(row.providerState)} /><Fact term="Provider status" value={humanize(row.providerStatus)} /><Fact term="Shipments" value={String(row.shipmentCount)} /><Fact term="Tracking" value={row.trackingAvailable ? "Available in protected order detail" : "Not available"} /><Fact term="Last evidence" value={formatTimestamp(row.lastProviderEvidenceAt)} /></dl>
+          <Link className="fulfillment-link" to="/orders">View order <AdminIcon name="arrow" size={14} /></Link>
+        </article>)}</div> : <div className="fulfillment-empty"><AdminIcon name="fulfillment" size={24} /><div><strong>No provider orders</strong><p>The lifecycle is implemented, but the unfinished controlled acceptance has not created a Printful draft. There are zero normalized shipments and tracking records.</p></div></div>}
       </section>
 
       <section className="fulfillment-section" aria-labelledby="pipeline-title">

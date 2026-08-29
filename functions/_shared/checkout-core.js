@@ -24,6 +24,7 @@ import {
   stripeShippingRateFields,
 } from "./shipping-core.js";
 import { orderCustomerProjection, prepareCheckoutCustomer, validateCheckoutCustomer } from "./commerce-customers.js";
+import { fulfillmentDetailForOrder } from "./printful-fulfillment.js";
 
 const encoder = new TextEncoder();
 const STRIPE_CHECKOUT_URL = "https://api.stripe.com/v1/checkout/sessions";
@@ -272,6 +273,10 @@ export async function commerceOrdersPayload(env, session, input = {}) {
        SELECT o.id, o.checkout_status, o.payment_status, o.fulfillment_status, o.currency_code, o.environment,
               o.customer_gross_amount, o.refund_amount, o.stripe_checkout_session_id, o.stripe_payment_intent_id,
               o.printful_order_id, o.customer_id, c.customer_kind, c.linked_account_id,
+              f.provider_state normalized_provider_state,f.fulfillment_state normalized_fulfillment_state,
+              f.confirmation_state normalized_confirmation_state,f.provider_order_id normalized_provider_order_id,
+              (SELECT COUNT(*) FROM commerce_fulfillment_shipments fs WHERE fs.fulfillment_order_id=f.id) normalized_shipment_count,
+              EXISTS(SELECT 1 FROM commerce_fulfillment_shipments fs WHERE fs.fulfillment_order_id=f.id AND fs.tracking_available=1) normalized_tracking_available,
               o.created_at, o.updated_at, o.checkout_created_at, o.payment_confirmed_at,
               COALESCE(i.line_count, 0) AS line_count, COALESCE(i.item_count, 0) AS item_count,
               COALESCE(d.document_count, 0) AS document_count, COALESCE(e.email_count, 0) AS email_count
@@ -280,6 +285,7 @@ export async function commerceOrdersPayload(env, session, input = {}) {
        LEFT JOIN document_counts d ON d.order_id = o.id
        LEFT JOIN email_counts e ON e.order_id = o.id
        LEFT JOIN commerce_customers c ON c.id = o.customer_id
+       LEFT JOIN commerce_fulfillment_orders f ON f.order_id=o.id AND f.provider='printful'
        ${whereSql}
        ORDER BY ${orderSortSql(options.sort)}, o.id ASC LIMIT ? OFFSET ?`,
     ).bind(...params, options.pageSize, offset).all(),
@@ -340,7 +346,7 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
      FROM commerce_orders WHERE id = ? LIMIT 1`,
   ).bind(orderId).first();
   if (!order) throw new AuthFailure(404, "commerce_order_not_found", "The commerce order was not found.");
-  const [itemsResult, webhooksResult, documentsResult, deliveriesResult, auditResult, deliverySnapshot] = await Promise.all([
+  const [itemsResult, webhooksResult, documentsResult, deliveriesResult, auditResult, deliverySnapshot, fulfillmentLifecycle] = await Promise.all([
     db.prepare(
       `SELECT i.id, i.line_number, i.product_id, i.variant_id, i.product_name, i.variant_name, i.sku,
               i.option_values_json, i.currency_code, i.unit_amount, i.quantity, i.line_total_amount,
@@ -375,6 +381,7 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
               display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at
        FROM commerce_order_delivery_snapshots WHERE order_id=? LIMIT 1`,
     ).bind(orderId).first(),
+    fulfillmentDetailForOrder(env, orderId, { includeTracking: true }),
   ]);
   const items = (itemsResult?.results || []).map(serializeOrderItem);
   const webhooks = (webhooksResult?.results || []).map((row) => ({
@@ -451,10 +458,10 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
       items,
       financial: { subtotalAmount, discountAmount: null, shippingAmount, taxAmount: null, totalAmount, refundAmount, netAmount: refundAmount <= totalAmount ? totalAmount - refundAmount : null, currencyCode: cleanText(order.currency_code, 3).toUpperCase() },
       payment: { provider: cleanText(order.customer_payment_provider, 40), status: cleanText(order.payment_status, 40), environment: order.environment === "live" ? "live" : "test", stripeSessionId: safeStripeObjectId(order.stripe_checkout_session_id), stripePaymentIntentId: safeStripeObjectId(order.stripe_payment_intent_id) },
-      fulfillment: { provider: cleanText(order.fulfillment_provider, 40) || null, status: cleanText(order.fulfillment_status, 40), printfulOrderId: cleanText(order.printful_order_id, 255) || null, orderMode: "draft_only", submissionEnabled: false, tracking: null, carrier: null, failureReason: cleanText(order.checkout_failure_code, 80) || null, providerCosts: { product: safeMinorAmount(order.printful_product_cost_amount), shipping: safeMinorAmount(order.printful_shipping_cost_amount), tax: safeMinorAmount(order.printful_tax_amount), refundCredit: safeMinorAmount(order.printful_refund_credit_amount) } },
+      fulfillment: { provider: cleanText(order.fulfillment_provider, 40) || null, status: cleanText(order.fulfillment_status, 40), printfulOrderId: fulfillmentLifecycle.providerOrderId || cleanText(order.printful_order_id, 255) || null, orderMode: "draft_only", submissionEnabled: false, tracking: null, carrier: null, failureReason: cleanText(order.checkout_failure_code, 80) || null, providerCosts: { product: safeMinorAmount(order.printful_product_cost_amount), shipping: safeMinorAmount(order.printful_shipping_cost_amount), tax: safeMinorAmount(order.printful_tax_amount), refundCredit: safeMinorAmount(order.printful_refund_credit_amount) }, lifecycle: fulfillmentLifecycle },
       documents, deliveries, webhooks, audit,
       technical: { checkoutRequestId: cleanText(order.checkout_request_id, 36) || null, stripeSessionId: safeStripeObjectId(order.stripe_checkout_session_id), stripePaymentIntentId: safeStripeObjectId(order.stripe_payment_intent_id), printfulOrderId: cleanText(order.printful_order_id, 255) || null },
-      timeline: orderTimeline(order, webhooks, documents, deliveries, audit),
+      timeline: orderTimeline(order, webhooks, documents, deliveries, audit, fulfillmentLifecycle),
     },
   };
 }
@@ -875,6 +882,12 @@ function serializeOrderListRow(row) {
     paymentConfirmedAt: cleanText(row.payment_confirmed_at, 80) || null, lineCount: Number(row.line_count || 0),
     itemCount: Number(row.item_count || 0), documentCount: Number(row.document_count || 0), emailCount: Number(row.email_count || 0),
     customer: row.customer_id ? { id: cleanText(row.customer_id, 80), kind: row.customer_kind === "account" ? "account" : "guest", accountId: cleanText(row.linked_account_id, 160) || null } : null,
+    fulfillment: {
+      available: Boolean(row.normalized_provider_order_id), providerOrderId: cleanText(row.normalized_provider_order_id, 80) || null,
+      providerState: cleanText(row.normalized_provider_state, 40) || "none", state: cleanText(row.normalized_fulfillment_state, 40) || "unfulfilled",
+      confirmationState: cleanText(row.normalized_confirmation_state, 40) || "none", shipmentCount: Number(row.normalized_shipment_count || 0),
+      trackingAvailable: row.normalized_tracking_available === 1,
+    },
   };
 }
 
@@ -895,7 +908,7 @@ function emptyOrdersPayload(access, options) {
   return { ok: true, databaseConfigured: false, access, controlledTest: null, orders: [], page: 1, pageSize: options.pageSize, totalMatching: 0, totalPages: 0, startIndex: 0, endIndex: 0, filters: { query: options.query, environment: options.environment, payment: options.payment, fulfillment: options.fulfillment, sort: options.sort }, summary: { totalMatching: 0, paid: 0, pending: 0, refunded: 0, fulfillmentActive: 0, testOrders: 0, liveOrders: 0, liveGrossAmount: 0, liveNetAmount: 0, currencyCode: "CAD" } };
 }
 
-function orderTimeline(order, webhooks, documents, deliveries, audit) {
+function orderTimeline(order, webhooks, documents, deliveries, audit, fulfillmentLifecycle = null) {
   const entries = [];
   const add = (timestamp, kind, title, detail, status = null, id = "") => {
     const value = cleanText(timestamp, 80);
@@ -909,6 +922,10 @@ function orderTimeline(order, webhooks, documents, deliveries, audit) {
   for (const document of documents) add(document.issuedAt || document.createdAt, "document", `${document.type === "receipt" ? "Receipt" : "Invoice"} ${document.status}`, `Template ${document.templateKey} revision ${document.templateRevision}.`, document.status, document.id);
   for (const delivery of deliveries) add(delivery.sentAt || delivery.createdAt, "email", `Email delivery ${delivery.status}`, `${delivery.templateKey} / ${delivery.eventKey} / ${delivery.purpose}.`, delivery.status, delivery.id);
   for (const event of audit) add(event.createdAt, "audit", event.action, `${event.targetType} / ${event.result}.`, event.result, event.id);
+  if (fulfillmentLifecycle?.available) {
+    add(fulfillmentLifecycle.providerCreatedAt || fulfillmentLifecycle.lastProviderEvidenceAt, "fulfillment", "Provider order recorded", `${fulfillmentLifecycle.providerState} / ${fulfillmentLifecycle.fulfillmentState}.`, fulfillmentLifecycle.providerState, fulfillmentLifecycle.id);
+    for (const shipment of fulfillmentLifecycle.shipments) add(shipment.shippedAt || shipment.returnedAt || shipment.lastProviderEvidenceAt, "shipment", shipment.reshipment ? "Reshipment evidence" : "Shipment evidence", `${shipment.state}${shipment.carrier ? ` / ${shipment.carrier}` : ""}.`, shipment.state, shipment.id);
+  }
   return entries.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id.localeCompare(right.id));
 }
 

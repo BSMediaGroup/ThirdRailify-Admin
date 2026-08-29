@@ -1,5 +1,25 @@
 # Bump notes
 
+## 2026-08-29 — Collapsed sidebar brand alignment
+
+- Centred the Third Railify brand mark inside the collapsed desktop sidebar's full 84-pixel rail, matching the navigation-item centre line without changing the expanded layout, mark size, or readable navigation geometry.
+- Added source and real-browser geometry coverage; the collapsed mark and navigation controls resolve to the same horizontal centre within half a pixel. The production JavaScript remained byte-identical to the prior stable release and the stylesheet differed only by this rule.
+- Deployed the bounded Admin correction as `93ace347` (`https://93ace347.thirdrailify-admin.pages.dev`). The stable alias serves `index-BDUli45O.css` with the centering rule present; no route authority, data, D1/R2, provider, payment, fulfilment, Public projection, commit, or push changed.
+
+## 2026-08-29 — Retained Watch episode thumbnails
+
+- Allowed the exact Public Pages origin in Admin's image CSP so the existing retained-episode `<img>` can load its protected Watch payload's same thumbnail proxy used by the Public episode gallery. Valid thumbnails now render in each retained row; absent or failed images still use the existing play-symbol fallback.
+- Added responsive browser proof that the Rumble proxy image loads with positive natural dimensions while a missing YouTube thumbnail retains the fallback, plus a static CSP regression assertion. No Watch archive record, visibility, retention order, signed authority, provider integration, Public code, or Commerce work changed.
+- Deployed the Admin-only correction as `313f08d1` (`https://313f08d1.thirdrailify-admin.pages.dev`). Stable and immutable `/watch` return 200 with the exact Public origin present in `img-src`, while a current retained Rumble thumbnail proxy returns `200 image/jpeg`; Public was not deployed.
+
+## 2026-08-29 â€” Normalized Printful fulfillment lifecycle
+
+- Added additive Commerce migration `0018_printful_fulfillment_lifecycle.sql` for normalized provider orders/items, shipments/item coverage, reshipment/return/delivery state, purpose-bound encrypted tracking, and bounded signed webhook evidence without raw provider payloads or PII.
+- Added one monotonic reducer shared by controlled `confirm=false` draft recording, an explicit injected stable-V1 reconciliation fallback, and a fail-closed Printful V2 beta HMAC receiver. The receiver remains unconfigured and provider-unverified; no Printful, Wix, payment, email, webhook-management, confirmation, shipment, or customer side effect was performed.
+- Upgraded Fulfillment & Shipping, Orders, and Customers with protected normalized lifecycle projections, truthful TEST/LIVE separation, partial/shipped/returned/tracking states, and deliberate empty states. Shipment-notification intent points at the existing template authority while customer sending remains disabled.
+- Added Node 22.16.0 migration/reducer/security/idempotency/regression coverage and responsive Playwright coverage at 1440, 768, and 390 pixels. Checkout, live capture, fulfillment submission, Stripe Tax, shipping strategy, provider migration, product sellability, and Public code remain unchanged.
+- Applied only `0018_printful_fulfillment_lifecycle.sql` once to `thirdrailify-commerce`; the remote ledger is current, all five lifecycle tables and ten indexes exist, foreign-key check is clean, and provider orders, shipments, and Printful webhook evidence remain zero. Deployed Admin as `c4d3e555` (`https://c4d3e555.thirdrailify-admin.pages.dev`); the stable alias serves the same artifact and the receiver returns fail-closed `printful_webhook_not_configured`.
+
 ## 2026-08-29 — Customer identity and Admin relationship management
 
 - Added local-only additive Commerce migration `0017_commerce_customers.sql`: encrypted guest/account Customer identity, privacy-safe exact-email guest lookup, one account-backed Customer per Account, nullable restrictive `commerce_orders.customer_id`, and unchanged legacy orders.

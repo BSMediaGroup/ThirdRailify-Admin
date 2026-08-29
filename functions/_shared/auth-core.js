@@ -34,6 +34,7 @@ const RATE_RULES = {
   commerce_email: { limit: 5, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   commerce_snapshot: { limit: 2_000, windowSeconds: 4 * 60 * 60, blockSeconds: 15 * 60 },
   commerce_migration: { limit: 5_000, windowSeconds: 24 * 60 * 60, blockSeconds: 15 * 60 },
+  printful_webhook: { limit: 240, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
   checkout: { limit: 12, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   shipping_quote: { limit: 8, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   watch: { limit: 60, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },

@@ -33,6 +33,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 - Admin remains the sole Wheels D1 and custom-media R2 authority. Additive migration `0016_wheels_media.sql` stores bounded lifecycle metadata only; upload/remove routes enforce owner/editor or Master access, edit locks, rate limits, raster/SVG validation, hidden-wheel protection, audit, and immediate old-object cleanup. Public receives only opaque asset IDs and same-origin media URLs, never an object key or binding.
 - `GET /api/public/commerce/order-status?session_id=cs_test_…` exposes only an exact-session local payment projection for Public's `/checkout/success` page. It cannot enumerate orders, does not call Stripe from the browser, and never treats a success redirect as payment authority.
 - Public machine-to-machine `POST /api/webhooks/stripe` receiver code with exact raw-body Web Crypto verification, a five-minute Stripe `v1` timestamp window, test-event enforcement, and D1-backed duplicate receipt protection. A real signed sandbox event has verified the deployed destination and matching Admin-only signing configuration.
+- Public machine-to-machine `POST /api/webhooks/printful` receiver code for allowlisted Printful V2 beta lifecycle evidence, with exact raw-body HMAC verification, store isolation, bounded digest idempotency, and no raw-payload retention. It remains fail-closed and unverified until server-only keys and a provider subscription are deliberately configured.
 - Stripe-first Canadian operating model using the dedicated Third Railify Official merchant account, server-created Stripe-hosted Checkout Sessions, Admin-only environment secrets, disabled Checkout/live capture, a draft-only Printful design, deferred PayPal, unavailable Printify, and untouched legacy Wix production.
 - Protected `POST /api/admin/commerce/printful/verify` action for exactly two server-side reads: store-scoped discovery through `GET /stores`, then `GET /store/products?limit=1`. Live verification resolved exactly one dedicated native `Third Railify API` store, safe Store ID `18668025`, and one visible product; the Wix store was not selected. The action rejects Wix or multi-store scope, persists only safe identity/count proof, and never exposes the Private Token.
 - Cloudflare Pages static output, SPA fallback, document and response-level noindex, restrictive baseline headers, and no custom domain.
@@ -92,6 +93,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/commerce/payments` | Stripe direct-merchant Payments & Payouts control plane with canonical TEST evidence, isolated TEST/LIVE summaries, webhook health, fail-closed activation gates, truthful Stripe-managed payout boundaries, and a disabled future PayPal donations scaffold |
 | `/api/commerce/checkout` | Exact-Public-origin customer POST/OPTIONS endpoint; server-priced Stripe-hosted TEST Checkout behind disabled product/configuration gates |
 | `/api/webhooks/stripe` | External Stripe sandbox delivery route; POST/raw-body/signature/D1 required, with no browser authentication and only invariant-checked existing-order payment confirmation |
+| `/api/webhooks/printful` | External Printful V2 beta lifecycle route; POST/raw-body/HMAC/store/D1 required, fail-closed while webhook keys and subscription remain unconfigured |
 | `/commerce/business` | Authoritative merchant-profile editor over the singleton Commerce D1 business model: public-safe storefront/contact/address fields, masked encrypted legal replacements, read-only CA/ON/CAD defaults, server-derived tax/document/email/fulfillment dependencies shared with Payments, revisioned saves, and category-only audit |
 | `/commerce/tax` | Authoritative Tax & Documents control plane: masked encrypted registrations, structured receipt/invoice editors, ephemeral SAMPLE previews, seller/email/readiness projections, and explicit no-collection/no-remittance boundaries |
 | `/commerce/emails` | Safe structured customer template editor; no send path |
@@ -129,14 +131,14 @@ ThirdRailify-Admin/
 │   └── people/             Seeded host imagery (not used in admin)
 ├── public/
 │   ├── _headers            Noindex and static response safeguards
-│   ├── _routes.json        Auth, Admin, profile-media, and Stripe webhook Pages Function routing
+│   ├── _routes.json        Auth, Admin, profile-media, Stripe, and Printful webhook Pages Function routing
 │   └── _redirects          SPA fallback
 ├── functions/
-│   ├── _shared/            D1 auth/session/OAuth/security, profile-media, commerce, shared brand, and GOATS helpers
-│   ├── api/                Shared auth, protected contact delivery, signed Admin/GOATS APIs, public projections, and signed Stripe webhook receiver
+│   ├── _shared/            D1 auth/session/OAuth/security, profile-media, commerce, shared brand, GOATS, and normalized Printful fulfillment helpers
+│   ├── api/                Shared auth, protected Admin/GOATS APIs, public projections, and signed Stripe/Printful webhook receivers
 │   └── u/                  Immutable R2-backed profile-media delivery
 ├── commerce-import/        Sanitized catalogue evidence and design-only variant schema
-├── commerce-migrations/    Commerce, Stripe/order/product/collection/shipping authority, and additive community schema
+├── commerce-migrations/    Commerce authority through additive `0018_printful_fulfillment_lifecycle.sql`
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
 │   ├── auth/               Gate, session provider, modal, Turnstile, and account widget
@@ -153,6 +155,9 @@ ThirdRailify-Admin/
 │   ├── printful.test.mjs   Focused single-store, no-write, persistence, and Store-ID invariant coverage
 │   ├── printful-catalogue.test.mjs  Full GET-only source/target snapshot safety coverage
 │   ├── fulfillment-browser.test.mjs  390/768/1440 operator-state and explicit-download regression
+│   ├── fulfillment-lifecycle-migration.test.mjs  Additive schema, constraints, history, and FK coverage
+│   ├── printful-fulfillment.test.mjs  Provider normalization, split shipment, reshipment, return, and reconciliation coverage
+│   ├── printful-webhook.test.mjs  Signed receiver, fail-closed security, idempotency, and no-PII persistence coverage
 │   └── …                   Auth/commerce migrations, crypto, API, permissions, and safety coverage
 ├── docs/                   GOATS authority/import contracts and operator boundaries
 ├── scripts/                GOATS import validator plus opt-in demo seed/cleanup fixtures
@@ -173,7 +178,7 @@ Additive banner files in this structure are `commerce-migrations/0006_site_banne
 
 Catalogue imagery is copied into the existing Admin-owned R2 binding under immutable `commerce/catalogue/<sha256>.<ext>` keys and served through `/commerce-media/<sha256>.<ext>` with year-long immutable caching, content sniffing, and cross-origin image delivery. Product saves ingest external HTTPS image sources before persisting first-party URLs; the Public catalogue owns no R2 binding and receives only those safe first-party URLs. Products and Collections use focus-trapped, body-scroll-locked modal editors so long lists never push editing controls below the page.
 
-`src/pages/OrdersManagementPage.tsx` is the dedicated read-only order-management surface. It uses bounded list/detail projections from the order, line, encrypted delivery, Stripe webhook, document, email-delivery, and commerce-audit authority; the list contains no PII and detail exposes only safe destination/method/amount evidence. `src/pages/CustomerEmailsPage.tsx` is the dedicated lifecycle-template and delivery-readiness surface; its matching protected read projection is `/api/admin/commerce/emails`. `src/pages/FulfillmentShippingPage.tsx` consumes the protected `/api/admin/commerce/fulfillment` projection and pure Printful draft preparation intended for a future local workflow. The projection reads Commerce D1 and server configured-state only: it performs no provider request, creates no order/draft/shipment, writes no audit event, and exposes no submission or activation control.
+`src/pages/OrdersManagementPage.tsx` is the dedicated read-only order-management surface. It uses bounded list/detail projections from order, line, encrypted delivery, normalized provider-order/shipment/tracking, Stripe webhook, document, email-delivery, and commerce-audit authority; list and Customer-history projections expose only lifecycle state, counts, and tracking availability, while protected detail can decrypt a tracking reference/URL. `src/pages/CustomerEmailsPage.tsx` remains the lifecycle-template and delivery-readiness surface; shipment-notification sends stay globally disabled. `src/pages/FulfillmentShippingPage.tsx` consumes the protected `/api/admin/commerce/fulfillment` projection and pure Printful draft preparation. The read projection performs no provider request, creates no provider object, and exposes no submission, confirmation, retry, reshipment, or activation control.
 
 `src/pages/CustomersPage.tsx` owns the protected commerce relationship view; `src/pages/AccountsPage.tsx` remains the separate authentication/access authority. Both use bounded detail drawers and reciprocal deep links without moving password, provider, session-token, or role authority into Commerce. `src/components/ResizableTables.tsx` enhances every real named-column Admin table with pointer and keyboard resizing, route/table-scoped local preference storage, sensible width bounds, and a visible reset. The current semantic-table inventory is Accounts, Customers, Wheels Library, Wheels Access assignments, and Wheels Results; card and list layouts are not misreported as tables. Phone layouts hide desktop resize handles and retain the existing stacked-row behavior.
 

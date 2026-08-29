@@ -54,7 +54,7 @@ Public intentionally requests rates after completing delivery details. It sends 
 
 A selected quote can be used only while its opaque ID is locally fresh and its stored environment, CAD currency, recomputed cart fingerprint, recomputed recipient fingerprint, and opaque option ID all match. The stored rate amount—not a browser field—is added to the authoritative line subtotal. The local order, immutable items, and encrypted delivery snapshot are written before the Stripe boundary. Stripe receives a server-built fixed-amount shipping option, and its returned total must equal the local order total. Recipient PII is absent from Stripe metadata. Signed Stripe webhooks remain the only payment-confirmation authority.
 
-The Printful adapter is implemented but `shipping_strategy` remains `unconfigured`; it fails before fetch in the current canonical state. Normal checkout, the completed controlled TEST gate, live payment capture, fulfillment submission, customer email sending, provider draft creation, confirmation, shipments, and tracking all remain disabled or unimplemented. `prepareStoredPrintfulDraftOrder` can decrypt a protected order snapshot and construct an internal non-network draft representation, but the fulfillment gate still makes submission impossible.
+The Printful shipping adapter is implemented but `shipping_strategy` remains `unconfigured`; it fails before fetch in the current canonical state. Normal checkout, the completed controlled TEST gate, live payment capture, fulfillment submission, confirmation, and customer email sending remain disabled. The normalized provider-order, shipment, item-coverage, return/reshipment, encrypted-tracking, and signed-webhook receiver capabilities exist without current production evidence. `prepareStoredPrintfulDraftOrder` can decrypt a protected order snapshot and construct an internal non-network draft representation; the fulfillment gate still makes submission impossible.
 
 ## Pre-cutover Stripe TEST acceptance
 
@@ -114,7 +114,7 @@ The dedicated account's creation and Sandbox/test access are operator-confirmed.
 
 ## Data authority
 
-Authentication remains in the existing auth D1. Commerce state belongs in the separate `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. Schema authority is the ordered additive `commerce-migrations` sequence through `0015_checkout_shipping_foundation.sql`; applied migrations are never edited.
+Authentication remains in the existing auth D1. Commerce state belongs in the separate `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. Schema authority is the ordered additive `commerce-migrations` sequence through `0018_printful_fulfillment_lifecycle.sql`; applied migrations are never edited.
 
 Entities:
 
@@ -129,6 +129,9 @@ Entities:
 - `commerce_order_items`: immutable normalized product ID/name/CAD unit amount/quantity/line total/shipping-required snapshots; later product edits do not rewrite what was purchased.
 - `commerce_shipping_quotes`: short-lived opaque, fingerprint-bound, CAD rate authority with no customer plaintext.
 - `commerce_order_delivery_snapshots`: one encrypted recipient and selected shipping-method/amount history per order, never projected in catalogue or order-list APIs.
+- `commerce_fulfillment_orders` and `commerce_fulfillment_order_items`: normalized Printful order state and restrictive local-to-provider item correlation, separate from payment and legacy order fields.
+- `commerce_fulfillment_shipments` and `commerce_fulfillment_shipment_items`: package lifecycle, partial item coverage, reshipment relationships, returns, delivery evidence, and purpose-bound encrypted tracking references/URLs.
+- `commerce_provider_webhook_events`: bounded signed Printful event evidence and digest idempotency without raw payload, signature, address, customer, or tracking plaintext.
 - `commerce_audit`: redacted mutation history.
 - `commerce_webhook_events`: one safe receipt per provider plus provider Event ID, with bounded event/object/status metadata and a raw-payload SHA-256 only. It has no raw payload, signature, secret, credential, customer, address, card, or full-object column.
 
@@ -182,7 +185,13 @@ Printful has no Stripe-style sandbox in this architecture. The provider API is r
 
 Only the existing unique Printful provider row is updated. Live read-only verification resolved the token to exactly one `native` store named `Third Railify API`, Store ID `18668025`, with one visible product; that ID is now the safe Wrangler configuration and the Wix store was not selected. Safe store ID/name/type, single-store access, product count, real-API posture, Cloudflare-secret custody, and verification time may persist. The token, Authorization header, raw responses, account/team/billing information, and Wix credentials never persist. The provider row's schema `environment=staging` describes the application rollout, not a Printful sandbox. Permanent pre-cutover gates remain `draft_only`, `fulfillment_enabled=false`, `webhook_configured=false`, `checkout_enabled=false`, and `live_payment_capture_enabled=false`.
 
-Stripe does not pay Printful. Transaction 1 is the customer's payment to Third Railify. Transaction 2 is Printful's separate charge to the Third Railify Printful Wallet or configured billing method for product/printing, shipping, taxes, and other applicable fees. Order accounting keeps customer gross, Stripe fee, customer refund, Printful product cost, shipping, tax, refund/credit, and gross margin separate. No Printful order creation, confirmation, file/product mutation, or webhook configuration exists in this milestone.
+Stripe does not pay Printful. Transaction 1 is the customer's payment to Third Railify. Transaction 2 is Printful's separate charge to the Third Railify Printful Wallet or configured billing method for product/printing, shipping, taxes, and other applicable fees. Order accounting keeps customer gross, Stripe fee, customer refund, Printful product cost, shipping, tax, refund/credit, and gross margin separate. No Printful order, confirmation, file/product mutation, or webhook configuration call is performed by the lifecycle read surfaces.
+
+### Normalized fulfillment lifecycle
+
+`0018_printful_fulfillment_lifecycle.sql` adds provider order, provider item, shipment, shipment-item coverage, and signed webhook evidence authorities without rewriting historical orders. One monotonic reducer maps documented Printful V1 order states into local provider state while keeping payment, confirmation, fulfillment, and shipment state distinct. Split packages become `partial` until non-reshipment shipment-item coverage reaches the ordered quantity; reshipments never inflate coverage, returns remain distinct from cancellation, and verified delivery evidence can advance shipped packages to delivered.
+
+`POST /api/webhooks/printful` is a public machine boundary for Printful V2 beta signed events. It is fail-closed unless the expected store ID, public key, and hex webhook secret are server-configured. It verifies exact raw bytes with HMAC-SHA256 before JSON parsing, allowlists lifecycle events, rate-limits bodies to 256 KiB, rejects wrong-store and conflicting relationships, and records only bounded digests and normalized evidence. The receiver is code-complete but its keys and provider subscription are not configured or verified; no Printful webhook-management request was made. Stable V1 remains the explicitly injected read-only reconciliation fallback, with no scheduler or automatic polling. Shipment-notification intent is projected into the existing email authority, but the global send gate remains false and no delivery is created.
 
 ### Read-only catalogue recovery
 

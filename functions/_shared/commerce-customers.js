@@ -107,9 +107,13 @@ export async function customerDetailPayload(env, session, rawCustomerId, input =
     db.prepare(`SELECT o.id,o.environment,o.payment_status,o.fulfillment_status,o.currency_code,
         o.customer_gross_amount,o.refund_amount,o.created_at,o.payment_confirmed_at,
         d.destination_country_code,d.destination_region_code,d.display_shipping_method,
+        f.fulfillment_state normalized_fulfillment_state,
+        (SELECT COUNT(*) FROM commerce_fulfillment_shipments fs WHERE fs.fulfillment_order_id=f.id) shipment_count,
+        EXISTS(SELECT 1 FROM commerce_fulfillment_shipments fs WHERE fs.fulfillment_order_id=f.id AND fs.tracking_available=1) tracking_available,
         (SELECT COUNT(*) FROM commerce_order_documents od WHERE od.order_id=o.id) document_count,
         (SELECT COUNT(*) FROM commerce_email_deliveries ed WHERE ed.order_id=o.id) email_count
       FROM commerce_orders o LEFT JOIN commerce_order_delivery_snapshots d ON d.order_id=o.id
+      LEFT JOIN commerce_fulfillment_orders f ON f.order_id=o.id AND f.provider='printful'
       WHERE o.customer_id=? ORDER BY o.created_at DESC,o.id ASC LIMIT ? OFFSET ?`)
       .bind(customerId, pageSize, offset).all(),
     row.linked_account_id ? accountMap(env, [row.linked_account_id]) : Promise.resolve(new Map()),
@@ -248,6 +252,7 @@ function serializeCustomerOrder(row) {
     createdAt: cleanText(row.created_at, 80), paymentConfirmedAt: cleanText(row.payment_confirmed_at, 80) || null,
     delivery: row.destination_country_code ? { countryCode: cleanText(row.destination_country_code, 2), regionCode: cleanText(row.destination_region_code, 80) || null, method: cleanText(row.display_shipping_method, 100) || null, historicalSnapshot: true } : null,
     documentCount: Number(row.document_count || 0), emailCount: Number(row.email_count || 0),
+    fulfillment: { state: cleanText(row.normalized_fulfillment_state, 40) || "unfulfilled", shipped: new Set(["shipped", "delivered", "returned"]).has(row.normalized_fulfillment_state), trackingAvailable: row.tracking_available === 1, shipmentCount: Number(row.shipment_count || 0) },
   };
 }
 

@@ -22,6 +22,7 @@ test("Admin sidebar keeps branding outside the independently scrollable navigati
   assert.match(shell, /className="sidebar-scroll-region"[\s\S]*className="environment-note"[\s\S]*className="primary-nav"[\s\S]*className="sidebar-footer"/);
   assert.match(styles, /\.sidebar \{[\s\S]*overflow: hidden;/);
   assert.match(styles, /\.sidebar-brand-panel \{[^}]*flex: 0 0 auto;[^}]*border-bottom:/);
+  assert.match(styles, /\.admin-layout--collapsed \.sidebar-brand-panel \{ justify-content: center; \}/);
   assert.match(styles, /\.sidebar-scroll-region \{[^}]*min-height: 0;[^}]*flex: 1 1 auto;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/);
 });
 
@@ -176,5 +177,5 @@ test("Shop is an expandable Products, Collections, Orders group with dirty-only 
   assert.match(page, /featuredDirty && <div className="featured-order-save"/); assert.match(page, /Featured order changed/); assert.match(page, />Discard<\/button>/); assert.match(page, /Select all \{payload\.totalItems\} matching/); assert.match(page, /Rows per page/);
   for (const label of ["Create collection", "Stable Public slug", "Product membership", "Current products", "Add products", "Show collection on storefront", "Archive collection", "Delete empty collection", "Rows per page", "Edit collection"]) assert.match(page, new RegExp(label));
   assert.match(page, /getCollectionList/); assert.match(page, /bulkUpdateCollections/); assert.match(page, /updateCollectionMemberships/); assert.match(page, /No standalone collection image field exists/);
-  assert.match(styles, /\.featured-dirty-rail/); assert.match(styles, /\.collection-membership-grid/); assert.match(styles, /\.collection-admin-list > article/); assert.match(headers, /img-src[^;]*https:\/\/static\.wixstatic\.com/);
+  assert.match(styles, /\.featured-dirty-rail/); assert.match(styles, /\.collection-membership-grid/); assert.match(styles, /\.collection-admin-list > article/); assert.match(headers, /img-src[^;]*https:\/\/static\.wixstatic\.com/); assert.match(headers, /img-src[^;]*https:\/\/thirdrailify\.pages\.dev/);
 });

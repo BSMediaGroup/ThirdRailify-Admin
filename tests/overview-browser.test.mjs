@@ -184,6 +184,12 @@ test("Admin sidebar scroll keeps the branding panel fixed on desktop and mobile"
     assert.equal(after.linkTop < before.linkTop, true, `navigation content moves at ${width}x${height}`);
     assert.equal(Math.abs(after.brandTop - before.brandTop) < 0.5, true, `brand top remains fixed at ${width}x${height}`);
     assert.equal(Math.abs(after.brandBottom - before.brandBottom) < 0.5, true, `brand bottom remains fixed at ${width}x${height}`);
+    if (width > 820) {
+      await page.getByRole("button", { name: "Collapse sidebar" }).click(); await page.waitForTimeout(250);
+      const collapsed = await page.locator("#admin-sidebar").evaluate((sidebar) => { const mark = sidebar.querySelector(".brand-mark"); const firstLink = sidebar.querySelector(".primary-nav .nav-link"); if (!(mark instanceof HTMLElement) || !(firstLink instanceof HTMLElement)) return null; const side = sidebar.getBoundingClientRect(); const brand = mark.getBoundingClientRect(); const link = firstLink.getBoundingClientRect(); const centre = (box) => box.left + box.width / 2; return { sidebarCentre: centre(side), brandCentre: centre(brand), navCentre: centre(link) }; });
+      assert.ok(collapsed, "collapsed sidebar alignment geometry exists"); assert.ok(Math.abs(collapsed.brandCentre - collapsed.sidebarCentre) <= .5, `collapsed brand is centred in the sidebar: ${JSON.stringify(collapsed)}`); assert.ok(Math.abs(collapsed.brandCentre - collapsed.navCentre) <= .5, `collapsed brand aligns with navigation icons: ${JSON.stringify(collapsed)}`);
+      if (process.env.OVERVIEW_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", "thirdrailify-admin-sidebar-collapsed-PROOF.png"), fullPage: false });
+    }
     assert.deepEqual(errors, [], `no sidebar runtime errors at ${width}x${height}`);
     await context.close();
   }

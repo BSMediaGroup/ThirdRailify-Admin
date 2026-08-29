@@ -35,6 +35,10 @@ test("Watch Admin renders empty and retained archives with direct source links r
         assert.deepEqual(request.postDataJSON(), { action: "read" });
         return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(archivePayload) });
       }
+      if (pathname === "/api/watch/thumbnail") {
+        assert.equal(new URL(request.url()).origin, "https://thirdrailify.pages.dev");
+        return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z5Z0AAAAASUVORK5CYII=", "base64") });
+      }
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: "not_found" }) });
     });
 
@@ -59,6 +63,11 @@ test("Watch Admin renders empty and retained archives with direct source links r
     assert.equal(await youtubeSource.getAttribute("href"), "https://www.youtube.com/watch?v=abc123DEF45");
     assert.match(await rumbleSource.locator("img").getAttribute("src"), /rumble\.svg/);
     assert.match(await youtubeSource.locator("img").getAttribute("src"), /youtube\.svg/);
+    const rumbleThumbnail = page.locator(".watch-admin-row").filter({ hasText: "Rumble retained episode" }).locator(".watch-admin-row__thumb img");
+    await rumbleThumbnail.waitFor();
+    assert.equal(await rumbleThumbnail.getAttribute("src"), "https://thirdrailify.pages.dev/api/watch/thumbnail?episode=ep_rumble");
+    assert.equal(await rumbleThumbnail.evaluate((image) => image.complete && image.naturalWidth > 0), true, "the retained Rumble thumbnail image renders");
+    assert.equal(await page.locator(".watch-admin-row").filter({ hasText: "Hidden YouTube retained episode" }).locator(".watch-admin-row__thumb img").count(), 0, "the play icon remains the missing-thumbnail fallback");
     assert.equal(await page.getByText("Preview unavailable while hidden", { exact: true }).count(), 1, "hidden episodes retain their source link but not a Public preview");
     assert.equal(await page.getByRole("link", { name: /Preview/ }).count(), 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${viewport.width}px populated archive has no horizontal overflow`);
@@ -95,7 +104,7 @@ function emptyArchive() {
 }
 
 function populatedArchive() {
-  const rumble = { id: "ep_rumble", identityKey: "rumble:vfixture-rumble", platform: "rumble", contentId: "vfixture-rumble", title: "Rumble retained episode", description: null, thumbnailUrl: null, thumbnailState: "fallback", watchUrl: "https://rumble.com/vfixture-rumble.html", archiveDate: "2026-08-28T00:00:00.000Z", visible: true, archiveOrder: 1, publicRoute: "https://thirdrailify.pages.dev/watch/v/ep_rumble" };
+  const rumble = { id: "ep_rumble", identityKey: "rumble:vfixture-rumble", platform: "rumble", contentId: "vfixture-rumble", title: "Rumble retained episode", description: null, thumbnailUrl: "https://thirdrailify.pages.dev/api/watch/thumbnail?episode=ep_rumble", thumbnailState: "proxy", watchUrl: "https://rumble.com/vfixture-rumble.html", archiveDate: "2026-08-28T00:00:00.000Z", visible: true, archiveOrder: 1, publicRoute: "https://thirdrailify.pages.dev/watch/v/ep_rumble" };
   const youtube = { id: "ep_youtube", identityKey: "youtube:abc123DEF45", platform: "youtube", contentId: "abc123DEF45", title: "Hidden YouTube retained episode", description: null, thumbnailUrl: null, thumbnailState: "fallback", watchUrl: "https://www.youtube.com/watch?v=abc123DEF45", archiveDate: "2026-08-27T00:00:00.000Z", visible: false, archiveOrder: 2, publicRoute: null };
   return { ok: true, current: null, summary: { retained: 2, visible: 1, hidden: 1, remaining: 22, newest: { id: rumble.id, title: rumble.title, date: rumble.archiveDate }, oldest: { id: youtube.id, title: youtube.title, date: youtube.archiveDate } }, episodes: [rumble, youtube] };
 }

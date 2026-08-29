@@ -71,6 +71,7 @@ async function seedPaidAcceptance(harness) {
 test("controlled paid TEST order creates at most one unconfirmed Printful draft and reconciles locally", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const created = await seedPaidAcceptance(harness);
+  const localItem = await harness.commerceDb.prepare("SELECT id FROM commerce_order_items WHERE order_id=?").bind(created.orderId).first();
   const calls = [];
   const printful = async (url, init) => {
     calls.push({ url, method: init.method, body: init.body ? JSON.parse(init.body) : null });
@@ -79,7 +80,7 @@ test("controlled paid TEST order creates at most one unconfirmed Printful draft 
     assert.equal("confirm" in calls.at(-1).body, false);
     assert.equal(calls.at(-1).body.external_id, created.orderId);
     assert.equal(calls.at(-1).body.shipping, "STANDARD");
-    assert.deepEqual(calls.at(-1).body.items, [{ sync_variant_id: "target-variant-001", quantity: 1 }]);
+    assert.deepEqual(calls.at(-1).body.items, [{ external_id: localItem.id, sync_variant_id: "target-variant-001", quantity: 1 }]);
     assert.equal(calls.at(-1).body.recipient.address1, "100 Test Street");
     return Response.json({ code: 200, result: { id: 700001, external_id: created.orderId, store: 18668025, status: "draft" } });
   };
