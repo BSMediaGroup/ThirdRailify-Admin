@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-08-30 - Account V2 commerce authority
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added additive migration `0019_account_address_book.sql` for purpose-bound encrypted current Customer phone and reusable delivery addresses with ownership, revision, one-default, ten-active-address, lifecycle, and deletion constraints.
+- Added the signed exact-Public-origin `/api/account-commerce/internal/*` boundary. It resolves active Account authority server-side, creates/reuses only that Account's Customer, returns bounded TEST/LIVE order history and detail, and excludes encryption envelopes, fingerprints, Stripe/webhook/provider secrets, and browser-supplied owner identity.
+- Preserved immutable encrypted checkout-time contact/delivery snapshots independently of current contact/address changes. No Admin commerce UI expansion, checkout enablement, payment, fulfilment, Printful/Wix/provider write, DNS/domain change, or production cutover is included.
+- Added focused migration/encryption/ownership/revision/default/cap/order-isolation/HMAC tests and kept the established checkout foundation passing under Node 22.16.0.
+- Backed up remote `thirdrailify-commerce` before applying only `0019`, preserving 1 Customer, 2 orders, 50 products, and 1,323 variants; the new address table remains empty and `PRAGMA foreign_key_check` is clean. Deployed Admin first as `114963e2-7e24-4394-864e-7231cdba5cf9` (`https://114963e2.thirdrailify-admin.pages.dev`) before the Public Account release.
+
 ## 2026-08-30 - Wider Admin workspace
 
 CURRENT VER=0.1.0-alpha.0

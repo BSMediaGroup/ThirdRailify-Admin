@@ -31,12 +31,13 @@ export function normalizeCartItems(value) {
 
 export function normalizeDeliveryRecipient(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new AuthFailure(400, "delivery_recipient_invalid", "Delivery details are required.");
-  const allowed = new Set(["name", "address1", "address2", "city", "region", "postalCode", "countryCode", "phone"]);
+  const allowed = new Set(["name", "company", "address1", "address2", "city", "region", "postalCode", "countryCode", "phone"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new AuthFailure(400, "delivery_recipient_fields_invalid", "Delivery details contain unsupported fields.");
   const countryCode = safeField(value.countryCode, 2, "country code", true).toUpperCase();
   if (!ISO_COUNTRIES.has(countryCode)) throw new AuthFailure(400, "delivery_country_invalid", "Choose a valid two-letter destination country code.");
   const recipient = {
     name: safeField(value.name, 120, "recipient name", true),
+    ...(safeField(value.company, 120, "company", false) ? { company: safeField(value.company, 120, "company", false) } : {}),
     address1: safeField(value.address1, 180, "address line 1", true),
     address2: safeField(value.address2, 180, "address line 2", false) || null,
     city: safeField(value.city, 120, "city or locality", true),
@@ -52,7 +53,7 @@ export function normalizeDeliveryRecipient(value) {
 
 export async function recipientFingerprint(recipient) {
   return sha256Hex(JSON.stringify({
-    name: recipient.name, address1: recipient.address1, address2: recipient.address2,
+    name: recipient.name, company: recipient.company || null, address1: recipient.address1, address2: recipient.address2,
     city: recipient.city, region: recipient.region, postalCode: recipient.postalCode,
     countryCode: recipient.countryCode, phone: recipient.phone,
   }));
@@ -214,6 +215,7 @@ export function printfulShippingRateRequest(recipient, lines) {
   if (!physical.length) throw new AuthFailure(409, "shipping_not_required", "This cart does not require provider shipping rates.");
   return {
     recipient: {
+      name: recipient.name, ...(recipient.company ? { company: recipient.company } : {}), ...(recipient.phone ? { phone: recipient.phone } : {}),
       address1: recipient.address1, ...(recipient.address2 ? { address2: recipient.address2 } : {}),
       city: recipient.city, ...(recipient.region ? { state_code: recipient.region } : {}),
       country_code: recipient.countryCode, zip: recipient.postalCode,
