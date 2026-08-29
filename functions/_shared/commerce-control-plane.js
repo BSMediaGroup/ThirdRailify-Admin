@@ -521,7 +521,8 @@ export function preparePrintfulDraftOrder(input) {
   if (candidate?.requiresShipping !== false && (!shippingMethod || !providerShippingMethodId)) block("shipping_method_missing", "An authoritative selected shipping method is required.");
   if (providerShippingMethodId && !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(providerShippingMethodId)) block("shipping_method_invalid", "The selected provider shipping method is invalid.");
   if (input?.fulfillmentEnabled !== true) block("fulfillment_disabled", "Fulfillment submission is intentionally disabled.");
-  if (orderMode !== "draft_only") block(orderMode === "live" ? "live_order_mode_rejected" : "printful_order_mode_invalid", "Preview preparation requires the canonical Printful mode to be draft_only.");
+  const acceptedOrderMode = input?.environment === "live" ? "draft_then_confirm" : "draft_only";
+  if (orderMode !== acceptedOrderMode) block(orderMode === "live" ? "live_order_mode_rejected" : "printful_order_mode_invalid", `The canonical Printful mode must be ${acceptedOrderMode}.`);
   if (providerMode && providerMode !== orderMode) block("printful_mode_contradictory", "The provider metadata and canonical Printful order mode disagree.");
   if (input?.environment === "live" && input?.previewOnly === true) block("live_preview_rejected", "A preview-only path cannot prepare a LIVE order.");
   if (input?.paymentStatus && !new Set(["paid", "synthetic_fixture"]).has(input.paymentStatus)) block("payment_not_confirmed", "A real order must have signed-webhook payment authority before fulfillment preparation.");
@@ -1100,7 +1101,7 @@ export async function customerEmailsControlPlanePayload(env, session) {
     templatesPayload(env, session),
     productionReadinessPayload(env, session),
     db.prepare("SELECT trading_name,currency_code,public_contact_email,support_email,legal_business_name_ciphertext,private_address_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
-    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('transactional_email_enabled','customer_document_access_enabled')").all(),
+    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('transactional_email_enabled','customer_document_access_enabled','resend_domain_verified')").all(),
   ]);
   const [timestampsRead, recentRead, countsRead, lastSuccessRead, lastFailureRead] = await Promise.all([
     optionalD1Read(() => db.prepare("SELECT template_key,updated_at FROM commerce_templates WHERE template_kind='email' ORDER BY template_key").all(), { results: [] }),
@@ -1126,7 +1127,7 @@ export async function customerEmailsControlPlanePayload(env, session) {
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, false)]));
   const customerSendsEnabled = settings.transactional_email_enabled === true;
   const configuredTemplates = emailTemplates.filter((template) => template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
-  const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && configuredTemplates >= 2;
+  const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && settings.resend_domain_verified === true && configuredTemplates >= 2;
   const manageSensitiveEvidence = access.isMasterAdmin || access.capabilities.includes("commerce.templates.manage");
   const recent = (recentResult?.results || []).map((row) => serializeEmailDelivery(row, manageSensitiveEvidence));
   const counts = { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 };
@@ -1139,14 +1140,14 @@ export async function customerEmailsControlPlanePayload(env, session) {
   const communications = readiness.domains.communications;
   return {
     ok: true, databaseConfigured: true, authority: "Commerce D1 + server environment", access,
-    provider: providerProjection(env, sender, lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null),
+    provider: { ...providerProjection(env, sender, lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null), externalVerification: settings.resend_domain_verified === true ? "verified" : "unverified" },
     sender: { ...sender, businessDisplayName: cleanText(profile?.trading_name, 160) || null, businessSupportEmail: cleanText(profile?.support_email || profile?.public_contact_email, 254) || null },
     templates: emailTemplates,
     mergeVariables: CUSTOMER_EMAIL_VARIABLES,
     readiness: {
       state: customerSendsEnabled ? (communications.ready ? "ready" : "action_required") : configurationReady ? "ready_but_disabled" : "incomplete",
       configurationReady, configuredTemplates, totalTemplates: emailTemplates.length, minimumReadyTemplates: 2,
-      customerSendsEnabled, productionLifecycleImplemented: false,
+      customerSendsEnabled, productionLifecycleImplemented: true,
     },
     dependencies: {
       business: { complete: businessContactComplete, canonicalReady: readiness.domains.business.ready, displayName: cleanText(profile?.trading_name, 160) || null, supportEmail: cleanText(profile?.support_email || profile?.public_contact_email, 254) || null, href: "/commerce/business" },
@@ -1159,13 +1160,13 @@ export async function customerEmailsControlPlanePayload(env, session) {
     },
     deliveries: { state: deliveryHistoryAvailable ? "available" : "unavailable", recent, counts, lastSuccessful: lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailed: lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } },
     canonicalReadiness: { productionReady: readiness.productionReady, communications },
-    safety: emailSafety(customerSendsEnabled),
+    safety: emailSafety(customerSendsEnabled, true),
     checkedAt: nowIso(),
   };
 }
 
 function emailTemplateProjection(template, updatedAt = null) {
-  return { ...template, purpose: CUSTOMER_EMAIL_LIFECYCLES[template.templateKey] || "Persisted customer lifecycle template.", updatedAt, productionTriggerImplemented: false };
+  return { ...template, purpose: CUSTOMER_EMAIL_LIFECYCLES[template.templateKey] || "Persisted customer lifecycle template.", updatedAt, productionTriggerImplemented: new Set(["order_confirmation", "shipment_notification"]).has(template.templateKey) };
 }
 
 function senderProjection(env) {
@@ -1209,7 +1210,7 @@ function maskEmail(value) {
 function templateDependency(template) { return { configured: Boolean(template?.validity?.state !== "invalid" && template?.status === "ready" && template?.enabled), status: template?.validity?.state === "invalid" ? "invalid" : template?.status || "not_configured", enabled: Boolean(template?.validity?.state !== "invalid" && template?.enabled), revision: template?.revision || null }; }
 function emptyEmailDependencies() { return { business: { complete: false, canonicalReady: false, displayName: null, supportEmail: null, href: "/commerce/business" }, documents: { receipt: templateDependency(null), invoice: templateDependency(null), customerAccessEnabled: false, href: "/commerce/tax" }, orders: { href: "/orders", orderSpecificHistoryOwner: true }, paypalRequired: false }; }
 function emptyEmailDeliveries() { return { state: "unavailable", recent: [], counts: { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 }, lastSuccessful: null, lastFailed: null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } }; }
-function emailSafety(customerSendsEnabled) { return { customerSendsEnabled, mutableFromThisRoute: false, testSendExposed: false, previewMutates: false, providerCallsOnRead: false, providerCallsOnPreview: false, productionLifecycleImplemented: false }; }
+function emailSafety(customerSendsEnabled, lifecycleImplemented = false) { return { customerSendsEnabled, mutableFromThisRoute: false, testSendExposed: false, previewMutates: false, providerCallsOnRead: false, providerCallsOnPreview: false, productionLifecycleImplemented: lifecycleImplemented }; }
 
 export function validateTemplatePlaceholders(template) {
   const unknown = new Set();
@@ -1364,6 +1365,21 @@ export async function commerceEmailDeliveryKey({ templateKey, templateRevision, 
   };
   if (!Number.isSafeInteger(normalized.templateRevision) || normalized.templateRevision < 1 || !normalized.eventKey) throw new AuthFailure(400, "email_delivery_identity_invalid", "The deterministic email delivery identity is invalid.");
   return sha256Hex(JSON.stringify(normalized));
+}
+
+export async function renderOrderLifecycleEmail(env, orderId, templateKey, variableOverrides = {}) {
+  const db = requireCommerceDb(env);
+  const row = await templateRow(db, templateKey);
+  if (row.template_kind !== "email" || row.status !== "ready" || Number(row.enabled) !== 1) {
+    throw new AuthFailure(409, "transactional_email_template_not_ready", "The approved transactional email template is not enabled.");
+  }
+  const fixture = await orderVariables(db, orderId);
+  const variables = { ...fixture.variables, ...variableOverrides };
+  return {
+    templateKey: row.template_key,
+    templateRevision: Number(row.revision),
+    rendered: renderCommerceTemplate(serializeTemplateForValidation(row), variables, { assetOrigin: env?.THIRDRAILIFY_PUBLIC_ORIGIN }),
+  };
 }
 
 export async function orderDocumentPreviewPayload(env, session, orderId, documentType = "receipt") {

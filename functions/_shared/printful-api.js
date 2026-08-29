@@ -99,6 +99,25 @@ export async function buildPrintfulDraftCreateRequest({ localOrderId, targetStor
   };
 }
 
+export async function buildPrintfulProductionDraftCreateRequest({ localOrderId, targetStoreId, shippingCode, recipient, items }) {
+  const storeId = assertPrintfulTargetStore(targetStoreId);
+  const externalId = assertCanonicalPrintfulOrderExternalId(await buildPrintfulOrderExternalId(localOrderId));
+  const shipping = String(shippingCode || "").trim();
+  if (!PROVIDER_SHIPPING_CODE.test(shipping)) throw new AuthFailure(409, "printful_shipping_code_invalid", "The persisted Printful shipping method code is invalid.");
+  if (!Array.isArray(items) || !items.length || items.length > 20) throw new AuthFailure(409, "printful_items_invalid", "The authoritative Printful item set is invalid.");
+  const normalizedItems = items.map((item) => {
+    const syncVariant = Number(item?.syncVariantId ?? item?.sync_variant_id);
+    const itemQuantity = Number(item?.quantity);
+    if (!Number.isSafeInteger(syncVariant) || syncVariant < 1) throw new AuthFailure(409, "printful_sync_variant_invalid", "A configured Printful Sync Variant identifier is invalid.");
+    if (!Number.isSafeInteger(itemQuantity) || itemQuantity < 1 || itemQuantity > 20) throw new AuthFailure(409, "printful_quantity_invalid", "A Printful quantity is invalid.");
+    return { sync_variant_id: syncVariant, quantity: itemQuantity };
+  });
+  if (normalizedItems.reduce((sum, item) => sum + item.quantity, 0) > 100) throw new AuthFailure(409, "printful_quantity_total_invalid", "The Printful order quantity is too large.");
+  const body = { external_id: externalId, recipient: normalizeRecipient(recipient), shipping, items: normalizedItems };
+  const payloadDigest = await sha256Hex(JSON.stringify(body));
+  return { url: PRINTFUL_ORDERS_URL, method: "POST", targetStoreId: storeId, body, payloadDigest, externalId };
+}
+
 export function assertPrintfulTargetStore(value) {
   const storeId = String(value || "").trim();
   if (storeId === PRINTFUL_SOURCE_WIX_STORE_ID) throw new AuthFailure(409, "printful_source_store_rejected", "The legacy Wix source store cannot receive order writes.");

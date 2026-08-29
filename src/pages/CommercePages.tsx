@@ -9,6 +9,10 @@ import { AdminIcon } from "../components/AdminIcon";
 import { OrdersManagementPage } from "./OrdersManagementPage";
 import {
   getCommerceOverview,
+  getCommerceLaunchPlan,
+  applyCommerceCatalogueSellability,
+  activateCommerceLaunch,
+  pauseCommerceLaunch,
   getPaymentsControlPlane,
   getMerchandisingProductList,
   getCollectionOptions,
@@ -32,6 +36,7 @@ import {
   cadTextToMinorUnits,
   verifyStripeConnection,
   type CommerceOverviewPayload,
+  type CommerceLaunchPlan,
   type PaymentAuthorityState,
   type PaymentGateState,
   type PaymentsControlPlanePayload,
@@ -67,22 +72,44 @@ const COMMERCE_WORKSPACES = [
 ] as const;
 
 export function CommerceOverviewPage() {
+  const { csrfToken } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
+  const [launch, setLaunch] = useState<CommerceLaunchPlan | null>(null);
   const [error, setError] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState("");
   const load = useCallback(async () => {
     const stop = startLoading("Loading commerce posture"); setError("");
-    try { setPayload(await getCommerceOverview()); }
+    try { const [overview, launchPlan] = await Promise.all([getCommerceOverview(), getCommerceLaunchPlan()]); setPayload(overview); setLaunch(launchPlan); }
     catch (reason) { setError(errorMessage(reason, "Commerce posture is unavailable.")); }
     finally { stop(); }
   }, [startLoading]);
   useEffect(() => { void load(); }, [load]);
   const stripe = payload?.providers.find((provider) => provider.provider === "stripe");
   const stripeOperational = Boolean(stripe?.status === "connected" && stripe.apiConfigured && stripe.webhookConfigured && stripe.webhookSigningConfigured);
+  const mutateLaunch = async (action: "catalogue" | "activate" | "pause") => {
+    if (!csrfToken || !launch) return;
+    const stop = startLoading(action === "activate" ? "Activating production commerce" : action === "pause" ? "Pausing production commerce" : "Applying catalogue sellability");
+    setBusy(action); setError("");
+    try {
+      if (action === "catalogue") await applyCommerceCatalogueSellability(csrfToken);
+      if (action === "activate") await activateCommerceLaunch(csrfToken, launch.revision, confirmation);
+      if (action === "pause") await pauseCommerceLaunch(csrfToken, launch.revision, "Authorized operator emergency pause.");
+      setConfirmation(""); await load();
+    } catch (reason) { setError(errorMessage(reason, "The launch operation failed closed.")); }
+    finally { setBusy(""); stop(); }
+  };
 
   return <>
     <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary={stripeOperational ? "The sandbox Checkout engine is implemented behind authoritative product and payment gates. The Canadian Stripe TEST API and signed webhook path are verified; Public checkout, live payments, and fulfillment remain disabled." : "The sandbox Checkout engine is implemented but remains fail-closed until its Stripe TEST API and signed webhook path are verified. Public checkout, live payments, and fulfillment remain disabled."} status="disabled" />
     {error && <div className="admin-alert" role="alert">{error}</div>}
+    {launch && <section className="commerce-section" aria-labelledby="launch-authority-title">
+      <SectionTitle id="launch-authority-title" eyebrow="Atomic production authority" title="Launch, pause &amp; eligibility" />
+      <div className={`commerce-callout ${launch.ready ? "is-connected" : "is-pending"}`}><AdminIcon name="shield" /><div><strong>{launch.state.toUpperCase()} · revision {launch.revision} · {launch.ready ? "all hard gates ready" : "activation blocked"}</strong><p>{launch.catalogue.eligibleSellableVariants}/{launch.catalogue.eligibleVariants} eligible variants are sellable; {launch.catalogue.ineligibleSellableVariants} ineligible variants are exposed. Shipping markets: {launch.shippingMarkets.filter((market) => market.status === "active").map((market) => market.countryCode).join(", ") || "none"}.</p></div></div>
+      <div className="payments-gate-grid">{launch.hardGates.map((gate) => <article className={`payment-gate is-${gate.ready ? "ready" : "action_required"}`} key={gate.id}><div><PaymentStateChip state={gate.ready ? "verified" : "unverified"} /><strong>{humanize(gate.id)}</strong></div><p>{gate.detail}</p></article>)}</div>
+      <div className="commerce-form__actions"><button className="secondary-button" type="button" disabled={!csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("catalogue")}>{busy === "catalogue" ? "Applying…" : "Apply eligible sellability"}</button>{launch.state !== "active" ? <><input aria-label="Production activation confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="ACTIVATE LIVE COMMERCE" /><button className="primary-button" type="button" disabled={!csrfToken || !launch.ready || confirmation !== "ACTIVATE LIVE COMMERCE" || Boolean(busy)} onClick={() => void mutateLaunch("activate")}>{busy === "activate" ? "Activating…" : "Activate LIVE commerce"}</button></> : <button className="secondary-button" type="button" disabled={!csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("pause")}>{busy === "pause" ? "Pausing…" : "Emergency pause"}</button>}</div>
+    </section>}
     <section className="commerce-section commerce-workspace-section" aria-labelledby="workspace-title">
       <SectionTitle id="workspace-title" eyebrow="Governed workspaces" title="Commerce control rooms" />
       <div className="commerce-link-grid">

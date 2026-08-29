@@ -136,6 +136,9 @@ export async function createShippingQuote(env, request, input, fetchImpl = fetch
   const items = normalizeCartItems(input.items);
   const recipient = normalizeDeliveryRecipient(input.recipient);
   const configuration = await requireShippingConfiguration(env, db);
+  if (!configuration.allowedCountries.includes(recipient.countryCode)) {
+    throw new AuthFailure(409, "shipping_country_unavailable", "Shipping is not currently available for this destination.");
+  }
   await enforceRateLimit(env, request, "shipping_quote", await sha256Hex(JSON.stringify(items)));
   if (configuration.turnstileRequired) await verifyTurnstile(env, request, input.turnstileToken, "commerce_shipping_quote", fetchImpl);
   const lines = await authoritativeCartLines(db, items, { gate: "shipping_quote", environment: configuration.environment });
@@ -168,6 +171,16 @@ export async function createShippingQuote(env, request, input, fetchImpl = fetch
       subtotalAmount, requiresShipping, checkoutAvailable: configuration.checkoutAvailable,
       options: options.map(publicRateOption),
     },
+  };
+}
+
+export async function publicShippingMarketsPayload(env) {
+  const db = requireCommerceDb(env);
+  const result = await db.prepare("SELECT country_code,display_name FROM commerce_shipping_markets WHERE status='active' AND strategy='printful_dynamic' ORDER BY display_name,country_code").all();
+  return {
+    ok: true,
+    authority: "Commerce D1",
+    markets: (result?.results || []).map((row) => ({ countryCode: row.country_code, displayName: row.display_name })),
   };
 }
 
@@ -246,10 +259,11 @@ export function normalizePrintfulShippingRates(value) {
 }
 
 async function requireShippingConfiguration(env, db) {
-  const [settingsResult, provider, stripe] = await Promise.all([
+  const [settingsResult, provider, stripe, marketsResult] = await Promise.all([
     db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('shipping_strategy','checkout_turnstile_required','commerce_environment','checkout_enabled')").all(),
     db.prepare("SELECT status,environment,integration_mode,currency_code,safe_metadata_json FROM commerce_provider_connections WHERE provider='printful' LIMIT 1").first(),
     db.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider='stripe' LIMIT 1").first(),
+    db.prepare("SELECT country_code FROM commerce_shipping_markets WHERE status='active' AND strategy='printful_dynamic' ORDER BY country_code").all(),
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, null)]));
   const strategy = cleanText(settings.shipping_strategy, 80).toLowerCase() || "unconfigured";
@@ -258,7 +272,9 @@ async function requireShippingConfiguration(env, db) {
   const metadata = parseJson(provider?.safe_metadata_json, {});
   if (!provider || provider.status !== "connected" || provider.integration_mode !== "fulfillment" || String(provider.currency_code || "").toUpperCase() !== "CAD" || metadata.api_configured !== true || !String(env?.PRINTFUL_API_TOKEN || "").trim()) throw new AuthFailure(503, "shipping_provider_not_ready", "The shipping provider is not configured for rate calculation.");
   const stripeMetadata = parseJson(stripe?.safe_metadata_json, {});
-  return { strategy, environment: commerceEnvironment(settings.commerce_environment, env?.AUTH_ENVIRONMENT), turnstileRequired: settings.checkout_turnstile_required === true, checkoutAvailable: settings.checkout_enabled === true && stripeMetadata.checkout_enabled === true };
+  const allowedCountries = (marketsResult?.results || []).map((row) => cleanText(row.country_code, 2).toUpperCase()).filter(Boolean);
+  if (!allowedCountries.length) throw new AuthFailure(409, "shipping_markets_unavailable", "No shipping destinations are currently enabled.");
+  return { strategy, environment: commerceEnvironment(settings.commerce_environment, env?.AUTH_ENVIRONMENT), turnstileRequired: settings.checkout_turnstile_required === true, checkoutAvailable: settings.checkout_enabled === true && stripeMetadata.checkout_enabled === true, allowedCountries };
 }
 
 async function requestPrintfulShippingRates(env, recipient, lines, fetchImpl) {

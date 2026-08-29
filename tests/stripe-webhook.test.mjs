@@ -133,7 +133,7 @@ test("webhook requires a current valid v1 signature over the exact raw body", as
   assert.equal(acceptedConfiguration.settings.stripe_webhook_configured, true); assert.equal(acceptedConfiguration.provider.webhook_configured, true);
 });
 
-test("valid signatures still reject malformed JSON, non-Event envelopes, and live events", async (t) => {
+test("valid signatures reject malformed envelopes and LIVE delivery fails closed without its distinct secret", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness, { STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET });
   const malformed = "{not-json";
@@ -144,7 +144,7 @@ test("valid signatures still reject malformed JSON, non-Event envelopes, and liv
   assert.equal(notEventResponse.status, 400); assert.equal((await notEventResponse.json()).error, "stripe_event_invalid");
   const live = JSON.stringify(eventPayload({ id: "evt_synthetic_live_001", livemode: true }));
   const liveResponse = await invoke(webhookRequest(live), env);
-  assert.equal(liveResponse.status, 400); assert.equal((await liveResponse.json()).error, "stripe_live_event_rejected");
+  assert.equal(liveResponse.status, 503); assert.equal((await liveResponse.json()).error, "stripe_webhook_not_configured");
   const count = await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_webhook_events").first();
   assert.equal(count.count, 0);
   const configuration = await stripeConfiguration(harness.commerceDb);
@@ -190,7 +190,8 @@ test("checkout completion is receipt-only, duplicate-safe, and persists no sensi
   const orders = await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first();
   assert.equal(orders.count, 0);
   const fulfillmentTables = await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'commerce_fulfillment%'").first();
-  assert.equal(fulfillmentTables.count, 0);
+  assert.equal(fulfillmentTables.count, 4);
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_operation_jobs").first()).count, 0);
   const settings = await harness.commerceDb.prepare("SELECT setting_key, value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled', 'live_payment_capture_enabled', 'fulfillment_submission_enabled') ORDER BY setting_key").all();
   assert.deepEqual(settings.results.map((row) => row.value_json), ["false", "false", "false"]);
   const stripe = await harness.commerceDb.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider = 'stripe'").first();
@@ -252,4 +253,31 @@ test("unknown, mismatched, wrong-amount, wrong-currency, and unpaid Sessions nev
   }
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first()).count, 1);
   assert.equal((await harness.commerceDb.prepare("SELECT fulfillment_status FROM commerce_orders").first()).fulfillment_status, "disabled");
+});
+
+test("a distinct signed LIVE webhook confirms tax totals and enqueues fulfillment exactly once", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const liveSecret = "whsec_synthetic_live_secret_only";
+  const env = commerceEnvironment(harness, { STRIPE_LIVE_WEBHOOK_SECRET: liveSecret });
+  await harness.commerceDb.prepare(`INSERT INTO commerce_orders
+    (id,customer_payment_provider,payment_status,fulfillment_provider,fulfillment_status,currency_code,customer_gross_amount,
+     product_subtotal_amount,shipping_amount,tax_amount,tax_status,checkout_request_id,checkout_request_digest,cart_digest,
+     stripe_checkout_session_id,environment,checkout_status,created_at,updated_at)
+    VALUES ('ord_live_webhook','stripe','pending','printful','pending','CAD',6500,5000,1000,0,'calculating',
+      '88888888-8888-4888-8888-888888888888',?,?, 'cs_live_linked_001','live','checkout_created','now','now')`)
+    .bind("a".repeat(64), "b".repeat(64)).run();
+  const session = {
+    id: "cs_live_linked_001", object: "checkout.session", livemode: true, mode: "payment", currency: "cad", amount_total: 6500,
+    payment_status: "paid", client_reference_id: "ord_live_webhook", metadata: { order_id: "ord_live_webhook", checkout_request_id: "88888888-8888-4888-8888-888888888888" },
+    payment_intent: "pi_live_linked_001", total_details: { amount_tax: 500 }, automatic_tax: { status: "complete" },
+  };
+  const body = JSON.stringify(eventPayload({ id: "evt_live_paid_001", livemode: true, data: { object: session } }));
+  const first = await invoke(webhookRequest(body, { secret: liveSecret }), env);
+  assert.equal(first.status, 200); assert.equal((await first.json()).result, "payment_confirmed");
+  const order = await harness.commerceDb.prepare("SELECT payment_status,customer_gross_amount,tax_amount,tax_status,fulfillment_status FROM commerce_orders WHERE id='ord_live_webhook'").first();
+  assert.deepEqual(order, { payment_status: "paid", customer_gross_amount: 6500, tax_amount: 500, tax_status: "complete", fulfillment_status: "pending" });
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_operation_jobs WHERE order_id='ord_live_webhook' AND job_kind='fulfillment_submit'").first()).count, 1);
+  const duplicate = await invoke(webhookRequest(body, { secret: liveSecret }), env);
+  assert.equal(duplicate.status, 200); assert.equal((await duplicate.json()).duplicate, true);
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_operation_jobs WHERE order_id='ord_live_webhook'").first()).count, 1);
 });

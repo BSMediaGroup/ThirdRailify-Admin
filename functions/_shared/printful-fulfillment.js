@@ -16,7 +16,9 @@ export const PRINTFUL_V2_WEBHOOK_EVENTS = Object.freeze([
   "order_failed",
   "order_canceled",
   "order_put_hold",
+  "order_put_hold_approval",
   "order_remove_hold",
+  "order_refunded",
   "shipment_sent",
   "shipment_delivered",
   "shipment_returned",
@@ -251,11 +253,11 @@ export function normalizePrintfulV2WebhookEnvelope(value, expectedStoreId) {
   }
   const order = value.data.order;
   if (!order || typeof order !== "object" || Array.isArray(order)) throw new AuthFailure(400, "printful_webhook_order_invalid", "The Printful webhook order evidence is invalid.");
-  const failureCategory = type === "order_failed" ? "provider_failure" : type === "order_canceled" ? "provider_canceled" : type === "order_put_hold" ? "provider_hold" : null;
+  const failureCategory = type === "order_failed" ? "provider_failure" : type === "order_canceled" ? "provider_canceled" : new Set(["order_put_hold", "order_put_hold_approval"]).has(type) ? "provider_hold" : type === "order_refunded" ? "provider_refunded" : null;
   const orderEvidence = normalizePrintfulOrderEvidence(order, { expectedStoreId: storeId, occurredAt, failureCategory });
   if (type === "order_failed") { orderEvidence.providerState = "failed"; orderEvidence.confirmationState = "submitted"; }
   if (type === "order_canceled") { orderEvidence.providerState = "canceled"; orderEvidence.confirmationState = "submitted"; }
-  if (type === "order_put_hold") { orderEvidence.providerState = "on_hold"; orderEvidence.confirmationState = "submitted"; }
+  if (new Set(["order_put_hold", "order_put_hold_approval"]).has(type)) { orderEvidence.providerState = "on_hold"; orderEvidence.confirmationState = "submitted"; }
   if (type.startsWith("shipment_")) {
     const returnedReasonCategory = type === "shipment_returned" ? "package_returned" : type === "shipment_canceled" ? "shipment_canceled" : null;
     orderEvidence.shipments = [normalizePrintfulShipmentEvidence(value.data.shipment, { eventType: type, occurredAt, returnedReasonCategory })];
@@ -288,7 +290,7 @@ export async function processPrintfulWebhookEvidence(env, envelope, payloadSha25
   ).run();
   try {
     const result = await reconcilePrintfulOrderEvidence(env, envelope.orderEvidence, { expectedStoreId: envelope.storeId });
-    const email = await shipmentNotificationIntent(env, result, envelope.type);
+    const email = await shipmentNotificationIntent(env, result, envelope.type, payloadSha256);
     const processedAt = nowIso();
     const resultCode = result.shipmentChanged ? "shipment_reconciled" : result.providerStateChanged || result.created ? "provider_order_reconciled" : "accepted_noop";
     await db.prepare("UPDATE commerce_provider_webhook_events SET processing_status='processed',result_code=?,processed_at=? WHERE id=?").bind(resultCode, processedAt, eventId).run();
@@ -303,10 +305,23 @@ export async function processPrintfulWebhookEvidence(env, envelope, payloadSha25
   }
 }
 
-export async function shipmentNotificationIntent(env, transition, eventType) {
+export async function shipmentNotificationIntent(env, transition, eventType, evidenceDigest = "") {
   if (!String(eventType || "").startsWith("shipment_")) return { requested: false, status: "not_applicable", deliveryCreated: false, providerCallMade: false };
-  const row = await requireCommerceDb(env).prepare("SELECT value_json FROM commerce_settings WHERE setting_key='transactional_email_enabled'").first();
+  const db = requireCommerceDb(env);
+  const row = await db.prepare("SELECT value_json FROM commerce_settings WHERE setting_key='transactional_email_enabled'").first();
   const enabled = parseJson(row?.value_json, false) === true;
+  if (enabled && transition?.orderId) {
+    const order = await db.prepare("SELECT environment FROM commerce_orders WHERE id=?").bind(transition.orderId).first();
+    if (order?.environment === "live") {
+      const eventKey = `shipment:${transition.orderId}:${cleanToken(eventType, 40)}:${cleanToken(evidenceDigest, 64)}`;
+      const digest = await sha256Hex(encoder.encode(eventKey));
+      await db.prepare(`INSERT OR IGNORE INTO commerce_operation_jobs
+        (id,job_kind,event_key,order_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at)
+        VALUES (?,'email_send',?,?,'live',?,'pending',?,?,?)`)
+        .bind(`coj_${crypto.randomUUID()}`, eventKey, transition.orderId, digest, nowIso(), nowIso(), nowIso()).run();
+      return { requested: true, status: "queued", templateKey: "shipment_notification", orderId: transition.orderId, deliveryCreated: false, providerCallMade: false };
+    }
+  }
   return {
     requested: false,
     status: enabled ? "workflow_not_activated" : "disabled_global_gate",
@@ -316,6 +331,8 @@ export async function shipmentNotificationIntent(env, transition, eventType) {
     providerCallMade: false,
   };
 }
+
+function cleanToken(value, maximum) { const text = String(value || "").trim().toLowerCase(); return /^[a-z0-9_.:-]+$/.test(text) ? text.slice(0, maximum) : "unknown"; }
 
 export async function fulfillmentDetailForOrder(env, rawOrderId, { includeTracking = true } = {}) {
   const db = requireCommerceDb(env);

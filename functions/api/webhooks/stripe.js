@@ -8,14 +8,18 @@ import {
   recordVerifiedStripeWebhookReceipt,
   requireCommerceDb,
 } from "../../_shared/commerce-core.js";
-import { processStripeCheckoutCompleted } from "../../_shared/checkout-core.js";
+import { processStripeCheckoutCompleted, processStripeCheckoutFailed } from "../../_shared/checkout-core.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
 export const STRIPE_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 export const STRIPE_WEBHOOK_TOLERANCE_SECONDS = 300;
-export const STRIPE_WEBHOOK_EVENT_ALLOWLIST = Object.freeze(["checkout.session.completed"]);
+export const STRIPE_WEBHOOK_EVENT_ALLOWLIST = Object.freeze([
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
+]);
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -34,15 +38,8 @@ export async function onRequest(context) {
 }
 
 export async function handleStripeWebhook(request, env, now = Date.now()) {
-  const webhookSecret = configuredWebhookSecret(env);
-  if (!webhookSecret) {
-    throw new AuthFailure(503, "stripe_webhook_not_configured", "Stripe webhook signing is not configured.");
-  }
   requireCommerceDb(env);
   const rawBody = await readBoundedRawBody(request);
-  const signature = parseStripeSignature(request.headers.get("stripe-signature"));
-  await verifyStripeSignature(webhookSecret, signature, rawBody, now);
-
   let event;
   try {
     event = JSON.parse(decoder.decode(rawBody));
@@ -50,9 +47,10 @@ export async function handleStripeWebhook(request, env, now = Date.now()) {
     throw new AuthFailure(400, "stripe_event_invalid", "The Stripe event payload is invalid.");
   }
   const normalized = normalizeStripeEvent(event);
-  if (normalized.livemode) {
-    throw new AuthFailure(400, "stripe_live_event_rejected", "Live-mode Stripe events are not accepted by this staging endpoint.");
-  }
+  const webhookSecret = configuredWebhookSecret(env, normalized.livemode);
+  if (!webhookSecret) throw new AuthFailure(503, "stripe_webhook_not_configured", `Stripe ${normalized.livemode ? "LIVE" : "TEST"} webhook signing is not configured.`);
+  const signature = parseStripeSignature(request.headers.get("stripe-signature"));
+  await verifyStripeSignature(webhookSecret, signature, rawBody, now);
 
   const accepted = STRIPE_WEBHOOK_EVENT_ALLOWLIST.includes(normalized.type);
   const receivedAt = nowIso(now);
@@ -66,9 +64,12 @@ export async function handleStripeWebhook(request, env, now = Date.now()) {
     relatedObjectId: normalized.relatedObjectId,
     relatedObjectType: normalized.relatedObjectType,
     payloadSha256,
+    livemode: normalized.livemode,
   };
   let stored;
-  if (accepted) {
+  if (normalized.type === "checkout.session.async_payment_failed") {
+    stored = await processStripeCheckoutFailed(env, normalized, receipt);
+  } else if (accepted) {
     stored = await processStripeCheckoutCompleted(env, normalized, receipt);
   } else {
     const result = await recordVerifiedStripeWebhookReceipt(env, {
@@ -164,8 +165,8 @@ export async function readBoundedRawBody(request) {
   return body;
 }
 
-function configuredWebhookSecret(env) {
-  const secret = String(env?.STRIPE_WEBHOOK_SECRET || "");
+function configuredWebhookSecret(env, livemode) {
+  const secret = String(livemode ? env?.STRIPE_LIVE_WEBHOOK_SECRET : env?.STRIPE_WEBHOOK_SECRET || "");
   return /^whsec_[^\s]{6,}$/.test(secret) && secret.length <= 512 ? secret : "";
 }
 
@@ -194,14 +195,14 @@ function normalizeStripeEvent(value) {
     apiVersion: boundedStripeText(value.api_version, 80) || null,
     relatedObjectId: safeStripeIdentifier(related?.id, 255),
     relatedObjectType: safeStripeObjectType(related?.object),
-    checkoutSession: type === "checkout.session.completed" ? normalizeCheckoutSession(related) : null,
+    checkoutSession: type.startsWith("checkout.session.") ? normalizeCheckoutSession(related) : null,
   };
 }
 
 function normalizeCheckoutSession(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || value.object !== "checkout.session") return null;
   const id = safeStripeIdentifier(value.id, 255);
-  if (!id || !id.startsWith("cs_test_")) return null;
+  if (!id || !/^cs_(?:test|live)_/.test(id)) return null;
   const amountTotal = Number(value.amount_total);
   return {
     id,
@@ -214,6 +215,8 @@ function normalizeCheckoutSession(value) {
     metadataOrderId: safeStripeIdentifier(value.metadata?.order_id, 255),
     metadataCheckoutRequestId: safeStripeIdentifier(value.metadata?.checkout_request_id, 255),
     paymentIntentId: safeStripeIdentifier(typeof value.payment_intent === "string" ? value.payment_intent : value.payment_intent?.id, 255),
+    taxAmount: Number.isSafeInteger(Number(value.total_details?.amount_tax)) && Number(value.total_details.amount_tax) >= 0 ? Number(value.total_details.amount_tax) : null,
+    automaticTaxStatus: boundedStripeText(value.automatic_tax?.status, 40) || null,
   };
 }
 

@@ -2,12 +2,13 @@ import { AuthFailure, cleanText } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
 
 export async function publicCataloguePayload(env) {
-  const { products, collections } = await loadPublicCatalogue(requireCommerceDb(env));
+  const db = requireCommerceDb(env);
+  const [{ products, collections }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db), publicCheckoutEnabled(db)]);
   return {
     ok: true,
     source: "commerce-d1",
     currency: "CAD",
-    checkoutEnabled: false,
+    checkoutEnabled,
     collections,
     products,
     updatedAt: [...products, ...collections].reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, "") || null,
@@ -19,9 +20,10 @@ export async function publicProductPayload(env, slug) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug)) {
     throw new AuthFailure(404, "product_not_found", "The product was not found.");
   }
-  const { products } = await loadPublicCatalogue(requireCommerceDb(env), normalizedSlug);
+  const db = requireCommerceDb(env);
+  const [{ products }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, normalizedSlug), publicCheckoutEnabled(db)]);
   if (!products.length) throw new AuthFailure(404, "product_not_found", "The product was not found.");
-  return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled: false, product: products[0] };
+  return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled, product: products[0] };
 }
 
 async function loadPublicCatalogue(db, slug = null) {
@@ -49,7 +51,7 @@ async function loadPublicCatalogue(db, slug = null) {
      FROM commerce_product_variants
      WHERE product_id IN (${ids.map(() => "?").join(",")})
        AND status = 'active' AND visibility = 'public' AND is_ignored = 0
-       AND availability_status <> 'discontinued'
+       AND is_sellable = 1 AND availability_status = 'active'
      ORDER BY product_id, local_variant_key, id`,
   ).bind(...ids).all(),
   db.prepare(`SELECT pc.product_id, c.id, c.slug, c.title
@@ -71,6 +73,7 @@ async function loadPublicCatalogue(db, slug = null) {
 
 function serializePublicProduct(row, variants, collections) {
   if (String(row.currency_code || "").toUpperCase() !== "CAD") return null;
+  if (row.requires_shipping === 1 && variants.length === 0) return null;
   const metadata = safeObject(row.safe_metadata_json);
   const fallbackAmount = boundedAmount(row.unit_amount);
   const prices = variants.map((variant) => variant.unitAmount).filter(Number.isSafeInteger);
@@ -105,6 +108,12 @@ function serializePublicProduct(row, variants, collections) {
     available: variants.length ? variants.some((variant) => variant.availability === "active") : true,
     updatedAt: cleanText(row.updated_at, 80),
   };
+}
+
+async function publicCheckoutEnabled(db) {
+  const result = await db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled','live_payment_capture_enabled','fulfillment_submission_enabled','commerce_emergency_paused')").all();
+  const settings = Object.fromEntries((result?.results || []).map((row) => { try { return [row.setting_key, JSON.parse(row.value_json)]; } catch { return [row.setting_key, null]; } }));
+  return settings.checkout_enabled === true && settings.live_payment_capture_enabled === true && settings.fulfillment_submission_enabled === true && settings.commerce_emergency_paused !== true;
 }
 
 function serializePublicCollection(row, productIds) {

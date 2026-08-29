@@ -43,7 +43,15 @@ export type CommerceTemplate = {
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; enabled: boolean; revision: number;
   validity?: { state: "valid" | "invalid"; action: "none" | "action_required"; code: string | null; message: string | null };
 };
-export type CustomerEmailTemplate = CommerceTemplate & { purpose: string; updatedAt: string | null; productionTriggerImplemented: false };
+export type CommerceLaunchGate = { id: string; ready: boolean; detail: string };
+export type CommerceLaunchPlan = {
+  ok: true; state: "preflight" | "active" | "paused"; revision: number; ready: boolean; digest: string;
+  hardGates: CommerceLaunchGate[]; advisories: CommerceLaunchGate[];
+  catalogue: { totalVariants: number; eligibleVariants: number; sellableVariants: number; eligibleSellableVariants: number; ineligibleSellableVariants: number };
+  shippingMarkets: Array<{ countryCode: string; displayName: string; status: string; strategy: string; revision: number }>;
+  settings: { checkoutEnabled: boolean; liveCaptureEnabled: boolean; fulfillmentEnabled: boolean; transactionalEmailEnabled: boolean; stripeTaxEnabled: boolean; emergencyPaused: boolean };
+};
+export type CustomerEmailTemplate = CommerceTemplate & { purpose: string; updatedAt: string | null; productionTriggerImplemented: boolean };
 export type CustomerEmailDelivery = {
   id: string; templateKey: string; templateRevision: number; orderId: string | null; environment: "test" | "live" | "unknown";
   purpose: "test_preview" | "transactional"; status: "pending" | "sending" | "sent" | "failed"; attemptCount: number;
@@ -51,11 +59,11 @@ export type CustomerEmailDelivery = {
 };
 export type CustomerEmailsPayload = {
   ok: boolean; databaseConfigured: boolean; authority: string; access: CommerceAccess;
-  provider: { name: "Resend"; configured: boolean; credentialConfigured: boolean; senderConfigured: boolean; replyToConfigured: boolean; externalVerification: "unverified"; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null };
+  provider: { name: "Resend"; configured: boolean; credentialConfigured: boolean; senderConfigured: boolean; replyToConfigured: boolean; externalVerification: "verified" | "unverified"; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null };
   sender: { source: "server_environment"; providerCredentialConfigured: boolean; fromDisplayName: string | null; fromAddress: string | null; fromAddressConfigured: boolean; replyToAddress: string | null; replyToConfigured: boolean; sendingDomain: string | null; externallyVerified: false; businessDisplayName?: string | null; businessSupportEmail?: string | null };
   templates: CustomerEmailTemplate[];
   mergeVariables: Array<{ key: string; group: string; description: string }>;
-  readiness: { state: "ready" | "ready_but_disabled" | "incomplete" | "action_required"; configurationReady: boolean; configuredTemplates: number; totalTemplates: number; minimumReadyTemplates: number; customerSendsEnabled: boolean; productionLifecycleImplemented: false };
+  readiness: { state: "ready" | "ready_but_disabled" | "incomplete" | "action_required"; configurationReady: boolean; configuredTemplates: number; totalTemplates: number; minimumReadyTemplates: number; customerSendsEnabled: boolean; productionLifecycleImplemented: boolean };
   dependencies: {
     business: { complete: boolean; canonicalReady: boolean; displayName: string | null; supportEmail: string | null; href: string };
     documents: { receipt: { configured: boolean; status: string; enabled: boolean; revision: number | null }; invoice: { configured: boolean; status: string; enabled: boolean; revision: number | null }; customerAccessEnabled: boolean; href: string };
@@ -63,7 +71,7 @@ export type CustomerEmailsPayload = {
   };
   deliveries: { state: "available" | "unavailable"; recent: CustomerEmailDelivery[]; counts: { total: number; test: number; live: number; unknown: number; sent: number; failed: number; pending: number; sending: number }; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null; idempotency: { implemented: true; authority: string; retriesAvailableFromThisRoute: false } };
   canonicalReadiness: null | { productionReady: boolean; communications: ReadinessDomain };
-  safety: { customerSendsEnabled: boolean; mutableFromThisRoute: false; testSendExposed: false; previewMutates: false; providerCallsOnRead: false; providerCallsOnPreview: false; productionLifecycleImplemented: false };
+  safety: { customerSendsEnabled: boolean; mutableFromThisRoute: false; testSendExposed: false; previewMutates: false; providerCallsOnRead: false; providerCallsOnPreview: false; productionLifecycleImplemented: boolean };
   checkedAt: string;
 };
 export type PaymentAuthorityState = "configured" | "verified" | "unverified" | "disabled" | "unavailable";
@@ -324,6 +332,10 @@ type SnapshotContinuationPayload = {
 };
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
+export function getCommerceLaunchPlan() { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch"); }
+export function applyCommerceCatalogueSellability(csrfToken: string) { return adminApi<{ ok: true }>("/api/admin/commerce/launch/catalogue-apply", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmation: "APPLY ELIGIBLE SELLABILITY" }) }); }
+export function activateCommerceLaunch(csrfToken: string, expectedRevision: number, confirmation: string) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/activate", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedRevision, confirmation }) }); }
+export function pauseCommerceLaunch(csrfToken: string, expectedRevision: number, reason: string) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/pause", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedRevision, confirmation: "PAUSE LIVE COMMERCE", reason }) }); }
 export function getPaymentsControlPlane() { return adminApi<PaymentsControlPlanePayload>("/api/admin/commerce/payments"); }
 export function getFulfillmentShipping() { return adminApi<FulfillmentShippingPayload>("/api/admin/commerce/fulfillment"); }
 export function verifyStripeConnection(csrfToken: string) {

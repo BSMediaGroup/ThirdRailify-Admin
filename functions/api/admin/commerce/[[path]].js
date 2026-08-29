@@ -76,6 +76,13 @@ import {
   resumeManuallyPausedPermanentPrintfulMigration,
   runPermanentPrintfulMigrationStep,
 } from "../../../_shared/printful-migration.js";
+import {
+  activateCommerceLaunch,
+  applyEligibleVariantSellability,
+  commerceLaunchPlan,
+  pauseCommerceLaunch,
+} from "../../../_shared/commerce-launch.js";
+import { commerceJobsPayload, retryCommerceJob } from "../../../_shared/commerce-operations.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
 
@@ -115,6 +122,12 @@ async function handleGet(request, env, path) {
   } else if (path === "readiness") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await productionReadinessPayload(env, session);
+  } else if (path === "launch") {
+    await requireMasterAdmin(env, request);
+    payload = await commerceLaunchPlan(env);
+  } else if (path === "launch/jobs") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = { ok: true, ...(await commerceJobsPayload(env)) };
   } else if (path === "payments") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await paymentsControlPlanePayload(env, session);
@@ -194,6 +207,28 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.payments.manage");
     payload = await verifyStripeAccount(env, session, fetchImpl);
     authEventType = "stripe_account_verified";
+  } else if (path === "launch/catalogue-apply") {
+    await requireMasterAdmin(env, request);
+    const body = await readJsonBody(request);
+    if (!body || Object.keys(body).length !== 1 || body.confirmation !== "APPLY ELIGIBLE SELLABILITY") {
+      throw new AuthFailure(400, "commerce_catalogue_confirmation_required", "Type APPLY ELIGIBLE SELLABILITY exactly to continue.");
+    }
+    payload = await applyEligibleVariantSellability(env, session.accountId);
+    authEventType = "commerce_catalogue_sellability_applied";
+  } else if (path === "launch/activate") {
+    await requireMasterAdmin(env, request);
+    payload = await activateCommerceLaunch(env, await readJsonBody(request), session.accountId);
+    authEventType = "commerce_production_activated";
+  } else if (path === "launch/pause") {
+    await requireMasterAdmin(env, request);
+    payload = await pauseCommerceLaunch(env, await readJsonBody(request), session.accountId);
+    authEventType = "commerce_emergency_paused";
+  } else if (/^launch\/jobs\/[^/]+\/retry$/.test(path)) {
+    await requireMasterAdmin(env, request);
+    const body = await readJsonBody(request);
+    if (!body || Object.keys(body).length !== 1 || body.confirmation !== "RETRY JOB") throw new AuthFailure(400, "commerce_job_retry_confirmation_required", "Type RETRY JOB exactly to continue.");
+    payload = await retryCommerceJob(env, decodePathPart(path.split("/")[2]), session.accountId);
+    authEventType = "commerce_job_retry_requested";
   } else if (path === "test-checkout") {
     await requireMasterAdmin(env, request);
     const body = await readJsonBody(request);

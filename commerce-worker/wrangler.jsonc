@@ -1,0 +1,22 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "thirdrailify-commerce-operations",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-11",
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "vars": {
+    "ADMIN_OPERATIONS_URL": "https://thirdrailify-admin.pages.dev/api/internal/commerce/jobs",
+    "PRINTFUL_STORE_ID": "18668025",
+    "MAIL_FROM": "Third Railify Official <alerts@notify.thirdrailify.com>",
+    "MAIL_REPLY_TO": "info@thirdrailify.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "THIRDRAILIFY_COMMERCE_DB",
+      "database_name": "thirdrailify-commerce",
+      "database_id": "3dd23a7e-7c64-49cb-a52c-c1540b41db1c"
+    }
+  ]
+}

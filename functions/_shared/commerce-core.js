@@ -131,6 +131,20 @@ export function isPrintfulCredentialConfigured(env) {
   return Boolean(printfulCredential(env));
 }
 
+export function isStripeLiveCredentialConfigured(env) {
+  return /^sk_live_[A-Za-z0-9_]{8,}$/.test(String(env?.STRIPE_LIVE_SECRET_KEY || "").trim());
+}
+
+export function isStripeLiveWebhookSigningConfigured(env) {
+  const secret = String(env?.STRIPE_LIVE_WEBHOOK_SECRET || "");
+  return /^whsec_[^\s]{6,}$/.test(secret) && secret.length <= 512;
+}
+
+export function stripeCredentialForEnvironment(env, environment) {
+  if (environment === "live") return isStripeLiveCredentialConfigured(env) ? String(env.STRIPE_LIVE_SECRET_KEY).trim() : "";
+  return isStripeTestCredentialConfigured(env) ? String(env.STRIPE_SECRET_KEY).trim() : "";
+}
+
 export function printfulCatalogueSnapshotAvailability(env) {
   const sourceStoreId = safeConfiguredStoreId(env?.PRINTFUL_WIX_SOURCE_STORE_ID);
   const targetStoreId = safeConfiguredStoreId(env?.PRINTFUL_STORE_ID);
@@ -1067,18 +1081,23 @@ export async function recordVerifiedStripeWebhookReceipt(env, receipt, orderTran
     throw new AuthFailure(503, "stripe_provider_unavailable", "The Stripe provider connection is not configured.");
   }
 
+  const livemode = receipt.livemode === true;
+  const environment = livemode ? "live" : "test";
+  const webhookSetting = livemode ? "stripe_live_webhook_configured" : "stripe_webhook_configured";
+  const metadataPath = livemode ? "$.live_webhook_configured" : "$.webhook_configured";
   const statements = [
     db.prepare(
       `INSERT OR IGNORE INTO commerce_webhook_events (
          provider, provider_event_id, event_type, event_created_at, received_at, livemode,
          api_version, related_object_id, related_object_type, processing_status,
          processed_at, result_code, payload_sha256
-       ) VALUES ('stripe', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES ('stripe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       receipt.eventId,
       receipt.eventType,
       receipt.eventCreatedAt,
       receipt.receivedAt,
+      livemode ? 1 : 0,
       receipt.apiVersion,
       receipt.relatedObjectId,
       receipt.relatedObjectType,
@@ -1089,20 +1108,45 @@ export async function recordVerifiedStripeWebhookReceipt(env, receipt, orderTran
     ),
     db.prepare(
       `UPDATE commerce_provider_connections
-       SET safe_metadata_json = json_set(safe_metadata_json, '$.webhook_configured', json('true')),
+       SET safe_metadata_json = json_set(safe_metadata_json, ?, json('true')),
            last_synchronized_at = ?, updated_at = ?
        WHERE provider = 'stripe'`,
-    ).bind(receipt.receivedAt, receipt.receivedAt),
-    configuredSettingStatement(db, "stripe_webhook_configured", receipt.receivedAt, null),
+    ).bind(metadataPath, receipt.receivedAt, receipt.receivedAt),
+    configuredSettingStatement(db, webhookSetting, receipt.receivedAt, null),
   ];
+  let transitionIndex = -1;
+  let jobIndex = -1;
   if (orderTransition) {
-    statements.push(db.prepare(
-      `UPDATE commerce_orders
-       SET payment_status = 'paid', stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id),
-           payment_confirmed_at = COALESCE(payment_confirmed_at, ?), updated_at = ?
-       WHERE id = ? AND stripe_checkout_session_id = ? AND environment = 'test'
-         AND checkout_status = 'checkout_created' AND payment_status = 'pending'`,
-    ).bind(orderTransition.paymentIntentId, receipt.receivedAt, receipt.receivedAt, orderTransition.orderId, orderTransition.sessionId));
+    transitionIndex = statements.length;
+    if (orderTransition.failed === true) {
+      statements.push(db.prepare(`UPDATE commerce_orders SET payment_status='failed',payment_failed_at=COALESCE(payment_failed_at,?),checkout_failure_code='stripe_payment_failed',updated_at=?
+        WHERE id=? AND stripe_checkout_session_id=? AND environment=? AND checkout_status='checkout_created' AND payment_status='pending'`)
+        .bind(receipt.receivedAt, receipt.receivedAt, orderTransition.orderId, orderTransition.sessionId, environment));
+    } else {
+      statements.push(db.prepare(
+        `UPDATE commerce_orders
+         SET payment_status = 'paid', stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id),
+             customer_gross_amount=?,tax_amount=?,tax_status=?,tax_reason=?,
+             fulfillment_status=CASE WHEN environment='live' THEN 'pending' ELSE fulfillment_status END,
+             payment_confirmed_at = COALESCE(payment_confirmed_at, ?), updated_at = ?
+         WHERE id = ? AND stripe_checkout_session_id = ? AND environment = ?
+           AND checkout_status = 'checkout_created' AND payment_status = 'pending'`,
+      ).bind(orderTransition.paymentIntentId, orderTransition.amountTotal, orderTransition.taxAmount || 0, orderTransition.taxStatus || "not_calculated", orderTransition.taxStatus === "not_collecting" ? "stripe_tax_not_collecting" : null, receipt.receivedAt, receipt.receivedAt, orderTransition.orderId, orderTransition.sessionId, environment));
+      if (environment === "live") {
+        jobIndex = statements.length;
+        statements.push(db.prepare(`INSERT OR IGNORE INTO commerce_operation_jobs
+          (id,job_kind,event_key,order_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at)
+          SELECT ?,'fulfillment_submit',?,id,'live',?,'pending',?,?,? FROM commerce_orders
+          WHERE id=? AND environment='live' AND payment_status='paid' AND fulfillment_status='pending'`)
+          .bind(`coj_${randomId()}`, `${receipt.eventId}:fulfillment`, receipt.payloadSha256, receipt.receivedAt, receipt.receivedAt, receipt.receivedAt, orderTransition.orderId));
+        statements.push(db.prepare(`INSERT OR IGNORE INTO commerce_operation_jobs
+          (id,job_kind,event_key,order_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at)
+          SELECT ?,'email_send',?,id,'live',?,'pending',?,?,? FROM commerce_orders
+          WHERE id=? AND environment='live' AND payment_status='paid'
+            AND (SELECT value_json FROM commerce_settings WHERE setting_key='transactional_email_enabled')='true'`)
+          .bind(`coj_${randomId()}`, `${receipt.eventId}:order_confirmation`, receipt.payloadSha256, receipt.receivedAt, receipt.receivedAt, receipt.receivedAt, orderTransition.orderId));
+      }
+    }
   }
   let updates;
   try {
@@ -1115,7 +1159,8 @@ export async function recordVerifiedStripeWebhookReceipt(env, receipt, orderTran
   }
   return {
     duplicate: Number(updates?.[0]?.meta?.changes || 0) === 0,
-    orderTransitioned: orderTransition ? Number(updates?.[3]?.meta?.changes || 0) === 1 : false,
+    orderTransitioned: transitionIndex >= 0 ? Number(updates?.[transitionIndex]?.meta?.changes || 0) === 1 : false,
+    jobEnqueued: jobIndex >= 0 ? Number(updates?.[jobIndex]?.meta?.changes || 0) === 1 : false,
   };
 }
 

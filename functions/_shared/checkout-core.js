@@ -10,10 +10,13 @@ import {
   commerceAccessForSession,
   decryptCommerceSecret,
   encryptCommerceSecret,
+  isStripeLiveCredentialConfigured,
+  isStripeLiveWebhookSigningConfigured,
   isStripeTestCredentialConfigured,
   isStripeWebhookSigningConfigured,
   recordVerifiedStripeWebhookReceipt,
   requireCommerceDb,
+  stripeCredentialForEnvironment,
 } from "./commerce-core.js";
 import {
   authoritativeCartLines,
@@ -103,11 +106,11 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
       db.prepare(
         `INSERT INTO commerce_orders (
            id, customer_payment_provider, payment_status, fulfillment_provider, fulfillment_status, currency_code,
-           customer_gross_amount, checkout_request_id, checkout_request_digest, cart_digest,
+         customer_gross_amount, product_subtotal_amount, shipping_amount, checkout_request_id, checkout_request_digest, cart_digest,
            environment, checkout_status, customer_id, safe_metadata_json, created_at, updated_at
-         ) VALUES (?, 'stripe', 'pending', ?, 'disabled', 'CAD', ?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?, ?)`,
+         ) VALUES (?, 'stripe', 'pending', ?, 'disabled', 'CAD', ?, ?, ?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?, ?)`,
       ).bind(
-        orderId, shippingSelection?.provider || null, expectedAmount, cartRequest.checkoutRequestId, checkoutRequestDigest, cartDigest, configuration.environment,
+        orderId, shippingSelection?.provider || null, expectedAmount, authoritativeSubtotal(lines), shippingSelection?.option.amount || 0, cartRequest.checkoutRequestId, checkoutRequestDigest, cartDigest, configuration.environment,
         customer?.id || null,
         JSON.stringify(gate === "controlled_test" ? { checkoutGate: "controlled_test", fulfillment: "disabled" } : {}),
         timestamp, timestamp,
@@ -161,8 +164,8 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
   ).bind(nowIso(), order.id).run();
 
   const publicOrigin = configuredPublicOrigin(env);
-  const body = stripeCheckoutBody(order, lines, publicOrigin, shippingSelection, cartRequest.customer);
-  const credential = String(env.STRIPE_SECRET_KEY).trim();
+  const body = stripeCheckoutBody(order, lines, publicOrigin, shippingSelection, cartRequest.customer, configuration);
+  const credential = configuration.credential;
   const idempotencyKey = await stripeCheckoutIdempotencyKey(order.id, order.checkout_request_id);
   let response;
   const controller = new AbortController();
@@ -199,7 +202,7 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
     await markCheckoutFailure(db, order.id, "stripe_response_invalid");
     throw new AuthFailure(502, "stripe_checkout_response_invalid", "Stripe returned an invalid Checkout Session response.");
   }
-  const session = normalizeCreatedCheckoutSession(rawSession, order, expectedAmount);
+  const session = normalizeCreatedCheckoutSession(rawSession, order, expectedAmount, configuration);
   if (!session) {
     await markCheckoutFailure(db, order.id, "stripe_response_invalid");
     throw new AuthFailure(502, "stripe_checkout_response_invalid", "Stripe returned an invalid test Checkout Session.");
@@ -329,6 +332,18 @@ export async function commerceOrdersPayload(env, session, input = {}) {
       currencyCode: "CAD",
     },
   };
+}
+
+export async function processStripeCheckoutFailed(env, event, receipt) {
+  const db = requireCommerceDb(env);
+  const existing = await db.prepare("SELECT provider_event_id FROM commerce_webhook_events WHERE provider='stripe' AND provider_event_id=? LIMIT 1").bind(receipt.eventId).first();
+  if (existing) return { duplicate: true, orderTransitioned: false, resultCode: "duplicate" };
+  const session = event.checkoutSession;
+  const order = session?.metadataOrderId ? await db.prepare("SELECT id,environment,stripe_checkout_session_id,payment_status FROM commerce_orders WHERE id=?").bind(session.metadataOrderId).first() : null;
+  const linked = Boolean(order && order.id === session?.clientReferenceId && order.stripe_checkout_session_id === session.id && order.environment === (receipt.livemode ? "live" : "test"));
+  const resultCode = linked ? "payment_failed" : "checkout_order_unlinked";
+  const stored = await recordVerifiedStripeWebhookReceipt(env, { ...receipt, processingStatus: linked ? "processed" : "accepted_noop", resultCode }, linked ? { orderId: order.id, sessionId: session.id, environment: order.environment, failed: true } : null);
+  return { ...stored, resultCode: stored.duplicate ? "duplicate" : resultCode };
 }
 
 export async function commerceOrderDetailPayload(env, session, rawOrderId) {
@@ -556,7 +571,9 @@ async function requireCheckoutConfiguration(env, db, gate) {
       `SELECT setting_key, value_json FROM commerce_settings
        WHERE setting_key IN ('checkout_enabled', 'stripe_api_configured', 'stripe_webhook_configured',
                              'live_payment_capture_enabled', 'fulfillment_submission_enabled', 'checkout_turnstile_required',
-                             'stripe_test_checkout_enabled', 'stripe_test_checkout_product_id', 'stripe_test_checkout_variant_id')`,
+                             'stripe_test_checkout_enabled', 'stripe_test_checkout_product_id', 'stripe_test_checkout_variant_id',
+                             'stripe_live_api_verified','stripe_live_webhook_configured','stripe_tax_enabled','tax_calculation_provider',
+                             'commerce_emergency_paused','commerce_environment')`,
     ).all(),
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, null)]));
@@ -574,32 +591,34 @@ async function requireCheckoutConfiguration(env, db, gate) {
     const variantId = safeLocalId(settings.stripe_test_checkout_variant_id);
     if (!productId || !variantId) throw new AuthFailure(503, "stripe_test_candidate_invalid", "The controlled test checkout candidate is not configured.");
     candidate = { productId, variantId };
-  } else if (settings.checkout_enabled !== true || metadata.checkout_enabled !== true) {
-    throw new AuthFailure(409, "checkout_disabled", "Public checkout is not enabled.");
+  } else {
+    if (settings.checkout_enabled !== true || metadata.checkout_enabled !== true || settings.commerce_emergency_paused === true) throw new AuthFailure(409, "checkout_disabled", "Public checkout is not enabled.");
   }
-  if (settings.live_payment_capture_enabled === true || metadata.live_payments_enabled === true) {
-    throw new AuthFailure(409, "live_payments_not_supported", "This endpoint accepts Stripe test payments only.");
+  const environment = gate === "controlled_test" || settings.commerce_environment !== "production" ? "test" : "live";
+  if (environment === "live") {
+    if (settings.live_payment_capture_enabled !== true || metadata.live_payments_enabled !== true) throw new AuthFailure(409, "live_payments_disabled", "Live payment capture is not enabled.");
+    if (settings.fulfillment_submission_enabled !== true || printfulMetadata.fulfillment_enabled !== true) throw new AuthFailure(409, "fulfillment_not_ready", "Automatic fulfillment is not enabled.");
   }
-  if (settings.fulfillment_submission_enabled === true || printfulMetadata.fulfillment_enabled === true) {
-    throw new AuthFailure(409, "fulfillment_must_remain_disabled", "Checkout acceptance requires fulfillment submission to remain disabled.");
-  }
-  if (!provider || provider.status !== "connected" || provider.environment !== "test" || provider.integration_mode !== "direct_merchant") {
-    throw new AuthFailure(503, "stripe_provider_not_ready", "The Stripe test provider is not ready for Checkout.");
+  if (!provider || provider.status !== "connected" || provider.environment !== environment || provider.integration_mode !== "direct_merchant") {
+    throw new AuthFailure(503, "stripe_provider_not_ready", `The Stripe ${environment.toUpperCase()} provider is not ready for Checkout.`);
   }
   if (String(provider.currency_code || "").toUpperCase() !== "CAD") {
     throw new AuthFailure(503, "stripe_provider_currency_invalid", "The Stripe provider currency is invalid.");
   }
-  if (settings.stripe_api_configured !== true || metadata.api_configured !== true || !isStripeTestCredentialConfigured(env)) {
-    throw new AuthFailure(503, "stripe_api_not_configured", "Stripe test API verification is not configured.");
-  }
-  if (settings.stripe_webhook_configured !== true || metadata.webhook_configured !== true || !isStripeWebhookSigningConfigured(env)) {
-    throw new AuthFailure(503, "stripe_webhook_not_configured", "Stripe signed webhook verification is not configured.");
-  }
-  if (!new Set(["staging", "test"]).has(cleanText(env?.AUTH_ENVIRONMENT, 20).toLowerCase())) {
-    throw new AuthFailure(503, "checkout_environment_invalid", "Stripe Checkout is restricted to the staging test environment.");
-  }
+  const apiReady = environment === "live"
+    ? settings.stripe_live_api_verified === true && metadata.api_configured === true && metadata.charges_enabled === true && isStripeLiveCredentialConfigured(env)
+    : settings.stripe_api_configured === true && metadata.api_configured === true && isStripeTestCredentialConfigured(env);
+  if (!apiReady) throw new AuthFailure(503, "stripe_api_not_configured", `Stripe ${environment.toUpperCase()} API verification is not configured.`);
+  const webhookReady = environment === "live"
+    ? settings.stripe_live_webhook_configured === true && metadata.live_webhook_configured === true && isStripeLiveWebhookSigningConfigured(env)
+    : settings.stripe_webhook_configured === true && metadata.webhook_configured === true && isStripeWebhookSigningConfigured(env);
+  if (!webhookReady) throw new AuthFailure(503, "stripe_webhook_not_configured", `Stripe ${environment.toUpperCase()} signed webhook verification is not configured.`);
+  if (environment === "live" && (settings.stripe_tax_enabled !== true || settings.tax_calculation_provider !== "stripe_tax" || metadata.tax_ready !== true)) throw new AuthFailure(503, "stripe_tax_not_ready", "Stripe Tax is not configured for live checkout.");
+  if (environment === "test" && !new Set(["staging", "test"]).has(cleanText(env?.AUTH_ENVIRONMENT, 20).toLowerCase())) throw new AuthFailure(503, "checkout_environment_invalid", "Controlled Stripe TEST Checkout is restricted to staging.");
+  const credential = stripeCredentialForEnvironment(env, environment);
+  if (!credential) throw new AuthFailure(503, "stripe_credential_unavailable", `The Stripe ${environment.toUpperCase()} credential is unavailable.`);
   configuredPublicOrigin(env);
-  return { turnstileRequired: gate === "normal" && settings.checkout_turnstile_required === true, candidate, environment: "test" };
+  return { turnstileRequired: gate === "normal" && settings.checkout_turnstile_required === true, candidate, environment, credential, automaticTax: environment === "live" };
 }
 
 function requireControlledTestCart(cartRequest, candidate) {
@@ -683,12 +702,12 @@ async function loadOrderByCheckoutRequest(db, checkoutRequestId) {
 
 function linkedCheckoutResponse(order) {
   if (!order?.stripe_checkout_session_id || !order?.stripe_checkout_url) return null;
-  if (!/^cs_test_[A-Za-z0-9_]+$/.test(order.stripe_checkout_session_id)) return null;
+  if (!/^cs_(?:test|live)_[A-Za-z0-9_]+$/.test(order.stripe_checkout_session_id)) return null;
   const url = safeCheckoutUrl(order.stripe_checkout_url);
   return url ? { ok: true, orderId: order.id, sessionId: order.stripe_checkout_session_id, checkoutUrl: url } : null;
 }
 
-function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null, customer = null) {
+function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null, customer = null, configuration = {}) {
   const form = new URLSearchParams();
   form.set("mode", "payment");
   form.set("payment_method_types[0]", "card");
@@ -696,8 +715,16 @@ function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null
   form.set("metadata[order_id]", order.id);
   form.set("metadata[checkout_request_id]", order.checkout_request_id);
   form.set("metadata[cart_digest]", order.cart_digest);
+  form.set("metadata[environment]", order.environment);
   if (order.customer_id) form.set("metadata[customer_id]", order.customer_id);
-  if (customer?.email) form.set("customer_email", customer.email);
+  if (customer?.email) {
+    form.set("customer_email", customer.email);
+    form.set("payment_intent_data[receipt_email]", customer.email);
+  }
+  if (configuration.automaticTax === true) {
+    form.set("automatic_tax[enabled]", "true");
+    form.set("billing_address_collection", "required");
+  }
   form.set("success_url", `${publicOrigin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`);
   form.set("cancel_url", `${publicOrigin}/shop?checkout=canceled`);
   lines.forEach((line, index) => {
@@ -710,12 +737,13 @@ function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null
   return form.toString();
 }
 
-function normalizeCreatedCheckoutSession(value, order, expectedAmount) {
+function normalizeCreatedCheckoutSession(value, order, expectedAmount, configuration = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value) || value.object !== "checkout.session") return null;
-  const id = safeStripeId(value.id, "cs_test_");
+  const expectedPrefix = configuration.environment === "live" ? "cs_live_" : "cs_test_";
+  const id = safeStripeId(value.id, expectedPrefix);
   const url = safeCheckoutUrl(value.url);
-  if (!id || !url || value.livemode !== false || value.mode !== "payment" || value.currency !== "cad") return null;
-  if (!Number.isSafeInteger(value.amount_total) || value.amount_total !== expectedAmount) return null;
+  if (!id || !url || value.livemode !== (configuration.environment === "live") || value.mode !== "payment" || value.currency !== "cad") return null;
+  if (!Number.isSafeInteger(value.amount_total) || (configuration.automaticTax === true ? value.amount_total < expectedAmount : value.amount_total !== expectedAmount)) return null;
   if (value.client_reference_id !== order.id || value.metadata?.order_id !== order.id || value.metadata?.checkout_request_id !== order.checkout_request_id) return null;
   return { id, url };
 }
@@ -740,9 +768,15 @@ async function resolveCheckoutCompletion(db, session) {
   if (session.metadataCheckoutRequestId !== order.checkout_request_id) return invalidResolution("checkout_request_mismatch", true);
   if (session.mode !== "payment") return invalidResolution("checkout_mode_invalid", true);
   if (session.currency !== "cad" || String(order.currency_code).toUpperCase() !== "CAD") return invalidResolution("checkout_currency_mismatch", true);
-  if (!Number.isSafeInteger(session.amountTotal) || session.amountTotal !== Number(order.customer_gross_amount)) return invalidResolution("checkout_amount_mismatch", true);
+  const storedSubtotal = Number(order.product_subtotal_amount || 0);
+  const storedShipping = Number(order.shipping_amount || 0);
+  const storedBase = storedSubtotal + storedShipping > 0 ? storedSubtotal + storedShipping : Number(order.customer_gross_amount);
+  if (!Number.isSafeInteger(session.amountTotal) || !Number.isSafeInteger(storedBase) || session.amountTotal < storedBase) return invalidResolution("checkout_amount_mismatch", true);
+  const calculatedTax = session.amountTotal - storedBase;
+  if (session.taxAmount !== null && session.taxAmount !== calculatedTax) return invalidResolution("checkout_tax_mismatch", true);
   if (session.paymentStatus !== "paid") return invalidResolution("checkout_payment_incomplete", true);
-  if (session.livemode !== false || order.environment !== "test") return invalidResolution("checkout_environment_mismatch", true);
+  const environment = session.livemode === true ? "live" : "test";
+  if (order.environment !== environment) return invalidResolution("checkout_environment_mismatch", true);
   if (order.checkout_status !== "checkout_created") return invalidResolution("checkout_order_not_ready", true);
   if (order.payment_status === "paid") return invalidResolution("payment_already_confirmed", true);
   if (order.payment_status !== "pending") return invalidResolution("checkout_payment_state_invalid", true);
@@ -750,7 +784,7 @@ async function resolveCheckoutCompletion(db, session) {
     valid: true,
     resultCode: "payment_confirmed",
     linked: true,
-    transition: { orderId: order.id, sessionId: session.id, paymentIntentId: session.paymentIntentId },
+    transition: { orderId: order.id, sessionId: session.id, paymentIntentId: session.paymentIntentId, environment, amountTotal: session.amountTotal, taxAmount: calculatedTax, taxStatus: environment === "live" ? normalizeTaxStatus(session.automaticTaxStatus, calculatedTax) : "not_calculated" },
   };
 }
 
@@ -824,6 +858,13 @@ function safeCheckoutUrl(value) {
 function safeStripeId(value, prefix) {
   const id = cleanText(value, 255);
   return id.startsWith(prefix) && /^[A-Za-z0-9_]+$/.test(id) ? id : null;
+}
+
+function normalizeTaxStatus(value) {
+  if (value === "complete") return "complete";
+  if (value === "not_collecting") return "not_collecting";
+  if (value === "failed") return "failed";
+  return "calculating";
 }
 
 function safeLocalId(value) {
