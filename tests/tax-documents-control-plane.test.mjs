@@ -33,7 +33,10 @@ test("receipt and invoice templates enforce structured allowlists and optimistic
   await assert.rejects(updateTemplate(env, master, "invoice_document", { ...serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='invoice_document'").first()), introduction: '<img src=x onerror="send()">' }), /structured plain text/i);
   const previewInput = serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='payment_receipt'").first());
   const before = await tableCounts(harness.commerceDb); const preview = await templatePreviewPayload(env, master, "payment_receipt", { template: previewInput }); const after = await tableCounts(harness.commerceDb);
-  assert.equal(preview.test, true); assert.equal(preview.source, "synthetic_fixture"); assert.match(preview.preview.text, /TEST-ORDER-PREVIEW/); assert.deepEqual(after, before);
+  assert.equal(preview.test, true); assert.equal(preview.source, "synthetic_fixture"); assert.match(preview.preview.text, /TEST-ORDER-PREVIEW/); assert.match(preview.preview.text, /PAYMENT RECEIPT/); assert.match(preview.preview.html, /SAMPLE · TEST · NOT ISSUED/); assert.match(preview.preview.html, /email-assets\/trzapcolorcon\.svg/); assert.match(preview.preview.html, /Third Railify lightning logo/); assert.match(preview.preview.html, /<th[^>]*>Item<\/th>/); assert.deepEqual(after, before);
+  const invoiceInput = serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='invoice_document'").first());
+  const invoice = await templatePreviewPayload(env, master, "invoice_document", { template: invoiceInput });
+  assert.match(invoice.preview.text, /INVOICE \/ SALES DOCUMENT/); assert.match(invoice.preview.html, /INVOICE \/ SALES DOCUMENT/); assert.doesNotMatch(invoice.preview.html, /PAYMENT RECEIPT<\/span><\/td><\/tr><tr><td height/); assert.match(invoice.preview.html, /American Captain|Blinker/); assert.deepEqual(await tableCounts(harness.commerceDb), before);
   const audits = await harness.commerceDb.prepare("SELECT action,metadata_json FROM commerce_audit WHERE target_id='payment_receipt'").all(); assert.equal(audits.results.at(-1).action, "receipt_template_updated"); assert.doesNotMatch(JSON.stringify(audits.results), /<img|unknown_legal_value/);
 });
 

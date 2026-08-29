@@ -61,6 +61,21 @@ test("GOATS email workspace uses the branded Commerce-grade editor and sandboxed
   assert.match(core, /THIRD RAILIFY OFFICIAL/);
 });
 
+test("commerce email cards stay left-aligned and email/document previews consume canonical server HTML", async () => {
+  const [emailPage, taxPage, styles, taxStyles, core, brand] = await Promise.all([
+    read("src/pages/CustomerEmailsPage.tsx"), read("src/pages/TaxDocumentsPage.tsx"), read("src/styles/global.css"), read("src/styles/tax-documents.css"), read("functions/_shared/commerce-control-plane.js"), read("functions/_shared/thirdrail-brand.js"),
+  ]);
+  assert.match(styles, /\.customer-email-workspace > nav button \{[^}]*align-items: start;[^}]*text-align: left;/);
+  assert.match(styles, /\.customer-email-workspace > nav strong \{[^}]*text-align: left;/);
+  assert.match(styles, /\.customer-email-workspace > nav small \{[^}]*text-align: left;/);
+  assert.match(emailPage, /srcDoc=\{preview\.preview\.html\}/); assert.match(emailPage, /canonical sample preview/);
+  assert.match(taxPage, /srcDoc=\{preview\.preview\.html\}/); assert.match(taxPage, /canonical SAMPLE \/ TEST preview/);
+  assert.match(taxStyles, /\.document-preview-panel > iframe/);
+  assert.match(core, /template\.templateKind === "document"[\s\S]*renderCommerceDocument[\s\S]*renderCommerceEmail/);
+  assert.match(core, /html: output\.html, text: output\.text/);
+  assert.match(brand, /trzapcolorcon\.svg/); for (const font of ["American Captain", "Blinker", "Geist Mono"]) assert.match(brand, new RegExp(font));
+});
+
 test("GOATS approved records expose durable content, media, and reaction reset controls", async () => {
   const [app, page, client, navigation] = await Promise.all([read("src/App.tsx"), read("src/pages/GoatsAdminPages.tsx"), read("src/goats/client.ts"), read("src/config/navigation.ts")]);
   assert.match(app, /path="goats\/reactions" element={<Navigate to="\/goats\/approved" replace/);

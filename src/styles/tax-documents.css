@@ -78,6 +78,12 @@
 .document-preview-panel > header > div { display: grid; gap: 6px; }
 .document-sample-marker { width: fit-content; padding: 5px 7px; border: 1px solid rgba(243,201,40,.48); border-radius: 4px; color: #18160d; background: #f3c928; font: 850 .52rem "Geist Mono",monospace; letter-spacing: .08em; }
 .document-preview-panel > header small { color: var(--quiet); font-size: .65rem; }
+.document-preview-panel > iframe { display: block; width: 100%; min-height: 760px; border: 1px solid var(--line-strong); border-radius: 10px; background: #080806; }
+.document-preview-panel > footer { margin-top: 12px; padding: 12px; border-left: 2px solid var(--safe); background: rgba(114,215,165,.04); }
+.document-preview-panel > footer strong { color: var(--safe); font-size: .67rem; }
+.document-preview-panel > footer p,.document-preview-empty p { margin: 4px 0 0; color: var(--muted); font-size: .61rem; line-height: 1.45; }
+.document-preview-empty { display: grid; min-height: 240px; place-content: center; padding: 28px; border: 1px dashed var(--line-strong); border-radius: 10px; text-align: center; }
+.document-preview-empty strong { color: var(--paper); font: 1.35rem "American Captain",sans-serif; }
 .document-preview-panel > article { overflow: hidden; border: 1px solid var(--gold); border-radius: 10px; color: #17160f; background: #f3f0e5; box-shadow: 0 24px 70px rgba(0,0,0,.28); }
 .document-preview-brand { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 19px 21px; color: #f5f1e5; background: #11110e; }
 .document-preview-brand strong { font: 1.55rem "American Captain",sans-serif; }

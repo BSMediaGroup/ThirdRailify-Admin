@@ -16,6 +16,7 @@ import {
   validateTemplate,
   writeCommerceAudit,
 } from "./commerce-core.js";
+import { THIRD_RAIL_BRAND, thirdRailBrandAssets, thirdRailFontFaceCss } from "./thirdrail-brand.js";
 
 export { COMMERCE_TEMPLATE_VARIABLES };
 
@@ -820,7 +821,7 @@ export async function templatePreviewPayload(env, session, templateKey, input) {
   const source = await templateRow(db, templateKey);
   const template = input?.template ? validateTemplate({ ...input.template, templateKey }) : serializeTemplateForValidation(source);
   const fixture = input?.orderId ? await orderVariables(db, input.orderId) : await syntheticVariables(db);
-  return { ok: true, preview: renderCommerceTemplate(template, fixture.variables), source: fixture.source, test: fixture.test, orderId: fixture.orderId || null, variables: fixture.variables };
+  return { ok: true, preview: renderCommerceTemplate(template, fixture.variables, { assetOrigin: env?.THIRDRAILIFY_ADMIN_ORIGIN }), source: fixture.source, test: fixture.test, orderId: fixture.orderId || null, variables: fixture.variables };
 }
 
 const CUSTOMER_EMAIL_LIFECYCLES = Object.freeze({
@@ -995,7 +996,7 @@ export function validateTemplatePlaceholders(template) {
   return true;
 }
 
-export function renderCommerceTemplate(template, variables) {
+export function renderCommerceTemplate(template, variables, options = {}) {
   validateTemplatePlaceholders(template);
   const merge = (value) => String(value || "").replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_all, key) => cleanText(variables?.[key.toLowerCase()], 4000));
   const rendered = {
@@ -1006,9 +1007,90 @@ export function renderCommerceTemplate(template, variables) {
     ctaLabel: merge(template.ctaLabel), ctaUrl: merge(template.ctaUrl), supportText: merge(template.supportText), footer: merge(template.footer),
     accentColor: /^#[0-9a-f]{6}$/i.test(String(template.accentColor || "")) ? String(template.accentColor).toLowerCase() : "#f3c928",
   };
-  rendered.text = [rendered.heading, rendered.introduction, ...rendered.bodyBlocks, rendered.ctaLabel && rendered.ctaUrl ? `${rendered.ctaLabel}: ${rendered.ctaUrl}` : "", rendered.supportText, rendered.footer].filter(Boolean).join("\n\n");
-  rendered.html = `<!doctype html><html><body style="margin:0;background:#111;color:#f7f7f7;font-family:Arial,sans-serif"><main style="max-width:640px;margin:auto;padding:32px"><p style="color:${rendered.accentColor};font-weight:700">THIRD RAILIFY OFFICIAL</p><h1>${escapeHtml(rendered.heading)}</h1>${[rendered.introduction, ...rendered.bodyBlocks].filter(Boolean).map((value) => `<p>${escapeHtml(value).replaceAll("\n", "<br>")}</p>`).join("")}${rendered.ctaLabel && rendered.ctaUrl ? `<p><a href="${escapeAttribute(rendered.ctaUrl)}">${escapeHtml(rendered.ctaLabel)}</a></p>` : ""}<p>${escapeHtml(rendered.supportText)}</p><footer>${escapeHtml(rendered.footer)}</footer></main></body></html>`;
+  const output = template.templateKind === "document"
+    ? renderCommerceDocument(rendered, variables, options)
+    : renderCommerceEmail(rendered, variables, options);
+  rendered.text = output.text;
+  rendered.html = output.html;
   return rendered;
+}
+
+function renderCommerceEmail(rendered, variables, options) {
+  const assets = thirdRailBrandAssets(options.assetOrigin);
+  const accent = rendered.accentColor;
+  const safeCtaUrl = safeLinkUrl(rendered.ctaUrl);
+  const paragraphs = [rendered.introduction, ...rendered.bodyBlocks].filter(Boolean);
+  const contextRows = emailContextRows(rendered.templateKey, variables);
+  const lifecycleLabel = emailLifecycleLabel(rendered.templateKey, rendered.displayName);
+  const footer = rendered.footer || `${THIRD_RAIL_BRAND.name} · Customer communication`;
+  const preheader = rendered.preheader ? `<div class="tr-preheader">${escapeHtml(rendered.preheader)}</div>` : "";
+  const context = contextRows.length ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0 4px;border-collapse:collapse;border:1px solid #d5cebb;background:#ebe6d8">${contextRows.map(([label, value]) => `<tr><td style="width:38%;padding:10px 12px;border-bottom:1px solid #d5cebb;color:#817a65;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase">${escapeHtml(label)}</td><td style="padding:10px 12px;border-bottom:1px solid #d5cebb;color:#302d22;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:14px;font-weight:600;text-align:right;overflow-wrap:anywhere">${escapeHtml(value)}</td></tr>`).join("")}</table>` : "";
+  const cta = rendered.ctaLabel && safeCtaUrl ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:26px 0 4px"><tr><td style="border-radius:6px;background:${accent}"><a href="${escapeHtml(safeCtaUrl)}" style="display:inline-block;min-width:150px;padding:14px 19px;color:#090907;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:12px;font-weight:800;letter-spacing:.06em;text-align:center;text-decoration:none;text-transform:uppercase">${escapeHtml(rendered.ctaLabel)}</a></td></tr></table>` : "";
+  const support = rendered.supportText ? `<p style="margin:24px 0 0;padding-top:18px;border-top:1px solid #d5cebb;color:#655f4c;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:14px;line-height:1.55">${emailTextHtml(rendered.supportText)}</p>` : "";
+  const text = [
+    THIRD_RAIL_BRAND.wordmark,
+    lifecycleLabel,
+    rendered.heading,
+    rendered.introduction,
+    ...rendered.bodyBlocks,
+    ...contextRows.map(([label, value]) => `${label}: ${value}`),
+    rendered.ctaLabel && safeCtaUrl ? `${rendered.ctaLabel}: ${safeCtaUrl}` : "",
+    rendered.supportText,
+    footer,
+  ].filter(Boolean).map(plainTextValue).join("\n\n");
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${escapeHtml(rendered.subject || rendered.heading)}</title><style>${thirdRailFontFaceCss(options.assetOrigin)}.tr-preheader{display:none!important;max-height:0;max-width:0;overflow:hidden;opacity:0;color:transparent}.tr-copy p{margin:0 0 15px;color:#4d493a;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:15px;line-height:1.65}.tr-copy h1{margin:0 0 18px;color:${THIRD_RAIL_BRAND.ink};font-family:${THIRD_RAIL_BRAND.displayFont};font-size:52px;font-weight:400;letter-spacing:.01em;line-height:.96;text-transform:uppercase;overflow-wrap:anywhere}@media(max-width:640px){.tr-card{width:100%!important}.tr-outer{padding:18px 8px!important}.tr-header{padding:19px 18px!important}.tr-pad{padding:28px 20px!important}.tr-copy h1{font-size:42px!important}.tr-context td{display:block!important;width:auto!important;text-align:left!important}}</style></head><body style="margin:0;padding:0;background:${THIRD_RAIL_BRAND.page};color:#f5f1e5;font-family:${THIRD_RAIL_BRAND.bodyFont}">${preheader}<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:${THIRD_RAIL_BRAND.page}"><tr><td class="tr-outer" align="center" style="padding:34px 16px"><table role="presentation" class="tr-card" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:100%;border:1px solid #3b351d;border-radius:12px;background:${THIRD_RAIL_BRAND.cream}"><tr><td class="tr-header" style="padding:22px 28px;background:${THIRD_RAIL_BRAND.dark}"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td width="50" valign="middle"><img src="${assets.logo}" width="38" height="38" alt="Third Railify lightning logo" style="display:block;width:38px;height:38px;border:0;object-fit:contain"></td><td valign="middle"><strong style="display:block;color:#f5f1e5;font-family:${THIRD_RAIL_BRAND.displayFont};font-size:27px;font-weight:400;letter-spacing:.01em;line-height:1;text-transform:uppercase">${THIRD_RAIL_BRAND.wordmark}</strong><span style="display:block;margin-top:4px;color:#b7b19d;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase">Customer notification</span></td></tr></table></td></tr><tr><td height="5" style="height:5px;background:${accent}"></td></tr><tr><td class="tr-pad" style="padding:38px 42px"><div style="margin-bottom:12px;color:#8b7007;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase">${escapeHtml(lifecycleLabel)}</div><div class="tr-copy"><h1>${escapeHtml(rendered.heading)}</h1>${paragraphs.map((value) => `<p>${emailTextHtml(value)}</p>`).join("")}</div><div class="tr-context">${context}</div>${cta}${support}</td></tr><tr><td style="padding:20px 28px;border-top:1px solid #d5cebb;background:${THIRD_RAIL_BRAND.creamMuted};color:#655f4c;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:13px;line-height:1.55"><strong style="color:#3f3b2e;font-weight:600">${THIRD_RAIL_BRAND.name}</strong><br>${emailTextHtml(footer)}</td></tr></table><div style="padding:18px 8px;color:#77715f;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:10px;line-height:1.5">This transactional message was generated from the approved Third Railify commerce template.</div></td></tr></table></body></html>`;
+  return { html, text };
+}
+
+function renderCommerceDocument(rendered, variables, options) {
+  const assets = thirdRailBrandAssets(options.assetOrigin);
+  const source = options.document || {};
+  const type = source.type === "invoice" || rendered.templateKey === "invoice_document" ? "invoice" : "receipt";
+  const typeLabel = type === "invoice" ? "INVOICE / SALES DOCUMENT" : "PAYMENT RECEIPT";
+  const marker = cleanText(source.marker, 80) || "SAMPLE · TEST · NOT ISSUED";
+  const merchantName = cleanText(source.merchantName || variables?.merchant_name, 160) || THIRD_RAIL_BRAND.name;
+  const customerName = cleanText(source.customerName || variables?.customer_name, 160);
+  const orderReference = cleanText(source.orderReference || variables?.order_reference, 160) || "NOT SUPPLIED";
+  const issuedAt = cleanText(source.issuedAt, 80);
+  const currency = cleanText(source.currency || variables?.currency, 3).toUpperCase() || "CAD";
+  const items = Array.isArray(source.items) && source.items.length
+    ? source.items.map((item) => ({ description: [cleanText(item.productName, 240), cleanText(item.variantName, 300)].filter(Boolean).join(" — "), quantity: Number(item.quantity) || "", amount: documentMoney(item.lineTotalAmount, currency) }))
+    : [{ description: cleanText(variables?.product_summary, 1000) || "No line item supplied", quantity: "", amount: variableMoney(variables?.order_total, currency) }];
+  const subtotal = source.subtotal === 0 || Number.isFinite(source.subtotal) ? documentMoney(source.subtotal, currency) : variableMoney(variables?.order_total, currency);
+  const shipping = source.shipping === 0 || Number.isFinite(source.shipping) ? documentMoney(source.shipping, currency) : "—";
+  const tax = source.tax === 0 || Number.isFinite(source.tax) ? documentMoney(source.tax, currency) : "—";
+  const total = source.total === 0 || Number.isFinite(source.total) ? documentMoney(source.total, currency) : variableMoney(variables?.order_total, currency);
+  const address = documentAddressLines(source.legalAddress);
+  const disclosures = Array.isArray(source.disclosures) ? source.disclosures.map((value) => cleanText(value, 1000)).filter(Boolean) : [];
+  const paragraphs = [rendered.introduction, ...rendered.bodyBlocks].filter(Boolean);
+  const support = rendered.supportText || cleanText(source.supportEmail || variables?.support_email, 254);
+  const footer = rendered.footer || `${THIRD_RAIL_BRAND.name} · ${typeLabel}`;
+  const detailCells = [["REFERENCE", orderReference], ...(customerName ? [["CUSTOMER", customerName]] : []), ...(issuedAt ? [["DATE", issuedAt]] : [])];
+  const text = [
+    marker,
+    THIRD_RAIL_BRAND.wordmark,
+    typeLabel,
+    rendered.heading,
+    ...detailCells.map(([label, value]) => `${label}: ${value}`),
+    rendered.introduction,
+    ...rendered.bodyBlocks,
+    "LINE ITEMS",
+    ...items.map((item) => `${item.description}${item.quantity ? ` × ${item.quantity}` : ""} — ${item.amount}`),
+    `Subtotal: ${subtotal}`,
+    `Shipping: ${shipping}`,
+    `Tax: ${tax}`,
+    `Total: ${total}`,
+    support,
+    ...disclosures,
+    footer,
+  ].filter(Boolean).map(plainTextValue).join("\n\n");
+  const details = detailCells.map(([label, value]) => `<td valign="top" style="padding:0 14px 18px 0"><span style="display:block;color:#817a65;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${escapeHtml(label)}</span><strong style="display:block;margin-top:5px;color:#302d22;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:14px;font-weight:600;overflow-wrap:anywhere">${escapeHtml(value)}</strong></td>`).join("");
+  const itemRows = items.map((item) => `<tr><td style="padding:13px 10px;border-bottom:1px solid #d9d2c0;color:#302d22;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:14px;line-height:1.4">${escapeHtml(item.description)}</td><td align="center" style="padding:13px 8px;border-bottom:1px solid #d9d2c0;color:#655f4c;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:11px">${escapeHtml(item.quantity)}</td><td align="right" style="padding:13px 10px;border-bottom:1px solid #d9d2c0;color:#302d22;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:14px;font-weight:600;white-space:nowrap">${escapeHtml(item.amount)}</td></tr>`).join("");
+  const totals = [["Subtotal", subtotal], ["Shipping", shipping], ["Tax", tax], ["Total", total]].map(([label, value], index) => `<tr><td style="padding:${index === 3 ? "12px" : "7px"} 10px;color:${index === 3 ? THIRD_RAIL_BRAND.ink : "#655f4c"};font-family:${index === 3 ? THIRD_RAIL_BRAND.displayFont : THIRD_RAIL_BRAND.bodyFont};font-size:${index === 3 ? "22px" : "13px"};${index === 3 ? "border-top:2px solid #302d22;text-transform:uppercase" : ""}">${label}</td><td align="right" style="padding:${index === 3 ? "12px" : "7px"} 10px;color:${index === 3 ? THIRD_RAIL_BRAND.ink : "#302d22"};font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:${index === 3 ? "17px" : "13px"};font-weight:${index === 3 ? "700" : "600"};${index === 3 ? "border-top:2px solid #302d22" : ""};white-space:nowrap">${escapeHtml(value)}</td></tr>`).join("");
+  const seller = source.legalName || address.length ? `<div style="margin-top:22px;padding-top:16px;border-top:1px solid #d5cebb;color:#655f4c;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:12px;line-height:1.55"><strong style="color:#3f3b2e">Seller</strong><br>${[cleanText(source.legalName, 240) || merchantName, ...address].map(escapeHtml).join("<br>")}</div>` : "";
+  const disclosureHtml = disclosures.length ? `<div style="margin-top:18px;padding:14px;border:1px solid #d5cebb;background:#ebe6d8;color:#655f4c;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:12px;line-height:1.5">${disclosures.map((value) => `<p style="margin:0 0 7px">${emailTextHtml(value)}</p>`).join("")}</div>` : "";
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${escapeHtml(typeLabel)}</title><style>${thirdRailFontFaceCss(options.assetOrigin)}@media(max-width:680px){.tr-doc{width:100%!important}.tr-doc-outer{padding:12px 6px!important}.tr-doc-header{padding:18px!important}.tr-doc-body{padding:24px 18px!important}.tr-doc-title{font-size:42px!important}.tr-doc-details td{display:block!important;width:auto!important}.tr-doc-items th:nth-child(2),.tr-doc-items td:nth-child(2){display:none!important}}</style></head><body style="margin:0;padding:0;background:${THIRD_RAIL_BRAND.page};font-family:${THIRD_RAIL_BRAND.bodyFont}"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:${THIRD_RAIL_BRAND.page}"><tr><td class="tr-doc-outer" align="center" style="padding:30px 14px"><table role="presentation" class="tr-doc" width="680" cellspacing="0" cellpadding="0" border="0" style="width:680px;max-width:100%;border:1px solid #3b351d;border-radius:10px;background:${THIRD_RAIL_BRAND.cream}"><tr><td class="tr-doc-header" style="padding:22px 26px;background:${THIRD_RAIL_BRAND.dark}"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td width="50" valign="middle"><img src="${assets.logo}" width="38" height="38" alt="Third Railify lightning logo" style="display:block;width:38px;height:38px;border:0;object-fit:contain"></td><td valign="middle"><strong style="display:block;color:#f5f1e5;font-family:${THIRD_RAIL_BRAND.displayFont};font-size:27px;font-weight:400;line-height:1;text-transform:uppercase">${THIRD_RAIL_BRAND.wordmark}</strong><span style="display:block;margin-top:4px;color:#b7b19d;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase">${typeLabel}</span></td></tr></table></td></tr><tr><td height="5" style="height:5px;background:${rendered.accentColor}"></td></tr><tr><td style="padding:13px 26px;background:${THIRD_RAIL_BRAND.gold};color:#17160f;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:10px;font-weight:850;letter-spacing:.09em;text-align:center;text-transform:uppercase">${escapeHtml(marker)}</td></tr><tr><td class="tr-doc-body" style="padding:36px 38px"><div style="margin-bottom:10px;color:#8b7007;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase">${typeLabel}</div><h1 class="tr-doc-title" style="margin:0 0 24px;color:${THIRD_RAIL_BRAND.ink};font-family:${THIRD_RAIL_BRAND.displayFont};font-size:50px;font-weight:400;line-height:.96;text-transform:uppercase;overflow-wrap:anywhere">${escapeHtml(rendered.heading)}</h1><table role="presentation" class="tr-doc-details" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>${details}</tr></table>${paragraphs.map((value) => `<p style="margin:0 0 14px;color:#4d493a;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:14px;line-height:1.6">${emailTextHtml(value)}</p>`).join("")}<table class="tr-doc-items" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:24px;border-collapse:collapse;border:1px solid #d9d2c0"><thead><tr><th align="left" style="padding:10px;color:#817a65;background:#ebe6d8;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:9px;letter-spacing:.08em;text-transform:uppercase">Item</th><th align="center" style="padding:10px;color:#817a65;background:#ebe6d8;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:9px;letter-spacing:.08em;text-transform:uppercase">Qty</th><th align="right" style="padding:10px;color:#817a65;background:#ebe6d8;font-family:${THIRD_RAIL_BRAND.monoFont};font-size:9px;letter-spacing:.08em;text-transform:uppercase">Amount</th></tr></thead><tbody>${itemRows}</tbody></table><table role="presentation" width="260" align="right" cellspacing="0" cellpadding="0" border="0" style="width:260px;max-width:100%;margin-top:16px;border-collapse:collapse">${totals}</table><div style="clear:both"></div>${support ? `<p style="margin:26px 0 0;padding-top:18px;border-top:1px solid #d5cebb;color:#655f4c;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:13px;line-height:1.55">${emailTextHtml(support)}</p>` : ""}${seller}${disclosureHtml}</td></tr><tr><td style="padding:18px 26px;border-top:1px solid #d5cebb;background:${THIRD_RAIL_BRAND.creamMuted};color:#655f4c;font-family:${THIRD_RAIL_BRAND.bodyFont};font-size:12px;line-height:1.5"><strong style="color:#3f3b2e">${merchantName}</strong><br>${emailTextHtml(footer)}</td></tr></table></td></tr></table></body></html>`;
+  return { html, text };
 }
 
 export async function sendTestTemplateEmail(env, session, templateKey, input, fetchImpl = fetch) {
@@ -1017,7 +1099,7 @@ export async function sendTestTemplateEmail(env, session, templateKey, input, fe
   const row = await templateRow(db, templateKey);
   if (row.template_kind !== "email") throw new AuthFailure(409, "template_email_required", "Only customer email templates can be test-sent.");
   const fixture = input?.orderId ? await orderVariables(db, input.orderId) : await syntheticVariables(db);
-  const rendered = renderCommerceTemplate(serializeTemplateForValidation(row), fixture.variables);
+  const rendered = renderCommerceTemplate(serializeTemplateForValidation(row), fixture.variables, { assetOrigin: env?.THIRDRAILIFY_ADMIN_ORIGIN });
   const eventKey = `test-preview:${row.template_key}:${row.revision}:${fixture.orderId || "synthetic"}:${recipient}`;
   const deliveryKey = await commerceEmailDeliveryKey({ templateKey: row.template_key, templateRevision: Number(row.revision), orderId: fixture.orderId, eventKey, recipient, purpose: "test_preview" });
   const timestamp = nowIso();
@@ -1114,7 +1196,7 @@ async function buildDocumentSnapshot(env, db, orderId, type, invoiceReady) {
   if (profile?.legal_business_name_ciphertext) legalName = await decryptCommerceSecret(env, profile.legal_business_name_ciphertext, "business:legal-name");
   if (profile?.private_address_ciphertext) legalAddress = json(await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address"), null) || await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address");
   const items = (itemsResult?.results || []).map((item) => ({ productName: cleanText(item.product_name, 240), variantName: cleanText(item.variant_name, 300) || null, options: json(item.option_values_json, {}), unitAmount: Number(item.unit_amount), quantity: Number(item.quantity), lineTotalAmount: Number(item.line_total_amount) }));
-  return {
+  const snapshot = {
     type, available, reason, test: order.environment === "test", marker: order.environment === "test" ? "TEST / SANDBOX" : "LIVE",
     displayReference: type === "receipt" ? id : `Invoice preview for ${id}`, orderReference: id,
     merchantName: cleanText(profile?.trading_name, 160) || "Third Railify Official",
@@ -1127,6 +1209,20 @@ async function buildDocumentSnapshot(env, db, orderId, type, invoiceReady) {
     templateKey: template.template_key, templateRevision: Number(template.revision),
     disclosures: [], providerIds: undefined,
   };
+  const variables = {
+    order_reference: id,
+    customer_name: "",
+    merchant_name: snapshot.merchantName,
+    order_total: formatMinorUnits(snapshot.total),
+    currency: snapshot.currency,
+    product_summary: items.map((item) => `${item.productName}${item.variantName ? ` — ${item.variantName}` : ""} × ${item.quantity}`).join("; "),
+    support_email: snapshot.supportEmail,
+    receipt_url: "",
+    shipping_method: cleanText(delivery?.display_shipping_method, 200),
+    tracking_number: "",
+  };
+  const output = renderCommerceTemplate(serializeTemplateForValidation(template), variables, { assetOrigin: env?.THIRDRAILIFY_ADMIN_ORIGIN, document: snapshot });
+  return { ...snapshot, html: output.html, text: output.text };
 }
 
 function validateTaxRegistration(input, current) {
@@ -1279,7 +1375,51 @@ async function orderVariables(db, orderId) {
 async function emailBusinessIdentity(db) { const row = await db.prepare("SELECT trading_name,currency_code,public_contact_email,support_email FROM commerce_business_profiles WHERE id='primary'").first(); return { merchantName: cleanText(row?.trading_name, 160) || "Third Railify Official", currency: cleanText(row?.currency_code, 3).toUpperCase() || "CAD", supportEmail: cleanText(row?.support_email || row?.public_contact_email, 254) || "info@thirdrailify.com" }; }
 function formatMinorUnits(value) { const amount = Number(value); if (!Number.isSafeInteger(amount) || amount < 0) return "0.00"; return `${Math.floor(amount / 100)}.${String(amount % 100).padStart(2, "0")}`; }
 function templateTextValues(template) { return [template.subject, template.preheader, template.heading, template.introduction, ...(template.bodyBlocks || []), template.ctaLabel, template.ctaUrl, template.supportText, template.footer]; }
+function emailLifecycleLabel(templateKey, fallback) {
+  return ({
+    order_confirmation: "Order confirmation",
+    shipment_notification: "Shipment update",
+    cancellation: "Order status · Cancelled",
+    refund: "Refund update",
+    payment_failure: "Action needed · Payment incomplete",
+    invoice_notification: "Invoice notification",
+    receipt_notification: "Receipt notification",
+  })[templateKey] || cleanText(fallback, 120) || "Customer notification";
+}
+function emailContextRows(templateKey, variables) {
+  const rows = [];
+  const orderReference = meaningfulVariable(variables?.order_reference);
+  const total = meaningfulVariable(variables?.order_total);
+  const currency = meaningfulVariable(variables?.currency);
+  if (orderReference) rows.push(["Order reference", orderReference]);
+  if (total) rows.push(["Order total", `${total}${currency ? ` ${currency}` : ""}`]);
+  if (templateKey === "shipment_notification") {
+    const method = meaningfulVariable(variables?.shipping_method);
+    const tracking = meaningfulVariable(variables?.tracking_number);
+    if (method) rows.push(["Shipping method", method]);
+    if (tracking) rows.push(["Tracking number", tracking]);
+  }
+  return rows;
+}
+function meaningfulVariable(value) {
+  const text = cleanText(value, 1000);
+  return !text || /^(not available|not configured|unknown|n\/a)$/i.test(text) ? "" : text;
+}
+function safeLinkUrl(value) {
+  const text = cleanText(value, 500);
+  if ((text.startsWith("/") && !text.startsWith("//")) || /^https:\/\/[^\s]+$/i.test(text)) return text;
+  return "";
+}
+function emailTextHtml(value) { return escapeHtml(value).replaceAll("\n", "<br>"); }
+function plainTextValue(value) { return String(value || "").replaceAll("<", "‹").replaceAll(">", "›").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim(); }
+function variableMoney(value, currency) { const text = cleanText(value, 80); return text ? `${text} ${currency}` : "—"; }
+function documentMoney(value, currency) { const amount = Number(value); return Number.isSafeInteger(amount) ? `${(amount / 100).toFixed(2)} ${currency}` : "—"; }
+function documentAddressLines(value) {
+  if (!value) return [];
+  if (typeof value === "string") return value.split(/\r?\n/).map((line) => cleanText(line, 240)).filter(Boolean).slice(0, 6);
+  if (typeof value !== "object" || Array.isArray(value)) return [];
+  return [value.line1, value.line2, [value.city, value.province || value.region, value.postalCode].filter(Boolean).join(" "), value.country].map((line) => cleanText(line, 240)).filter(Boolean);
+}
 function escapeHtml(value) { return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;"); }
-function escapeAttribute(value) { const text = cleanText(value, 500); if (!(text.startsWith("/") && !text.startsWith("//")) && !/^https:\/\//i.test(text)) return "#"; return escapeHtml(text); }
 async function sha256Hex(value) { const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value))); return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 function randomToken() { const bytes = crypto.getRandomValues(new Uint8Array(32)); let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, ""); }

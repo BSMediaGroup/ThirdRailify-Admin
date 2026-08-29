@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
-import { customerEmailsControlPlanePayload, templatePreviewPayload } from "../functions/_shared/commerce-control-plane.js";
+import { customerEmailsControlPlanePayload, renderCommerceTemplate, templatePreviewPayload } from "../functions/_shared/commerce-control-plane.js";
 import { updateTemplate } from "../functions/_shared/commerce-core.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
@@ -55,6 +55,30 @@ test("Customer Emails read and synthetic preview are non-mutating and never call
 
   const unauthenticated = await commerceRequest({ request: jsonRequest(url, { method: "GET", origin: ADMIN_ORIGIN }), env, data: {} }); assert.equal(unauthenticated.status, 401);
   const wrongOrigin = await commerceRequest({ request: jsonRequest(url, { method: "GET", origin: "https://evil.example", cookie: session.cookie }), env, data: {} }); assert.equal(wrongOrigin.status, 403);
+});
+
+test("all seven lifecycle templates use the canonical branded HTML shell and semantic plaintext fallback", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_ADMIN_ORIGIN: ADMIN_ORIGIN });
+  const payload = await customerEmailsControlPlanePayload(env, master); const before = await authorityCounts(harness.commerceDb);
+  for (const template of payload.templates) {
+    const preview = await templatePreviewPayload(env, master, template.templateKey, {});
+    assert.match(preview.preview.html, /^<!doctype html>/i, template.templateKey);
+    assert.match(preview.preview.html, /class="tr-card"/, template.templateKey);
+    assert.match(preview.preview.html, /THIRD RAILIFY OFFICIAL/, template.templateKey);
+    assert.match(preview.preview.html, /https:\/\/thirdrailify-admin\.pages\.dev\/email-assets\/trzapcolorcon\.svg/, template.templateKey);
+    assert.match(preview.preview.html, /Third Railify lightning logo/, template.templateKey);
+    assert.match(preview.preview.html, /American Captain/, template.templateKey);
+    assert.match(preview.preview.html, /Blinker/, template.templateKey);
+    assert.match(preview.preview.html, /Geist Mono/, template.templateKey);
+    assert.match(preview.preview.html, /#f3f0e5/i, template.templateKey);
+    assert.ok(preview.preview.text.length > 0, template.templateKey);
+    assert.doesNotMatch(preview.preview.text, /<\/?[a-z][^>]*>/i, template.templateKey);
+  }
+  const unsafe = renderCommerceTemplate({ ...payload.templates[0], introduction: "Hello {{customer_name}}" }, { customer_name: '<script>alert("x")</script>' }, { assetOrigin: ADMIN_ORIGIN });
+  assert.match(unsafe.html, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
+  assert.doesNotMatch(unsafe.html, /<script>/i); assert.doesNotMatch(unsafe.text, /<script>/i);
+  assert.deepEqual(await authorityCounts(harness.commerceDb), before);
 });
 
 test("Customer Emails isolates an unsafe persisted template and keeps sibling, sender, and delivery projections available", async (t) => {

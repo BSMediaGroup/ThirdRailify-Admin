@@ -123,7 +123,7 @@ ThirdRailify-Admin/
 │   ├── _routes.json        Auth, Admin, profile-media, and Stripe webhook Pages Function routing
 │   └── _redirects          SPA fallback
 ├── functions/
-│   ├── _shared/            D1 auth/session/OAuth/security, profile-media, commerce, and GOATS helpers
+│   ├── _shared/            D1 auth/session/OAuth/security, profile-media, commerce, shared brand, and GOATS helpers
 │   ├── api/                Shared auth, protected contact delivery, signed Admin/GOATS APIs, public projections, and signed Stripe webhook receiver
 │   └── u/                  Immutable R2-backed profile-media delivery
 ├── commerce-import/        Sanitized catalogue evidence and design-only variant schema

@@ -1,5 +1,11 @@
 # Bump notes
 
+## 2026-08-29 — Third Railify transactional branding restoration
+
+- Restored the canonical structured commerce renderer to a GOATS-proven Third Railify shell using the approved lightning logo and published American Captain, Blinker, and Geist Mono assets, with responsive email-safe HTML plus a semantic plaintext fallback across all seven customer lifecycle templates.
+- Made Receipt and Invoice use distinct canonical server document renders with the same branded masthead, gold accent, cream canvas, item/totals hierarchy, conditional supplied values, and unmistakable SAMPLE / TEST markers; Admin previews now frame that canonical HTML instead of rebuilding a separate text-logo mock.
+- Forced Customer Emails lifecycle-card title/detail alignment left at desktop and retained a compact left-aligned mobile selector. Structured validation, escaping, permission/origin/CSRF boundaries, and every commerce activation/provider gate remain unchanged; no send, document issuance, token, order, provider call, remote mutation, migration, deployment, or GOATS renderer change was made.
+
 ## 2026-08-29 — Emergency Admin commerce regression repair
 
 - Restored Customer Emails preview compatibility by keeping server-only projection metadata out of strict template mutation payloads. Persisted templates now validate independently at the read boundary: safe legacy/current rows hydrate normally, while an unsafe row is redacted, disabled in projection, and marked `action_required` without suppressing valid siblings, sender/provider readiness, or optional delivery-ledger state.

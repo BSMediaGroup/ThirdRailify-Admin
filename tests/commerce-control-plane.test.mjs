@@ -113,8 +113,9 @@ test("paid TEST receipt is truthful and opaque customer tokens cannot enumerate 
   assert.equal(preview.document.available, true); assert.equal(preview.document.marker, "TEST / SANDBOX");
   assert.equal(preview.document.merchantName, "Third Railify Official"); assert.equal(preview.document.payment, "Confirmed"); assert.equal(preview.document.fulfillment, "Disabled / not started");
   assert.equal(preview.document.items[0].productName, "Third Rail Farm | Black Glossy Mug"); assert.equal(preview.document.items[0].variantName, "11 oz / Black"); assert.equal(preview.document.total, 1500);
+  assert.match(preview.document.html, /THIRD RAILIFY OFFICIAL/); assert.match(preview.document.html, /email-assets\/trzapcolorcon\.svg/); assert.match(preview.document.html, /PAYMENT RECEIPT/); assert.match(preview.document.html, /Third Rail Farm \| Black Glossy Mug/); assert.match(preview.document.text, /Payment receipt/i); assert.doesNotMatch(preview.document.text, /<\/?[a-z][^>]*>/i);
   assert.equal(preview.document.tax, null); assert.equal(preview.document.shipping, null); assert.equal(preview.document.legalName, null); assert.equal("stripeSessionId" in preview.document, false);
-  const invoice = await orderDocumentPreviewPayload(env, master, acceptedOrderId, "invoice"); assert.equal(invoice.document.available, false); assert.match(invoice.document.reason, /tax configuration/i);
+  const invoice = await orderDocumentPreviewPayload(env, master, acceptedOrderId, "invoice"); assert.equal(invoice.document.available, false); assert.match(invoice.document.reason, /tax configuration/i); assert.match(invoice.document.html, /INVOICE \/ SALES DOCUMENT/); assert.doesNotMatch(invoice.document.html, /<span[^>]*>PAYMENT RECEIPT<\/span>/);
   await assert.rejects(issueOrderDocumentAccess(env, master, acceptedOrderId, "receipt"), /remains disabled/i);
   await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key='customer_document_access_enabled'").run();
   const issued = await issueOrderDocumentAccess(env, master, acceptedOrderId, "receipt"); assert.match(issued.token, /^[A-Za-z0-9_-]{43}$/);
