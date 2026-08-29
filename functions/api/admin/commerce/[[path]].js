@@ -200,7 +200,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     const checkoutRequestId = String(body.checkoutRequestId || "");
     const productId = String(body.productId || "");
     const variantId = String(body.variantId || "");
-    if (Object.keys(body).some((key) => !new Set(["checkoutRequestId", "productId", "variantId", "quantity", "recipient", "quoteId", "shippingOptionId"]).has(key)) || Object.keys(body).length !== 7) {
+    if (Object.keys(body).some((key) => !new Set(["checkoutRequestId", "productId", "variantId", "quantity", "recipient", "quoteId", "shippingOptionId", "customer"]).has(key)) || Object.keys(body).length !== 8) {
       throw new AuthFailure(400, "stripe_test_checkout_request_invalid", "The controlled test checkout request is invalid.");
     }
     payload = await createStripeCheckoutSession(env, request, {
@@ -209,6 +209,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
       recipient: body.recipient,
       quoteId: body.quoteId,
       shippingOptionId: body.shippingOptionId,
+      customer: body.customer,
     }, fetchImpl, { gate: "controlled_test" });
     authEventType = "stripe_test_checkout_created";
   } else if (/^orders\/[^/]+\/printful-draft$/.test(path)) {

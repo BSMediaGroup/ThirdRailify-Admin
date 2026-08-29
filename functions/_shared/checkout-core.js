@@ -96,7 +96,7 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
     const recipientCiphertext = shippingSelection
       ? await encryptCommerceSecret(env, JSON.stringify({ ...shippingSelection.recipient, customerContact: cartRequest.customer ? { name: cartRequest.customer.name, email: cartRequest.customer.email } : null }), `order-delivery:${orderId}`)
       : null;
-    const customer = gate === "normal" ? await prepareCheckoutCustomer(env, db, cartRequest.customer) : null;
+    const customer = cartRequest.customer ? await prepareCheckoutCustomer(env, db, cartRequest.customer) : null;
     const statements = [
       ...(customer ? [customer.statement, ...(customer.auditStatement ? [customer.auditStatement] : [])] : []),
       db.prepare(
@@ -622,7 +622,7 @@ function validateCheckoutRequest(input, session, gate) {
   const recipient = input.recipient === undefined || input.recipient === null ? null : normalizeDeliveryRecipient(input.recipient);
   const quoteId = input.quoteId === undefined || input.quoteId === null ? null : cleanText(input.quoteId, 80);
   const shippingOptionId = input.shippingOptionId === undefined || input.shippingOptionId === null ? null : cleanText(input.shippingOptionId, 40);
-  const customer = gate === "normal" ? validateCheckoutCustomer(input.customer, session) : null;
+  const customer = validateCheckoutCustomer(input.customer, gate === "normal" ? session : null);
   return { checkoutRequestId, items, recipient, quoteId, shippingOptionId, customer };
 }
 

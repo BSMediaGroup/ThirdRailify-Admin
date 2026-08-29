@@ -569,8 +569,10 @@ export async function createStoredPrintfulDraftOrder(env, session, rawOrderId, f
   const db = requireCommerceDb(env);
   const orderId = validId(rawOrderId, "order_id_invalid");
   const [order, itemResult, delivery, settingsResult, provider, migration] = await Promise.all([
-    db.prepare(`SELECT id,environment,payment_status,fulfillment_status,stripe_checkout_session_id,
-      printful_order_id,safe_metadata_json,payment_confirmed_at FROM commerce_orders WHERE id=?`).bind(orderId).first(),
+    db.prepare(`SELECT o.id,o.environment,o.payment_status,o.fulfillment_status,o.stripe_checkout_session_id,
+      o.printful_order_id,o.safe_metadata_json,o.payment_confirmed_at,o.customer_id,
+      c.id linked_customer_id,c.customer_kind,c.contact_name_ciphertext,c.contact_email_ciphertext
+      FROM commerce_orders o LEFT JOIN commerce_customers c ON c.id=o.customer_id WHERE o.id=?`).bind(orderId).first(),
     db.prepare("SELECT product_id,variant_id,quantity FROM commerce_order_items WHERE order_id=? ORDER BY line_number").bind(orderId).all(),
     db.prepare("SELECT source_quote_id,provider_shipping_method_id,recipient_ciphertext FROM commerce_order_delivery_snapshots WHERE order_id=?").bind(orderId).first(),
     db.prepare(`SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN (
@@ -594,6 +596,7 @@ export async function createStoredPrintfulDraftOrder(env, session, rawOrderId, f
 
   requireDraftAcceptance(order.environment === "test", "printful_draft_test_only", "Only a controlled TEST order may create an acceptance draft.");
   requireDraftAcceptance(order.payment_status === "paid" && Boolean(order.payment_confirmed_at) && Boolean(verifiedWebhook), "printful_draft_payment_unverified", "A processed signed Stripe TEST webhook must confirm payment before drafting.");
+  requireDraftAcceptance(Boolean(order.customer_id) && order.customer_id === order.linked_customer_id && order.customer_kind === "guest" && Boolean(order.contact_name_ciphertext) && Boolean(order.contact_email_ciphertext), "printful_draft_customer_missing", "The controlled TEST order must be linked to its encrypted Guest Customer authority.");
   requireDraftAcceptance(order.fulfillment_status === "disabled", "printful_draft_fulfillment_state_invalid", "The local order must remain outside fulfillment.");
   requireDraftAcceptance(settings.checkout_enabled === false && settings.live_payment_capture_enabled === false, "printful_draft_live_gate_open", "Normal checkout and live payments must remain disabled.");
   requireDraftAcceptance(settings.fulfillment_submission_enabled === false && providerMetadata.fulfillment_enabled !== true, "printful_draft_fulfillment_gate_open", "Fulfillment must remain disabled while creating the unconfirmed draft.");

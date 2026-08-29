@@ -11,6 +11,7 @@ import { commerceEnvironment, createCommerceDatabases, enableControlledTestCheck
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const PUBLIC_ORIGIN = "https://thirdrailify.pages.dev";
 const REQUEST_ID = "55555555-5555-4555-8555-555555555555";
+const CONTROLLED_CUSTOMER = { mode: "guest", name: "Controlled Test Guest", email: "controlled-checkout@example.test" };
 
 async function configuredHarness() {
   const harness = await createCommerceDatabases();
@@ -55,6 +56,7 @@ function controlledInput(overrides = {}) {
     recipient: TEST_DELIVERY_RECIPIENT,
     quoteId: "shq_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     shippingOptionId: "shr_bbbbbbbbbbbbbbbbbbbbbbbb",
+    customer: CONTROLLED_CUSTOMER,
     ...overrides,
   };
 }
@@ -68,7 +70,7 @@ test("normal checkout stays disabled while the controlled route requires Master 
   assert.equal(normal.status, 409); assert.equal((await normal.json()).error, "checkout_disabled");
 
   const url = `${ADMIN_ORIGIN}/api/admin/commerce/test-checkout`;
-  const body = { checkoutRequestId: REQUEST_ID, productId: "product-test-001", variantId: "variant-test-001", quantity: 1, recipient: TEST_DELIVERY_RECIPIENT, quoteId: "shq_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", shippingOptionId: "shr_bbbbbbbbbbbbbbbbbbbbbbbb" };
+  const body = { checkoutRequestId: REQUEST_ID, productId: "product-test-001", variantId: "variant-test-001", quantity: 1, recipient: TEST_DELIVERY_RECIPIENT, quoteId: "shq_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", shippingOptionId: "shr_bbbbbbbbbbbbbbbbbbbbbbbb", customer: CONTROLLED_CUSTOMER };
   const anonymous = await adminCommerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, body }), env, data: { commerceFetch: stripeMock([]) } });
   assert.equal(anonymous.status, 401); assert.equal((await anonymous.json()).error, "unauthenticated");
   const { created, cookie } = await masterSession(env);
@@ -80,6 +82,10 @@ test("normal checkout stays disabled while the controlled route requires Master 
   const payload = await response.json();
   assert.equal(response.status, 200); assert.equal(payload.ok, true); assert.equal(payload.sessionId, "cs_test_controlled_001"); assert.equal(calls.length, 1);
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first()).count, 1);
+  const linked = await harness.commerceDb.prepare(`SELECT o.customer_id,c.customer_kind,c.linked_account_id,c.contact_name_ciphertext,c.contact_email_ciphertext
+    FROM commerce_orders o JOIN commerce_customers c ON c.id=o.customer_id`).first();
+  assert.ok(linked.customer_id); assert.equal(linked.customer_kind, "guest"); assert.equal(linked.linked_account_id, null);
+  assert.doesNotMatch(`${linked.contact_name_ciphertext}${linked.contact_email_ciphertext}`, /Controlled Test Guest|controlled-checkout@example\.test/i);
 });
 
 test("controlled core accepts only the configured fully verified sellable variant at quantity one", async (t) => {
@@ -115,6 +121,7 @@ test("controlled checkout requires a Stripe TEST credential and rejects browser 
     await assert.rejects(createStripeCheckoutSession({ ...env, STRIPE_SECRET_KEY: credential }, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), controlledInput(), async () => { throw new Error("Stripe must not be called"); }, { gate: "controlled_test" }), (error) => error.code === "stripe_api_not_configured");
   }
   await assert.rejects(createStripeCheckoutSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), { ...controlledInput(), unitPrice: 1 }, async () => { throw new Error("Stripe must not be called"); }, { gate: "controlled_test" }), (error) => error.code === "checkout_request_fields_invalid");
+  await assert.rejects(createStripeCheckoutSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), controlledInput({ customer: { ...CONTROLLED_CUSTOMER, mode: "account" } }), async () => { throw new Error("Stripe must not be called"); }, { gate: "controlled_test" }), (error) => error.code === "checkout_account_session_required");
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first()).count, 0);
 });
 
@@ -141,10 +148,11 @@ test("controlled core reuses authoritative pricing, immutable variant snapshot, 
   assert.equal(calls.length, 1);
   const params = calls[0].params;
   assert.equal(params.get("mode"), "payment"); assert.equal(params.get("line_items[0][price_data][currency]"), "cad"); assert.equal(params.get("line_items[0][price_data][unit_amount]"), "1500"); assert.equal(params.get("line_items[0][quantity]"), "1");
+  assert.equal(params.get("customer_email"), CONTROLLED_CUSTOMER.email); assert.ok(params.get("metadata[customer_id]")?.startsWith("cst_"));
   assert.equal(Object.keys(calls[0].init.headers).some((name) => name.toLowerCase() === "stripe-account"), false);
   assert.match(calls[0].init.headers["Idempotency-Key"], /^thirdrailify-checkout-v1-[0-9a-f]{64}$/);
-  const order = await harness.commerceDb.prepare("SELECT payment_status,fulfillment_status,customer_gross_amount,checkout_status,stripe_checkout_session_id,printful_order_id,safe_metadata_json FROM commerce_orders").first();
-  assert.equal(order.payment_status, "pending"); assert.equal(order.fulfillment_status, "disabled"); assert.equal(order.customer_gross_amount, 2000); assert.equal(order.checkout_status, "checkout_created"); assert.equal(order.stripe_checkout_session_id, first.sessionId); assert.equal(order.printful_order_id, null); assert.deepEqual(JSON.parse(order.safe_metadata_json), { checkoutGate: "controlled_test", fulfillment: "disabled" });
+  const order = await harness.commerceDb.prepare("SELECT payment_status,fulfillment_status,customer_gross_amount,checkout_status,stripe_checkout_session_id,printful_order_id,customer_id,safe_metadata_json FROM commerce_orders").first();
+  assert.equal(order.payment_status, "pending"); assert.equal(order.fulfillment_status, "disabled"); assert.equal(order.customer_gross_amount, 2000); assert.equal(order.checkout_status, "checkout_created"); assert.equal(order.stripe_checkout_session_id, first.sessionId); assert.equal(order.printful_order_id, null); assert.ok(order.customer_id?.startsWith("cst_")); assert.deepEqual(JSON.parse(order.safe_metadata_json), { checkoutGate: "controlled_test", fulfillment: "disabled" });
   const line = await harness.commerceDb.prepare("SELECT product_id,variant_id,product_name,variant_name,unit_amount,quantity,line_total_amount,fulfillment_provider,fulfillment_variant_id FROM commerce_order_items").first();
   assert.deepEqual(line, { product_id: "product-test-001", variant_id: "variant-test-001", product_name: "Controlled Mug", variant_name: "M / Black", unit_amount: 1500, quantity: 1, line_total_amount: 1500, fulfillment_provider: "printful", fulfillment_variant_id: "target-variant-001" });
   const delivery = await harness.commerceDb.prepare("SELECT recipient_ciphertext,shipping_amount,display_shipping_method FROM commerce_order_delivery_snapshots").first();

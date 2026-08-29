@@ -44,6 +44,7 @@ async function seedPaidAcceptance(harness) {
     recipient: TEST_DELIVERY_RECIPIENT,
     quoteId: quote.quoteId,
     shippingOptionId: quote.shippingOptionId,
+    customer: { mode: "guest", name: "Controlled Draft Guest", email: "controlled-draft@example.test" },
   };
   const stripe = async (_url, init) => {
     const params = new URLSearchParams(init.body);
@@ -103,6 +104,7 @@ test("controlled paid TEST order creates at most one unconfirmed Printful draft 
 test("Printful draft acceptance fails before provider access when payment or safety authority is incomplete", async () => {
   for (const mutation of [
     "UPDATE commerce_orders SET payment_status='pending',payment_confirmed_at=NULL",
+    "UPDATE commerce_orders SET customer_id=NULL",
     "DELETE FROM commerce_webhook_events",
     "UPDATE commerce_settings SET value_json='true' WHERE setting_key='fulfillment_submission_enabled'",
     "UPDATE commerce_settings SET value_json='\"live\"' WHERE setting_key='printful_order_mode'",

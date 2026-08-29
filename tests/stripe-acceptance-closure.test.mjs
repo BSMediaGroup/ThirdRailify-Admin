@@ -29,6 +29,7 @@ test("acceptance closure preserves paid evidence and paused migration while both
   const created = await createStripeCheckoutSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), {
     checkoutRequestId: "77777777-7777-4777-8777-777777777777",
     items: [{ productId: "product-test-001", variantId: "variant-test-001", quantity: 1 }],
+    customer: { mode: "guest", name: "Closure Test Guest", email: "closure-guest@example.test" },
   }, async (_url, init) => {
     stripeCalls += 1;
     const params = new URLSearchParams(init.body);

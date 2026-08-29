@@ -33,10 +33,35 @@ test("Customer Emails is responsive, revision-aware, non-sending, and usable acr
     if (width === 1440) await exerciseEditor(page, fixture);
     if (width <= 768) { assert.equal(await page.locator("#customer-email-template-select").isVisible(), true); assert.equal(await page.locator("#customer-email-template-select").evaluate((element) => getComputedStyle(element).textAlign), "left"); }
     else {
-      const alignment = await page.locator('.customer-email-workspace > nav button').first().evaluate((button) => ({ button: getComputedStyle(button).textAlign, title: getComputedStyle(button.querySelector("strong")).textAlign, detail: getComputedStyle(button.querySelector("small")).textAlign }));
-      assert.deepEqual(alignment, { button: "left", title: "left", detail: "left" });
+      const alignment = await page.locator('.customer-email-workspace > nav button').evaluateAll((buttons) => buttons.map((button) => {
+        const span = button.querySelector(":scope > span"); const title = button.querySelector("strong"); const detail = button.querySelector("small"); const chip = button.querySelector(":scope > .customer-email-chip");
+        const buttonBox = button.getBoundingClientRect(); const spanBox = span.getBoundingClientRect(); const titleBox = title.getBoundingClientRect(); const detailBox = detail.getBoundingClientRect(); const chipBox = chip.getBoundingClientRect(); const style = getComputedStyle(button);
+        const borderLeft = Number.parseFloat(style.borderLeftWidth); const borderRight = Number.parseFloat(style.borderRightWidth); const paddingLeft = Number.parseFloat(style.paddingLeft); const paddingRight = Number.parseFloat(style.paddingRight);
+        return { textAlign: style.textAlign, justifyContent: style.justifyContent, expectedLeft: buttonBox.left + borderLeft + paddingLeft, spanLeft: spanBox.left, titleLeft: titleBox.left, detailLeft: detailBox.left, chipLeft: chipBox.left, spanWidth: spanBox.width, availableWidth: buttonBox.width - borderLeft - borderRight - paddingLeft - paddingRight };
+      }));
+      assert.ok(alignment.length > 1, "desktop renders the full template card rail");
+      for (const card of alignment) {
+        assert.equal(card.textAlign, "left"); assert.equal(card.justifyContent, "stretch");
+        for (const [label, left] of [["content", card.spanLeft], ["title", card.titleLeft], ["description", card.detailLeft], ["status", card.chipLeft]]) assert.ok(Math.abs(left - card.expectedLeft) <= 1, `${label} shares the card's left content edge: ${JSON.stringify(card)}`);
+        assert.ok(Math.abs(card.spanWidth - card.availableWidth) <= 1, `content spans the available card width: ${JSON.stringify(card)}`);
+      }
+      const variableAlignment = await page.locator('.customer-email-variables button').evaluateAll((buttons) => buttons.map((button) => {
+        const token = button.querySelector("code"); const detail = button.querySelector("span"); const buttonBox = button.getBoundingClientRect(); const tokenBox = token.getBoundingClientRect(); const detailBox = detail.getBoundingClientRect(); const style = getComputedStyle(button);
+        const borderLeft = Number.parseFloat(style.borderLeftWidth); const paddingLeft = Number.parseFloat(style.paddingLeft);
+        return { textAlign: style.textAlign, justifyContent: style.justifyContent, expectedLeft: buttonBox.left + borderLeft + paddingLeft, tokenLeft: tokenBox.left, detailLeft: detailBox.left, verticalGap: detailBox.top - tokenBox.bottom };
+      }));
+      assert.ok(variableAlignment.length > 1, "desktop renders the merge-variable cards");
+      for (const card of variableAlignment) {
+        assert.equal(card.textAlign, "left"); assert.equal(card.justifyContent, "stretch");
+        assert.ok(Math.abs(card.tokenLeft - card.expectedLeft) <= 1, `variable token shares the card's left content edge: ${JSON.stringify(card)}`);
+        assert.ok(Math.abs(card.detailLeft - card.expectedLeft) <= 1, `variable description shares the card's left content edge: ${JSON.stringify(card)}`);
+        assert.ok(card.verticalGap >= 2 && card.verticalGap <= 5, `variable token and description retain compact line spacing: ${JSON.stringify(card)}`);
+      }
     }
+    const variableColumns = await page.locator('.customer-email-variables > div').evaluate((grid) => getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length);
+    assert.equal(variableColumns, width === 1440 ? 3 : width === 768 ? 2 : 1, `${width}px uses the intended merge-variable column count`);
     if (process.env.CUSTOMER_EMAILS_SCREENSHOT_DIR) { await page.locator(".customer-email-editor-shell").evaluate((element) => element.scrollIntoView({ block: "start" })); await page.screenshot({ path: path.join(process.env.CUSTOMER_EMAILS_SCREENSHOT_DIR, `customer-emails-${width}-editor.png`) }); }
+    if (width === 1440 && process.env.CUSTOMER_EMAILS_SCREENSHOT_DIR) { await page.locator(".customer-email-variables").evaluate((element) => element.scrollIntoView({ block: "center" })); await page.screenshot({ path: path.join(process.env.CUSTOMER_EMAILS_SCREENSHOT_DIR, "customer-emails-1440-variables.png") }); }
     await page.keyboard.press("Tab"); assert.equal(await page.evaluate(() => document.activeElement !== document.body), true);
     await context.close();
   }
