@@ -127,6 +127,55 @@ test("Admin inbox, sidebar queue counts, and account indicator render without ov
   }
 });
 
+test("Admin sidebar scroll keeps the branding panel fixed on desktop and mobile", async (t) => {
+  const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "44201"], { stdio: "ignore" });
+  t.after(() => server.kill()); await waitForServer();
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
+
+  for (const [width, height] of [[1440, 560], [390, 560]]) {
+    const context = await browser.newContext({ viewport: { width, height } });
+    const page = await context.newPage(); const errors = [];
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("**/api/**", (route) => routeFixture(route, () => {}));
+    await page.goto(ORIGIN); await page.getByRole("heading", { level: 1, name: "Every signal. One control room." }).waitFor();
+    if (width <= 820) {
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      await page.waitForTimeout(250);
+    }
+
+    const before = await page.locator("#admin-sidebar").evaluate((sidebar) => {
+      const brand = sidebar.querySelector(".sidebar-brand-panel");
+      const scroller = sidebar.querySelector(".sidebar-scroll-region");
+      const firstLink = sidebar.querySelector(".primary-nav .nav-link");
+      if (!(brand instanceof HTMLElement) || !(scroller instanceof HTMLElement) || !(firstLink instanceof HTMLElement)) return null;
+      const brandBox = brand.getBoundingClientRect(); const linkBox = firstLink.getBoundingClientRect();
+      return { brandTop: brandBox.top, brandBottom: brandBox.bottom, linkTop: linkBox.top, scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight, sidebarOverflow: getComputedStyle(sidebar).overflowY };
+    });
+    assert.ok(before, `sidebar regions exist at ${width}x${height}`);
+    assert.equal(before.sidebarOverflow, "hidden", `outer sidebar does not scroll at ${width}x${height}`);
+    assert.equal(before.scrollHeight > before.clientHeight, true, `navigation region overflows at ${width}x${height}`);
+
+    await page.locator(".sidebar-scroll-region").evaluate((scroller) => { scroller.scrollTop = 260; });
+    await page.waitForTimeout(50);
+    const after = await page.locator("#admin-sidebar").evaluate((sidebar) => {
+      const brand = sidebar.querySelector(".sidebar-brand-panel");
+      const scroller = sidebar.querySelector(".sidebar-scroll-region");
+      const firstLink = sidebar.querySelector(".primary-nav .nav-link");
+      if (!(brand instanceof HTMLElement) || !(scroller instanceof HTMLElement) || !(firstLink instanceof HTMLElement)) return null;
+      const brandBox = brand.getBoundingClientRect(); const linkBox = firstLink.getBoundingClientRect();
+      return { brandTop: brandBox.top, brandBottom: brandBox.bottom, linkTop: linkBox.top, scrollTop: scroller.scrollTop };
+    });
+    assert.ok(after, `sidebar regions remain mounted at ${width}x${height}`);
+    assert.equal(after.scrollTop > 0, true, `navigation region scrolls at ${width}x${height}`);
+    assert.equal(after.linkTop < before.linkTop, true, `navigation content moves at ${width}x${height}`);
+    assert.equal(Math.abs(after.brandTop - before.brandTop) < 0.5, true, `brand top remains fixed at ${width}x${height}`);
+    assert.equal(Math.abs(after.brandBottom - before.brandBottom) < 0.5, true, `brand bottom remains fixed at ${width}x${height}`);
+    assert.deepEqual(errors, [], `no sidebar runtime errors at ${width}x${height}`);
+    await context.close();
+  }
+});
+
 async function routeFixture(route, onStatus, options = {}) {
   const url = new URL(route.request().url()); const apiPath = url.pathname;
   if (apiPath === "/api/auth/config") return json(route, { configured: true, emailSignupConfigured: true, turnstileSiteKey: "fixture-site-key", oauthProviders: ["discord", "github", "twitter"], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: ORIGIN, environment: "test", cookieMode: "host-only" });

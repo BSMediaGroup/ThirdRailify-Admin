@@ -104,55 +104,59 @@ export function AdminShell() {
     <div className={`admin-layout${collapsed ? " admin-layout--collapsed" : ""}`}>
       <a className="skip-link" href="#admin-main">Skip to content</a>
       <aside id="admin-sidebar" className={`sidebar ${mobileOpen ? "sidebar--open" : ""}`} aria-label="Admin navigation">
-        <div className="brand-lockup">
-          <span className="brand-mark" aria-hidden="true"><img src={boltMark} alt="" /></span>
-          <div className="brand-lockup__copy"><strong>THIRD RAILIFY</strong><span>CONTROL ROOM</span></div>
+        <div className="sidebar-brand-panel">
+          <div className="brand-lockup">
+            <span className="brand-mark" aria-hidden="true"><img src={boltMark} alt="" /></span>
+            <div className="brand-lockup__copy"><strong>THIRD RAILIFY</strong><span>CONTROL ROOM</span></div>
+          </div>
         </div>
 
-        <div className="environment-note">
-          <span className="status-dot" aria-hidden="true" />
-          <div><strong>Authenticated staging</strong><span>D1 account authority</span></div>
-        </div>
+        <div className="sidebar-scroll-region">
+          <div className="environment-note">
+            <span className="status-dot" aria-hidden="true" />
+            <div><strong>Authenticated staging</strong><span>D1 account authority</span></div>
+          </div>
 
-        <nav className="primary-nav">
-          <p className="nav-label">Workspace</p>
-          {topLevelAdminAreas.map((area) => {
-            const children = childAdminAreas(area.path);
-            if (!children.length) return <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
-              <AdminIcon name={area.icon} />
-              <span>{area.label}</span>
-              {badgeFor(area.path) ? <b className="nav-badge" aria-label={`${badgeFor(area.path)} unread`}>{formatBadge(badgeFor(area.path))}</b> : null}
-            </NavLink>;
-            const active = groupIsActive(area.path, location.pathname);
-            const open = openGroups.has(area.path);
-            const controlId = `${area.shortLabel.toLowerCase()}-navigation`;
-            return <div key={area.path} className={`nav-group${open ? " nav-group--open" : ""}${active ? " nav-group--active" : ""}`}>
-              <div className="nav-group__row">
-                <NavLink to={area.path} end aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
-                  <AdminIcon name={area.icon} />
-                  <span>{area.label}</span>
-                  {badgeFor(area.path) ? <b className="nav-badge" aria-label={`${badgeFor(area.path)} items need attention`}>{formatBadge(badgeFor(area.path))}</b> : null}
-                </NavLink>
-                <button className="nav-group__toggle" type="button" aria-expanded={open} aria-controls={controlId} aria-label={`${open ? "Collapse" : "Expand"} ${area.shortLabel} navigation`} onClick={() => setOpenGroups((current) => { const next = new Set(current); if (next.has(area.path)) next.delete(area.path); else next.add(area.path); return next; })}>
-                  <AdminIcon name="chevron" size={15} />
-                </button>
-              </div>
-              <div id={controlId} className="nav-group__children" hidden={!open}>
-                {children.map((child) => (
-                  <NavLink key={child.path} to={child.path} aria-label={child.label} className={({ isActive }) => isActive ? "nav-link nav-link--nested nav-link--active" : "nav-link nav-link--nested"}>
-                    <AdminIcon name={child.icon} size={17} />
-                    <span>{child.label}</span>
-                    {badgeFor(child.path) ? <b className="nav-badge nav-badge--nested" aria-label={`${badgeFor(child.path)} items need attention`}>{formatBadge(badgeFor(child.path))}</b> : null}
+          <nav className="primary-nav">
+            <p className="nav-label">Workspace</p>
+            {topLevelAdminAreas.map((area) => {
+              const children = childAdminAreas(area.path);
+              if (!children.length) return <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
+                <AdminIcon name={area.icon} />
+                <span>{area.label}</span>
+                {badgeFor(area.path) ? <b className="nav-badge" aria-label={`${badgeFor(area.path)} unread`}>{formatBadge(badgeFor(area.path))}</b> : null}
+              </NavLink>;
+              const active = groupIsActive(area.path, location.pathname);
+              const open = openGroups.has(area.path);
+              const controlId = `${area.shortLabel.toLowerCase()}-navigation`;
+              return <div key={area.path} className={`nav-group${open ? " nav-group--open" : ""}${active ? " nav-group--active" : ""}`}>
+                <div className="nav-group__row">
+                  <NavLink to={area.path} end aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
+                    <AdminIcon name={area.icon} />
+                    <span>{area.label}</span>
+                    {badgeFor(area.path) ? <b className="nav-badge" aria-label={`${badgeFor(area.path)} items need attention`}>{formatBadge(badgeFor(area.path))}</b> : null}
                   </NavLink>
-                ))}
-              </div>
-            </div>;
-          })}
-        </nav>
+                  <button className="nav-group__toggle" type="button" aria-expanded={open} aria-controls={controlId} aria-label={`${open ? "Collapse" : "Expand"} ${area.shortLabel} navigation`} onClick={() => setOpenGroups((current) => { const next = new Set(current); if (next.has(area.path)) next.delete(area.path); else next.add(area.path); return next; })}>
+                    <AdminIcon name="chevron" size={15} />
+                  </button>
+                </div>
+                <div id={controlId} className="nav-group__children" hidden={!open}>
+                  {children.map((child) => (
+                    <NavLink key={child.path} to={child.path} aria-label={child.label} className={({ isActive }) => isActive ? "nav-link nav-link--nested nav-link--active" : "nav-link nav-link--nested"}>
+                      <AdminIcon name={child.icon} size={17} />
+                      <span>{child.label}</span>
+                      {badgeFor(child.path) ? <b className="nav-badge nav-badge--nested" aria-label={`${badgeFor(child.path)} items need attention`}>{formatBadge(badgeFor(child.path))}</b> : null}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>;
+            })}
+          </nav>
 
-        <div className="sidebar-footer">
-          <AdminIcon name="shield" />
-          <p><strong>Least privilege</strong><span>Account writes require Master Admin.</span></p>
+          <div className="sidebar-footer">
+            <AdminIcon name="shield" />
+            <p><strong>Least privilege</strong><span>Account writes require Master Admin.</span></p>
+          </div>
         </div>
       </aside>
 

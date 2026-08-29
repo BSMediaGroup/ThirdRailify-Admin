@@ -78,8 +78,8 @@ html::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, var(--gold), var(--gold-hot));
 }
 
-.sidebar { -ms-overflow-style: none; scrollbar-width: none; }
-.sidebar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.sidebar-scroll-region { -ms-overflow-style: none; scrollbar-width: none; }
+.sidebar-scroll-region::-webkit-scrollbar { display: none; width: 0; height: 0; }
 body::before {
   position: fixed;
   inset: 0;
@@ -111,11 +111,12 @@ img { display: block; max-width: 100%; }
   display: flex;
   width: var(--sidebar-width);
   flex-direction: column;
-  padding: 24px 18px 18px;
-  overflow-y: auto;
+  overflow: hidden;
   border-right: 1px solid var(--line);
   background: linear-gradient(180deg, #0d0d0a, #090907 70%);
 }
+.sidebar-brand-panel { display: flex; min-height: 112px; flex: 0 0 auto; align-items: center; padding: 24px 18px; border-bottom: 1px solid var(--line); background: rgba(11,11,9,.96); }
+.sidebar-scroll-region { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; padding: 0 18px 18px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; min-height: 49px; padding: 0 6px; }
 .brand-mark { position: relative; display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; border: 1px solid rgba(243,201,40,.38); border-radius: 12px; background: radial-gradient(circle at 50% 25%, rgba(243,201,40,.16), transparent 66%), #10100d; box-shadow: inset 0 1px 0 rgba(255,223,85,.12), inset 0 0 18px rgba(243,201,40,.05), 0 0 22px rgba(243,201,40,.08); }
 .brand-mark::after { position: absolute; inset: 3px; border: 1px solid rgba(255,223,85,.07); border-radius: 9px; content: ""; pointer-events: none; }
@@ -163,11 +164,15 @@ img { display: block; max-width: 100%; }
 
 .admin-workspace { min-height: 100vh; margin-left: var(--sidebar-width); }
 .sidebar,
+.sidebar-brand-panel,
+.sidebar-scroll-region,
 .admin-workspace { transition: width .2s ease, margin-left .2s ease, padding .2s ease; }
 
 @media (min-width: 821px) {
   .admin-layout--collapsed { --sidebar-width: var(--sidebar-collapsed-width); }
-  .admin-layout--collapsed .sidebar { align-items: center; padding-inline: 12px; overflow-x: hidden; }
+  .admin-layout--collapsed .sidebar { overflow-x: hidden; }
+  .admin-layout--collapsed .sidebar-brand-panel,
+  .admin-layout--collapsed .sidebar-scroll-region { padding-inline: 12px; }
   .admin-layout--collapsed .brand-lockup { justify-content: center; padding: 0; }
   .admin-layout--collapsed .brand-lockup__copy,
   .admin-layout--collapsed .environment-note > div,

@@ -4,6 +4,18 @@ import test from "node:test";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
 
+test("Admin sidebar keeps branding outside the independently scrollable navigation region", async () => {
+  const [shell, styles] = await Promise.all([
+    read("src/components/AdminShell.tsx"),
+    read("src/styles/global.css"),
+  ]);
+  assert.match(shell, /className="sidebar-brand-panel"[\s\S]*className="brand-lockup"/);
+  assert.match(shell, /className="sidebar-scroll-region"[\s\S]*className="environment-note"[\s\S]*className="primary-nav"[\s\S]*className="sidebar-footer"/);
+  assert.match(styles, /\.sidebar \{[\s\S]*overflow: hidden;/);
+  assert.match(styles, /\.sidebar-brand-panel \{[^}]*flex: 0 0 auto;[^}]*border-bottom:/);
+  assert.match(styles, /\.sidebar-scroll-region \{[^}]*min-height: 0;[^}]*flex: 1 1 auto;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/);
+});
+
 test("GOATS is a first-class expandable sidebar group with relevant child icons", async () => {
   const [navigation, shell, icons] = await Promise.all([
     read("src/config/navigation.ts"),
