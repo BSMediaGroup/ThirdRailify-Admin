@@ -1,5 +1,15 @@
 # Bump notes
 
+## 2026-08-30 — Wheels V1.7 portable config validation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Extended only the existing wheel-config JSON sanitizer/projection for `themePreset: "custom"`, strict 1–5 colour custom palettes, normalized accent values, and backward-compatible `fireworksEnabled` defaulting. Added focused true/false/legacy/invalid palette and accent coverage.
+- Added no D1 schema, migration, table, binding, route, resource or secret. Signed save authority, creator roles, revision/conflict handling, official selection/idempotency/results, media custody, Commerce, providers, Wix, DNS, domains, and production cutover remain unchanged.
+- Released Admin first as `7329f40c-1af4-4c9b-9106-20263fd56c6a` (`https://7329f40c.thirdrailify-admin.pages.dev`); stable and immutable `/api/wheels` both return the existing JSON route successfully. Public followed as `985c6189-53a9-474c-bd12-a76595a7a4b9` (`https://985c6189.thirdrailify.pages.dev`).
+
 ## 2026-08-29 — Collapsed sidebar brand alignment
 
 - Centred the Third Railify brand mark inside the collapsed desktop sidebar's full 84-pixel rail, matching the navigation-item centre line without changing the expanded layout, mark size, or readable navigation geometry.

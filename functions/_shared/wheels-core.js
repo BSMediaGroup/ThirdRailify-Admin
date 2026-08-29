@@ -16,7 +16,7 @@ const MAX_BODY_BYTES = 384 * 1024;
 const HEX = /^#[0-9a-f]{6}$/i;
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,78}[a-z0-9])$/;
 const ROLES = new Set(["owner", "editor", "spinner"]);
-const PRESETS = new Set(["third-rail-gold", "live-wire-red", "gina-violet", "high-voltage-mono", "signal-teal", "after-hours"]);
+const PRESETS = new Set(["third-rail-gold", "live-wire-red", "gina-violet", "high-voltage-mono", "signal-teal", "after-hours", "custom"]);
 const CELEBRATIONS = new Set(["subtle", "normal", "strong"]);
 const DEFAULT_CONFIG = Object.freeze({
   themePreset: "third-rail-gold",
@@ -30,6 +30,7 @@ const DEFAULT_CONFIG = Object.freeze({
   winnerSoundEnabled: true,
   celebrationEnabled: true,
   confettiEnabled: true,
+  fireworksEnabled: true,
   winnerLightingEnabled: true,
   celebrationIntensity: "normal",
   backgroundEnabled: true,
@@ -455,8 +456,11 @@ function validateEntries(input, options = {}) {
 }
 
 function validateConfig(input) {
-  const palette = Array.isArray(input.palette) ? input.palette.map((value) => clean(value, 7)).filter((value) => HEX.test(value)).slice(0, 12).map((value) => value.toUpperCase()) : DEFAULT_CONFIG.palette;
-  if (palette.length < 2) throw new AuthFailure(400, "wheel_palette_invalid", "Choose at least two valid palette colours.");
+  const rawPalette = Array.isArray(input.palette) ? input.palette : DEFAULT_CONFIG.palette;
+  if (rawPalette.length > 12 || rawPalette.some((value) => !HEX.test(clean(value, 7)))) throw new AuthFailure(400, "wheel_palette_invalid", "Palette colours must be six-digit hex values.");
+  const palette = rawPalette.map((value) => clean(value, 7).toUpperCase());
+  const custom = input.themePreset === "custom";
+  if (palette.length < (custom ? 1 : 2) || (custom && palette.length > 5)) throw new AuthFailure(400, "wheel_palette_invalid", custom ? "Custom palettes require between one and five valid colours." : "Choose at least two valid palette colours.");
   const pointer = clean(input.pointerAccent || DEFAULT_CONFIG.pointerAccent, 7);
   if (!HEX.test(pointer)) throw new AuthFailure(400, "wheel_pointer_invalid", "The pointer accent must be a six-digit hex colour.");
   const duration = positiveInteger(input.spinDurationMs || DEFAULT_CONFIG.spinDurationMs, "spin_duration_invalid", 20000);
@@ -474,6 +478,7 @@ function validateConfig(input) {
     winnerSoundEnabled: input.winnerSoundEnabled !== false,
     celebrationEnabled: input.celebrationEnabled !== false && input.celebrationIntensity !== "off",
     confettiEnabled: input.confettiEnabled !== false,
+    fireworksEnabled: input.fireworksEnabled !== false,
     winnerLightingEnabled: input.winnerLightingEnabled !== false,
     celebrationIntensity: CELEBRATIONS.has(input.celebrationIntensity) ? input.celebrationIntensity : legacyCelebration(input.celebrationIntensity),
     backgroundEnabled: input.backgroundEnabled !== false,

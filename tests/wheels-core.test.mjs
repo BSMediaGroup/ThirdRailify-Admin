@@ -3,8 +3,19 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createCommerceDatabases, commerceEnvironment } from "./commerce-test-helpers.mjs";
 import {
-  createWheel,getPublicWheel,listPublicWheels,mutateCreatorGrant,mutateWheelAssignment,participantSnapshotHash,performOfficialSpin,saveWheel,secureBoundedInteger,voidOfficialResult,
+  createWheel,getPublicWheel,listPublicWheels,mutateCreatorGrant,mutateWheelAssignment,participantSnapshotHash,performOfficialSpin,saveWheel,secureBoundedInteger,validateConfig,voidOfficialResult,
 } from "../functions/_shared/wheels-core.js";
+
+test("V1.7 custom palette and fireworks config normalize without schema changes", () => {
+  const single = validateConfig({ themePreset: "custom", palette: ["#112233"], pointerAccent: "#abcdef", fireworksEnabled: false, spinDurationMs: 6500, winnerMessageTemplate: "Signal locked: {winner}" });
+  assert.equal(single.themePreset, "custom"); assert.deepEqual(single.palette, ["#112233"]); assert.equal(single.pointerAccent, "#ABCDEF"); assert.equal(single.fireworksEnabled, false);
+  assert.equal(validateConfig({ ...single, fireworksEnabled: true }).fireworksEnabled, true); assert.equal(validateConfig({ ...single, fireworksEnabled: "invalid" }).fireworksEnabled, true); assert.equal(validateConfig({ ...single, fireworksEnabled: undefined }).fireworksEnabled, true);
+  assert.throws(() => validateConfig({ ...single, palette: [] }), (error) => error.code === "wheel_palette_invalid");
+  assert.throws(() => validateConfig({ ...single, palette: Array(6).fill("#112233") }), (error) => error.code === "wheel_palette_invalid");
+  assert.throws(() => validateConfig({ ...single, palette: ["#112233", "var(--gold)"] }), (error) => error.code === "wheel_palette_invalid");
+  assert.throws(() => validateConfig({ ...single, pointerAccent: "transparent" }), (error) => error.code === "wheel_pointer_invalid");
+  const legacy = validateConfig({ themePreset: "third-rail-gold", palette: ["#F3C928", "#B8182F"], pointerAccent: "#F3C928", spinDurationMs: 6500, winnerMessageTemplate: "Signal locked: {winner}" }); assert.equal(legacy.fireworksEnabled, true); assert.equal(legacy.themePreset, "third-rail-gold");
+});
 
 test("secure bounded integers use rejection sampling and weighted snapshot hashes are stable", async () => {
   let calls = 0; const values = [0xffffffff, 2];

@@ -1,5 +1,9 @@
 # Wheels V1.1 Admin Authority
 
+## V1.7 portable appearance config
+
+No migration is required. The existing `config_json` authority now accepts `themePreset: "custom"` with 1–5 strict six-digit hex values in the existing `palette` array and one normalized `pointerAccent`. Named/legacy palette validation retains its previous bound for backward-compatible imports. The new `fireworksEnabled` boolean is projected through the same sanitized config; missing/legacy values normalize to `true` under the existing boolean-default convention. Entry colour persistence, signed save authorization, revision checks, wheel media, and official-spin/result semantics are unchanged.
+
 ## Authority and storage
 
 Wheels is an additive subsystem in the existing Admin-owned `thirdrailify-commerce` D1. Migration `0014_wheels_v1.sql` adds `wheels`, `wheel_entries`, `wheel_creator_grants`, `wheel_access`, `wheel_official_spins`, `wheel_audit_events`, `wheel_rate_limits`, and `wheel_settings`. Migration `0016_wheels_media.sql` adds only `wheel_media_assets` and its active-purpose index; it creates no wheel and no asset. Existing commerce, GOATS, banner, inbox, catalogue, order, and payment tables are not changed.
