@@ -23,6 +23,7 @@ const CHECKOUT_URL = "https://thirdrailify-admin.pages.dev/api/commerce/checkout
 const REQUEST_ID = "77777777-7777-4777-8777-777777777777";
 const ITEMS = [{ productId: "product-test-001", variantId: "variant-test-001", quantity: 2 }];
 const RECIPIENT = { name: "  Ada   Rail  ", address1: "  100   King Street  ", address2: " Unit  4 ", city: " London ", region: "on", postalCode: "n6a 1a1", countryCode: "ca" };
+const CUSTOMER = { mode: "guest", name: "Ada Rail", email: "ada@example.test" };
 
 function post(url, body) {
   return new Request(url, { method: "POST", headers: { Origin: PUBLIC_ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -108,7 +109,7 @@ test("quote binds authoritative cart and recipient, then checkout snapshots encr
   assert.equal("providerRateId" in payload.quote.options[0], false); assert.doesNotMatch(JSON.stringify(payload), /11576|target-variant|STANDARD/);
 
   const stripeCalls = [];
-  const checkoutBody = { checkoutRequestId: REQUEST_ID, items: ITEMS, recipient: RECIPIENT, quoteId: payload.quote.id, shippingOptionId: payload.quote.options[0].id };
+  const checkoutBody = { checkoutRequestId: REQUEST_ID, customer: CUSTOMER, items: ITEMS, recipient: RECIPIENT, quoteId: payload.quote.id, shippingOptionId: payload.quote.options[0].id };
   const stripe = async (url, init) => {
     const params = new URLSearchParams(init.body); stripeCalls.push({ url, init, params }); const orderId = params.get("metadata[order_id]");
     return Response.json({ id: "cs_test_shipping_001", object: "checkout.session", livemode: false, mode: "payment", currency: "cad", amount_total: 6850, client_reference_id: orderId, metadata: { order_id: orderId, checkout_request_id: REQUEST_ID }, url: "https://checkout.stripe.com/c/pay/cs_test_shipping_001" });
@@ -126,7 +127,7 @@ test("quote binds authoritative cart and recipient, then checkout snapshots encr
   const delivery = await harness.commerceDb.prepare("SELECT * FROM commerce_order_delivery_snapshots WHERE order_id=?").bind(checkoutPayload.orderId).first();
   assert.equal(order.customer_gross_amount, 6850); assert.equal(order.fulfillment_provider, "printful"); assert.equal(delivery.shipping_amount, 1350); assert.equal(delivery.currency_code, "CAD");
   assert.doesNotMatch(delivery.recipient_ciphertext, /Ada|King|N6A/i);
-  assert.deepEqual(JSON.parse(await decryptCommerceSecret(env(harness), delivery.recipient_ciphertext, `order-delivery:${checkoutPayload.orderId}`)), normalizeDeliveryRecipient(RECIPIENT));
+  assert.deepEqual(JSON.parse(await decryptCommerceSecret(env(harness), delivery.recipient_ciphertext, `order-delivery:${checkoutPayload.orderId}`)), { ...normalizeDeliveryRecipient(RECIPIENT), customerContact: { name: CUSTOMER.name, email: CUSTOMER.email } });
   const serializedDb = JSON.stringify(await harness.commerceDb.prepare("SELECT * FROM commerce_shipping_quotes").all());
   assert.doesNotMatch(serializedDb, /Ada|King|N6A/i);
 
@@ -153,7 +154,7 @@ test("checkout rejects changed cart, recipient, expired quote, selected option, 
     try {
       await seedPhysicalCart(harness); await enableShipping(harness.commerceDb); await enableTestCheckout(harness.commerceDb);
       const { payload } = await createQuote(harness);
-      const body = await mutate({ checkoutRequestId: REQUEST_ID, items: ITEMS, recipient: RECIPIENT, quoteId: payload.quote.id, shippingOptionId: payload.quote.options[0].id });
+      const body = await mutate({ checkoutRequestId: REQUEST_ID, customer: CUSTOMER, items: ITEMS, recipient: RECIPIENT, quoteId: payload.quote.id, shippingOptionId: payload.quote.options[0].id });
       const response = await checkoutRequest({ request: post(CHECKOUT_URL, body), env: env(harness), data: { checkoutFetch: async () => { throw new Error("must not call Stripe"); } } });
       const error = await response.json(); assert.equal(response.status, 409, JSON.stringify(error)); assert.equal(error.error, expected);
       assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_orders").first()).count, 0);
@@ -164,7 +165,7 @@ test("checkout rejects changed cart, recipient, expired quote, selected option, 
   await seedPhysicalCart(harness); await enableShipping(harness.commerceDb); await enableTestCheckout(harness.commerceDb);
   const { payload } = await createQuote(harness);
   await harness.commerceDb.prepare("UPDATE commerce_shipping_quotes SET expires_at='2000-01-01T00:00:00Z' WHERE id=?").bind(payload.quote.id).run();
-  const base = { checkoutRequestId: REQUEST_ID, items: ITEMS, recipient: RECIPIENT, quoteId: payload.quote.id, shippingOptionId: payload.quote.options[0].id };
+  const base = { checkoutRequestId: REQUEST_ID, customer: CUSTOMER, items: ITEMS, recipient: RECIPIENT, quoteId: payload.quote.id, shippingOptionId: payload.quote.options[0].id };
   const expired = await checkoutRequest({ request: post(CHECKOUT_URL, base), env: env(harness), data: { checkoutFetch: async () => { throw new Error("must not call Stripe"); } } });
   assert.equal(expired.status, 409); assert.equal((await expired.json()).error, "shipping_quote_expired");
   const forged = await checkoutRequest({ request: post(CHECKOUT_URL, { ...base, shippingAmount: 1 }), env: env(harness), data: {} });

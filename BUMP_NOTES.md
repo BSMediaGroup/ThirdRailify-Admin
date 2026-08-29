@@ -1,5 +1,12 @@
 # Bump notes
 
+## 2026-08-29 — Customer identity and Admin relationship management
+
+- Added local-only additive Commerce migration `0017_commerce_customers.sql`: encrypted guest/account Customer identity, privacy-safe exact-email guest lookup, one account-backed Customer per Account, nullable restrictive `commerce_orders.customer_id`, and unchanged legacy orders.
+- Added server-authoritative guest/account checkout binding, immutable checkout contact snapshots, protected Customers list/detail APIs and UI, reciprocal Account/Order deep links, comprehensive safe Account drawers, and truthful isolated TEST/LIVE customer aggregates. Matching guest and Account emails are never auto-merged.
+- Standardized pointer/keyboard resizable columns, persistence, bounds, mobile fallback, and visible reset across the five genuine Admin tables: Accounts, Customers, Wheels Library, Wheels Access assignments, and Wheels Results.
+- Added Node 22.16.0 migration/server/security regression coverage plus Playwright coverage at 1440, 768, and 390. Checkout/payment/fulfillment/tax/email gates, product sellability, provider APIs, remote D1, deployment, and the closed acceptance remain untouched.
+
 ## 2026-08-29 — Global Admin button system
 
 CURRENT VER=0.1.0-alpha.0

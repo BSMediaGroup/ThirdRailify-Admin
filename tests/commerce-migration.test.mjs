@@ -9,7 +9,7 @@ test("commerce migrations apply in order, with the idempotent foundations repeat
   const result = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all();
   assert.deepEqual(result.results.map((row) => row.name), [
     "admin_inbox_messages", "admin_inbox_reads",
-    "commerce_audit", "commerce_business_profiles", "commerce_catalogue_migrations", "commerce_collections", "commerce_email_deliveries", "commerce_order_delivery_snapshots", "commerce_order_documents", "commerce_order_items", "commerce_orders", "commerce_permission_grants", "commerce_printful_file_mappings", "commerce_product_collections", "commerce_product_variants", "commerce_products",
+    "commerce_audit", "commerce_business_profiles", "commerce_catalogue_migrations", "commerce_collections", "commerce_customers", "commerce_email_deliveries", "commerce_order_delivery_snapshots", "commerce_order_documents", "commerce_order_items", "commerce_orders", "commerce_permission_grants", "commerce_printful_file_mappings", "commerce_product_collections", "commerce_product_variants", "commerce_products",
     "commerce_provider_connections", "commerce_settings", "commerce_shipping_quotes", "commerce_tax_registrations", "commerce_templates", "commerce_webhook_events",
     "community_comments", "community_email_outbox", "community_email_templates", "community_media", "community_moderation_events",
     "community_rate_limits", "community_reactions", "community_submissions", "site_banner_settings",

@@ -47,7 +47,7 @@ test("order list is filter-first, deterministically paginated, and excludes TEST
   assert.ok(paid.orders.every((order, index, rows) => index === 0 || rows[index - 1].totalAmount >= order.totalAmount));
   const summary = await commerceOrdersPayload(env, master, { pageSize: 20 });
   assert.equal(summary.summary.liveGrossAmount, expectedLiveGross); assert.equal(summary.summary.liveNetAmount, expectedLiveNet);
-  assert.ok(summary.summary.liveGrossAmount < 999_900); assert.equal("items" in summary.orders[0], false); assert.equal("customer" in summary.orders[0], false);
+  assert.ok(summary.summary.liveGrossAmount < 999_900); assert.equal("items" in summary.orders[0], false); assert.equal(summary.orders[0].customer, null);
 });
 
 test("single-order detail preserves immutable history through catalogue changes and projects documents, delivery, webhook, audit, and ordered timeline", async (t) => {

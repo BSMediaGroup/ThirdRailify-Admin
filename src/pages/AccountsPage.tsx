@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Link, useOutletContext, useSearchParams } from "react-router-dom";
 import { AdminAvatar } from "../auth/AdminAccountWidget";
 import { useAuth } from "../auth/AuthProvider";
 import { adminApi, importAvatarUrl, updateDisplayName, uploadAvatar } from "../auth/client";
 import type { AuthAccount } from "../auth/types";
 import type { AdminShellOutletContext } from "../components/AdminShell";
+import { DetailDrawer } from "../components/DetailDrawer";
+import { resetResizableTable } from "../components/resizableTableEvents";
 
 type AccountsPayload = { ok: boolean; accounts: AuthAccount[]; access: { isAdmin: boolean; isMasterAdmin: boolean }; checkedAt: string };
 type AccountAction = "promote" | "demote" | "disable" | "enable" | "revoke-sessions";
 type PendingAction = { account: AuthAccount; action: AccountAction };
+type AccountDetailPayload = { ok: boolean; account: AuthAccount; sessions: Array<{ id: string; createdAt: string; expiresAt: string; lastSeenAt: string; revokedAt: string | null; sourceOrigin: string; userAgentRecorded: boolean }>; audit: Array<{ id: string; eventType: string; result: string; provider: string | null; createdAt: string }>; access: { isAdmin: boolean; isMasterAdmin: boolean }; checkedAt: string };
 
 export function AccountsPage() {
   const { csrfToken, account: currentAccount, access, refresh } = useAuth();
@@ -22,6 +25,10 @@ export function AccountsPage() {
   const [role, setRole] = useState("all");
   const [status, setStatus] = useState("all");
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [detail, setDetail] = useState<AccountDetailPayload | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const selectedAccountId = searchParams.get("account");
 
   const load = useCallback(async () => {
     const stopLoading = startLoading("Loading D1 accounts");
@@ -31,6 +38,14 @@ export function AccountsPage() {
     finally { setLoading(false); stopLoading(); }
   }, [startLoading]);
   useEffect(() => { void load(); }, [load]);
+  const closeDetail = useCallback(() => { setSearchParams((current) => { const next = new URLSearchParams(current); next.delete("account"); return next; }); }, [setSearchParams]);
+  const openDetail = (accountId: string) => { const next = new URLSearchParams(searchParams); next.set("account", accountId); setSearchParams(next); };
+  useEffect(() => {
+    if (!selectedAccountId) { setDetail(null); setDetailLoading(false); return; }
+    let active = true; setDetailLoading(true); setDetail(null); setError("");
+    void adminApi<AccountDetailPayload>(`/api/admin/accounts/${encodeURIComponent(selectedAccountId)}`).then((result) => { if (active) setDetail(result); }).catch((reason) => { if (active) { setError(reason instanceof Error ? reason.message : "Account detail is unavailable."); closeDetail(); } }).finally(() => { if (active) setDetailLoading(false); });
+    return () => { active = false; };
+  }, [closeDetail, selectedAccountId]);
 
   const providers = useMemo(() => Array.from(new Set((payload?.accounts || []).flatMap((account) => account.providers))).sort(), [payload]);
   const visible = useMemo(() => (payload?.accounts || []).filter((account) => {
@@ -50,7 +65,7 @@ export function AccountsPage() {
   };
 
   return <>
-    <section className="accounts-heading"><div><p className="eyebrow"><span /> D1 account authority</p><h1>Accounts &amp; access</h1><p>Review shared identities, roles, status, and active access controls. Authority is enforced by the server on every request.</p></div><button className="secondary-button" type="button" onClick={() => void load()} disabled={loading}>Refresh</button></section>
+    <section className="accounts-heading"><div><p className="eyebrow"><span /> D1 account authority</p><h1>Accounts &amp; access</h1><p>Review shared identities, roles, status, and active access controls. Accounts remain distinct from commerce Customers.</p></div><div className="accounts-heading__actions"><button className="secondary-button" type="button" onClick={() => resetResizableTable("accounts")}>Reset columns</button><button className="secondary-button" type="button" onClick={() => void load()} disabled={loading}>Refresh</button></div></section>
     {currentAccount && <AvatarSettings account={currentAccount} csrfToken={csrfToken} onUpdated={async () => { await refresh(); await load(); }} />}
     {error && <div className="admin-alert" role="alert">{error}</div>}
     <section className="account-filters" aria-label="Account filters">
@@ -61,19 +76,21 @@ export function AccountsPage() {
     </section>
     <div className="accounts-summary"><strong>{loading ? "Loading" : visible.length}</strong><span>of {payload?.accounts.length || 0} accounts</span><span>{access.isMasterAdmin ? "Master controls enabled" : "Read-only Full Admin view"}</span></div>
     <section className="accounts-table-wrap" aria-live="polite">
-      {loading ? <p className="accounts-state">Loading D1 accounts...</p> : visible.length === 0 ? <p className="accounts-state">No accounts match these filters.</p> : <table className="accounts-table">
-        <thead><tr><th>Account</th><th>Identity</th><th>Access</th><th>State</th><th>Activity</th><th>Controls</th></tr></thead>
-        <tbody>{visible.map((account) => <tr key={account.id}>
-          <td><div className="account-cell"><AdminAvatar account={account} /><div><strong>{account.displayName}</strong><span>{account.email || "No provider email"}</span></div></div></td>
-          <td><ProviderList account={account} /></td>
-          <td><strong>{account.adminLevel === "master" ? "Master Admin" : account.adminLevel === "full" ? "Full Admin" : "Regular user"}</strong><span>{account.source}</span></td>
-          <td><strong className={`state-label state-label--${account.status}`}>{label(account.status)}</strong><span>{account.email ? account.emailVerified ? "Email verified" : "Email unverified" : "No email supplied"}</span></td>
-          <td><strong>Created {formatDate(account.createdAt)}</strong><span>{account.lastLoginAt ? `Last login ${formatDate(account.lastLoginAt)}` : "Never signed in"}</span></td>
-          <td><AccountActions account={account} currentId={currentAccount?.id || ""} master={access.isMasterAdmin} busy={busyId === account.id} onAction={(action) => setPending({ account, action })} /></td>
+      {loading ? <p className="accounts-state">Loading D1 accounts...</p> : visible.length === 0 ? <p className="accounts-state">No accounts match these filters.</p> : <table className="accounts-table" data-resizable-key="accounts">
+        <thead><tr><AccountHeader width={210}>Account</AccountHeader><AccountHeader width={150}>Identity</AccountHeader><AccountHeader width={125}>Access</AccountHeader><AccountHeader width={130}>State</AccountHeader><AccountHeader width={175}>Activity</AccountHeader><AccountHeader width={115}>Customer</AccountHeader><AccountHeader width={190}>Controls</AccountHeader></tr></thead>
+        <tbody>{visible.map((account) => <tr key={account.id} tabIndex={0} aria-label={`Open account ${account.displayName}`} onClick={() => openDetail(account.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(account.id); } }}>
+          <td data-label="Account"><div className="account-cell"><AdminAvatar account={account} /><div><strong>{account.displayName}</strong><span>{account.email || "No provider email"}</span></div></div></td>
+          <td data-label="Identity"><ProviderList account={account} /></td>
+          <td data-label="Access"><strong>{account.adminLevel === "master" ? "Master Admin" : account.adminLevel === "full" ? "Full Admin" : "Regular user"}</strong><span>{account.source}</span></td>
+          <td data-label="State"><strong className={`state-label state-label--${account.status}`}>{label(account.status)}</strong><span>{account.email ? account.emailVerified ? "Email verified" : "Email unverified" : "No email supplied"}</span></td>
+          <td data-label="Activity"><strong>Created {formatDate(account.createdAt)}</strong><span>{account.lastLoginAt ? `Last login ${formatDate(account.lastLoginAt)}` : "Never signed in"}</span></td>
+          <td data-label="Customer">{account.customer ? <Link className="account-customer-link" to={`/customers?customer=${encodeURIComponent(account.customer.id)}`} onClick={(event) => event.stopPropagation()}><strong>Customer</strong><span>{account.customer.orderCount} order{account.customer.orderCount === 1 ? "" : "s"}</span></Link> : <span className="control-note">No purchases</span>}</td>
+          <td data-label="Controls"><AccountActions account={account} currentId={currentAccount?.id || ""} master={access.isMasterAdmin} busy={busyId === account.id} onAction={(action) => setPending({ account, action })} /></td>
         </tr>)}</tbody>
       </table>}
     </section>
     {pending && <div className="confirm-backdrop" role="presentation"><div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><p className="eyebrow">Security action</p><h2 id="confirm-title">{actionLabel(pending.action)}?</h2><p>This will apply immediately to <strong>{pending.account.displayName}</strong> through the signed Admin API.</p><div><button type="button" className="secondary-button" onClick={() => setPending(null)} disabled={Boolean(busyId)}>Cancel</button><button type="button" className="danger-button" onClick={() => void mutate()} disabled={Boolean(busyId)}>{busyId ? "Applying..." : "Confirm"}</button></div></div></div>}
+    {selectedAccountId && <DetailDrawer titleId="account-detail-title" onClose={closeDetail}><AccountDetailDrawer payload={detail} loading={detailLoading} close={closeDetail} master={access.isMasterAdmin} currentId={currentAccount?.id || ""} busyId={busyId} action={(account, value) => setPending({ account, action: value })} /></DetailDrawer>}
   </>;
 }
 
@@ -139,12 +156,27 @@ function AccountActions({ account, currentId, master, busy, onAction }: { accoun
   if (!master) return <span className="control-note">Master Admin required</span>;
   if (account.locked || account.adminLevel === "master") return <span className="control-note">Environment locked</span>;
   return <div className="account-actions">
-    {account.role === "user" && account.status === "active" && (account.source !== "email" || account.emailVerified) && <button type="button" onClick={() => onAction("promote")} disabled={busy || account.id === currentId}>Promote</button>}
-    {account.role === "admin" && <button type="button" onClick={() => onAction("demote")} disabled={busy}>Demote</button>}
-    {account.status === "disabled" ? <button type="button" onClick={() => onAction("enable")} disabled={busy}>Enable</button> : <button type="button" onClick={() => onAction("disable")} disabled={busy}>Disable</button>}
-    <button type="button" onClick={() => onAction("revoke-sessions")} disabled={busy}>Revoke sessions</button>
+    {account.role === "user" && account.status === "active" && (account.source !== "email" || account.emailVerified) && <button type="button" onClick={(event) => { event.stopPropagation(); onAction("promote"); }} disabled={busy || account.id === currentId}>Promote</button>}
+    {account.role === "admin" && <button type="button" onClick={(event) => { event.stopPropagation(); onAction("demote"); }} disabled={busy}>Demote</button>}
+    {account.status === "disabled" ? <button type="button" onClick={(event) => { event.stopPropagation(); onAction("enable"); }} disabled={busy}>Enable</button> : <button type="button" onClick={(event) => { event.stopPropagation(); onAction("disable"); }} disabled={busy}>Disable</button>}
+    <button type="button" onClick={(event) => { event.stopPropagation(); onAction("revoke-sessions"); }} disabled={busy}>Revoke sessions</button>
   </div>;
 }
+function AccountDetailDrawer({ payload, loading, close, master, currentId, busyId, action }: { payload: AccountDetailPayload | null; loading: boolean; close: () => void; master: boolean; currentId: string; busyId: string; action: (account: AuthAccount, value: AccountAction) => void }) {
+  if (loading || !payload) return <><header className="detail-drawer__header"><div><p className="eyebrow">Account detail</p><h2 id="account-detail-title">Loading account…</h2></div><button type="button" className="commerce-editor-close" onClick={close} data-autofocus>Close</button></header><div className="commerce-state">Loading safe account authority…</div></>;
+  const account = payload.account;
+  return <><header className="detail-drawer__header"><div><p className="eyebrow">Authentication Account</p><h2 id="account-detail-title">{account.displayName}</h2><p>{account.email || "No account email"}</p></div><button type="button" className="commerce-editor-close" onClick={close} data-autofocus>Close</button></header><div className="detail-drawer__body">
+    <AccountSection title="Identity"><div className="account-detail-identity"><AdminAvatar account={account} /><dl><AccountFact term="Display name" value={account.displayName} /><AccountFact term="Email" value={account.email || "Not supplied"} /><AccountFact term="Username" value={account.username ? `@${account.username}` : "Not supplied"} /><AccountFact term="Providers" value={account.providers.map(label).join(", ") || "Email credential"} /></dl></div></AccountSection>
+    <AccountSection title="Access"><dl><AccountFact term="Role" value={account.adminLevel === "master" ? "Master Admin" : account.adminLevel === "full" ? "Full Admin" : "Regular user"} /><AccountFact term="State" value={label(account.status)} /><AccountFact term="Email verification" value={account.emailVerified ? `Verified${account.emailVerifiedAt ? ` ${formatDate(account.emailVerifiedAt)}` : ""}` : "Unverified"} /><AccountFact term="Authority" value={account.source} /></dl></AccountSection>
+    <AccountSection title="Activity"><dl><AccountFact term="Created" value={formatDate(account.createdAt)} /><AccountFact term="Updated" value={account.updatedAt ? formatDate(account.updatedAt) : "Not recorded"} /><AccountFact term="Last login" value={account.lastLoginAt ? formatDate(account.lastLoginAt) : "Never signed in"} /><AccountFact term="Sessions" value={`${payload.sessions.filter((session) => !session.revokedAt && Date.parse(session.expiresAt) > Date.now()).length} active · ${payload.sessions.length} retained`} /></dl></AccountSection>
+    <AccountSection title="Connected Customer">{account.customer ? <><dl><AccountFact term="Orders" value={String(account.customer.orderCount)} /><AccountFact term="Latest purchase" value={account.customer.lastOrderAt ? formatDate(account.customer.lastOrderAt) : "No order timestamp"} /></dl><Link className="secondary-button" to={`/customers?customer=${encodeURIComponent(account.customer.id)}`}>Open Customer details</Link></> : <div className="order-missing"><strong>No Customer</strong><span>This Account has no linked commerce purchase. No Customer was created merely for existing.</span></div>}</AccountSection>
+    <AccountSection title="Admin controls"><AccountActions account={account} currentId={currentId} master={master} busy={busyId === account.id} onAction={(value) => action(account, value)} /></AccountSection>
+    <details className="order-technical"><summary>Technical and audit metadata</summary><dl><AccountFact term="Account ID" value={account.id} /><AccountFact term="Provider subjects" value={account.identities?.map((identity) => `${label(identity.provider)}: ${compactSubject(identity.subject)}`).join(" · ") || "None"} /><AccountFact term="Audit events" value={String(payload.audit.length)} /><AccountFact term="Session tokens" value="Never exposed" /></dl></details>
+  </div></>;
+}
+function AccountSection({ title, children }: { title: string; children: ReactNode }) { return <section className="detail-drawer__section"><h3>{title}</h3>{children}</section>; }
+function AccountFact({ term, value }: { term: string; value: string }) { return <div><dt>{term}</dt><dd>{value}</dd></div>; }
+function AccountHeader({ width, children }: { width: number; children: ReactNode }) { return <th data-column-width={width} data-column-min={72} data-column-max={520}>{children}</th>; }
 function label(value: string) { return value === "twitter" ? "X" : value.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase()); }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" }).format(date); }
 function compactSubject(value: string) { return value.length > 20 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value; }

@@ -1,5 +1,13 @@
 # Commerce architecture
 
+## Customer identity and order history
+
+An Account is authentication authority; a Customer is commerce relationship authority. Accounts own login providers, credentials, roles, state, sessions, display name, avatar, and verified email. `commerce_customers` owns only the protected guest/account customer relationship and current encrypted checkout contact identity. Accounts without purchases have no Customer. Guest purchasers remain Customers with no Account linkage. Authenticated checkout resolves the real session server-side and creates or reuses the one Customer linked to that Account; browser-supplied account or Customer IDs are rejected.
+
+Exact guest email reuse uses a keyed fingerprint plus the existing AES-GCM contact encryption. It never links or merges a Guest Customer into an Account merely because email text matches. Admin list/detail reads require `commerce.view`, aggregate orders in SQL, correlate Accounts in bounded batches across the existing D1 authorities, and never return encryption envelopes, fingerprints, credential material, or session tokens.
+
+`commerce_orders.customer_id` is nullable for legacy evidence and restrictive for linked history. Every new normal checkout persists Customer linkage in the same D1 batch as the order, but the encrypted order delivery snapshot also retains the checkout-time contact. Current Customer or Account changes therefore do not rewrite historical order truth. TEST and LIVE counts and integer CAD aggregates remain separate. This migration is local-only until a separately authorized remote apply.
+
 ## Replacement catalogue read path
 
 ```text

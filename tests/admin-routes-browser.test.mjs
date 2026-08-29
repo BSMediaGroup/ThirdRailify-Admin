@@ -7,7 +7,7 @@ import { chromium } from "playwright-core";
 const ORIGIN = "http://127.0.0.1:44208";
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const ROUTES = [
-  "/", "/inbox", "/watch", "/content", "/shop", "/products", "/collections", "/orders",
+  "/", "/inbox", "/watch", "/content", "/shop", "/products", "/collections", "/orders", "/customers",
   "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment",
   "/media", "/goats", "/goats/pending", "/goats/approved", "/goats/rejected", "/goats/comments", "/goats/settings", "/goats/emails",
   "/wheels", "/wheels/access", "/wheels/results", "/membership", "/access", "/integrations", "/settings",

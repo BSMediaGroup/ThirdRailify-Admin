@@ -54,6 +54,7 @@ import {
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrderDetailPayload, commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
+import { customerDetailPayload, customerListPayload } from "../../../_shared/commerce-customers.js";
 import { commerceMediaLimits, ingestCommerceProductMedia, uploadCommerceProductMedia } from "../../../_shared/commerce-media.js";
 import {
   businessInformationPayload,
@@ -150,6 +151,12 @@ async function handleGet(request, env, path) {
   } else if (/^orders\/[^/]+$/.test(path)) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOrderDetailPayload(env, session, decodePathPart(path.split("/")[1]));
+  } else if (path === "customers") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await customerListPayload(env, session, Object.fromEntries(new URL(request.url).searchParams));
+  } else if (/^customers\/[^/]+$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await customerDetailPayload(env, session, decodePathPart(path.split("/")[1]), Object.fromEntries(new URL(request.url).searchParams));
   } else if (path === "media/config") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = commerceMediaLimits();

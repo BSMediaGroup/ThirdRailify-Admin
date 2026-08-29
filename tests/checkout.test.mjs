@@ -6,12 +6,16 @@ import { commerceEnvironment, createCommerceDatabases, enableTestCheckout, inser
 const PUBLIC_ORIGIN = "https://thirdrailify.pages.dev";
 const CHECKOUT_URL = "https://thirdrailify-admin.pages.dev/api/commerce/checkout";
 const REQUEST_ID = "11111111-1111-4111-8111-111111111111";
+const CUSTOMER = { mode: "guest", name: "Checkout Fixture", email: "checkout@example.test" };
 
 function request(body = { checkoutRequestId: REQUEST_ID, items: [{ productId: "product-test-001", quantity: 2 }] }, overrides = {}) {
+  const normalizedBody = body && typeof body === "object" && "checkoutRequestId" in body && !("customer" in body)
+    ? { ...body, customer: CUSTOMER }
+    : body;
   return new Request(CHECKOUT_URL, {
     method: overrides.method || "POST",
     headers: { Origin: overrides.origin || PUBLIC_ORIGIN, "Content-Type": "application/json", ...(overrides.headers || {}) },
-    body: overrides.method === "OPTIONS" ? undefined : JSON.stringify(body),
+    body: overrides.method === "OPTIONS" ? undefined : JSON.stringify(normalizedBody),
   });
 }
 

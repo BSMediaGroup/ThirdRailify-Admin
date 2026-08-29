@@ -17,6 +17,7 @@ import {
   serializeAccount,
   writeAudit,
 } from "../../../_shared/auth-core.js";
+import { customerSummaryByAccountIds } from "../../../_shared/commerce-customers.js";
 
 const ROUTE_PREFIX = "/api/admin/accounts";
 const MUTATIONS = new Set(["promote", "demote", "disable", "enable", "revoke-sessions"]);
@@ -30,6 +31,11 @@ export async function onRequest(context) {
       requireAdminOriginWhenPresent(request, env);
       const session = await requireAdmin(env, request);
       return jsonResponse(await accountsPayload(env, session), { headers: corsHeaders(request, env) });
+    }
+    if (request.method === "GET" && path && !path.includes("/")) {
+      requireAdminOriginWhenPresent(request, env);
+      const session = await requireAdmin(env, request);
+      return jsonResponse(await accountDetailPayload(env, session, decodeAccountId(path)), { headers: corsHeaders(request, env) });
     }
     if (request.method !== "POST") {
       throw new AuthFailure(405, "method_not_allowed", "This method is not allowed.", { Allow: "GET, POST, OPTIONS" });
@@ -74,13 +80,43 @@ async function accountsPayload(env, session) {
   const accounts = await Promise.all(
     (accountResult?.results || []).map((row) => serializeAccount(env, row, { identities: identityMap.get(row.id) || [] })),
   );
+  const customers = await customerSummaryByAccountIds(env, accounts.map((account) => account.id));
   return {
     ok: true,
-    accounts,
+    accounts: accounts.map((account) => ({ ...account, customer: customers.get(account.id) || null })),
     access: {
       isAdmin: true,
       isMasterAdmin: session.account.adminLevel === "master",
     },
+    checkedAt: nowIso(),
+  };
+}
+
+async function accountDetailPayload(env, session, accountId) {
+  await ensureEnvironmentMasters(env);
+  const db = requireAuthDb(env);
+  const row = await loadAccountById(env, accountId);
+  if (!row) throw new AuthFailure(404, "account_not_found", "The account was not found.");
+  const [identities, sessions, audit, customers] = await Promise.all([
+    db.prepare(`SELECT provider,provider_subject,provider_username,provider_email,provider_email_verified
+      FROM auth_identities WHERE account_id=? ORDER BY created_at ASC`).bind(accountId).all(),
+    db.prepare(`SELECT id,created_at,expires_at,last_seen_at,revoked_at,source_origin,user_agent_hash
+      FROM sessions WHERE account_id=? ORDER BY created_at DESC LIMIT 50`).bind(accountId).all(),
+    db.prepare(`SELECT id,event_type,result,provider,created_at
+      FROM auth_audit WHERE target_account_id=? ORDER BY created_at DESC LIMIT 100`).bind(accountId).all(),
+    customerSummaryByAccountIds(env, [accountId]),
+  ]);
+  const account = await serializeAccount(env, row, { identities: identities?.results || [] });
+  return {
+    ok: true,
+    account: { ...account, customer: customers.get(accountId) || null },
+    sessions: (sessions?.results || []).map((item) => ({
+      id: cleanValue(item.id, 160), createdAt: item.created_at, expiresAt: item.expires_at,
+      lastSeenAt: item.last_seen_at, revokedAt: item.revoked_at || null,
+      sourceOrigin: cleanValue(item.source_origin, 240), userAgentRecorded: Boolean(item.user_agent_hash),
+    })),
+    audit: (audit?.results || []).map((item) => ({ id: cleanValue(item.id, 160), eventType: cleanValue(item.event_type, 100), result: cleanValue(item.result, 40), provider: cleanValue(item.provider, 40) || null, createdAt: item.created_at })),
+    access: { isAdmin: true, isMasterAdmin: session.account.adminLevel === "master" },
     checkedAt: nowIso(),
   };
 }
@@ -137,6 +173,8 @@ function decodeAccountId(value) {
   }
 }
 
+function cleanValue(value, maximum) { return String(value || "").trim().slice(0, maximum); }
+
 function requireAdminOriginWhenPresent(request, env) {
   if (!request.headers.get("origin")) return;
   requireAdminOrigin(request, env);
@@ -163,4 +201,4 @@ function handleOptions(request, env) {
   });
 }
 
-export { accountsPayload, mutateAccount };
+export { accountDetailPayload, accountsPayload, mutateAccount };

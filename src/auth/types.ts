@@ -4,6 +4,7 @@ export type AuthAccount = {
   providers: string[]; identities?: AuthIdentity[]; role: "user" | "admin"; adminLevel: "none" | "full" | "master";
   status: "pending_email" | "active" | "disabled"; emailVerified: boolean; emailVerifiedAt?: string | null;
   createdAt: string; updatedAt?: string; lastLoginAt: string | null; source: string; locked?: boolean;
+  customer?: { id: string; orderCount: number; lastOrderAt: string | null } | null;
 };
 export type AuthConfig = {
   configured: boolean; emailSignupConfigured: boolean; turnstileSiteKey: string | null;

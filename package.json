@@ -23,6 +23,7 @@
     "test:browser:banner": "node --test --test-concurrency=1 tests/banner-browser.test.mjs",
     "test:browser:orders": "node --test --test-concurrency=1 tests/orders-browser.test.mjs",
     "test:orders": "node --test --test-concurrency=1 tests/orders-management.test.mjs tests/orders-browser.test.mjs",
+    "test:customers": "node --test --test-concurrency=1 tests/customers-management.test.mjs tests/customers-browser.test.mjs tests/resizable-table-inventory.test.mjs",
     "test:payments": "node --test --test-concurrency=1 tests/payments-control-plane.test.mjs tests/stripe-webhook.test.mjs tests/stripe-acceptance-closure.test.mjs",
     "test:browser:payments": "node --test --test-concurrency=1 tests/payments-browser.test.mjs",
     "test:tax": "node --test --test-concurrency=1 tests/tax-documents-control-plane.test.mjs tests/commerce-control-plane.test.mjs",

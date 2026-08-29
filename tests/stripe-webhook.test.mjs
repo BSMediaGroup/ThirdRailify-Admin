@@ -44,7 +44,7 @@ async function createLinkedOrder(harness, env, checkoutRequestId = "33333333-333
   const checkoutHttpRequest = new Request("https://thirdrailify-admin.pages.dev/api/commerce/checkout", {
     method: "POST",
     headers: { Origin: "https://thirdrailify.pages.dev", "Content-Type": "application/json" },
-    body: JSON.stringify({ checkoutRequestId, items: [{ productId: "product-test-001", quantity: 2 }] }),
+    body: JSON.stringify({ checkoutRequestId, customer: { mode: "guest", name: "Webhook Fixture", email: "webhook@example.test" }, items: [{ productId: "product-test-001", quantity: 2 }] }),
   });
   const response = await checkoutRequest({ request: checkoutHttpRequest, env, data: { checkoutFetch: async (url, init) => {
     assert.equal(url, "https://api.stripe.com/v1/checkout/sessions");

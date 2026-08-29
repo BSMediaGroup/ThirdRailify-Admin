@@ -6,6 +6,7 @@ import { AdminIcon } from "./AdminIcon";
 import { AdminAccountWidget } from "../auth/AdminAccountWidget";
 import { useAuth } from "../auth/AuthProvider";
 import { getInboxSummary, type InboxSummary } from "../inbox/client";
+import { ResizableTables } from "./ResizableTables";
 
 export type AdminShellOutletContext = {
   startLoading: (reason?: string) => () => void;
@@ -179,6 +180,7 @@ export function AdminShell() {
         </header>
         <main id="admin-main" className="admin-main" tabIndex={-1} aria-busy={Boolean(loadingReason)}>
           <Outlet context={{ startLoading, inboxSummary, refreshInbox }} />
+          <ResizableTables />
         </main>
       </div>
     </div>

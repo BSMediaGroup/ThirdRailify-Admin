@@ -46,8 +46,8 @@ export const adminAreas: AdminArea[] = [
     label: "Shop",
     shortLabel: "Shop",
     icon: "products",
-    summary: "Product, collection, and order authority.",
-    futureScope: ["Products", "Collections", "Orders"],
+    summary: "Product, collection, order, and customer authority.",
+    futureScope: ["Products", "Collections", "Orders", "Customers"],
   },
   {
     path: "/wheels",
@@ -101,6 +101,15 @@ export const adminAreas: AdminArea[] = [
     icon: "orders",
     summary: "Commerce order authority with no synthetic records.",
     futureScope: ["Server-side order access", "Fulfillment status", "Audited operational actions"],
+  },
+  {
+    path: "/customers",
+    parentPath: "/shop",
+    label: "Customers",
+    shortLabel: "Customers",
+    icon: "users",
+    summary: "Guest and account-backed commerce relationships and order history.",
+    futureScope: ["Protected customer projection", "Account linkage", "Historical order relationships"],
   },
   {
     path: "/commerce",

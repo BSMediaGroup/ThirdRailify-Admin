@@ -3,6 +3,7 @@ import {
   jsonResponse,
   normalizeOrigin,
   readJsonBody,
+  resolveSession,
 } from "../../_shared/auth-core.js";
 import { createStripeCheckoutSession } from "../../_shared/checkout-core.js";
 import { requireCommerceDb } from "../../_shared/commerce-core.js";
@@ -24,7 +25,8 @@ export async function handleCheckoutPost(request, env, fetchImpl = fetch) {
   requirePublicOrigin(request, env);
   requireCommerceDb(env);
   const body = await readJsonBody(request);
-  const payload = await createStripeCheckoutSession(env, request, body, fetchImpl);
+  const session = await resolveSession(env, request);
+  const payload = await createStripeCheckoutSession(env, request, body, fetchImpl, { session });
   return jsonResponse(payload, { status: 201, headers: checkoutCorsHeaders(request, env) });
 }
 

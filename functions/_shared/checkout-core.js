@@ -8,6 +8,7 @@ import {
 } from "./auth-core.js";
 import {
   commerceAccessForSession,
+  decryptCommerceSecret,
   encryptCommerceSecret,
   isStripeTestCredentialConfigured,
   isStripeWebhookSigningConfigured,
@@ -22,6 +23,7 @@ import {
   resolveShippingSelection,
   stripeShippingRateFields,
 } from "./shipping-core.js";
+import { orderCustomerProjection, prepareCheckoutCustomer, validateCheckoutCustomer } from "./commerce-customers.js";
 
 const encoder = new TextEncoder();
 const STRIPE_CHECKOUT_URL = "https://api.stripe.com/v1/checkout/sessions";
@@ -34,11 +36,12 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
   const db = requireCommerceDb(env);
   const gate = options.gate === "controlled_test" ? "controlled_test" : "normal";
   const configuration = await requireCheckoutConfiguration(env, db, gate);
-  const cartRequest = validateCheckoutRequest(input);
+  const cartRequest = validateCheckoutRequest(input, options.session, gate);
   if (gate === "controlled_test") requireControlledTestCart(cartRequest, configuration.candidate);
   const checkoutRequestDigest = await sha256Hex(JSON.stringify({
     items: cartRequest.items,
     recipient: cartRequest.recipient,
+    customer: cartRequest.customer,
     quoteId: cartRequest.quoteId,
     shippingOptionId: cartRequest.shippingOptionId,
   }));
@@ -91,17 +94,20 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
     const cartDigest = await authoritativeCartDigest(lines);
     const expectedAmount = totalAmount(lines, shippingSelection?.option.amount || 0);
     const recipientCiphertext = shippingSelection
-      ? await encryptCommerceSecret(env, JSON.stringify(shippingSelection.recipient), `order-delivery:${orderId}`)
+      ? await encryptCommerceSecret(env, JSON.stringify({ ...shippingSelection.recipient, customerContact: cartRequest.customer ? { name: cartRequest.customer.name, email: cartRequest.customer.email } : null }), `order-delivery:${orderId}`)
       : null;
+    const customer = gate === "normal" ? await prepareCheckoutCustomer(env, db, cartRequest.customer) : null;
     const statements = [
+      ...(customer ? [customer.statement, ...(customer.auditStatement ? [customer.auditStatement] : [])] : []),
       db.prepare(
         `INSERT INTO commerce_orders (
            id, customer_payment_provider, payment_status, fulfillment_provider, fulfillment_status, currency_code,
            customer_gross_amount, checkout_request_id, checkout_request_digest, cart_digest,
-           environment, checkout_status, safe_metadata_json, created_at, updated_at
-         ) VALUES (?, 'stripe', 'pending', ?, 'disabled', 'CAD', ?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?)`,
+           environment, checkout_status, customer_id, safe_metadata_json, created_at, updated_at
+         ) VALUES (?, 'stripe', 'pending', ?, 'disabled', 'CAD', ?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?, ?)`,
       ).bind(
         orderId, shippingSelection?.provider || null, expectedAmount, cartRequest.checkoutRequestId, checkoutRequestDigest, cartDigest, configuration.environment,
+        customer?.id || null,
         JSON.stringify(gate === "controlled_test" ? { checkoutGate: "controlled_test", fulfillment: "disabled" } : {}),
         timestamp, timestamp,
       ),
@@ -154,7 +160,7 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
   ).bind(nowIso(), order.id).run();
 
   const publicOrigin = configuredPublicOrigin(env);
-  const body = stripeCheckoutBody(order, lines, publicOrigin, shippingSelection);
+  const body = stripeCheckoutBody(order, lines, publicOrigin, shippingSelection, cartRequest.customer);
   const credential = String(env.STRIPE_SECRET_KEY).trim();
   const idempotencyKey = await stripeCheckoutIdempotencyKey(order.id, order.checkout_request_id);
   let response;
@@ -265,13 +271,15 @@ export async function commerceOrdersPayload(env, session, input = {}) {
        )
        SELECT o.id, o.checkout_status, o.payment_status, o.fulfillment_status, o.currency_code, o.environment,
               o.customer_gross_amount, o.refund_amount, o.stripe_checkout_session_id, o.stripe_payment_intent_id,
-              o.printful_order_id, o.created_at, o.updated_at, o.checkout_created_at, o.payment_confirmed_at,
+              o.printful_order_id, o.customer_id, c.customer_kind, c.linked_account_id,
+              o.created_at, o.updated_at, o.checkout_created_at, o.payment_confirmed_at,
               COALESCE(i.line_count, 0) AS line_count, COALESCE(i.item_count, 0) AS item_count,
               COALESCE(d.document_count, 0) AS document_count, COALESCE(e.email_count, 0) AS email_count
        FROM commerce_orders o
        LEFT JOIN item_counts i ON i.order_id = o.id
        LEFT JOIN document_counts d ON d.order_id = o.id
        LEFT JOIN email_counts e ON e.order_id = o.id
+       LEFT JOIN commerce_customers c ON c.id = o.customer_id
        ${whereSql}
        ORDER BY ${orderSortSql(options.sort)}, o.id ASC LIMIT ? OFFSET ?`,
     ).bind(...params, options.pageSize, offset).all(),
@@ -328,7 +336,7 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
             printful_shipping_cost_amount, printful_tax_amount, printful_refund_credit_amount,
             stripe_checkout_session_id, stripe_payment_intent_id, printful_order_id, checkout_request_id,
             environment, checkout_status, checkout_failure_code, checkout_created_at, payment_confirmed_at,
-            payment_failed_at, created_at, updated_at
+            payment_failed_at, customer_id, created_at, updated_at
      FROM commerce_orders WHERE id = ? LIMIT 1`,
   ).bind(orderId).first();
   if (!order) throw new AuthFailure(404, "commerce_order_not_found", "The commerce order was not found.");
@@ -363,7 +371,7 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
        FROM commerce_audit WHERE target_id = ? ORDER BY created_at ASC, id ASC LIMIT 100`,
     ).bind(orderId).all(),
     db.prepare(
-      `SELECT destination_country_code,destination_region_code,shipping_strategy,provider,
+      `SELECT recipient_ciphertext,destination_country_code,destination_region_code,shipping_strategy,provider,
               display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at
        FROM commerce_order_delivery_snapshots WHERE order_id=? LIMIT 1`,
     ).bind(orderId).first(),
@@ -396,6 +404,12 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
   const totalAmount = safeMinorAmount(order.customer_gross_amount);
   const refundAmount = safeMinorAmount(order.refund_amount);
   const shippingAmount = deliverySnapshot ? safeMinorAmount(deliverySnapshot.shipping_amount) : null;
+  const [customerRelationship, recipientSnapshot] = await Promise.all([
+    orderCustomerProjection(env, order.customer_id),
+    deliverySnapshot?.recipient_ciphertext
+      ? decryptCommerceSecret(env, deliverySnapshot.recipient_ciphertext, `order-delivery:${orderId}`).then((value) => parseJson(value, null))
+      : Promise.resolve(null),
+  ]);
   const delivery = deliverySnapshot ? {
     available: true, recipientConfigured: true,
     destinationCountryCode: cleanText(deliverySnapshot.destination_country_code, 2).toUpperCase(),
@@ -422,7 +436,17 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
       createdAt: cleanText(order.created_at, 80), updatedAt: cleanText(order.updated_at, 80),
       checkoutCreatedAt: cleanText(order.checkout_created_at, 80) || null, paymentConfirmedAt: cleanText(order.payment_confirmed_at, 80) || null,
       paymentFailedAt: cleanText(order.payment_failed_at, 80) || null, checkoutFailureCode: cleanText(order.checkout_failure_code, 80) || null,
-      customer: { available: false, name: null, email: null, phone: null, billingAddress: null, shippingAddress: null },
+      customer: {
+        ...customerRelationship,
+        available: customerRelationship.linked,
+        snapshot: recipientSnapshot?.customerContact ? {
+          name: cleanText(recipientSnapshot.customerContact.name, 120) || null,
+          email: cleanText(recipientSnapshot.customerContact.email, 254) || null,
+          historical: true,
+        } : null,
+        phone: cleanText(recipientSnapshot?.phone, 32) || null,
+        billingAddress: null, shippingAddress: null,
+      },
       delivery,
       items,
       financial: { subtotalAmount, discountAmount: null, shippingAmount, taxAmount: null, totalAmount, refundAmount, netAmount: refundAmount <= totalAmount ? totalAmount - refundAmount : null, currencyCode: cleanText(order.currency_code, 3).toUpperCase() },
@@ -582,11 +606,11 @@ function requireControlledTestCart(cartRequest, candidate) {
   if (item.quantity !== 1) throw new AuthFailure(409, "stripe_test_quantity_locked", "Controlled test checkout is limited to quantity one.");
 }
 
-function validateCheckoutRequest(input) {
+function validateCheckoutRequest(input, session, gate) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new AuthFailure(400, "checkout_request_invalid", "The checkout request is invalid.");
   }
-  const allowedKeys = new Set(["checkoutRequestId", "items", "recipient", "quoteId", "shippingOptionId", "turnstileToken"]);
+  const allowedKeys = new Set(["checkoutRequestId", "items", "recipient", "quoteId", "shippingOptionId", "turnstileToken", "customer"]);
   if (Object.keys(input).some((key) => !allowedKeys.has(key))) {
     throw new AuthFailure(400, "checkout_request_fields_invalid", "The checkout request contains unsupported fields.");
   }
@@ -598,7 +622,8 @@ function validateCheckoutRequest(input) {
   const recipient = input.recipient === undefined || input.recipient === null ? null : normalizeDeliveryRecipient(input.recipient);
   const quoteId = input.quoteId === undefined || input.quoteId === null ? null : cleanText(input.quoteId, 80);
   const shippingOptionId = input.shippingOptionId === undefined || input.shippingOptionId === null ? null : cleanText(input.shippingOptionId, 40);
-  return { checkoutRequestId, items, recipient, quoteId, shippingOptionId };
+  const customer = gate === "normal" ? validateCheckoutCustomer(input.customer, session) : null;
+  return { checkoutRequestId, items, recipient, quoteId, shippingOptionId, customer };
 }
 
 async function loadOrderItems(db, orderId) {
@@ -656,7 +681,7 @@ function linkedCheckoutResponse(order) {
   return url ? { ok: true, orderId: order.id, sessionId: order.stripe_checkout_session_id, checkoutUrl: url } : null;
 }
 
-function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null) {
+function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null, customer = null) {
   const form = new URLSearchParams();
   form.set("mode", "payment");
   form.set("payment_method_types[0]", "card");
@@ -664,6 +689,8 @@ function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null
   form.set("metadata[order_id]", order.id);
   form.set("metadata[checkout_request_id]", order.checkout_request_id);
   form.set("metadata[cart_digest]", order.cart_digest);
+  if (order.customer_id) form.set("metadata[customer_id]", order.customer_id);
+  if (customer?.email) form.set("customer_email", customer.email);
   form.set("success_url", `${publicOrigin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`);
   form.set("cancel_url", `${publicOrigin}/shop?checkout=canceled`);
   lines.forEach((line, index) => {
@@ -847,6 +874,7 @@ function serializeOrderListRow(row) {
     updatedAt: cleanText(row.updated_at, 80), checkoutCreatedAt: cleanText(row.checkout_created_at, 80) || null,
     paymentConfirmedAt: cleanText(row.payment_confirmed_at, 80) || null, lineCount: Number(row.line_count || 0),
     itemCount: Number(row.item_count || 0), documentCount: Number(row.document_count || 0), emailCount: Number(row.email_count || 0),
+    customer: row.customer_id ? { id: cleanText(row.customer_id, 80), kind: row.customer_kind === "account" ? "account" : "guest", accountId: cleanText(row.linked_account_id, 160) || null } : null,
   };
 }
 
