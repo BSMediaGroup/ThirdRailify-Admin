@@ -13,7 +13,7 @@ test("Payments and Payouts renders truthful responsive TEST-only control plane",
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4204"], { stdio: "ignore" });
   t.after(() => server.kill()); await waitForServer();
   const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
-  for (const [width, height] of [[1440, 900], [768, 1024], [390, 844]]) {
+  for (const [width, height] of [[1920, 1080], [1440, 900], [768, 1024], [390, 844]]) {
     const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" }); const page = await context.newPage(); const errors = [];
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); }); page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/**", routeFixture);

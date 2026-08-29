@@ -59,6 +59,8 @@
   --control-focus-ring: 0 0 0 3px rgba(243, 201, 40, .24);
   --sidebar-width: 276px;
   --sidebar-collapsed-width: 84px;
+  --admin-page-max: 1720px;
+  --admin-page-gutter: clamp(22px, 3vw, 52px);
   background: var(--bg);
   color: var(--ink);
 }
@@ -220,7 +222,7 @@ img { display: block; max-width: 100%; }
 @keyframes admin-shell-loader-indeterminate { from { left: -36%; } to { left: 100%; } }
 .icon-button { display: inline-grid; width: 42px; height: 42px; place-items: center; padding: 0; color: var(--ink); border: 1px solid var(--line); border-radius: 9px; background: var(--panel); cursor: pointer; }
 .menu-button { display: none; }
-.admin-main { width: min(1240px, 100%); margin: 0 auto; padding: clamp(42px, 6vw, 80px) clamp(22px, 5vw, 68px) 90px; }
+.admin-main { width: min(var(--admin-page-max), 100%); margin: 0 auto; padding: clamp(42px, 6vw, 80px) var(--admin-page-gutter) 90px; }
 
 .eyebrow { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; color: var(--gold-soft); font-family: "Geist Mono", monospace; font-size: .69rem; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; }
 .eyebrow > span { width: 24px; height: 1px; background: var(--gold); }

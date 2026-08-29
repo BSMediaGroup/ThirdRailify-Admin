@@ -77,10 +77,11 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   assert.deepEqual(errors, []);
   await context.close();
 
-  for (const viewport of [{ width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
     const mobile = await browser.newContext({ viewport, reducedMotion: "reduce" }); const mobilePage = await mobile.newPage();
     await mobilePage.route("**/api/**", respond); await mobilePage.goto(`${ORIGIN}/customers`);
     await mobilePage.getByText("Guest Buyer", { exact: true }).waitFor();
+    if (viewport.width === 1440 || viewport.width === 390) await capture(mobilePage, `customers-${viewport.width}.png`);
     assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `Customers has no horizontal overflow at ${viewport.width}px`);
     assert.equal(await mobilePage.getByRole("separator").first().isVisible(), viewport.width > 760, `resize handle visibility matches the responsive table mode at ${viewport.width}px`);
     await mobilePage.getByRole("row", { name: /Open customer Guest Buyer/ }).click();

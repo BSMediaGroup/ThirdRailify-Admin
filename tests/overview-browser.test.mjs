@@ -12,7 +12,7 @@ test("Admin overview reports real cross-system state responsively without deferr
   t.after(() => server.kill()); await waitForServer();
   const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
 
-  for (const [width, height] of [[1440, 900], [1024, 768], [768, 1024], [390, 844]]) {
+  for (const [width, height] of [[1920, 1080], [1440, 900], [1024, 768], [768, 1024], [390, 844]]) {
     const context = await browser.newContext({ viewport: { width, height } });
     const page = await context.newPage(); const errors = []; let statusReads = 0;
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });

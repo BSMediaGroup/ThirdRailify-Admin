@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-08-30 - Wider Admin workspace
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Increased the single normal-page width authority from the hard-coded 1240px cap to `--admin-page-max: 1720px`, with a shared `clamp(22px, 3vw, 52px)` desktop/tablet gutter and the existing 17px phone gutter. The sidebar, top bar, modal/dialog widths, and intentionally capped reading copy are unchanged.
+- Audited every configured route at 1920, 1440, and 390 pixels, plus the shell at 1600, 1365, 1024, and 768 pixels. Focused Customers, Products, Overview, Payments, and Wheels browser fixtures confirm the wider tables, filters, metric grids, and management workspaces remain balanced without viewport overflow.
+- Added bounded browser geometry coverage for expanded/collapsed sidebar widths, usable content width, centring, ultrawide outer gutters, and the former narrow cap. No Public, API, auth, schema, D1/R2, provider, Wix, DNS, domain, payment, checkout, fulfilment, Wheels, GOATS, or Watch behavior changed.
+- Deployed the Admin-only build as `0dc65629-ad87-43ba-9e88-1997c8b11cf7` (`https://0dc65629.thirdrailify-admin.pages.dev`). Stable and immutable routes serve the same `index-Bu1ByXAn.css` and `index-CdVlQnNu.js` assets; the stable Customers fixture passed the full responsive geometry matrix.
+
 ## 2026-08-30 — Admin table overflow correction
 
 - Removed phantom horizontal scroll ranges from `/customers` and `/access`: default resizable-column widths now contract proportionally to the available table wrapper while retaining column minimums, and the final resize handle stays inside the table boundary. User-expanded columns still produce genuine horizontal scrolling when their stored width exceeds the wrapper.
