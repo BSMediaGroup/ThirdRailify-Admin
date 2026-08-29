@@ -1503,7 +1503,8 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .commerce-collection-picker legend { padding: 0 6px; color: var(--paper); font: .7rem "Geist Mono",monospace; text-transform: uppercase; }
 .commerce-collection-picker > p { margin: 0 0 10px; color: var(--quiet); font-size: .68rem; }
 .commerce-collection-picker > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; }
-.commerce-collection-picker label { display: flex; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: #0b0b09; }
+.commerce-collection-picker label { display: flex; width: 100%; min-height: 56px; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: #0b0b09; cursor: pointer; user-select: none; transition: border-color .16s ease, background-color .16s ease; }
+.commerce-collection-picker label:hover,.commerce-collection-picker label:focus-within { border-color: rgba(243,201,40,.38); background: rgba(243,201,40,.035); }
 .commerce-collection-picker label.is-selected { border-color: rgba(243,201,40,.5); background: rgba(243,201,40,.06); }
 .commerce-collection-picker span,.commerce-collection-picker small { display: block; }
 .commerce-collection-picker small { margin-top: 2px; color: var(--quiet); font-size: .58rem; }

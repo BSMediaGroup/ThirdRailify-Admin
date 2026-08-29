@@ -151,6 +151,25 @@ test("controlled core reuses authoritative pricing, immutable variant snapshot, 
   assert.equal(delivery.shipping_amount, 500); assert.equal(delivery.display_shipping_method, "Standard delivery"); assert.doesNotMatch(delivery.recipient_ciphertext, /Checkout Fixture|100 Test Street/);
 });
 
+test("a closed historical acceptance does not block one new configured candidate, but that candidate remains single-use", async (t) => {
+  const { harness, env } = await configuredHarness(); t.after(harness.dispose);
+  await insertTestVariant(harness.commerceDb, { id: "variant-historical", localVariantKey: "historical", targetPrintfulSyncVariantId: "target-variant-historical", targetCatalogueVariantId: "11547" });
+  await harness.commerceDb.batch([
+    harness.commerceDb.prepare(`INSERT INTO commerce_orders
+      (id,payment_status,fulfillment_status,currency_code,customer_gross_amount,environment,checkout_status,safe_metadata_json,created_at,updated_at)
+      VALUES ('ord_historical','paid','disabled','CAD',1500,'test','checkout_created','{"checkoutGate":"controlled_test"}','2026-08-28T00:00:00Z','2026-08-28T00:00:00Z')`),
+    harness.commerceDb.prepare(`INSERT INTO commerce_order_items
+      (id,order_id,line_number,product_id,variant_id,product_name,variant_name,currency_code,unit_amount,quantity,line_total_amount,requires_shipping,fulfillment_provider,fulfillment_variant_id,created_at)
+      VALUES ('item-historical','ord_historical',1,'product-test-001','variant-historical','Historical','M / Black','CAD',1500,1,1500,1,'printful','target-variant-historical','2026-08-28T00:00:00Z')`),
+  ]);
+  const calls = [];
+  const first = await createStripeCheckoutSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), controlledInput(), stripeMock(calls), { gate: "controlled_test" });
+  assert.equal(first.sessionId, "cs_test_controlled_001"); assert.equal(calls.length, 1);
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_orders").first()).count, 2);
+  await assert.rejects(createStripeCheckoutSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), controlledInput({ checkoutRequestId: "99999999-9999-4999-8999-999999999999" }), stripeMock(calls), { gate: "controlled_test" }), (error) => error.code === "stripe_test_checkout_already_created");
+  assert.equal(calls.length, 1);
+});
+
 test("public order status is exact-session-only and exposes a bounded local projection", async (t) => {
   const { harness, env } = await configuredHarness(); t.after(harness.dispose);
   const created = await createStripeCheckoutSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), controlledInput(), stripeMock([]), { gate: "controlled_test" });

@@ -51,9 +51,15 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
     const linked = linkedCheckoutResponse(order);
     if (linked) return linked;
   } else if (gate === "controlled_test") {
-    const existing = await db.prepare("SELECT COUNT(*) AS count FROM commerce_orders").first();
+    const existing = await db.prepare(
+      `SELECT COUNT(DISTINCT o.id) AS count
+       FROM commerce_orders o
+       JOIN commerce_order_items i ON i.order_id = o.id
+       WHERE json_extract(o.safe_metadata_json, '$.checkoutGate') = 'controlled_test'
+         AND i.product_id = ? AND i.variant_id = ?`,
+    ).bind(configuration.candidate.productId, configuration.candidate.variantId).first();
     if (Number(existing?.count || 0) !== 0) {
-      throw new AuthFailure(409, "stripe_test_checkout_already_created", "The single controlled Stripe TEST checkout has already been created.");
+      throw new AuthFailure(409, "stripe_test_checkout_already_created", "The configured controlled Stripe TEST candidate already has an acceptance order.");
     }
   }
 

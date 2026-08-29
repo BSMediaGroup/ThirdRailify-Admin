@@ -57,6 +57,7 @@ import { commerceOrderDetailPayload, commerceOrdersPayload, createStripeCheckout
 import { commerceMediaLimits, ingestCommerceProductMedia, uploadCommerceProductMedia } from "../../../_shared/commerce-media.js";
 import {
   businessInformationPayload,
+  createStoredPrintfulDraftOrder,
   createTaxRegistration,
   customerEmailsControlPlanePayload,
   fulfillmentShippingPayload,
@@ -203,6 +204,14 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
       shippingOptionId: body.shippingOptionId,
     }, fetchImpl, { gate: "controlled_test" });
     authEventType = "stripe_test_checkout_created";
+  } else if (/^orders\/[^/]+\/printful-draft$/.test(path)) {
+    await requireMasterAdmin(env, request);
+    const body = await readJsonBody(request);
+    if (!body || Object.keys(body).length !== 1 || body.confirmUnconfirmedDraft !== true) {
+      throw new AuthFailure(400, "printful_draft_confirmation_required", "Explicit confirmation of an unconfirmed Printful draft is required.");
+    }
+    payload = await createStoredPrintfulDraftOrder(env, session, decodePathPart(path.split("/")[1]), fetchImpl);
+    authEventType = payload.created ? "printful_order_draft_created" : "printful_order_draft_reconciled";
   } else if (path === "printful/verify") {
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
     payload = await verifyPrintfulStore(env, session, fetchImpl);
