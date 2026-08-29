@@ -89,7 +89,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/api/commerce/checkout` | Exact-Public-origin customer POST/OPTIONS endpoint; server-priced Stripe-hosted TEST Checkout behind disabled product/configuration gates |
 | `/api/webhooks/stripe` | External Stripe sandbox delivery route; POST/raw-body/signature/D1 required, with no browser authentication and only invariant-checked existing-order payment confirmation |
 | `/commerce/business` | Authoritative merchant-profile editor over the singleton Commerce D1 business model: public-safe storefront/contact/address fields, masked encrypted legal replacements, read-only CA/ON/CAD defaults, server-derived tax/document/email/fulfillment dependencies shared with Payments, revisioned saves, and category-only audit |
-| `/commerce/tax` | Encrypted tax identifiers and document presentation; no custom tax calculation/compliance claim |
+| `/commerce/tax` | Authoritative Tax & Documents control plane: masked encrypted registrations, structured receipt/invoice editors, ephemeral SAMPLE previews, seller/email/readiness projections, and explicit no-collection/no-remittance boundaries |
 | `/commerce/emails` | Safe structured customer template editor; no send path |
 | `/commerce/fulfillment` | Dedicated Printful identities, executable read-only catalogue snapshot with progress/retry and four explicit evidence downloads, draft-only/fulfillment-disabled gates, and untouched Wix posture |
 | `/api/admin/commerce/printful/verify` | Admin-session, exact-origin, CSRF, rate-limit, and `commerce.integrations.manage` protected read-only Printful verification |
@@ -102,6 +102,8 @@ The production output is `dist/`. The local development server uses port 5174 an
 | everything else | Branded 404 |
 
 Business Information reads require `commerce.view`; mutations additionally require `commerce.business.manage`, exact Admin origin, CSRF, the existing commerce rate limit, server validation, optimistic profile revision matching, encryption custody, and commerce audit. Legal name, legal address, private phone, and business/corporation number are never prefilled or returned as plaintext. Tax registrations remain authoritative under `/commerce/tax`, template/sender state remains authoritative in the existing document and email models, PayPal is not a readiness requirement, and Canada / Ontario / CAD cannot be changed through this surface.
+
+Tax & Documents reads require `commerce.view`; tax-registration mutations require `commerce.business.manage`, while receipt/invoice template mutations require `commerce.templates.manage`. Existing revision columns now reject stale registration and template writes. Registration identifiers remain encrypted at rest and masked in browser projections and audit metadata; explicit replacement inputs are always blank. Preview posts retain exact-origin/session/CSRF/rate-limit validation, use the existing allow-listed structured renderer with synthetic TEST data, and create no order, document row, customer token, email delivery, provider call, or checkout mutation. Business Information remains the seller-identity authority, Customer Emails remains the delivery authority, and the canonical server readiness consumed by Payments remains the production interpretation.
 
 ## Structure
 
@@ -134,6 +136,8 @@ ThirdRailify-Admin/
 ├── tests/
 │   ├── payments-control-plane.test.mjs  Direct-merchant authority, evidence, financial-isolation, permission, and no-provider-call coverage
 │   ├── payments-browser.test.mjs  390/768/1440 rendering, overflow, locks, links, and payout-boundary coverage
+│   ├── tax-documents-control-plane.test.mjs  Registration/template custody, revision, permissions, preview, audit, and no-side-effect coverage
+│   ├── tax-documents-browser.test.mjs  390/768/1440 masked editor, preview, dependency, accessibility, and overflow coverage
 │   ├── printful.test.mjs   Focused single-store, no-write, persistence, and Store-ID invariant coverage
 │   ├── printful-catalogue.test.mjs  Full GET-only source/target snapshot safety coverage
 │   ├── fulfillment-browser.test.mjs  390/768/1440 operator-state and explicit-download regression

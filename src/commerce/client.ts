@@ -66,7 +66,13 @@ export type PaymentsControlPlanePayload = {
 };
 export type TemplatesPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; templates: CommerceTemplate[] };
 export type TaxRegistration = { id: string; registrationType: "gst_hst" | "qst" | "pst" | "rst" | "other"; jurisdiction: string; countryCode: string; provinceCode: string | null; maskedIdentifier: string; status: string; effectiveDate: string | null; expiresAt: string | null; notes: string; documentDisclosureEnabled: boolean; revision: number; updatedAt: string };
-export type TaxPayload = { ok: boolean; access: CommerceAccess; registrations: TaxRegistration[]; calculation: { provider: string; stripeTax: string; ratesConfigured: boolean }; readiness: { ready: boolean; status: string; reason: string } };
+export type TaxPayload = {
+  ok: boolean; authority: string; access: CommerceAccess; registrations: TaxRegistration[];
+  registrationState: { configured: boolean; activeCount: number; externallyVerified: false };
+  calculation: { provider: string; stripeTax: string; ratesConfigured: boolean };
+  documents: { tokenizedAccessSupported: boolean; customerAccessEnabled: boolean; deliveryEnabled: boolean; previewCount: number; issuedCount: number; revokedCount: number; lastGeneratedAt: string | null; lastGeneratedType: string | null; lastGeneratedStatus: string | null };
+  readiness: { ready: boolean; status: string; reason: string };
+};
 export type TemplatePreviewPayload = { ok: boolean; preview: CommerceTemplate & { text: string; html: string }; source: string; test: boolean; orderId: string | null; variables: Record<string, string> };
 export type CommerceDocument = { type: "receipt" | "invoice"; available: boolean; reason: string; test: boolean; marker: string; displayReference: string; orderReference: string; merchantName: string; legalName: string | null; legalAddress: PublicAddress | string | null; supportEmail: string; issuedAt: string; payment: string; fulfillment: string; items: Array<{ productName: string; variantName: string | null; options: Record<string, string>; unitAmount: number; quantity: number; lineTotalAmount: number }>; subtotal: number; shipping: number | null; tax: number | null; total: number; currency: string; templateKey: string; templateRevision: number; disclosures: string[] };
 export type DocumentPreviewPayload = { ok: boolean; access: CommerceAccess; document: CommerceDocument };

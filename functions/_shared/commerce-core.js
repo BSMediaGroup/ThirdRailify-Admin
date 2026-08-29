@@ -1261,9 +1261,12 @@ export async function templatesPayload(env, session) {
 export async function updateTemplate(env, session, templateKey, input) {
   const template = validateTemplate({ ...input, templateKey });
   const db = requireCommerceDb(env);
+  const current = await db.prepare("SELECT revision FROM commerce_templates WHERE template_key=?").bind(template.templateKey).first();
+  const revision = Number(input?.revision);
+  if (current && (!Number.isSafeInteger(revision) || revision !== Number(current.revision))) throw new AuthFailure(409, "template_revision_conflict", "This template changed after you opened it. Reload the latest version before saving.");
   const timestamp = nowIso();
   const id = `template-${template.templateKey.replaceAll("_", "-")}`;
-  await db
+  const updated = await db
     .prepare(
       `INSERT INTO commerce_templates (
          id, template_key, template_kind, display_name, subject, preheader, heading, introduction, body_blocks_json,
@@ -1287,7 +1290,8 @@ export async function updateTemplate(env, session, templateKey, input) {
          enabled = excluded.enabled,
          revision = commerce_templates.revision + 1,
          updated_at = excluded.updated_at,
-         updated_by_account_id = excluded.updated_by_account_id`,
+          updated_by_account_id = excluded.updated_by_account_id
+        WHERE commerce_templates.revision = ?`,
     )
     .bind(
       id,
@@ -1309,11 +1313,14 @@ export async function updateTemplate(env, session, templateKey, input) {
       timestamp,
       timestamp,
       session.accountId,
+      revision,
     )
     .run();
+  if (Number(updated?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "template_revision_conflict", "This template changed after you opened it. Reload the latest version before saving.");
+  const action = template.templateKey === "payment_receipt" ? "receipt_template_updated" : template.templateKey === "invoice_document" ? "invoice_template_updated" : "commerce_template_updated";
   await writeCommerceAudit(env, {
     actorAccountId: session.accountId,
-    action: "commerce_template_updated",
+    action,
     targetType: "commerce_template",
     targetId: template.templateKey,
     result: "success",

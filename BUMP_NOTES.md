@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-08-29 — Tax & Documents control plane
+
+CURRENT VER=0.0.0-seed
+
+PENDING VER=0.1.0-alpha.0
+
+- Rebuilt `/commerce/tax` as the authoritative Tax & Documents workspace without a migration. The page now presents real server-derived tax, receipt, invoice, communications, seller-identity, customer-access, and canonical production-readiness state; manages multiple existing tax-registration rows through compact cards and dirty-aware add/edit dialogs; and keeps registration, checkout tax calculation/collection, and remittance/filing as explicit separate boundaries.
+- Preserved encrypted registration custody and masked-only generic reads, added blank explicit identifier replacement, conservative deactivation rather than deletion, normalized country/region validation, optimistic tax/template revision conflicts, purpose-specific receipt/invoice audit actions, and `commerce.view` access to safe tax/template reads and non-mutating previews while retaining separate `commerce.business.manage` and `commerce.templates.manage` write authority.
+- Replaced the paired scaffold forms with a Receipt/Invoice switcher, practical structured-field editor, exact approved merge-variable help, save/discard state, and a realistic responsive SAMPLE / TEST preview using the existing server renderer. Preview remains ephemeral and performs no payment, checkout, persistence, token creation, email, customer delivery, provider order, or provider API action.
+- Added Business Information and Customer Emails dependency cards, customer-document token capability and delivery-gate evidence without hashes or URLs, Payments-shared canonical readiness, collapsed technical evidence, deliberate empty states, and focused Node 22.16.0 server/browser coverage at 1440, 768, and 390 pixels. Checkout, live payment capture, Stripe Tax, fulfillment, provider writes, remote D1, migrations, deployment, Public, permanent Printful migration, and concurrent Wheels work remain unchanged.
+
 ## 2026-08-28 — Commerce D1 storefront authority
 
 - Finalized the successful first genuine Stripe TEST acceptance for preserved order `ord_e47b94a4-4252-438b-8ca7-c47470029940` and Session `cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC`: one signed `checkout.session.completed` receipt moved the exact CAD 15.00 TEST order to paid while fulfillment remained disabled and no Printful order was created.

@@ -12,9 +12,6 @@ import {
   getCommerceOverview,
   getPaymentsControlPlane,
   getCommerceTemplates,
-  getTaxRegistrations,
-  createTaxRegistration,
-  saveTaxRegistration,
   previewCommerceTemplate,
   sendCommerceTemplateTest,
   getMerchandisingProductList,
@@ -60,8 +57,6 @@ import {
   type PermanentPrintfulMigrationPayload,
   type ProviderStatus,
   type TemplatesPayload,
-  type TaxPayload,
-  type TaxRegistration,
   type TemplatePreviewPayload,
   type CommerceMediaLimits,
 } from "../commerce/client";
@@ -185,43 +180,7 @@ function PaymentsControlPlane({ payload, canManagePayments, canVerify, busy, onV
 }
 
 export { BusinessInformationPage } from "./BusinessInformationPage";
-export function TaxDocumentsPage() { return <TaxDocumentsControlPlane />; }
-function TaxDocumentsControlPlane() {
-  const { csrfToken } = useAuth();
-  const { startLoading } = useOutletContext<AdminShellOutletContext>();
-  const [tax, setTax] = useState<TaxPayload | null>(null);
-  const [templates, setTemplates] = useState<TemplatesPayload | null>(null);
-  const [form, setForm] = useState({ registrationType: "gst_hst", jurisdiction: "CA", countryCode: "CA", provinceCode: "", identifier: "", status: "unverified", effectiveDate: "", expiresAt: "", notes: "", documentDisclosureEnabled: false });
-  const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => { const stop = startLoading("Loading tax and document controls"); setError(""); try { const [nextTax, nextTemplates] = await Promise.all([getTaxRegistrations(), getCommerceTemplates()]); setTax(nextTax); setTemplates(nextTemplates); } catch (reason) { setError(errorMessage(reason, "Tax and document controls are unavailable.")); } finally { stop(); } }, [startLoading]);
-  useEffect(() => { void load(); }, [load]);
-  const submit = async (event: FormEvent) => { event.preventDefault(); if (!csrfToken || busy) return; setBusy(true); setError(""); setMessage(""); try { setTax(await createTaxRegistration(csrfToken, form)); setForm((current) => ({ ...current, identifier: "", notes: "", effectiveDate: "", expiresAt: "" })); setMessage("Tax registration saved with its identifier encrypted and masked."); } catch (reason) { setError(errorMessage(reason, "The tax registration could not be saved.")); } finally { setBusy(false); } };
-  const deactivate = async (registration: TaxRegistration) => { if (!csrfToken || busy) return; setBusy(true); setError(""); try { setTax(await saveTaxRegistration(csrfToken, registration.id, { registrationType: registration.registrationType, jurisdiction: registration.jurisdiction, countryCode: registration.countryCode, provinceCode: registration.provinceCode || "", identifier: "", status: "inactive", effectiveDate: registration.effectiveDate || "", expiresAt: registration.expiresAt || "", notes: registration.notes, documentDisclosureEnabled: registration.documentDisclosureEnabled, revision: registration.revision })); setMessage("Tax registration deactivated without exposing its identifier."); } catch (reason) { setError(errorMessage(reason, "The tax registration could not be updated.")); } finally { setBusy(false); } };
-  const saveDocument = async (template: CommerceTemplate) => { if (!csrfToken) return; setError(""); try { const next = await saveCommerceTemplate(csrfToken, template); setTemplates(next); setMessage(`${template.displayName} template saved.`); } catch (reason) { setError(errorMessage(reason, "The document template could not be saved.")); } };
-  return <>
-    <CommerceHeading eyebrow="Operator configuration authority" title="Tax & documents" summary="Manage encrypted tax registrations and structured receipt/invoice templates without guessed rates or tax-compliance claims." status={tax?.readiness.ready ? "connected" : "disabled"} statusLabel={tax?.readiness.ready ? "Configured" : "Production blocked"} />
-    {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
-    <section className="commerce-posture" aria-label="Tax readiness"><div><span>Tax registrations</span><strong>{tax?.registrations.length ? "Configured by operator" : "Not configured"}</strong></div><div><span>Tax calculation provider</span><strong>Unconfigured</strong></div><div><span>Stripe Tax</span><strong>Not enabled / unverified</strong></div><div><span>Production tax readiness</span><strong>Blocked</strong></div></section>
-    <section className="commerce-section" aria-labelledby="tax-registration-title"><SectionTitle id="tax-registration-title" eyebrow="Encrypted identifier custody" title="Tax registrations" />
-      {tax?.registrations.length ? <div className="provider-card-grid">{tax.registrations.map((registration) => <article className="provider-card" key={registration.id}><div><span>{humanize(registration.registrationType)}</span><StatusBadge status={["active", "verified"].includes(registration.status) ? "connected" : "pending"} label={humanize(registration.status)} /></div><dl><Fact term="Jurisdiction" value={registration.jurisdiction} /><Fact term="Identifier" value={registration.maskedIdentifier} /><Fact term="Effective" value={registration.effectiveDate || "Not configured"} /><Fact term="Expiry" value={registration.expiresAt || "Not configured"} /><Fact term="Document disclosure" value={registration.documentDisclosureEnabled ? "Operator enabled" : "Disabled"} /></dl>{registration.status !== "inactive" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void deactivate(registration)}>Deactivate</button>}</article>)}</div> : <CommerceState><strong>No tax registrations configured.</strong><span>No registration status, identifier, or tax rate has been invented.</span></CommerceState>}
-      <form className="commerce-form" onSubmit={(event) => void submit(event)}>
-        <Field label="Registration type"><select value={form.registrationType} onChange={(event) => setForm({ ...form, registrationType: event.target.value })}><option value="gst_hst">GST/HST</option><option value="qst">QST</option><option value="pst">PST</option><option value="rst">RST</option><option value="other">Other</option></select></Field>
-        <Field label="Jurisdiction"><input value={form.jurisdiction} onChange={(event) => setForm({ ...form, jurisdiction: event.target.value })} required maxLength={80} /></Field><Field label="Country code"><input value={form.countryCode} onChange={(event) => setForm({ ...form, countryCode: event.target.value })} required maxLength={2} /></Field><Field label="Province / state"><input value={form.provinceCode} onChange={(event) => setForm({ ...form, provinceCode: event.target.value })} maxLength={3} /></Field>
-        <Field label="Registration identifier" hint="Encrypted after save; ordinary projections show only a mask."><input value={form.identifier} onChange={(event) => setForm({ ...form, identifier: event.target.value })} required autoComplete="off" maxLength={100} /></Field><Field label="Status"><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="unverified">Unverified</option><option value="pending">Pending</option><option value="verified">Verified by operator</option><option value="active">Active per operator</option><option value="not_registered">Not registered</option></select></Field>
-        <Field label="Effective date"><input type="date" value={form.effectiveDate} onChange={(event) => setForm({ ...form, effectiveDate: event.target.value })} /></Field><Field label="End / expiry date"><input type="date" value={form.expiresAt} onChange={(event) => setForm({ ...form, expiresAt: event.target.value })} /></Field><Field className="commerce-field--wide" label="Notes / reference"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} rows={3} maxLength={1000} /></Field>
-        <label className="commerce-toggle commerce-field--wide"><input type="checkbox" checked={form.documentDisclosureEnabled} onChange={(event) => setForm({ ...form, documentDisclosureEnabled: event.target.checked })} /><span>Allow this registration’s masked disclosure state on documents after legal review</span></label>
-        <div className="commerce-form__actions commerce-field--wide"><button className="secondary-button" type="submit" disabled={!csrfToken || busy}>{busy ? "Saving…" : "Add encrypted registration"}</button><span>This configuration does not calculate rates or determine legal obligations.</span></div>
-      </form>
-    </section>
-    <section className="commerce-section" aria-labelledby="document-template-title"><SectionTitle id="document-template-title" eyebrow="Structured document authority" title="Receipt and invoice templates" /><div className="provider-detail-grid">{templates?.templates.filter((template) => template.templateKind === "document").map((template) => <DocumentTemplateEditor key={template.templateKey} template={template} onSave={saveDocument} />)}</div></section>
-  </>;
-}
-
-function DocumentTemplateEditor({ template, onSave }: { template: CommerceTemplate; onSave: (template: CommerceTemplate) => Promise<void> }) {
-  const [draft, setDraft] = useState(template); useEffect(() => setDraft(template), [template]);
-  const change = <K extends keyof CommerceTemplate>(key: K, value: CommerceTemplate[K]) => setDraft((current) => ({ ...current, [key]: value }));
-  return <form className="provider-detail commerce-form" onSubmit={(event) => { event.preventDefault(); void onSave(draft); }}><header><div><p>Structured · revision {draft.revision}</p><h2>{draft.displayName}</h2></div><StatusBadge status={draft.enabled && draft.status === "ready" ? "connected" : "pending"} label={draft.enabled && draft.status === "ready" ? "Ready" : "Draft"} /></header><Field label="Display name"><input value={draft.displayName} onChange={(event) => change("displayName", event.target.value)} required /></Field><Field label="Document title"><input value={draft.heading} onChange={(event) => change("heading", event.target.value)} required /></Field><Field className="commerce-field--wide" label="Introduction"><textarea value={draft.introduction} onChange={(event) => change("introduction", event.target.value)} rows={3} /></Field><Field className="commerce-field--wide" label="Structured line blocks" hint="Allowed variables include order_reference, product_summary, order_total, currency, merchant_name, and support_email."><textarea value={draft.bodyBlocks.join("\n")} onChange={(event) => change("bodyBlocks", event.target.value.split("\n").slice(0, 8))} rows={4} /></Field><Field className="commerce-field--wide" label="Footer"><textarea value={draft.footer} onChange={(event) => change("footer", event.target.value)} rows={3} /></Field><Field label="Status"><select value={draft.status} onChange={(event) => change("status", event.target.value as CommerceTemplate["status"])}><option value="draft">Draft</option><option value="ready">Ready</option><option value="disabled">Disabled</option></select></Field><label className="commerce-toggle"><input type="checkbox" checked={draft.enabled} onChange={(event) => change("enabled", event.target.checked)} /><span>Enabled</span></label><button className="secondary-button" type="submit">Save document template</button><small>{draft.templateKey === "invoice_document" ? "Invoice readiness remains blocked until legal business and tax configuration are complete." : "Receipt rendering uses the immutable paid-order snapshot."}</small></form>;
-}
+export { TaxDocumentsPage } from "./TaxDocumentsPage";
 
 export function CustomerEmailsPage() {
   const { csrfToken } = useAuth();

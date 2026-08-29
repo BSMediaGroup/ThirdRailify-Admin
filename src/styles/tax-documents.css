@@ -1,0 +1,176 @@
+.tax-documents-page { min-width: 0; }
+.tax-documents-hero { position: relative; display: grid; grid-template-columns: minmax(0,1.05fr) minmax(430px,.95fr); gap: clamp(28px,5vw,70px); overflow: hidden; padding: clamp(26px,4vw,48px); border: 1px solid var(--line); border-radius: 16px; background: radial-gradient(70% 120% at 100% 0,rgba(243,201,40,.12),transparent 65%),linear-gradient(140deg,#10100d,#080807); }
+.tax-documents-hero::before { position: absolute; top: 0; right: 8%; left: 8%; height: 1px; content: ""; background: linear-gradient(90deg,transparent,var(--gold),transparent); opacity: .7; }
+.tax-documents-hero__copy .area-icon { margin-bottom: 20px; }
+.tax-documents-hero__copy h1 { margin: 5px 0 12px; font-size: clamp(3rem,6vw,5.6rem); line-height: .88; }
+.tax-documents-hero__copy > p:not(.eyebrow) { max-width: 720px; margin: 0; color: var(--muted); font-size: .9rem; line-height: 1.62; }
+.tax-documents-hero__chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 22px; }
+.tax-readiness-summary { display: grid; min-width: 0; align-self: stretch; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.22); }
+.tax-readiness-summary > div { display: grid; grid-template-columns: minmax(115px,.65fr) minmax(0,1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+.tax-readiness-summary > div:last-child { border-bottom: 0; }
+.tax-readiness-summary span:first-child { color: var(--quiet); font: 700 .55rem "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
+.tax-readiness-summary strong { min-width: 0; color: var(--cream); font-size: .73rem; font-weight: 650; overflow-wrap: anywhere; }
+.tax-status { display: inline-flex; width: fit-content; max-width: 100%; align-items: center; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--quiet); background: rgba(255,255,255,.025); font: 750 .51rem "Geist Mono",monospace; letter-spacing: .055em; line-height: 1.2; text-align: center; text-transform: uppercase; white-space: normal; }
+.tax-status.is-complete,.tax-status.is-configured { color: #92e4b9; border-color: rgba(114,215,165,.38); background: rgba(114,215,165,.075); }
+.tax-status.is-incomplete,.tax-status.is-action_required,.tax-status.is-not_configured { color: #f2b398; border-color: rgba(242,141,117,.4); background: rgba(242,141,117,.07); }
+.tax-status.is-unverified { color: var(--gold-soft); border-color: rgba(243,201,40,.38); background: rgba(243,201,40,.07); }
+.tax-status.is-disabled,.tax-status.is-not_required { color: #a4a196; background: rgba(255,255,255,.018); }
+.tax-section { min-width: 0; padding-top: clamp(36px,5vw,58px); }
+.tax-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; margin-bottom: 20px; }
+.tax-section-heading > div { max-width: 800px; }
+.tax-section-heading h2 { margin-top: 4px; font-size: clamp(2rem,4vw,3.15rem); }
+.tax-section-heading > div > p:last-child { margin: 8px 0 0; color: var(--muted); font-size: .82rem; line-height: 1.6; }
+.tax-section-heading > button { flex: 0 0 auto; }
+.tax-registration-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.tax-registration-card { min-width: 0; padding: 21px; border: 1px solid var(--line); border-radius: 12px; background: radial-gradient(90% 100% at 100% 0,rgba(243,201,40,.05),transparent 68%),var(--panel-soft); }
+.tax-registration-card > header,.tax-registration-card > footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.tax-registration-card > header p { margin: 0 0 5px; color: var(--gold-soft); font: .55rem "Geist Mono",monospace; letter-spacing: .09em; }
+.tax-registration-card h3 { font-size: 1.45rem; }
+.tax-registration-card dl,.tax-dependency-card dl,.tax-technical dl,.document-preview-body dl { display: grid; gap: 0; margin: 18px 0 0; }
+.tax-registration-card dl > div,.tax-dependency-card dl > div,.tax-technical dl > div,.document-preview-body dl > div { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 18px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.tax-registration-card dt,.tax-dependency-card dt,.tax-technical dt { color: var(--quiet); font-size: .65rem; }
+.tax-registration-card dd,.tax-dependency-card dd,.tax-technical dd { margin: 0; color: var(--cream); font-size: .68rem; text-align: right; overflow-wrap: anywhere; }
+.tax-registration-card__notes { padding: 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: rgba(0,0,0,.18); font-size: .69rem; line-height: 1.48; overflow-wrap: anywhere; }
+.tax-registration-card > footer { align-items: center; margin-top: 17px; }
+.tax-registration-card > footer .secondary-button { display: inline-flex; width: auto; align-items: center; gap: 7px; margin: 0; }
+.secondary-button.is-danger { color: #f2b398; border-color: rgba(242,141,117,.32); }
+.tax-boundary-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1px; padding: 1px; background: var(--line); }
+.tax-boundary-grid article { min-width: 0; padding: 23px; background: #0b0b09; }
+.tax-boundary-grid header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tax-boundary-grid header > span { color: rgba(243,201,40,.48); font: .66rem "Geist Mono",monospace; letter-spacing: .12em; }
+.tax-boundary-grid h3 { margin-top: 24px; font-size: 1.35rem; }
+.tax-boundary-grid p { margin: 9px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.6; }
+.document-switcher { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; max-width: 720px; margin-bottom: 14px; }
+.document-switcher button { display: grid; min-width: 0; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--panel-soft); cursor: pointer; text-align: left; }
+.document-switcher button.is-active { color: var(--ink); border-color: rgba(243,201,40,.46); background: rgba(243,201,40,.075); box-shadow: inset 0 1px 0 rgba(255,225,105,.09); }
+.document-switcher button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.document-switcher span { font-size: .83rem; font-weight: 750; }
+.document-switcher small { color: var(--quiet); font: .54rem "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
+.document-editor-layout { display: grid; grid-template-columns: minmax(0,1.08fr) minmax(390px,.92fr); align-items: start; gap: 14px; }
+.document-template-editor,.document-preview-panel { min-width: 0; padding: clamp(20px,3vw,30px); border: 1px solid var(--line); border-radius: 13px; background: radial-gradient(90% 80% at 100% 0,rgba(243,201,40,.05),transparent 70%),var(--panel-soft); }
+.document-template-editor > header,.document-preview-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 20px; }
+.document-template-editor h3 { margin-top: 4px; font-size: 1.8rem; }
+.document-field-grid,.tax-dialog-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; }
+.tax-field { display: grid; min-width: 0; align-content: start; gap: 7px; }
+.tax-field.is-wide,.tax-dialog-grid > .is-wide,.tax-sensitive-field { grid-column: 1/-1; }
+.tax-field > span,.tax-sensitive-field > header span { color: var(--muted); font: 700 .56rem "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
+.tax-field input,.tax-field textarea,.tax-field select { width: 100%; min-width: 0; min-height: 43px; padding: 9px 11px; resize: vertical; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #090907; font: inherit; }
+.tax-field input[type="color"] { padding: 5px; cursor: pointer; }
+.tax-field input:focus,.tax-field textarea:focus,.tax-field select:focus { border-color: var(--gold); outline: 2px solid rgba(243,201,40,.14); }
+.tax-field input:disabled,.tax-field textarea:disabled,.tax-field select:disabled { color: var(--quiet); background: rgba(255,255,255,.015); }
+.tax-field small { color: var(--quiet); font-size: .65rem; line-height: 1.4; }
+.tax-field small.is-error { color: #f2b398; }
+.document-enabled-toggle { display: flex; grid-column: 1/-1; align-items: flex-start; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+.document-enabled-toggle input { margin-top: 3px; accent-color: var(--gold); }
+.document-enabled-toggle span { display: grid; gap: 3px; }
+.document-enabled-toggle strong { color: var(--cream); font-size: .73rem; }
+.document-enabled-toggle small { color: var(--quiet); font-size: .65rem; line-height: 1.4; }
+.document-editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.document-editor-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.document-editor-actions button { margin: 0; }
+.document-editor-actions > span { color: var(--quiet); font: .56rem "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
+.document-variable-help { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.document-variable-help summary { color: var(--gold-soft); cursor: pointer; font: 700 .6rem "Geist Mono",monospace; letter-spacing: .06em; text-transform: uppercase; }
+.document-variable-help p { color: var(--quiet); font-size: .68rem; line-height: 1.5; }
+.document-variable-help div { display: flex; flex-wrap: wrap; gap: 6px; }
+.document-variable-help code { padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: #090907; font-size: .58rem; }
+.document-preview-panel { position: sticky; top: 82px; }
+.document-preview-panel > header > div { display: grid; gap: 6px; }
+.document-sample-marker { width: fit-content; padding: 5px 7px; border: 1px solid rgba(243,201,40,.48); border-radius: 4px; color: #18160d; background: #f3c928; font: 850 .52rem "Geist Mono",monospace; letter-spacing: .08em; }
+.document-preview-panel > header small { color: var(--quiet); font-size: .65rem; }
+.document-preview-panel > article { overflow: hidden; border: 1px solid var(--gold); border-radius: 10px; color: #17160f; background: #f3f0e5; box-shadow: 0 24px 70px rgba(0,0,0,.28); }
+.document-preview-brand { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 19px 21px; color: #f5f1e5; background: #11110e; }
+.document-preview-brand strong { font: 1.55rem "American Captain",sans-serif; }
+.document-preview-brand span { color: #b7b19d; font: .5rem "Geist Mono",monospace; letter-spacing: .1em; text-align: right; }
+.document-preview-body { padding: clamp(22px,3vw,34px); }
+.document-preview-title { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 25px; }
+.document-preview-title div { display: grid; gap: 4px; min-width: 0; }
+.document-preview-title small { color: #817a65; font: .5rem "Geist Mono",monospace; letter-spacing: .08em; }
+.document-preview-title strong { color: #302d22; font-size: .68rem; overflow-wrap: anywhere; }
+.document-preview-body h3 { margin: 0 0 10px; color: #17160f; font: clamp(2rem,4vw,3rem) "American Captain",sans-serif; line-height: .95; }
+.document-preview-body > p { color: #4d493a; font-size: .75rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.document-line-items { margin-top: 24px; border-block: 1px solid rgba(23,22,15,.15); }
+.document-line-items header,.document-line-items > div { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 15px; padding: 10px 0; }
+.document-line-items header { color: #817a65; font: .5rem "Geist Mono",monospace; letter-spacing: .08em; text-transform: uppercase; }
+.document-line-items > div { color: #302d22; font-size: .67rem; }
+.document-line-items strong { font-weight: 650; overflow-wrap: anywhere; }
+.document-preview-body dl > div { border-color: rgba(23,22,15,.1); }
+.document-preview-body dt,.document-preview-body dd { color: #4d493a; font-size: .65rem; }
+.document-preview-body dd { margin: 0; text-align: right; }
+.document-preview-body dl > div:last-child { font-weight: 800; }
+.document-preview-blocks { margin-top: 18px; padding-top: 12px; border-top: 1px solid rgba(23,22,15,.14); }
+.document-preview-blocks p,.document-preview-support { margin: 6px 0; color: #4d493a; font-size: .68rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.document-preview-panel article > footer { display: grid; gap: 5px; padding: 16px 21px; border-top: 1px solid rgba(23,22,15,.12); color: #4d493a; background: #e8e3d4; }
+.document-preview-panel article > footer span { font-size: .68rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.document-preview-panel article > footer small { color: #756f5c; font: .5rem/1.45 "Geist Mono",monospace; }
+.tax-dependency-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.tax-dependency-card { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-soft); }
+.tax-dependency-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tax-dependency-card > header > div { display: flex; align-items: center; gap: 10px; }
+.tax-dependency-card > header > div > span { display: grid; width: 34px; height: 34px; place-items: center; color: var(--gold); border: 1px solid rgba(243,201,40,.23); border-radius: 8px; background: rgba(243,201,40,.055); }
+.tax-dependency-card h3 { font-size: .94rem; }
+.tax-dependency-card > a,.tax-readiness-grid a { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; color: var(--gold-soft); font: 700 .57rem "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
+.tax-dependency-card > p { color: var(--quiet); font-size: .68rem; line-height: 1.5; }
+.tax-readiness-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
+.tax-readiness-grid article { min-width: 0; padding: 17px; border: 1px solid var(--line); border-radius: 9px; background: #0b0b09; }
+.tax-readiness-grid header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.tax-readiness-grid header strong { font-size: .77rem; }
+.tax-readiness-grid p { color: var(--muted); font-size: .68rem; line-height: 1.5; }
+.tax-technical { margin-top: clamp(34px,5vw,56px); border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.012); }
+.tax-technical > summary { padding: 15px 18px; color: var(--quiet); cursor: pointer; font: 700 .59rem "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
+.tax-technical-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1px; border-top: 1px solid var(--line); background: var(--line); }
+.tax-technical-grid section { min-width: 0; padding: 20px; background: #0a0a08; }
+.tax-technical-grid h3 { font-size: .82rem; }
+.tax-dialog-backdrop { position: fixed; z-index: 190; inset: 0; display: grid; place-items: center; padding: clamp(12px,2vw,28px); background: rgba(3,3,2,.9); backdrop-filter: blur(12px); }
+.tax-dialog { width: min(880px,100%); max-height: calc(100dvh - 30px); overflow: auto; border: 1px solid rgba(243,201,40,.48); border-radius: 14px; background: #0c0c09; box-shadow: 0 34px 120px rgba(0,0,0,.84); }
+.tax-dialog:focus { outline: none; }
+.tax-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px 26px; border-bottom: 1px solid var(--line); }
+.tax-dialog h2 { margin-top: 5px; font-size: 2.35rem; }
+.tax-dialog > header p:last-child { max-width: 690px; margin: 7px 0 0; color: var(--muted); font-size: .73rem; line-height: 1.5; }
+.tax-dialog .icon-button { flex: 0 0 auto; }
+.tax-dialog form { padding: 24px 26px; }
+.tax-sensitive-field { padding: 15px; border: 1px solid rgba(243,201,40,.25); border-radius: 9px; background: rgba(243,201,40,.035); }
+.tax-sensitive-field > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.tax-sensitive-field > header > div { display: grid; gap: 4px; }
+.tax-sensitive-field > header small { color: var(--quiet); font-size: .64rem; }
+.tax-sensitive-field .secondary-button { width: auto; margin: 0; }
+.tax-dialog form > footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.tax-dialog form > footer > span { color: var(--quiet); font: .55rem "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
+.tax-dialog form > footer > div { display: flex; gap: 8px; }
+.tax-dialog form > footer button { margin: 0; }
+
+@media (max-width: 1100px) {
+  .tax-documents-hero { grid-template-columns: 1fr; }
+  .tax-registration-grid,.tax-dependency-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .document-editor-layout { grid-template-columns: 1fr; }
+  .document-preview-panel { position: static; }
+  .tax-readiness-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+}
+@media (max-width: 760px) {
+  .tax-registration-grid,.tax-boundary-grid,.tax-dependency-grid,.tax-technical-grid { grid-template-columns: 1fr; }
+  .tax-readiness-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .tax-section-heading { align-items: stretch; flex-direction: column; }
+  .tax-section-heading > button { align-self: flex-start; }
+  .document-field-grid,.tax-dialog-grid { grid-template-columns: 1fr; }
+  .tax-field.is-wide,.tax-dialog-grid > .is-wide,.tax-sensitive-field { grid-column: auto; }
+  .document-editor-actions { align-items: flex-start; flex-direction: column; }
+}
+@media (max-width: 520px) {
+  .tax-documents-hero { padding: 24px 18px; }
+  .tax-documents-hero__copy h1 { font-size: 3.2rem; }
+  .tax-readiness-summary > div { grid-template-columns: minmax(0,1fr) auto; }
+  .tax-readiness-summary strong { grid-column: 1/-1; grid-row: 2; }
+  .document-switcher { grid-template-columns: 1fr; }
+  .document-template-editor,.document-preview-panel { padding: 16px; }
+  .document-preview-brand { align-items: flex-start; flex-direction: column; }
+  .document-preview-brand span { text-align: left; }
+  .document-preview-title { grid-template-columns: 1fr; }
+  .tax-readiness-grid { grid-template-columns: 1fr; }
+  .tax-dialog-backdrop { align-items: end; padding: 0; }
+  .tax-dialog { max-height: 96dvh; border-right: 0; border-bottom: 0; border-left: 0; border-radius: 14px 14px 0 0; }
+  .tax-dialog > header,.tax-dialog form { padding: 20px 18px; }
+  .tax-dialog h2 { font-size: 2rem; }
+  .tax-sensitive-field > header,.tax-dialog form > footer { align-items: stretch; flex-direction: column; }
+  .tax-dialog form > footer > div { flex-direction: column-reverse; }
+}
+@media (prefers-reduced-motion: reduce) { .tax-documents-page * { scroll-behavior: auto !important; transition: none !important; } }

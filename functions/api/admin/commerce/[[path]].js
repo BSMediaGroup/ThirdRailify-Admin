@@ -100,10 +100,10 @@ async function handleGet(request, env, path) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await businessInformationPayload(env, session);
   } else if (path === "templates") {
-    await requireCommerceCapability(env, session, "commerce.templates.manage");
+    await requireCommerceCapability(env, session, "commerce.view");
     payload = await templatesPayload(env, session);
   } else if (path === "tax") {
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.view");
     payload = await taxRegistrationsPayload(env, session);
   } else if (path === "readiness") {
     await requireCommerceCapability(env, session, "commerce.view");
@@ -255,7 +255,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     authEventType = "commerce_tax_registration_updated";
   } else if (/^templates\/[^/]+\/preview$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.templates.manage");
+    await requireCommerceCapability(env, session, "commerce.view");
     payload = await templatePreviewPayload(env, session, decodePathPart(path.split("/")[1]), body);
   } else if (/^templates\/[^/]+\/send-test$/.test(path)) {
     const body = await readJsonBody(request);

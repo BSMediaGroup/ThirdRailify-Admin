@@ -108,18 +108,43 @@ export async function businessInformationPayload(env, session) {
 
 export async function taxRegistrationsPayload(env, session) {
   const access = await commerceAccessForSession(env, session);
-  const result = await requireCommerceDb(env).prepare(
-    `SELECT id, registration_type, jurisdiction, country_code, province_code, masked_identifier,
-            status, effective_date, expires_at, notes, document_disclosure_enabled, revision, updated_at
-     FROM commerce_tax_registrations WHERE business_profile_id = 'primary'
-     ORDER BY country_code, province_code, registration_type, jurisdiction`,
-  ).all();
+  const db = requireCommerceDb(env);
+  const [result, settingsResult, documentCounts, latestDocument] = await Promise.all([
+    db.prepare(
+      `SELECT id, registration_type, jurisdiction, country_code, province_code, masked_identifier,
+              status, effective_date, expires_at, notes, document_disclosure_enabled, revision, updated_at
+       FROM commerce_tax_registrations WHERE business_profile_id = 'primary'
+       ORDER BY country_code, province_code, registration_type, jurisdiction`,
+    ).all(),
+    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('tax_calculation_provider','stripe_tax_enabled','transactional_email_enabled','customer_document_access_enabled')").all(),
+    db.prepare("SELECT status,COUNT(*) count FROM commerce_order_documents GROUP BY status").all(),
+    db.prepare("SELECT document_type,status,created_at FROM commerce_order_documents ORDER BY created_at DESC LIMIT 1").first(),
+  ]);
+  const registrations = (result?.results || []).map(serializeTaxRegistration);
+  const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
+  const activeRegistrationCount = registrations.filter((registration) => ["active", "verified"].includes(registration.status)).length;
+  const calculationProvider = cleanText(settings.tax_calculation_provider, 40) || "unconfigured";
+  const ready = calculationProvider !== "unconfigured" && activeRegistrationCount > 0;
+  const counts = Object.fromEntries((documentCounts?.results || []).map((row) => [cleanText(row.status, 30), Number(row.count || 0)]));
   return {
     ok: true,
+    authority: "Commerce D1",
     access,
-    registrations: (result?.results || []).map(serializeTaxRegistration),
-    calculation: { provider: "unconfigured", stripeTax: "not_enabled_unverified", ratesConfigured: false },
-    readiness: { ready: false, status: "blocked", reason: "An explicit tax calculation strategy and operator-approved registrations are required." },
+    registrations,
+    registrationState: { configured: registrations.length > 0, activeCount: activeRegistrationCount, externallyVerified: false },
+    calculation: { provider: calculationProvider, stripeTax: settings.stripe_tax_enabled === true ? "enabled_unverified" : "not_enabled_unverified", ratesConfigured: false },
+    documents: {
+      tokenizedAccessSupported: true,
+      customerAccessEnabled: settings.customer_document_access_enabled === true,
+      deliveryEnabled: settings.transactional_email_enabled === true,
+      previewCount: Number(counts.preview || 0),
+      issuedCount: Number(counts.issued || 0),
+      revokedCount: Number(counts.revoked || 0),
+      lastGeneratedAt: cleanText(latestDocument?.created_at, 80) || null,
+      lastGeneratedType: cleanText(latestDocument?.document_type, 20) || null,
+      lastGeneratedStatus: cleanText(latestDocument?.status, 20) || null,
+    },
+    readiness: { ready, status: ready ? "ready" : "blocked", reason: ready ? "An operator-approved registration and explicit calculation strategy are configured." : "An explicit tax calculation strategy and operator-approved registrations are required." },
   };
 }
 
@@ -152,24 +177,28 @@ export async function updateTaxRegistration(env, session, registrationId, input)
   const id = validId(registrationId, "tax_registration_id_invalid");
   const current = await db.prepare("SELECT * FROM commerce_tax_registrations WHERE id = ? AND business_profile_id = 'primary'").bind(id).first();
   if (!current) throw new AuthFailure(404, "tax_registration_not_found", "The tax registration was not found.");
+  const revision = Number(input?.revision);
+  if (!Number.isSafeInteger(revision) || revision !== Number(current.revision)) throw new AuthFailure(409, "tax_registration_revision_conflict", "This tax registration changed after you opened it. Reload the latest version before saving.");
   const value = validateTaxRegistration(input, current);
   const ciphertext = value.identifier
     ? await encryptCommerceSecret(env, value.identifier, `tax-registration:${id}:identifier`)
     : current.identifier_ciphertext;
   const masked = value.identifier ? maskTaxIdentifier(value.identifier) : current.masked_identifier;
   const timestamp = nowIso();
+  let updated;
   try {
-    await db.prepare(
+    updated = await db.prepare(
       `UPDATE commerce_tax_registrations SET registration_type=?, jurisdiction=?, country_code=?, province_code=?,
          identifier_ciphertext=?, masked_identifier=?, status=?, effective_date=?, expires_at=?, notes=?,
-         document_disclosure_enabled=?, revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=?`,
+         document_disclosure_enabled=?, revision=revision+1, updated_at=?, updated_by_account_id=? WHERE id=? AND revision=?`,
     ).bind(value.registrationType, value.jurisdiction, value.countryCode, value.provinceCode, ciphertext, masked,
       value.status, value.effectiveDate, value.expiresAt, value.notes, value.documentDisclosureEnabled ? 1 : 0,
-      timestamp, session.accountId, id).run();
+      timestamp, session.accountId, id, revision).run();
   } catch (error) {
     if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "tax_registration_duplicate", "That jurisdiction and registration type already exist.");
     throw error;
   }
+  if (Number(updated?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "tax_registration_revision_conflict", "This tax registration changed after you opened it. Reload the latest version before saving.");
   await writeCommerceAudit(env, { actorAccountId: session.accountId, action: value.status === "inactive" ? "tax_registration_deactivated" : "tax_registration_updated", targetType: "commerce_tax_registration", targetId: id, result: "success", metadata: { registrationType: value.registrationType, jurisdiction: value.jurisdiction, status: value.status, identifierReplaced: Boolean(value.identifier) } });
   return taxRegistrationsPayload(env, session);
 }
