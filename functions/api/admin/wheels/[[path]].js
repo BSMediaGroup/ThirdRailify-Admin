@@ -22,6 +22,7 @@ import {
   searchWheelAccounts,
   voidOfficialResult,
 } from "../../../_shared/wheels-core.js";
+import { adminRemoveWheelMedia } from "../../../_shared/wheel-media.js";
 
 const PREFIX = "/api/admin/wheels";
 
@@ -50,6 +51,8 @@ export async function onRequest(context) {
     if (path === "controls") return response(await mutateWheelControl(env, session.accountId, body), request, env);
     if (path === "results/void") return response(await voidOfficialResult(env, session.accountId, body), request, env);
     if (path === "settings") return response(await saveWheelSettings(env, session.accountId, body), request, env);
+    const mediaRemoval = path.match(/^([^/]+)\/media\/([^/]+)\/remove$/);
+    if (mediaRemoval) return response(await adminRemoveWheelMedia(env, decode(mediaRemoval[1]), decode(mediaRemoval[2]), session.accountId), request, env);
     throw new AuthFailure(404, "wheel_route_not_found", "The Admin wheel action was not found.");
   } catch (error) {
     return errorResponse(error, request, env);

@@ -1,5 +1,24 @@
 # Bump notes
 
+## 2026-08-29 — Wheels V1.1 custom-media authority
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added additive `0016_wheels_media.sql` metadata for one active background and centre asset per wheel, using the existing Admin R2 binding with opaque hash-safe keys and no seeded media.
+- Added signed Public-owner/editor upload/removal and Master removal paths with lock/rate/auth checks, raster magic/dimension/pixel limits, strict safe-SVG screening, hidden-wheel delivery protection, safe headers, audit, and R2 replacement/removal cleanup.
+- Expanded the wheel config authority to six palettes, per-entry colours, background presentation controls, independent confetti/lighting/sound toggles, and bounded intensity while preserving the official spin transaction unchanged.
+- Added migration, media, R2 lifecycle, security, hidden-access, and UI compatibility tests. Checkout, payments, fulfillment, Printful, Wix, DNS, domains, secrets, bots, and official wheel history are unchanged.
+- Backed up the remote Commerce D1 (3,013,256 bytes), applied only 0016, reconciled the already-present 0014 ledger row, verified exact before/after counts and empty foreign-key/media results, and deployed Admin `afd9db50` before Public `511d5421`. No authenticated remote media write was attempted or bypassed.
+
+## 2026-08-29 — Customer checkout and shipping foundation
+
+- Added additive migration `0015_checkout_shipping_foundation.sql` for plaintext-free, fingerprint-bound shipping quotes and one encrypted delivery/shipping snapshot per historical order. Existing AES-256-GCM custody protects recipient data; catalogue/list/audit/Stripe metadata projections never contain full address or envelope material.
+- Extended the existing order-before-Stripe checkout core with authoritative physical-product and Printful Catalog mapping checks, stable V1 mocked shipping-rate normalization, local quote freshness/integrity, integer CAD subtotal + shipping totals, fixed-amount Stripe shipping request fields, preserved idempotency, and exact Stripe/local total agreement.
+- Updated Fulfillment & Shipping and Orders to distinguish implemented capability from disabled configuration, show TEST/LIVE snapshot counts and safe order delivery facts, and prepare a protected stored order into a pure internal Printful DRAFT representation while submission remains impossible.
+- Added focused Node 22.16.0 server, migration, checkout, draft, Orders, Admin browser, and no-side-effect coverage. Shipping strategy, normal/controlled checkout, live payments, fulfillment, provider creation/confirmation, tracking, email, remote D1, and deployment remain untouched and disabled.
+
 ## 2026-08-29 — Fulfillment & Shipping control plane
 
 CURRENT VER=0.0.0-seed

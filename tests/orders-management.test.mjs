@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import { commerceOrderDetailPayload, commerceOrdersPayload } from "../functions/_shared/checkout-core.js";
+import { encryptCommerceSecret } from "../functions/_shared/commerce-core.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { commerceEnvironment, createCommerceDatabases, insertTestProduct } from "./commerce-test-helpers.mjs";
@@ -53,17 +54,26 @@ test("single-order detail preserves immutable history through catalogue changes 
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness);
   await insertTestProduct(harness.commerceDb, { id: "product-historical", slug: "historical", title: "Current title must not replace snapshot" });
+  const recipientCiphertext = await encryptCommerceSecret(env, JSON.stringify({ name: "Private Fixture", address1: "100 Hidden Street", city: "London", region: "ON", postalCode: "N6A 1A1", countryCode: "CA", phone: null }), "order-delivery:ord-detail-001");
   await harness.commerceDb.batch([
     harness.commerceDb.prepare(
       `INSERT INTO commerce_orders (id,payment_status,fulfillment_status,currency_code,customer_gross_amount,refund_amount,
         stripe_checkout_session_id,stripe_payment_intent_id,environment,checkout_status,checkout_request_id,
         checkout_created_at,payment_confirmed_at,created_at,updated_at)
-       VALUES ('ord-detail-001','paid','disabled','CAD',2500,500,'cs_test_detail001','pi_detail001','test','checkout_created',
+       VALUES ('ord-detail-001','paid','disabled','CAD',3000,500,'cs_test_detail001','pi_detail001','test','checkout_created',
         '11111111-1111-4111-8111-111111111111','2026-08-29T00:01:00.000Z','2026-08-29T00:03:00.000Z','2026-08-29T00:00:00.000Z','2026-08-29T00:03:00.000Z')`),
     harness.commerceDb.prepare(
       `INSERT INTO commerce_order_items (id,order_id,line_number,product_id,product_name,option_values_json,currency_code,
         unit_amount,quantity,line_total_amount,requires_shipping,created_at)
        VALUES ('line-detail-001','ord-detail-001',1,'product-historical','Immutable historical title','{"Size":"M"}','CAD',2500,1,2500,1,'2026-08-29T00:00:00.000Z')`),
+    harness.commerceDb.prepare(`INSERT INTO commerce_shipping_quotes
+      (id,environment,cart_fingerprint,recipient_fingerprint,currency_code,shipping_strategy,provider,rate_options_json,created_at,expires_at)
+      VALUES ('shq_cccccccc-cccc-4ccc-8ccc-cccccccccccc','test',?,?,'CAD','printful_dynamic','printful','[]','2026-08-29T00:00:00.000Z','2026-08-29T00:15:00.000Z')`).bind("a".repeat(64), "b".repeat(64)),
+    harness.commerceDb.prepare(
+      `INSERT INTO commerce_order_delivery_snapshots (order_id,recipient_ciphertext,destination_country_code,destination_region_code,
+        shipping_strategy,provider,provider_shipping_method_id,display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at,updated_at)
+       VALUES ('ord-detail-001',?,'CA','ON','printful_dynamic','printful','STANDARD','Standard delivery',500,'CAD','shq_cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        '2026-08-29T00:00:00.000Z','2026-08-29T00:00:00.000Z','2026-08-29T00:00:00.000Z')`).bind(recipientCiphertext),
     harness.commerceDb.prepare(
       `INSERT INTO commerce_webhook_events (provider,provider_event_id,event_type,event_created_at,received_at,livemode,
         related_object_id,related_object_type,processing_status,processed_at,result_code)
@@ -87,12 +97,18 @@ test("single-order detail preserves immutable history through catalogue changes 
   const payload = await commerceOrderDetailPayload(env, master, "ord-detail-001");
   assert.equal(payload.order.test, true); assert.equal(payload.order.customer.available, false);
   assert.equal(payload.order.items[0].productName, "Immutable historical title"); assert.equal(payload.order.items[0].imageUrl, null);
-  assert.deepEqual(payload.order.financial, { subtotalAmount: 2500, discountAmount: null, shippingAmount: null, taxAmount: null, totalAmount: 2500, refundAmount: 500, netAmount: 2000, currencyCode: "CAD" });
+  assert.deepEqual(payload.order.financial, { subtotalAmount: 2500, discountAmount: null, shippingAmount: 500, taxAmount: null, totalAmount: 3000, refundAmount: 500, netAmount: 2500, currencyCode: "CAD" });
+  assert.deepEqual(payload.order.delivery, { available: true, recipientConfigured: true, destinationCountryCode: "CA", destinationRegionCode: "ON", strategy: "printful_dynamic", provider: "printful", method: "Standard delivery", amount: 500, currencyCode: "CAD", quoteReference: "shq_cccccccc-cccc-4ccc-8ccc-cccccccccccc", quotedAt: "2026-08-29T00:00:00.000Z", capturedAt: "2026-08-29T00:00:00.000Z", addressExternallyVerified: false });
   assert.equal(payload.order.documents.length, 1); assert.equal(payload.order.deliveries.length, 1); assert.equal(payload.order.webhooks.length, 1); assert.equal(payload.order.audit.length, 1);
   assert.deepEqual(payload.order.timeline.map((entry) => entry.timestamp), [...payload.order.timeline.map((entry) => entry.timestamp)].sort());
   const serialized = JSON.stringify(payload);
-  assert.doesNotMatch(serialized, /recipient_email|customer@example|authorization|secret|credential|payload_sha256|snapshot_json/i);
+  assert.doesNotMatch(serialized, /recipient_email|customer@example|Private Fixture|Hidden Street|N6A 1A1|recipient_ciphertext|authorization|secret|credential|payload_sha256|snapshot_json/i);
   assert.equal(payload.order.fulfillment.submissionEnabled, false); assert.equal(payload.order.fulfillment.orderMode, "draft_only");
+
+  await harness.commerceDb.prepare(`INSERT INTO commerce_orders (id,payment_status,fulfillment_status,currency_code,customer_gross_amount,environment,checkout_status,created_at,updated_at)
+    VALUES ('ord-legacy-test','paid','disabled','CAD',1500,'test','checkout_created','2026-08-28T00:00:00Z','2026-08-28T00:01:00Z')`).run();
+  const legacy = await commerceOrderDetailPayload(env, master, "ord-legacy-test");
+  assert.equal(legacy.order.test, true); assert.equal(legacy.order.delivery.available, false); assert.equal(legacy.order.delivery.recipientConfigured, false); assert.equal(legacy.order.financial.shippingAmount, null);
 });
 
 test("order read routes reject unauthenticated and insufficient callers and never invoke providers", async (t) => {

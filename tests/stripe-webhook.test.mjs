@@ -40,7 +40,7 @@ async function invoke(request, env) {
 
 async function createLinkedOrder(harness, env, checkoutRequestId = "33333333-3333-4333-8333-333333333333") {
   await enableTestCheckout(harness.commerceDb);
-  await insertTestProduct(harness.commerceDb);
+  await insertTestProduct(harness.commerceDb, { requiresShipping: 0 });
   const checkoutHttpRequest = new Request("https://thirdrailify-admin.pages.dev/api/commerce/checkout", {
     method: "POST",
     headers: { Origin: "https://thirdrailify.pages.dev", "Content-Type": "application/json" },

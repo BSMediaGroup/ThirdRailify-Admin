@@ -8,11 +8,20 @@ import {
 } from "./auth-core.js";
 import {
   commerceAccessForSession,
+  encryptCommerceSecret,
   isStripeTestCredentialConfigured,
   isStripeWebhookSigningConfigured,
   recordVerifiedStripeWebhookReceipt,
   requireCommerceDb,
 } from "./commerce-core.js";
+import {
+  authoritativeCartLines,
+  authoritativeSubtotal,
+  normalizeCartItems,
+  normalizeDeliveryRecipient,
+  resolveShippingSelection,
+  stripeShippingRateFields,
+} from "./shipping-core.js";
 
 const encoder = new TextEncoder();
 const STRIPE_CHECKOUT_URL = "https://api.stripe.com/v1/checkout/sessions";
@@ -27,7 +36,12 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
   const configuration = await requireCheckoutConfiguration(env, db, gate);
   const cartRequest = validateCheckoutRequest(input);
   if (gate === "controlled_test") requireControlledTestCart(cartRequest, configuration.candidate);
-  const checkoutRequestDigest = await sha256Hex(JSON.stringify(cartRequest.items));
+  const checkoutRequestDigest = await sha256Hex(JSON.stringify({
+    items: cartRequest.items,
+    recipient: cartRequest.recipient,
+    quoteId: cartRequest.quoteId,
+    shippingOptionId: cartRequest.shippingOptionId,
+  }));
   let order = await loadOrderByCheckoutRequest(db, cartRequest.checkoutRequestId);
 
   if (order) {
@@ -49,24 +63,39 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
   await enforceRateLimit(env, request, "checkout", cartRequest.checkoutRequestId);
 
   let lines;
+  let shippingSelection = null;
   if (order) {
     lines = await loadOrderItems(db, order.id);
     if (!lines.length) throw new AuthFailure(503, "checkout_order_incomplete", "The existing checkout order is incomplete.");
+    shippingSelection = await loadOrderDeliverySelection(db, order.id);
+    if (lines.some((line) => line.requiresShipping) && !shippingSelection) throw new AuthFailure(503, "checkout_order_incomplete", "The existing checkout order has no delivery snapshot.");
   } else {
-    lines = await authoritativeCartLines(db, cartRequest.items, gate);
+    lines = await authoritativeCartLines(db, cartRequest.items, { gate, environment: configuration.environment });
+    if (lines.some((line) => line.requiresShipping)) {
+      shippingSelection = await resolveShippingSelection(db, {
+        lines,
+        recipient: cartRequest.recipient,
+        quoteId: cartRequest.quoteId,
+        optionId: cartRequest.shippingOptionId,
+        environment: configuration.environment,
+      });
+    }
     const timestamp = nowIso();
     const orderId = `ord_${randomId()}`;
     const cartDigest = await authoritativeCartDigest(lines);
-    const expectedAmount = totalAmount(lines);
+    const expectedAmount = totalAmount(lines, shippingSelection?.option.amount || 0);
+    const recipientCiphertext = shippingSelection
+      ? await encryptCommerceSecret(env, JSON.stringify(shippingSelection.recipient), `order-delivery:${orderId}`)
+      : null;
     const statements = [
       db.prepare(
         `INSERT INTO commerce_orders (
-           id, customer_payment_provider, payment_status, fulfillment_status, currency_code,
+           id, customer_payment_provider, payment_status, fulfillment_provider, fulfillment_status, currency_code,
            customer_gross_amount, checkout_request_id, checkout_request_digest, cart_digest,
            environment, checkout_status, safe_metadata_json, created_at, updated_at
-         ) VALUES (?, 'stripe', 'pending', 'disabled', 'CAD', ?, ?, ?, ?, 'test', 'checkout_pending', ?, ?, ?)`,
+         ) VALUES (?, 'stripe', 'pending', ?, 'disabled', 'CAD', ?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?)`,
       ).bind(
-        orderId, expectedAmount, cartRequest.checkoutRequestId, checkoutRequestDigest, cartDigest,
+        orderId, shippingSelection?.provider || null, expectedAmount, cartRequest.checkoutRequestId, checkoutRequestDigest, cartDigest, configuration.environment,
         JSON.stringify(gate === "controlled_test" ? { checkoutGate: "controlled_test", fulfillment: "disabled" } : {}),
         timestamp, timestamp,
       ),
@@ -82,6 +111,18 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
         line.quantity, line.lineTotalAmount, line.requiresShipping ? 1 : 0,
         line.fulfillmentProvider, line.fulfillmentVariantId, timestamp,
       )),
+      ...(shippingSelection ? [db.prepare(
+        `INSERT INTO commerce_order_delivery_snapshots (
+           order_id,recipient_ciphertext,destination_country_code,destination_region_code,
+           shipping_strategy,provider,provider_shipping_method_id,display_shipping_method,
+           shipping_amount,currency_code,source_quote_id,quoted_at,created_at,updated_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,'CAD',?,?,?,?)`,
+      ).bind(
+        orderId, recipientCiphertext, shippingSelection.recipient.countryCode, shippingSelection.recipient.region,
+        shippingSelection.strategy, shippingSelection.provider, shippingSelection.option.providerRateId,
+        shippingSelection.option.name, shippingSelection.option.amount, shippingSelection.quoteId,
+        shippingSelection.quotedAt, timestamp, timestamp,
+      )] : []),
     ];
     try {
       await db.batch(statements);
@@ -98,7 +139,7 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
   const linked = linkedCheckoutResponse(order);
   if (linked) return linked;
   const expectedAmount = Number(order.customer_gross_amount);
-  if (!Number.isSafeInteger(expectedAmount) || expectedAmount <= 0 || expectedAmount !== totalAmount(lines)) {
+  if (!Number.isSafeInteger(expectedAmount) || expectedAmount <= 0 || expectedAmount !== totalAmount(lines, shippingSelection?.option.amount || 0)) {
     throw new AuthFailure(503, "checkout_order_incomplete", "The checkout order total is invalid.");
   }
 
@@ -107,7 +148,7 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
   ).bind(nowIso(), order.id).run();
 
   const publicOrigin = configuredPublicOrigin(env);
-  const body = stripeCheckoutBody(order, lines, publicOrigin);
+  const body = stripeCheckoutBody(order, lines, publicOrigin, shippingSelection);
   const credential = String(env.STRIPE_SECRET_KEY).trim();
   const idempotencyKey = await stripeCheckoutIdempotencyKey(order.id, order.checkout_request_id);
   let response;
@@ -285,7 +326,7 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
      FROM commerce_orders WHERE id = ? LIMIT 1`,
   ).bind(orderId).first();
   if (!order) throw new AuthFailure(404, "commerce_order_not_found", "The commerce order was not found.");
-  const [itemsResult, webhooksResult, documentsResult, deliveriesResult, auditResult] = await Promise.all([
+  const [itemsResult, webhooksResult, documentsResult, deliveriesResult, auditResult, deliverySnapshot] = await Promise.all([
     db.prepare(
       `SELECT i.id, i.line_number, i.product_id, i.variant_id, i.product_name, i.variant_name, i.sku,
               i.option_values_json, i.currency_code, i.unit_amount, i.quantity, i.line_total_amount,
@@ -315,6 +356,11 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
       `SELECT id, action, target_type, result, created_at
        FROM commerce_audit WHERE target_id = ? ORDER BY created_at ASC, id ASC LIMIT 100`,
     ).bind(orderId).all(),
+    db.prepare(
+      `SELECT destination_country_code,destination_region_code,shipping_strategy,provider,
+              display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at
+       FROM commerce_order_delivery_snapshots WHERE order_id=? LIMIT 1`,
+    ).bind(orderId).first(),
   ]);
   const items = (itemsResult?.results || []).map(serializeOrderItem);
   const webhooks = (webhooksResult?.results || []).map((row) => ({
@@ -343,6 +389,21 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
   const subtotalAmount = items.reduce((sum, item) => sum + item.lineTotalAmount, 0);
   const totalAmount = safeMinorAmount(order.customer_gross_amount);
   const refundAmount = safeMinorAmount(order.refund_amount);
+  const shippingAmount = deliverySnapshot ? safeMinorAmount(deliverySnapshot.shipping_amount) : null;
+  const delivery = deliverySnapshot ? {
+    available: true, recipientConfigured: true,
+    destinationCountryCode: cleanText(deliverySnapshot.destination_country_code, 2).toUpperCase(),
+    destinationRegionCode: cleanText(deliverySnapshot.destination_region_code, 80) || null,
+    strategy: cleanText(deliverySnapshot.shipping_strategy, 80), provider: cleanText(deliverySnapshot.provider, 40) || null,
+    method: cleanText(deliverySnapshot.display_shipping_method, 100), amount: shippingAmount,
+    currencyCode: cleanText(deliverySnapshot.currency_code, 3).toUpperCase(),
+    quoteReference: cleanText(deliverySnapshot.source_quote_id, 80), quotedAt: cleanText(deliverySnapshot.quoted_at, 80),
+    capturedAt: cleanText(deliverySnapshot.created_at, 80), addressExternallyVerified: false,
+  } : {
+    available: false, recipientConfigured: false, destinationCountryCode: null, destinationRegionCode: null,
+    strategy: null, provider: null, method: null, amount: null, currencyCode: null,
+    quoteReference: null, quotedAt: null, capturedAt: null, addressExternallyVerified: false,
+  };
   return {
     ok: true,
     databaseConfigured: true,
@@ -356,8 +417,9 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
       checkoutCreatedAt: cleanText(order.checkout_created_at, 80) || null, paymentConfirmedAt: cleanText(order.payment_confirmed_at, 80) || null,
       paymentFailedAt: cleanText(order.payment_failed_at, 80) || null, checkoutFailureCode: cleanText(order.checkout_failure_code, 80) || null,
       customer: { available: false, name: null, email: null, phone: null, billingAddress: null, shippingAddress: null },
+      delivery,
       items,
-      financial: { subtotalAmount, discountAmount: null, shippingAmount: null, taxAmount: null, totalAmount, refundAmount, netAmount: refundAmount <= totalAmount ? totalAmount - refundAmount : null, currencyCode: cleanText(order.currency_code, 3).toUpperCase() },
+      financial: { subtotalAmount, discountAmount: null, shippingAmount, taxAmount: null, totalAmount, refundAmount, netAmount: refundAmount <= totalAmount ? totalAmount - refundAmount : null, currencyCode: cleanText(order.currency_code, 3).toUpperCase() },
       payment: { provider: cleanText(order.customer_payment_provider, 40), status: cleanText(order.payment_status, 40), environment: order.environment === "live" ? "live" : "test", stripeSessionId: safeStripeObjectId(order.stripe_checkout_session_id), stripePaymentIntentId: safeStripeObjectId(order.stripe_payment_intent_id) },
       fulfillment: { provider: cleanText(order.fulfillment_provider, 40) || null, status: cleanText(order.fulfillment_status, 40), printfulOrderId: cleanText(order.printful_order_id, 255) || null, orderMode: "draft_only", submissionEnabled: false, tracking: null, carrier: null, failureReason: cleanText(order.checkout_failure_code, 80) || null, providerCosts: { product: safeMinorAmount(order.printful_product_cost_amount), shipping: safeMinorAmount(order.printful_shipping_cost_amount), tax: safeMinorAmount(order.printful_tax_amount), refundCredit: safeMinorAmount(order.printful_refund_credit_amount) } },
       documents, deliveries, webhooks, audit,
@@ -500,7 +562,7 @@ async function requireCheckoutConfiguration(env, db, gate) {
     throw new AuthFailure(503, "checkout_environment_invalid", "Stripe Checkout is restricted to the staging test environment.");
   }
   configuredPublicOrigin(env);
-  return { turnstileRequired: gate === "normal" && settings.checkout_turnstile_required === true, candidate };
+  return { turnstileRequired: gate === "normal" && settings.checkout_turnstile_required === true, candidate, environment: "test" };
 }
 
 function requireControlledTestCart(cartRequest, candidate) {
@@ -518,7 +580,7 @@ function validateCheckoutRequest(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new AuthFailure(400, "checkout_request_invalid", "The checkout request is invalid.");
   }
-  const allowedKeys = new Set(["checkoutRequestId", "items", "turnstileToken"]);
+  const allowedKeys = new Set(["checkoutRequestId", "items", "recipient", "quoteId", "shippingOptionId", "turnstileToken"]);
   if (Object.keys(input).some((key) => !allowedKeys.has(key))) {
     throw new AuthFailure(400, "checkout_request_fields_invalid", "The checkout request contains unsupported fields.");
   }
@@ -526,111 +588,11 @@ function validateCheckoutRequest(input) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(checkoutRequestId)) {
     throw new AuthFailure(400, "checkout_request_id_invalid", "A valid checkout request UUID is required.");
   }
-  if (!Array.isArray(input.items) || input.items.length === 0) {
-    throw new AuthFailure(400, "checkout_cart_empty", "At least one cart line is required.");
-  }
-  if (input.items.length > CHECKOUT_MAX_LINES) {
-    throw new AuthFailure(400, "checkout_cart_too_large", "The cart contains too many lines.");
-  }
-  const items = input.items.map((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some((key) => !new Set(["productId", "variantId", "quantity"]).has(key))) {
-      throw new AuthFailure(400, "checkout_line_invalid", "Each cart line may contain only productId, variantId, and quantity.");
-    }
-    const productId = cleanText(item.productId, 160);
-    if (!productId || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(productId)) {
-      throw new AuthFailure(400, "checkout_product_id_invalid", "A cart line contains an invalid product identifier.");
-    }
-    if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > CHECKOUT_MAX_QUANTITY) {
-      throw new AuthFailure(400, "checkout_quantity_invalid", "Cart quantities must be bounded positive integers.");
-    }
-    const variantId = item.variantId === undefined || item.variantId === null ? null : cleanText(item.variantId, 160);
-    if (variantId !== null && (!variantId || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(variantId))) {
-      throw new AuthFailure(400, "checkout_variant_id_invalid", "A cart line contains an invalid variant identifier.");
-    }
-    return { productId, variantId, quantity: item.quantity };
-  }).sort((left, right) => `${left.productId}:${left.variantId || ""}`.localeCompare(`${right.productId}:${right.variantId || ""}`));
-  if (new Set(items.map((item) => `${item.productId}:${item.variantId || ""}`)).size !== items.length) {
-    throw new AuthFailure(400, "checkout_line_duplicate", "A product variant may appear only once in a checkout request.");
-  }
-  return { checkoutRequestId, items };
-}
-
-async function authoritativeCartLines(db, items, gate = "normal") {
-  const placeholders = items.map(() => "?").join(",");
-  const result = await db.prepare(
-    `SELECT id, title, currency_code, status, unit_amount, checkout_environment,
-            visibility, max_checkout_quantity, requires_shipping, migration_status, target_printful_product_id
-     FROM commerce_products WHERE id IN (${placeholders})`,
-  ).bind(...items.map((item) => item.productId)).all();
-  const rows = new Map((result?.results || []).map((row) => [row.id, row]));
-  const variantIds = items.map((item) => item.variantId).filter(Boolean);
-  const variantResult = variantIds.length ? await db.prepare(
-    `SELECT id, product_id, status, visibility, is_sellable, availability_status,
-            unit_amount, currency_code, sku, size_label, color_label, option_values_json,
-            fulfillment_provider, fulfillment_mapping_status, migration_status,
-            target_printful_product_id, target_printful_sync_variant_id
-     FROM commerce_product_variants WHERE id IN (${variantIds.map(() => "?").join(",")})`,
-  ).bind(...variantIds).all() : { results: [] };
-  const variants = new Map((variantResult?.results || []).map((row) => [row.id, row]));
-  const variantCountResult = await db.prepare(
-    `SELECT product_id, COUNT(*) AS variant_count FROM commerce_product_variants
-     WHERE product_id IN (${placeholders}) GROUP BY product_id`,
-  ).bind(...items.map((item) => item.productId)).all();
-  const variantCounts = new Map((variantCountResult?.results || []).map((row) => [row.product_id, Number(row.variant_count)]));
-  return items.map((item) => {
-    const product = rows.get(item.productId);
-    if (!product) throw new AuthFailure(400, "checkout_product_unknown", "A requested product does not exist.");
-    if (product.status !== "active" || product.visibility !== "public" || product.checkout_environment !== "test") {
-      throw new AuthFailure(409, "checkout_product_unavailable", "A requested product is not available for test checkout.");
-    }
-    if (String(product.currency_code || "").toUpperCase() !== "CAD") {
-      throw new AuthFailure(409, "checkout_product_currency_invalid", "A requested product is not priced in CAD.");
-    }
-    const hasVariants = (variantCounts.get(item.productId) || 0) > 0;
-    if (hasVariants && !item.variantId) throw new AuthFailure(400, "checkout_variant_required", "A concrete product variant is required.");
-    if (!hasVariants && item.variantId) throw new AuthFailure(400, "checkout_variant_unknown", "The requested product does not have variants.");
-    const variant = item.variantId ? variants.get(item.variantId) : null;
-    if (item.variantId && (!variant || variant.product_id !== item.productId)) throw new AuthFailure(400, "checkout_variant_unknown", "The requested product variant does not exist.");
-    if (variant && (variant.status !== "active" || variant.visibility !== "public" || variant.is_sellable !== 1 || variant.availability_status !== "active")) {
-      throw new AuthFailure(409, "checkout_variant_unavailable", "The requested product variant is not sellable and available.");
-    }
-    if (variant && (variant.fulfillment_provider !== "printful" || variant.fulfillment_mapping_status !== "mapped" || !variant.target_printful_sync_variant_id)) {
-      throw new AuthFailure(409, "checkout_variant_fulfillment_unavailable", "The requested product variant has no authoritative fulfillment mapping.");
-    }
-    if (gate === "controlled_test" && (
-      product.migration_status !== "target_verified" || !product.target_printful_product_id
-      || !variant || variant.migration_status !== "target_verified"
-      || !variant.target_printful_product_id || variant.target_printful_product_id !== product.target_printful_product_id
-    )) {
-      throw new AuthFailure(409, "checkout_variant_migration_unverified", "The controlled test variant is not fully verified against its target mapping.");
-    }
-    if (variant && String(variant.currency_code || "").toUpperCase() !== "CAD") throw new AuthFailure(409, "checkout_variant_currency_invalid", "The requested product variant is not priced in CAD.");
-    const unitAmount = Number(variant ? variant.unit_amount : product.unit_amount);
-    const maxQuantity = Number(product.max_checkout_quantity);
-    if (!Number.isSafeInteger(unitAmount) || unitAmount <= 0 || unitAmount > 100_000_000) {
-      throw new AuthFailure(409, "checkout_product_price_invalid", "A requested product has no valid authoritative price.");
-    }
-    if (!Number.isSafeInteger(maxQuantity) || item.quantity > maxQuantity) {
-      throw new AuthFailure(409, "checkout_quantity_unavailable", "A requested quantity is not permitted.");
-    }
-    const productName = cleanText(product.title, 240);
-    if (!productName) throw new AuthFailure(409, "checkout_product_name_invalid", "A requested product has no valid authoritative name.");
-    return {
-      productId: item.productId,
-      variantId: variant?.id || null,
-      productName,
-      variantName: variant ? [cleanText(variant.size_label, 120), cleanText(variant.color_label, 120)].filter(Boolean).join(" / ") || null : null,
-      sku: variant ? cleanText(variant.sku, 240) || null : null,
-      optionValues: variant ? parseJson(variant.option_values_json, {}) : {},
-      currencyCode: "CAD",
-      unitAmount,
-      quantity: item.quantity,
-      lineTotalAmount: unitAmount * item.quantity,
-      requiresShipping: product.requires_shipping === 1,
-      fulfillmentProvider: variant?.fulfillment_provider || null,
-      fulfillmentVariantId: variant?.target_printful_sync_variant_id || null,
-    };
-  });
+  const items = normalizeCartItems(input.items);
+  const recipient = input.recipient === undefined || input.recipient === null ? null : normalizeDeliveryRecipient(input.recipient);
+  const quoteId = input.quoteId === undefined || input.quoteId === null ? null : cleanText(input.quoteId, 80);
+  const shippingOptionId = input.shippingOptionId === undefined || input.shippingOptionId === null ? null : cleanText(input.shippingOptionId, 40);
+  return { checkoutRequestId, items, recipient, quoteId, shippingOptionId };
 }
 
 async function loadOrderItems(db, orderId) {
@@ -657,6 +619,26 @@ async function loadOrderItems(db, orderId) {
   }));
 }
 
+async function loadOrderDeliverySelection(db, orderId) {
+  const row = await db.prepare(
+    `SELECT source_quote_id,quoted_at,shipping_strategy,provider,provider_shipping_method_id,
+            display_shipping_method,shipping_amount,currency_code
+     FROM commerce_order_delivery_snapshots WHERE order_id=? LIMIT 1`,
+  ).bind(orderId).first();
+  if (!row) return null;
+  const amount = Number(row.shipping_amount);
+  if (!Number.isSafeInteger(amount) || amount < 0 || String(row.currency_code).toUpperCase() !== "CAD") return null;
+  return {
+    quoteId: cleanText(row.source_quote_id, 80), quotedAt: cleanText(row.quoted_at, 80),
+    strategy: cleanText(row.shipping_strategy, 80), provider: cleanText(row.provider, 40) || null,
+    option: {
+      providerRateId: cleanText(row.provider_shipping_method_id, 120) || null,
+      name: cleanText(row.display_shipping_method, 100), amount,
+      currency: "CAD", minDeliveryDays: null, maxDeliveryDays: null,
+    },
+  };
+}
+
 async function loadOrderByCheckoutRequest(db, checkoutRequestId) {
   return db.prepare("SELECT * FROM commerce_orders WHERE checkout_request_id = ? LIMIT 1").bind(checkoutRequestId).first();
 }
@@ -668,7 +650,7 @@ function linkedCheckoutResponse(order) {
   return url ? { ok: true, orderId: order.id, sessionId: order.stripe_checkout_session_id, checkoutUrl: url } : null;
 }
 
-function stripeCheckoutBody(order, lines, publicOrigin) {
+function stripeCheckoutBody(order, lines, publicOrigin, shippingSelection = null) {
   const form = new URLSearchParams();
   form.set("mode", "payment");
   form.set("payment_method_types[0]", "card");
@@ -684,6 +666,7 @@ function stripeCheckoutBody(order, lines, publicOrigin) {
     form.set(`line_items[${index}][price_data][product_data][name]`, line.variantName ? `${line.productName} — ${line.variantName}` : line.productName);
     form.set(`line_items[${index}][quantity]`, String(line.quantity));
   });
+  stripeShippingRateFields(form, shippingSelection);
   return form.toString();
 }
 
@@ -740,8 +723,8 @@ async function checkoutIsDisabled(db) {
   return parseJson(setting?.value_json, false) !== true;
 }
 
-function totalAmount(lines) {
-  const total = lines.reduce((sum, line) => sum + line.lineTotalAmount, 0);
+function totalAmount(lines, shippingAmount = 0) {
+  const total = authoritativeSubtotal(lines) + shippingAmount;
   if (!Number.isSafeInteger(total) || total <= 0 || total > CHECKOUT_MAX_TOTAL) {
     throw new AuthFailure(409, "checkout_total_invalid", "The authoritative cart total is outside the permitted range.");
   }

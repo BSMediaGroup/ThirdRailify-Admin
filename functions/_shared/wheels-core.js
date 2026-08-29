@@ -9,14 +9,15 @@ import {
   serializeAccount,
   timingSafeEqual,
 } from "./auth-core.js";
+import { mediaForWheel } from "./wheel-media.js";
 
 const MAX_ENTRIES = 1000;
 const MAX_BODY_BYTES = 384 * 1024;
 const HEX = /^#[0-9a-f]{6}$/i;
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,78}[a-z0-9])$/;
 const ROLES = new Set(["owner", "editor", "spinner"]);
-const PRESETS = new Set(["third-rail-gold", "live-wire-red", "gina-violet", "high-voltage-mono"]);
-const CELEBRATIONS = new Set(["off", "restrained", "full"]);
+const PRESETS = new Set(["third-rail-gold", "live-wire-red", "gina-violet", "high-voltage-mono", "signal-teal", "after-hours"]);
+const CELEBRATIONS = new Set(["subtle", "normal", "strong"]);
 const DEFAULT_CONFIG = Object.freeze({
   themePreset: "third-rail-gold",
   palette: ["#f3c928", "#b8182f", "#f3f0e5", "#5b2c83"],
@@ -27,7 +28,15 @@ const DEFAULT_CONFIG = Object.freeze({
   spinDurationMs: 6500,
   tickingSoundEnabled: true,
   winnerSoundEnabled: true,
-  celebrationIntensity: "full",
+  celebrationEnabled: true,
+  confettiEnabled: true,
+  winnerLightingEnabled: true,
+  celebrationIntensity: "normal",
+  backgroundEnabled: true,
+  backgroundFocalX: 50,
+  backgroundFocalY: 50,
+  backgroundImageOpacity: 72,
+  backgroundOverlayIntensity: 58,
   winnerMessageTemplate: "Signal locked: {winner}",
   publicHistoryVisible: true,
 });
@@ -93,7 +102,8 @@ export async function getPublicWheel(env, slug, accountId = "") {
   if (!publicVisible && !access.canViewPrivate) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   const entries = await entriesForWheel(env, wheel.id, access.canEdit);
   const history = await publicHistory(env, wheel, 10);
-  return { ok: true, wheel: publicDetail(wheel, entries, history, access), access: accessProjection(access, wheel) };
+  const media = await mediaForWheel(env, wheel.id);
+  return { ok: true, wheel: publicDetail(wheel, entries, history, access, media), access: accessProjection(access, wheel) };
 }
 
 export async function getCreatorAccess(env, accountId) {
@@ -289,7 +299,7 @@ export async function adminWheelDetail(env, id) {
   const row = await requireWheelDb(env).prepare("SELECT * FROM wheels WHERE id = ?").bind(clean(id, 80)).first();
   if (!row) throw new AuthFailure(404, "wheel_not_found", "The wheel was not found.");
   const [entries, access, results] = await Promise.all([entriesForWheel(env, row.id, true), wheelAccessRows(env, row.id), resultRows(env, row.id, 100)]);
-  return { ok: true, item: { ...(await adminWheelSummary(env, row)), config: parseJson(row.config_json, DEFAULT_CONFIG), entries, access, results: results.map(adminResultProjection) } };
+  return { ok: true, item: { ...(await adminWheelSummary(env, row)), config: validateConfig(parseJson(row.config_json, DEFAULT_CONFIG)), entries, access, results: results.map(adminResultProjection), media: await mediaForWheel(env, row.id, { includeDeleted: true }) } };
 }
 
 export async function adminWheelAccess(env) {
@@ -411,7 +421,7 @@ export async function saveWheelSettings(env, actorId, input) {
     maximumParticipants: positiveInteger(input.maximumParticipants || MAX_ENTRIES, "maximum_participants_invalid", MAX_ENTRIES),
     maximumWheelsPerCreator: positiveInteger(input.maximumWheelsPerCreator || 20, "maximum_wheels_invalid", 100),
     officialSpinCooldownSeconds: positiveInteger(input.officialSpinCooldownSeconds || 2, "cooldown_invalid", 60),
-    defaultCelebrationIntensity: CELEBRATIONS.has(input.defaultCelebrationIntensity) ? input.defaultCelebrationIntensity : "full",
+    defaultCelebrationIntensity: CELEBRATIONS.has(input.defaultCelebrationIntensity) ? input.defaultCelebrationIntensity : legacyCelebration(input.defaultCelebrationIntensity),
     defaultPublicHistory: input.defaultPublicHistory !== false,
   };
   const timestamp = nowIso(); const result = await requireWheelDb(env).prepare("UPDATE wheel_settings SET value_json = ?, revision = revision + 1, updated_at = ?, updated_by_account_id = ? WHERE setting_key = 'global' AND revision = ?").bind(JSON.stringify(settings), timestamp, actorId, revision).run();
@@ -462,7 +472,15 @@ function validateConfig(input) {
     spinDurationMs: duration,
     tickingSoundEnabled: input.tickingSoundEnabled !== false,
     winnerSoundEnabled: input.winnerSoundEnabled !== false,
-    celebrationIntensity: CELEBRATIONS.has(input.celebrationIntensity) ? input.celebrationIntensity : DEFAULT_CONFIG.celebrationIntensity,
+    celebrationEnabled: input.celebrationEnabled !== false && input.celebrationIntensity !== "off",
+    confettiEnabled: input.confettiEnabled !== false,
+    winnerLightingEnabled: input.winnerLightingEnabled !== false,
+    celebrationIntensity: CELEBRATIONS.has(input.celebrationIntensity) ? input.celebrationIntensity : legacyCelebration(input.celebrationIntensity),
+    backgroundEnabled: input.backgroundEnabled !== false,
+    backgroundFocalX: boundedPercent(input.backgroundFocalX, DEFAULT_CONFIG.backgroundFocalX),
+    backgroundFocalY: boundedPercent(input.backgroundFocalY, DEFAULT_CONFIG.backgroundFocalY),
+    backgroundImageOpacity: boundedPercent(input.backgroundImageOpacity, DEFAULT_CONFIG.backgroundImageOpacity),
+    backgroundOverlayIntensity: boundedPercent(input.backgroundOverlayIntensity, DEFAULT_CONFIG.backgroundOverlayIntensity),
     winnerMessageTemplate: template,
     publicHistoryVisible: input.publicHistoryVisible !== false,
   };
@@ -495,7 +513,7 @@ async function publicHistory(env, wheel, limit) { const config = parseJson(wheel
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
 function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null }; }
-function publicDetail(wheel, entries, history, access) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
+function publicDetail(wheel, entries, history, access, media) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, media, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
 function officialProjection(row) { return { id: row.id, type: "official", winningEntryId: row.winning_entry_id, winningLabel: row.winning_label_snapshot, winningWeight: Number(row.winning_weight_snapshot), wheelRevision: Number(row.wheel_revision), snapshotHash: row.participant_snapshot_hash, createdAt: row.created_at, voided: Boolean(row.voided_at) }; }
 function adminResultProjection(row) { return { ...officialProjection(row), wheelId: row.wheel_id, performedByAccountId: row.performed_by_account_id, idempotencyKey: row.idempotency_key, voidedAt: row.voided_at || null, voidReason: row.void_reason || null, voidedByAccountId: row.voided_by_account_id || null }; }
 async function adminWheelSummary(env, row) { return { id: row.id, reference: row.reference_code, slug: row.public_slug, title: row.title, description: row.description, lifecycle: row.lifecycle, visibility: row.visibility, owner: await accountSummary(env, row.owner_account_id), participantCount: Number(row.participant_count), revision: Number(row.revision), officialEnabled: Boolean(row.official_spin_enabled), demoEnabled: Boolean(row.public_demo_spin_enabled), editingLocked: Boolean(row.editing_locked), spinLocked: Boolean(row.official_spinning_locked), latestWinner: row.latest_winner || null, latestResultAt: row.latest_result_at || row.latest_official_spin_at || null, updatedAt: row.updated_at }; }
@@ -524,6 +542,8 @@ function clean(value, max) { return cleanText(value, max); }
 function requiredText(value, min, max, code) { const result = clean(value, max); if (result.length < min) throw new AuthFailure(400, code, "A required wheel field is invalid."); return result; }
 function optionalText(value, max) { const result = clean(value, max); return result || null; }
 function positiveInteger(value, code, max) { const number = Number(value); if (!Number.isSafeInteger(number) || number < 1 || number > max) throw new AuthFailure(400, code, "A wheel number is outside the allowed range."); return number; }
+function boundedPercent(value, fallback) { const number = Number(value); return Number.isFinite(number) ? Math.min(100, Math.max(0, Math.round(number))) : fallback; }
+function legacyCelebration(value) { return value === "restrained" ? "subtle" : value === "full" ? "normal" : DEFAULT_CONFIG.celebrationIntensity; }
 function parseJson(value, fallback) { try { const parsed = JSON.parse(String(value || "")); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback; } catch { return fallback; } }
 function escapeLike(value) { return String(value).replace(/[\\%_]/g, (match) => `\\${match}`); }
 async function digestHex(bytes) { const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); return Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join(""); }

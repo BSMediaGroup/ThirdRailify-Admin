@@ -2295,7 +2295,7 @@ function isStripeVerificationEnvironment(env) {
 
 export function assertNoCommerceSecretsInPublicPayload(payload) {
   const serialized = JSON.stringify(payload);
-  if (/(credential_ciphertext|legal_business_name_ciphertext|private_address_ciphertext|identifier_ciphertext|client_secret|secret_key|bank_account|card_pan|cvc)/i.test(serialized)) {
+  if (/(credential_ciphertext|legal_business_name_ciphertext|private_address_ciphertext|recipient_ciphertext|identifier_ciphertext|client_secret|secret_key|bank_account|card_pan|cvc)/i.test(serialized)) {
     throw new Error("private_commerce_data_exposed");
   }
   return true;

@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { Miniflare } from "miniflare";
 import { applyMigration, authEnvironment } from "./auth-test-helpers.mjs";
+import {
+  authoritativeCartFingerprint,
+  authoritativeCartLines,
+  authoritativeSubtotal,
+  normalizeDeliveryRecipient,
+  recipientFingerprint,
+} from "../functions/_shared/shipping-core.js";
 
 const authMigrationUrl = new URL("../migrations/0001_auth_foundation.sql", import.meta.url);
 const commerceMigrationUrls = [
@@ -18,9 +25,20 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0012_admin_inbox_and_reaction_reset.sql", import.meta.url),
   new URL("../commerce-migrations/0013_homepage_content_rail.sql", import.meta.url),
   new URL("../commerce-migrations/0014_wheels_v1.sql", import.meta.url),
+  new URL("../commerce-migrations/0015_checkout_shipping_foundation.sql", import.meta.url),
+  new URL("../commerce-migrations/0016_wheels_media.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";
+export const TEST_DELIVERY_RECIPIENT = Object.freeze({
+  name: "Checkout Fixture",
+  address1: "100 Test Street",
+  address2: "",
+  city: "London",
+  region: "ON",
+  postalCode: "N6A 1A1",
+  countryCode: "CA",
+});
 
 export async function createCommerceDatabases({ commerceMigrationCount = commerceMigrationUrls.length } = {}) {
   const miniflare = new Miniflare({
@@ -247,4 +265,39 @@ export async function enableControlledTestCheckout(db, productId = "product-test
        VALUES (?, ?, 'safe', ?) ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`,
     ).bind(key, JSON.stringify(value), timestamp)),
   ]);
+}
+
+export async function insertTestShippingQuote(db, {
+  items = [{ productId: "product-test-001", variantId: "variant-test-001", quantity: 1 }],
+  recipient = TEST_DELIVERY_RECIPIENT,
+  shippingAmount = 500,
+  quoteId = "shq_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  optionId = "shr_bbbbbbbbbbbbbbbbbbbbbbbb",
+} = {}) {
+  const normalizedRecipient = normalizeDeliveryRecipient(recipient);
+  const lines = await authoritativeCartLines(db, items, { gate: "controlled_test", environment: "test" });
+  const [cartFingerprint, addressFingerprint] = await Promise.all([
+    authoritativeCartFingerprint(lines),
+    recipientFingerprint(normalizedRecipient),
+  ]);
+  const subtotalAmount = authoritativeSubtotal(lines);
+  const options = [{
+    optionId,
+    providerRateId: "STANDARD",
+    name: "Standard delivery",
+    amount: shippingAmount,
+    currency: "CAD",
+    minDeliveryDays: 3,
+    maxDeliveryDays: 7,
+    minDeliveryDate: null,
+    maxDeliveryDate: null,
+    totalAmount: subtotalAmount + shippingAmount,
+  }];
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  await db.prepare(`INSERT INTO commerce_shipping_quotes
+    (id,environment,cart_fingerprint,recipient_fingerprint,currency_code,shipping_strategy,provider,rate_options_json,created_at,expires_at)
+    VALUES (?,'test',?,?,'CAD','printful_dynamic','printful',?,?,?)`
+  ).bind(quoteId, cartFingerprint, addressFingerprint, JSON.stringify(options), createdAt, expiresAt).run();
+  return { recipient, quoteId, shippingOptionId: optionId, shippingAmount, totalAmount: subtotalAmount + shippingAmount };
 }

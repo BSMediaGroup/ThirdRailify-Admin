@@ -25,13 +25,13 @@ test("Fulfillment & Shipping projects canonical local authority without secrets,
   assert.equal(payload.provider.name, "Printful"); assert.equal(payload.provider.configured, true); assert.equal(payload.provider.orderMode, "draft_only"); assert.equal(payload.provider.orderModeConsistent, true);
   assert.equal(payload.safety.checkoutEnabled, false); assert.equal(payload.safety.controlledTestCheckoutEnabled, false); assert.equal(payload.safety.livePaymentCaptureEnabled, false); assert.equal(payload.safety.fulfillmentEnabled, false); assert.equal(payload.safety.providerSubmissionAvailable, false);
   assert.equal(payload.readiness.paymentAuthority.state, "test_evidence_only"); assert.equal(payload.readiness.production.state, "blocked"); assert.equal(payload.readiness.fulfillment.state, "disabled");
-  assert.equal(payload.shipping.customerData.state, "not_implemented"); assert.deepEqual(payload.shipping.customerData.persistedFields, []);
-  assert.equal(payload.shipping.rates.state, "not_configured"); assert.equal(payload.shipping.rates.providerQuotePathImplemented, false); assert.equal(payload.shipping.rates.providerQuoteCalled, false);
+  assert.equal(payload.shipping.customerData.state, "implemented_no_evidence"); assert.deepEqual(payload.shipping.customerData.persistedFields, ["encrypted_recipient", "destination_country", "destination_region", "shipping_method", "shipping_amount", "currency", "source_quote"]);
+  assert.equal(payload.shipping.rates.state, "implemented_disabled"); assert.equal(payload.shipping.rates.providerQuotePathImplemented, true); assert.equal(payload.shipping.rates.providerQuoteCalled, false);
   assert.equal(payload.tracking.state, "not_implemented"); assert.deepEqual(payload.tracking.persistedFields, []); assert.equal(payload.tracking.providerPollingPerformed, false);
   assert.equal(payload.mapping.mappedProviderProducts, 1); assert.equal(payload.mapping.mappedProviderVariants, 1); assert.equal(payload.mapping.nonSellableVariants, 1); assert.equal(payload.mapping.potentiallyFulfillableVariants, 0);
   assert.equal(payload.migration.manuallyPaused, true); assert.equal(payload.migration.mutableFromThisRoute, false); assert.equal(payload.evidence.counts.providerOrders, 0); assert.deepEqual(payload.evidence.recent, []);
   assert.equal(payload.draftPreview.eligible, false); assert.equal(payload.draftPreview.item.mappedProviderVariant, "target-variant-authority");
-  assert.deepEqual(new Set(payload.draftPreview.blockers.map((item) => item.code)), new Set(["variant_not_sellable", "shipping_strategy_missing", "fulfillment_disabled"]));
+  assert.deepEqual(new Set(payload.draftPreview.blockers.map((item) => item.code)), new Set(["variant_not_sellable", "shipping_strategy_missing", "shipping_method_missing", "fulfillment_disabled"]));
   assert.deepEqual(payload.draftPreview.labels, ["DRAFT PREVIEW", "NO PROVIDER REQUEST", "NOT SUBMITTED"]);
   assert.deepEqual(payload.draftPreview.submission, { available: false, mode: "draft_only", networkRequestMade: false, providerOrderCreated: false, localOrderMutated: false, migrationMutated: false });
   assert.equal(payload.technical.providerCallsOnRead, false); assert.equal(payload.technical.providerCallsOnPreview, false); assert.equal(payload.technical.previewPersists, false);
@@ -46,7 +46,7 @@ test("pure Printful draft preparation succeeds structurally only with complete i
     provider: "printful", mappingStatus: "mapped", targetProductId: "target-product-authority", targetVariantId: "target-variant-authority", variantMigrationStatus: "target_verified",
   };
   const recipient = { source: "synthetic_fixture", name: "Preview customer", address1: "Synthetic address", city: "London", postalCode: "N6A 1A1", countryCode: "CA" };
-  const base = { reference: "DRAFT-TEST", environment: "test", paymentStatus: "synthetic_fixture", quantity: 1, candidate, recipient, shippingStrategy: "manual_configured", fulfillmentEnabled: true, orderMode: "draft_only", providerMode: "draft_only", requireSellable: true, previewOnly: true };
+  const base = { reference: "DRAFT-TEST", environment: "test", paymentStatus: "synthetic_fixture", quantity: 1, candidate, recipient, shippingStrategy: "printful_dynamic", shippingMethod: "Standard delivery", providerShippingMethodId: "STANDARD", fulfillmentEnabled: true, orderMode: "draft_only", providerMode: "draft_only", requireSellable: true, previewOnly: true };
   const valid = preparePrintfulDraftOrder(base);
   assert.equal(valid.eligible, true); assert.deepEqual(valid.blockers, []); assert.equal(valid.safePayloadPreview.items[0].providerVariantId, "target-variant-authority"); assert.equal(valid.submission.available, false);
 
@@ -56,7 +56,7 @@ test("pure Printful draft preparation succeeds structurally only with complete i
     ["provider_mapping_ambiguous", { candidate: { ...candidate, targetProductId: "different-target" } }],
     ["printful_mode_contradictory", { providerMode: "disabled" }], ["live_order_mode_rejected", { orderMode: "live", providerMode: "live" }],
     ["live_preview_rejected", { environment: "live" }], ["payment_not_confirmed", { paymentStatus: "pending" }],
-    ["product_variant_missing", { candidate: null }], ["shipping_strategy_missing", { shippingStrategy: "unconfigured" }], ["fulfillment_disabled", { fulfillmentEnabled: false }],
+    ["product_variant_missing", { candidate: null }], ["shipping_strategy_missing", { shippingStrategy: "unconfigured" }], ["shipping_method_missing", { providerShippingMethodId: "" }], ["fulfillment_disabled", { fulfillmentEnabled: false }],
   ];
   for (const [expectedCode, override] of cases) {
     const result = preparePrintfulDraftOrder({ ...base, ...override });

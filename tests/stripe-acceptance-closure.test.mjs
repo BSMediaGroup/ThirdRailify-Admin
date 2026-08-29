@@ -18,7 +18,7 @@ const ACTUAL_SESSION_ID = "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUk
 
 test("acceptance closure preserves paid evidence and paused migration while both checkout paths fail before Stripe", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
-  await insertTestProduct(harness.commerceDb, { title: "Third Rail Farm | Black Glossy Mug", unitAmount: 1500, targetPrintfulProductId: "target-product-001", migrationStatus: "target_verified" });
+  await insertTestProduct(harness.commerceDb, { title: "Third Rail Farm | Black Glossy Mug", unitAmount: 1500, requiresShipping: 0, targetPrintfulProductId: "target-product-001", migrationStatus: "target_verified" });
   await insertTestVariant(harness.commerceDb, { unitAmount: 1500, migrationStatus: "target_verified" });
   await enableControlledTestCheckout(harness.commerceDb);
   await harness.commerceDb.prepare(`UPDATE commerce_product_variants

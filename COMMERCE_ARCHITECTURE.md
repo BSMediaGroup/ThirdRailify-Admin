@@ -38,6 +38,16 @@ This repository contains the Admin-only control-plane foundation for a future St
 
 The separate Admin-only commerce D1 is bound, and its encryption key plus Stripe TEST API/webhook credentials remain encrypted Cloudflare Secrets. The 50-product/1,323-variant replacement catalogue is authoritative. `checkout_enabled=false` keeps normal checkout closed; `stripe_test_checkout_enabled=false` now permanently closes the completed temporary acceptance path. Live payments, tax, shipping calculation, fulfillment, refunds, payouts, and production merchant readiness remain outside this milestone.
 
+## Checkout and shipping foundation
+
+Migration `0015_checkout_shipping_foundation.sql` adds two narrow authorities without changing an activation gate. `commerce_shipping_quotes` stores an opaque quote ID, TEST/LIVE environment, SHA-256 cart and canonical-recipient fingerprints, CAD currency, strategy/provider, safe normalized rate options, and Third Railify's bounded local expiry; it stores no recipient plaintext. `commerce_order_delivery_snapshots` stores one restrictive historical snapshot per order: the existing purpose-bound AES-256-GCM recipient envelope, safe destination country/region, selected method/provider, integer CAD shipping amount, and source quote.
+
+Public intentionally requests rates after completing delivery details. It sends only local product/variant IDs, quantity, and the bounded recipient form. Admin re-resolves sellability, exact integer CAD prices, physical-product semantics, Printful mapping, and the distinct Printful Catalog variant ID used by the stable V1 shipping-rate endpoint. The Sync Variant ID remains the future order-item identifier. Provider tokens, provider IDs, raw responses, and authoritative amounts never enter the browser projection.
+
+A selected quote can be used only while its opaque ID is locally fresh and its stored environment, CAD currency, recomputed cart fingerprint, recomputed recipient fingerprint, and opaque option ID all match. The stored rate amount—not a browser field—is added to the authoritative line subtotal. The local order, immutable items, and encrypted delivery snapshot are written before the Stripe boundary. Stripe receives a server-built fixed-amount shipping option, and its returned total must equal the local order total. Recipient PII is absent from Stripe metadata. Signed Stripe webhooks remain the only payment-confirmation authority.
+
+The Printful adapter is implemented but `shipping_strategy` remains `unconfigured`; it fails before fetch in the current canonical state. Normal checkout, the completed controlled TEST gate, live payment capture, fulfillment submission, customer email sending, provider draft creation, confirmation, shipments, and tracking all remain disabled or unimplemented. `prepareStoredPrintfulDraftOrder` can decrypt a protected order snapshot and construct an internal non-network draft representation, but the fulfillment gate still makes submission impossible.
+
 ## Pre-cutover Stripe TEST acceptance
 
 `POST /api/admin/commerce/test-checkout` requires the existing Admin exact-origin session, Master role, CSRF proof, D1-backed route rate limit, checkout-core rate limit, and the dedicated test gate. It calls the same `createStripeCheckoutSession` core as normal checkout. The only special authority is passage through the pre-cutover gate; D1 product/variant association, active/public state, integer CAD amount, quantity, target-verified mapped state, immutable order-item snapshot, Stripe response validation, deterministic idempotency, and webhook linkage are unchanged.
@@ -96,7 +106,7 @@ The dedicated account's creation and Sandbox/test access are operator-confirmed.
 
 ## Data authority
 
-Authentication remains in the existing auth D1. Commerce state belongs in the separate `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. Schema authority is the ordered `0001_commerce_control_plane.sql`, `0002_stripe_webhook_events.sql`, then `0003_product_merchandising.sql` sequence; the third migration contains no product seed.
+Authentication remains in the existing auth D1. Commerce state belongs in the separate `thirdrailify-commerce` D1 (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`), bound only to Admin as `THIRDRAILIFY_COMMERCE_DB`. Schema authority is the ordered additive `commerce-migrations` sequence through `0015_checkout_shipping_foundation.sql`; applied migrations are never edited.
 
 Entities:
 
@@ -109,6 +119,8 @@ Entities:
 - `commerce_products`: checkout authority for active/public/test visibility, canonical name, integer CAD unit amount, quantity cap, and physical-shipping marker. Remote product count remains zero until the separately approved authoritative import/sync milestone.
 - `commerce_orders`: opaque local order, unique checkout request/digests, TEST environment, authoritative expected integer amount, bounded Checkout/payment/fulfillment states, Stripe Session/PaymentIntent references, and lifecycle timestamps. Customer-payment and later Printful cost/refund fields stay separate.
 - `commerce_order_items`: immutable normalized product ID/name/CAD unit amount/quantity/line total/shipping-required snapshots; later product edits do not rewrite what was purchased.
+- `commerce_shipping_quotes`: short-lived opaque, fingerprint-bound, CAD rate authority with no customer plaintext.
+- `commerce_order_delivery_snapshots`: one encrypted recipient and selected shipping-method/amount history per order, never projected in catalogue or order-list APIs.
 - `commerce_audit`: redacted mutation history.
 - `commerce_webhook_events`: one safe receipt per provider plus provider Event ID, with bounded event/object/status metadata and a raw-payload SHA-256 only. It has no raw payload, signature, secret, credential, customer, address, card, or full-object column.
 
@@ -130,7 +142,7 @@ Only a sane `object=event`, `livemode=false` Stripe envelope can reach D1. The e
 
 `POST /api/commerce/checkout` is customer-facing and therefore does not require an Admin session, Admin commerce capability, or Admin CSRF. It accepts requests only from the exact configured Public staging origin and provides narrow POST/OPTIONS CORS. Commerce D1, `checkout_enabled`, direct-merchant connected TEST Stripe, canonical API/webhook proof, signing-secret shape, test-key shape, disabled live capture, body limits, product authority, and rate limiting all fail closed before Stripe. Optional Turnstile enforcement is already structured behind the explicit `checkout_turnstile_required` safe setting.
 
-The request is exactly a checkout-request UUID plus up to 20 unique `{ productId, quantity }` lines; concrete variants are not accepted because the current authoritative schema and Public cart do not model variant IDs. Public's local Wix snapshot contains floating display prices and option-type labels only, so it is not sufficient for authoritative import without a later product/variant reconciliation. Browser prices, names, currencies, totals, Stripe IDs, tax, shipping, discounts, and live-mode requests are rejected.
+The request is exactly a checkout-request UUID, up to 20 unique `{ productId, variantId, quantity }` lines, and—for physical goods—a normalized recipient plus opaque server-issued quote/option IDs. Browser prices, names, currencies, totals, Stripe IDs, provider IDs, shipping amounts, tax, discounts, and live-mode requests are rejected.
 
 The server sorts identifiers, loads every product from `commerce_products`, requires active/public/test/CAD rows with positive bounded integer unit amounts and permitted quantities, calculates every line/total in minor units, and snapshots the order before contacting Stripe. A deterministic Stripe idempotency key belongs to the local order/request pair. The success redirect may carry Stripe's literal `{CHECKOUT_SESSION_ID}`, but the redirect and query parameter are never payment authority; only the signed webhook transition is authoritative.
 
@@ -152,7 +164,7 @@ The server sorts identifiers, loads every product from `commerce_products`, requ
 
 Browser-driven commerce reads and mutations reuse the existing Admin session, role, origin, CSRF, D1 rate-limit, and audit authority. Master Admins have all five commerce capabilities and are the only accounts allowed to grant or revoke them. Full Admins can view commerce by role and may receive bounded capabilities. Ordinary users cannot receive commerce authority. The external Stripe webhook is the deliberate exception to browser authentication and instead uses the signed-delivery controls above.
 
-ThirdRailify Public remains an unchanged read-only client with no commerce binding, key, Stripe script, or enabled payment button. The Admin-hosted customer Checkout endpoint is prepared for a later Public client, but its remote gate stays false until authoritative product import/sync. Public's eventual request contains identifiers and quantities only and receives only the local order ID, TEST Session ID, and Stripe-hosted Checkout URL.
+ThirdRailify Public remains a client with no commerce binding, provider key, Stripe script, or enabled payment button. Its same-origin quote and checkout relays forward bounded guest requests to Admin authority and return only safe customer projections. Delivery details stay in React memory and are never written to localStorage; the existing variant cart remains the only commerce browser storage.
 
 ## Printful store isolation and fulfillment boundary
 

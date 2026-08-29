@@ -93,8 +93,8 @@ export type FulfillmentDraftPreview = {
   builderVersion: string; kind: "draft_preview"; eligible: boolean; blockers: Array<{ code: string; message: string }>;
   labels: string[]; reference: string; environment: "test" | "live";
   item: null | { productId: string; product: string; variantId: string; variant: string; provider: string; mappedProviderVariant: string | null; quantity: number | null };
-  requirements: { recipient: { source: string; complete: boolean; missing: string[]; countryCode: string | null; postalCodePresent: boolean }; shipping: { required: boolean; strategy: string; configured: boolean } };
-  safePayloadPreview: null | { externalReference: string; recipient: { source: string; countryCode: string | null; postalCodePresent: boolean }; items: Array<{ providerVariantId: string; quantity: number | null }>; shipping: { strategy: string } };
+  requirements: { recipient: { source: string; complete: boolean; missing: string[]; countryCode: string | null; postalCodePresent: boolean }; shipping: { required: boolean; strategy: string; configured: boolean; method: string | null } };
+  safePayloadPreview: null | { externalReference: string; recipient: { source: string; countryCode: string | null; postalCodePresent: boolean }; items: Array<{ providerVariantId: string; quantity: number | null }>; shipping: { strategy: string; method: string | null } };
   submission: { available: false; mode: string; networkRequestMade: false; providerOrderCreated: false; localOrderMutated: false; migrationMutated: false };
 };
 export type FulfillmentShippingPayload = {
@@ -104,11 +104,11 @@ export type FulfillmentShippingPayload = {
   migration: { id: string; status: string; phase: string; manuallyPaused: boolean; verifiedProducts: number; mappedVariants: number; blockedProducts: number; deferredVariants: number; providerRequestCount: number; providerFailures: number; updatedAt: string | null; completedAt: string | null; mutableFromThisRoute: false };
   mapping: { storefrontProducts: number; storefrontVariants: number; totalProducts: number; totalVariants: number; mappedProviderProducts: number; mappedProviderVariants: number; unmappedVariants: number; blockedProducts: number; blockedVariants: number; deferredVariants: number; nonSellableVariants: number; potentiallyFulfillableVariants: number; contract: string };
   pipeline: Array<{ id: string; label: string; implemented: boolean; authority: string; transition: string; detail: string }>;
-  shipping: { customerData: { state: string; persistedFields: string[]; orderSpecificPiiProjectedHere: false }; rates: { state: string; strategy: string; providerQuotePathImplemented: false; providerQuoteCalled: false } };
+  shipping: { customerData: { state: string; persistedFields: string[]; orderSpecificPiiProjectedHere: false }; rates: { state: string; strategy: string; providerQuotePathImplemented: boolean; providerQuoteCalled: false } };
   tracking: { state: string; persistedFields: string[]; shipmentPollingImplemented: false; providerPollingPerformed: false };
   draftPreview: FulfillmentDraftPreview; gates: FulfillmentGate[];
   dependencies: { business: { href: string }; taxDocuments: { href: string }; customerEmails: { href: string; shipmentTemplate: { configured: boolean; state: string; revision: number | null; updatedAt: string | null }; sendsEnabled: boolean }; payments: { href: string }; products: { href: string }; orders: { href: string } };
-  evidence: { recent: Array<{ id: string; environment: "test" | "live"; paymentStatus: string; fulfillmentStatus: string; providerOrderRecorded: boolean; createdAt: string; updatedAt: string }>; counts: { totalOrders: number; testOrders: number; liveOrders: number; providerOrders: number; fulfillmentEvidence: number }; lastAudit: null | { action: string; result: string; createdAt: string } };
+  evidence: { recent: Array<{ id: string; environment: "test" | "live"; paymentStatus: string; fulfillmentStatus: string; providerOrderRecorded: boolean; createdAt: string; updatedAt: string }>; counts: { totalOrders: number; testOrders: number; liveOrders: number; providerOrders: number; fulfillmentEvidence: number; testShippingSnapshots: number; liveShippingSnapshots: number }; lastAudit: null | { action: string; result: string; createdAt: string } };
   technical: { builderVersion: string; providerCallsOnRead: false; providerCallsOnPreview: false; previewPersists: false; previewAuditedAsMutation: false; shippingDataCapability: string; shippingRateCapability: string; trackingCapability: string };
   safety: { checkoutEnabled: boolean; controlledTestCheckoutEnabled: boolean; livePaymentCaptureEnabled: boolean; fulfillmentEnabled: boolean; orderMode: string; providerSubmissionAvailable: false; previewOnly: true; mutationsAvailableFromThisRoute: false };
   canonicalReadiness: ProductionReadiness | null; checkedAt: string;
@@ -157,6 +157,7 @@ export type CommerceOrderDetail = {
   paymentProvider: string; fulfillmentProvider: string | null; currencyCode: string; createdAt: string; updatedAt: string;
   checkoutCreatedAt: string | null; paymentConfirmedAt: string | null; paymentFailedAt: string | null; checkoutFailureCode: string | null;
   customer: { available: boolean; name: string | null; email: string | null; phone: string | null; billingAddress: PublicAddress | null; shippingAddress: PublicAddress | null };
+  delivery: { available: boolean; recipientConfigured: boolean; destinationCountryCode: string | null; destinationRegionCode: string | null; strategy: string | null; provider: string | null; method: string | null; amount: number | null; currencyCode: string | null; quoteReference: string | null; quotedAt: string | null; capturedAt: string | null; addressExternallyVerified: false };
   items: Array<{ id: string; lineNumber: number; productId: string; variantId: string | null; productName: string; variantName: string | null; sku: string | null; options: Record<string, string>; currencyCode: string; unitAmount: number; quantity: number; lineTotalAmount: number; requiresShipping: boolean; fulfillmentProvider: string | null; fulfillmentVariantId: string | null; imageUrl: string | null }>;
   financial: { subtotalAmount: number; discountAmount: number | null; shippingAmount: number | null; taxAmount: number | null; totalAmount: number; refundAmount: number; netAmount: number | null; currencyCode: string };
   payment: { provider: string; status: string; environment: "test" | "live"; stripeSessionId: string | null; stripePaymentIntentId: string | null };
@@ -490,7 +491,7 @@ export function updateCollectionMemberships(csrfToken: string, collectionId: str
 export function getCommerceOrders(filters: OrderListFilters = {}) { const query = new URLSearchParams(); Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); }); return adminApi<CommerceOrdersPayload>(`/api/admin/commerce/orders?${query.toString()}`); }
 export function getCommerceOrder(orderId: string) { return adminApi<CommerceOrderDetailPayload>(`/api/admin/commerce/orders/${encodeURIComponent(orderId)}`); }
 export function getOrderDocument(orderId: string, type: "receipt" | "invoice") { return adminApi<DocumentPreviewPayload>(`/api/admin/commerce/orders/${encodeURIComponent(orderId)}/documents/${type}`); }
-export function generateControlledTestCheckout(csrfToken: string, body: { checkoutRequestId: string; productId: string; variantId: string; quantity: 1 }) {
+export function generateControlledTestCheckout(csrfToken: string, body: { checkoutRequestId: string; productId: string; variantId: string; quantity: 1; recipient: { name: string; address1: string; address2?: string; city: string; region?: string; postalCode: string; countryCode: string; phone?: string }; quoteId: string; shippingOptionId: string }) {
   return adminApi<TestCheckoutPayload>("/api/admin/commerce/test-checkout", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
 export function saveFeaturedProducts(csrfToken: string, featuredIds: string[]) {

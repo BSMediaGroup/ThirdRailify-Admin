@@ -25,7 +25,7 @@ export function FulfillmentShippingPage() {
 
   return <main className="fulfillment-workspace">
     <header className="fulfillment-heading">
-      <div><p className="eyebrow">Commerce operations control plane</p><h1>Fulfillment &amp; Shipping</h1><p>Local readiness, Printful mapping, delivery dependencies, draft preparation, and production locks. This workspace cannot submit, fulfill, quote, poll, or activate anything.</p></div>
+      <div><p className="eyebrow">Commerce operations control plane</p><h1>Fulfillment &amp; Shipping</h1><p>Local readiness, Printful mapping, delivery dependencies, draft preparation, and production locks. This workspace cannot submit, fulfill, poll, or activate anything.</p></div>
       <span className="fulfillment-lock"><AdminIcon name="shield" size={16} /> Read only / locked</span>
     </header>
     {error && <div className="admin-alert" role="alert">{error}</div>}
@@ -55,9 +55,9 @@ export function FulfillmentShippingPage() {
         </Panel>
         <Panel eyebrow="Delivery dependency" title="Shipping data & rates" state="blocked">
           <div className="fulfillment-capability-list">
-            <Capability title="Customer shipping-address capture" state={payload.shipping.customerData.state} detail={payload.shipping.customerData.persistedFields.length ? `${payload.shipping.customerData.persistedFields.length} normalized fields detected.` : "No normalized recipient or postal address fields exist in the order authority."} />
-            <Capability title="Shipping-rate strategy" state={payload.shipping.rates.state} detail={payload.shipping.rates.strategy === "unconfigured" ? "No flat rate, rate engine, or configured provider quote authority exists." : `Configured strategy: ${humanize(payload.shipping.rates.strategy)}.`} />
-            <Capability title="Live Printful quote path" state={payload.shipping.rates.providerQuotePathImplemented ? "available" : "not_implemented"} detail="No quote request is made on page load or from this workspace." />
+            <Capability title="Encrypted customer delivery snapshots" state={payload.shipping.customerData.state} detail={payload.shipping.customerData.persistedFields.length ? "Schema capability is implemented; order-specific PII is never projected here." : "No normalized recipient snapshot authority exists."} />
+            <Capability title="Shipping-rate strategy" state={payload.shipping.rates.state} detail={payload.shipping.rates.strategy === "unconfigured" ? "The quote adapter is implemented, but the canonical strategy remains unconfigured and fail-closed." : `Configured strategy: ${humanize(payload.shipping.rates.strategy)}.`} />
+            <Capability title="Printful quote adapter" state={payload.shipping.rates.providerQuotePathImplemented ? "available" : "not_implemented"} detail="Implemented with server-only provider identity. No quote request is made on page load or from this workspace, and no real provider quote is evidenced." />
             <Capability title="Tracking & shipment records" state={payload.tracking.state} detail={payload.tracking.persistedFields.length ? `${payload.tracking.persistedFields.length} normalized fields detected.` : "No tracking number, carrier, URL, shipment ID, shipped timestamp, or delivered timestamp is persisted."} />
           </div>
         </Panel>
@@ -112,6 +112,7 @@ export function FulfillmentShippingPage() {
 
       <section className="fulfillment-section" aria-labelledby="evidence-title">
         <SectionHeading eyebrow="Local persisted authority only" title="Recent fulfillment evidence" id="evidence-title" text="TEST and LIVE evidence remain distinct. TEST rows never contribute to production fulfillment claims." />
+        <div className="fulfillment-metrics"><Metric label="TEST delivery snapshots" value={payload.evidence.counts.testShippingSnapshots} /><Metric label="LIVE delivery snapshots" value={payload.evidence.counts.liveShippingSnapshots} /><Metric label="Provider orders" value={payload.evidence.counts.providerOrders} tone="muted" /></div>
         {payload.evidence.recent.length ? <div className="fulfillment-evidence" role="list">{payload.evidence.recent.map((item) => <article key={item.id} role="listitem" className={`is-${item.environment}`}><span className={`order-environment order-environment--${item.environment}`}>{item.environment.toUpperCase()}</span><div><strong>{item.id}</strong><small>{formatTimestamp(item.updatedAt)}</small></div><div><span>Payment</span><strong>{humanize(item.paymentStatus)}</strong></div><div><span>Fulfillment</span><strong>{humanize(item.fulfillmentStatus)}</strong></div><Link to="/orders">View order <AdminIcon name="arrow" size={13} /></Link></article>)}</div> : <div className="fulfillment-empty"><AdminIcon name="fulfillment" size={24} /><div><strong>No fulfillment evidence</strong><p>No Printful orders have been submitted, and no shipment or tracking evidence has been recorded.</p></div></div>}
       </section>
 
@@ -130,7 +131,7 @@ function SectionHeading({ eyebrow, title, id, text, action }: { eyebrow: string;
 function Metric({ label, value, tone: valueTone = "" }: { label: string; value: number; tone?: string }) { return <article className={valueTone ? `is-${valueTone}` : ""}><span>{label}</span><strong>{value.toLocaleString()}</strong></article>; }
 function Gate({ gate }: { gate: FulfillmentGate }) { const content = <><div><strong>{gate.label}</strong><p>{gate.detail}</p></div><StatusChip state={gate.state} /></>; return gate.href ? <Link to={gate.href}>{content}</Link> : <article>{content}</article>; }
 function Dependency({ to, title, text }: { to: string; title: string; text: string }) { return <Link to={to}><div><strong>{title}</strong><p>{text}</p></div><AdminIcon name="arrow" size={15} /></Link>; }
-function tone(state: string) { if (["ready", "configured", "available", "enabled"].includes(state)) return "good"; if (["partial", "incomplete", "unverified", "no_evidence", "test_evidence_only", "draft_only"].includes(state)) return "warn"; if (["blocked", "not_implemented", "not_configured", "disabled", "production_disabled", "live"].includes(state)) return "bad"; return "neutral"; }
+function tone(state: string) { if (["ready", "configured", "available", "enabled"].includes(state)) return "good"; if (["partial", "incomplete", "unverified", "no_evidence", "implemented_no_evidence", "implemented_disabled", "test_evidence_only", "draft_only"].includes(state)) return "warn"; if (["blocked", "not_implemented", "not_configured", "disabled", "production_disabled", "live"].includes(state)) return "bad"; return "neutral"; }
 function humanize(value: string) { return String(value || "Not recorded").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function formatTimestamp(value: string | null) { if (!value) return "No evidence"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? value : date.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }); }
 function errorMessage(reason: unknown, fallback: string) { return reason instanceof Error && reason.message ? reason.message : fallback; }

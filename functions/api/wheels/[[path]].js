@@ -12,6 +12,7 @@ import {
   saveWheel,
   verifyWheelInternalRequest,
 } from "../../_shared/wheels-core.js";
+import { removeWheelMedia, uploadWheelMedia, wheelMediaResponse } from "../../_shared/wheel-media.js";
 
 const PREFIX = "/api/wheels";
 const PUBLIC_CACHE = "public, max-age=30, s-maxage=120, stale-while-revalidate=300";
@@ -20,11 +21,14 @@ export async function onRequest(context) {
   const { request, env } = context;
   try {
     const path = new URL(request.url).pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g, "");
-    if (request.method === "GET") return handlePublicRead(request, env, path);
+    if (request.method === "GET" || request.method === "HEAD") return await handlePublicRead(request, env, path);
     if (!path.startsWith("internal/")) throw new AuthFailure(404, "wheel_route_not_found", "The wheel route was not found.");
+    const internalPath = path.slice("internal/".length);
+    const mediaUpload = internalPath.match(/^([^/]+)\/media\/(background|centre)$/);
+    if (request.method === "POST" && mediaUpload) return noStore(await handleMediaUpload(request, env, mediaUpload));
     const { body, raw } = await readWheelJson(request);
     await verifyWheelInternalRequest(request, env, raw);
-    return noStore(await handleInternal(request.method, env, path.slice("internal/".length), body));
+    return noStore(await handleInternal(request.method, env, internalPath, body));
   } catch (error) {
     return errorResponse(error, request, env);
   }
@@ -32,6 +36,12 @@ export async function onRequest(context) {
 
 async function handlePublicRead(request, env, path) {
   const url = new URL(request.url);
+  const media = path.match(/^media\/([a-f0-9-]{16,80})$/i);
+  if (media) {
+    let accountId = "";
+    if (request.headers.get("x-thirdrailify-signature")) { await verifyWheelInternalRequest(request, env, new Uint8Array()); accountId = String(request.headers.get("x-thirdrailify-account-id") || "").slice(0, 160); }
+    return wheelMediaResponse(env, decode(media[1]), request, accountId);
+  }
   if (!path) return cached(await listPublicWheels(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort") }));
   if (path === "access" || path.endsWith("/access")) throw new AuthFailure(401, "authentication_required", "Sign in to view wheel access.");
   if (!/^[a-z0-9][a-z0-9-]{1,78}[a-z0-9]$/i.test(path)) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
@@ -55,7 +65,18 @@ async function handleInternal(method, env, path, body) {
   if (method === "POST" && winner) return applyWinnerAction(env, accountId, decode(winner[1]), body.input || {});
   const lifecycle = path.match(/^([^/]+)\/lifecycle$/);
   if (method === "POST" && lifecycle) return changeWheelLifecycle(env, accountId, decode(lifecycle[1]), body.input || {});
+  const mediaRemove = path.match(/^([^/]+)\/media\/(background|centre)$/);
+  if (method === "DELETE" && mediaRemove) return removeWheelMedia(env, decode(mediaRemove[1]), mediaRemove[2], accountId);
   throw new AuthFailure(404, "wheel_route_not_found", "The wheel action was not found.");
+}
+
+async function handleMediaUpload(request, env, match) {
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(declared) && declared > 8 * 1024 * 1024) throw new AuthFailure(413, "wheel_media_too_large", "The wheel image is too large.");
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength > 8 * 1024 * 1024) throw new AuthFailure(413, "wheel_media_too_large", "The wheel image is too large.");
+  await verifyWheelInternalRequest(request, env, bytes);
+  return uploadWheelMedia(env, decode(match[1]), match[2], request.headers.get("x-thirdrailify-account-id"), bytes, request.headers.get("content-type"));
 }
 
 function cached(payload) { return jsonResponse(payload, { headers: { "Cache-Control": PUBLIC_CACHE, ETag: `W/\"${simpleHash(JSON.stringify(payload))}\"`, "X-Content-Type-Options": "nosniff" } }); }
@@ -63,5 +84,4 @@ function noStore(payload) { return jsonResponse(payload, { headers: { "Cache-Con
 function decode(value) { try { return decodeURIComponent(value); } catch { return ""; } }
 function simpleHash(value) { let hash = 2166136261; for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619); return (hash >>> 0).toString(16); }
 
-export { handleInternal, handlePublicRead };
-
+export { handleInternal, handleMediaUpload, handlePublicRead };
