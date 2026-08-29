@@ -1,90 +1,72 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
-
 import { chromium } from "playwright-core";
 
 const PREVIEW_ORIGIN = "http://127.0.0.1:4174";
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 
-test("a running Printful migration remains checkpointed until an explicit authenticated continuation", async (t) => {
+test("Fulfillment & Shipping is a responsive, truthful, non-mutating operations workspace", async (t) => {
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4174"], { stdio: "ignore" });
-  t.after(() => server.kill());
-  await waitForPreview();
-  const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
-  t.after(() => browser.close());
-
-  for (const width of [390, 768, 1440]) {
-    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 } });
-    const page = await context.newPage();
-    const consoleErrors = [];
-    let continuationCalls = 0;
-    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("pageerror", (error) => consoleErrors.push(error.message));
+  t.after(() => server.kill()); await waitForPreview();
+  const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true }); t.after(() => browser.close());
+  for (const [width, fixture] of [[390, "empty"], [768, "evidence"], [1440, "evidence"]]) {
+    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 } });
+    const page = await context.newPage(); const consoleErrors = []; const requests = [];
+    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); }); page.on("pageerror", (error) => consoleErrors.push(error.message));
     await page.route("**/api/**", async (route) => {
-      const request = route.request();
-      const path = new URL(request.url()).pathname;
+      const request = route.request(); const path = new URL(request.url()).pathname; requests.push({ path, method: request.method() });
       if (path === "/api/auth/config") return json(route, authConfig());
       if (path === "/api/auth/session") return json(route, session());
-      if (path === "/api/admin/commerce/overview") return json(route, overview());
-      if (path === "/api/admin/commerce/printful/catalogue/migration") return json(route, migration("running"));
-      if (path === "/api/admin/commerce/printful/catalogue/migrate") {
-        continuationCalls += 1;
-        assert.equal(request.method(), "POST");
-        assert.equal(request.headers()["x-csrf-token"], "browser-fixture-csrf");
-        assert.deepEqual(JSON.parse(request.postData() || "{}"), { action: "continue_permanent_printful_migration" });
-        return json(route, migration("completed_with_blocked_products"));
-      }
+      if (path === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
+      if (path === "/api/admin/commerce/fulfillment") return json(route, fulfillmentPayload(fixture));
       return json(route, { ok: false, error: "not_found" }, 404);
     });
-
-    await page.goto(`${PREVIEW_ORIGIN}/commerce/fulfillment`);
-    await page.getByRole("heading", { level: 1, name: "Fulfillment integrations" }).waitFor();
-    const button = page.getByRole("button", { name: "CONTINUE PERMANENT PRINTFUL MIGRATION FROM CHECKPOINT" });
-    await button.waitFor();
-    await page.waitForTimeout(300);
-    assert.equal(continuationCalls, 0, "opening the checkpoint page must not resume provider writes");
-    assert.equal(await page.getByText("PERMANENT MIGRATION — CHECKPOINTED", { exact: true }).count(), 1);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
-    await button.click();
-    await page.getByText("CATALOGUE MIGRATED WITH BLOCKED PRODUCTS RECORDED", { exact: true }).waitFor();
-    assert.equal(continuationCalls, 1);
-    assert.equal(await page.getByRole("button", { name: /PERMANENT PRINTFUL MIGRATION/ }).count(), 0, "terminal migrations expose no misleading continuation control");
-    assert.deepEqual(consoleErrors, []);
+    await page.goto(`${PREVIEW_ORIGIN}/COMMERCE/FULFILLMENT`); await page.waitForURL(`${PREVIEW_ORIGIN}/commerce/fulfillment`);
+    await page.getByRole("heading", { level: 1, name: "Fulfillment & Shipping" }).waitFor();
+    assert.equal(await page.getByText("Read only / locked", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Draft Only", { exact: true }).count() >= 1, true);
+    assert.equal(await page.getByText("Customer shipping-address capture", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("No flat rate, rate engine, or configured provider quote authority exists.", { exact: true }).count(), 1);
+    assert.equal(await page.getByRole("heading", { level: 2, name: "Order fulfillment pipeline" }).count(), 1);
+    assert.equal(await page.getByRole("heading", { level: 2, name: "Product & variant mapping health" }).count(), 1);
+    for (const text of ["DRAFT PREVIEW", "NO PROVIDER REQUEST", "NOT SUBMITTED"]) assert.equal(await page.getByText(text, { exact: true }).count(), 1);
+    assert.equal(await page.getByRole("button", { name: "Submit to Printful — unavailable" }).isDisabled(), true);
+    assert.equal(await page.getByText("shipping_strategy_missing", { exact: true }).count(), 1); assert.equal(await page.getByText("fulfillment_disabled", { exact: true }).count(), 1);
+    assert.equal(await page.getByRole("link", { name: /Manage Products/ }).getAttribute("href"), "/products");
+    for (const link of ["Business Information", "Tax & Documents", "Customer Emails", "Payments & Payouts", "Orders"]) assert.equal(await page.getByRole("link", { name: new RegExp(link) }).count() >= 1, true, link);
+    if (fixture === "empty") assert.equal(await page.getByText("No fulfillment evidence", { exact: true }).count(), 1);
+    else { assert.equal(await page.getByText("ord-test-fulfillment", { exact: true }).count(), 1); assert.equal(await page.getByText("ord-live-fulfillment", { exact: true }).count(), 1); }
+    await page.getByText("Advanced / technical", { exact: true }).click(); assert.equal(await page.getByText("printful-draft-preview-v1", { exact: true }).count(), 1);
+    assert.equal(await page.getByText(/printful-server-secret|authorization|bearer|customer@example|100 Preview Street/i).count(), 0);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true); assert.deepEqual(consoleErrors, []);
+    assert.deepEqual(requests.filter((entry) => entry.path === "/api/admin/commerce/fulfillment"), [{ path: "/api/admin/commerce/fulfillment", method: "GET" }]);
+    assert.equal(requests.some((entry) => /printful|stripe|paypal|wix|resend/i.test(entry.path) && entry.path !== "/api/admin/commerce/fulfillment"), false);
     await context.close();
   }
 });
 
-async function waitForPreview() {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    try { if ((await fetch(PREVIEW_ORIGIN)).ok) return; } catch { /* still starting */ }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error("Vite preview did not start.");
-}
-
-function json(route, body, status = 200) {
-  return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-}
-
-function authConfig() {
-  return { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: "https://thirdrailify-admin.pages.dev", environment: "test", cookieMode: "host-only" };
-}
-
-function session() {
-  return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00.000Z", source: "test", locked: true } };
-}
-
-function overview() {
-  return { ok: true, databaseConfigured: true, encryptionConfigured: true, stripeSecretConfigured: true, printfulSecretConfigured: true, access: { isMasterAdmin: true, capabilities: ["commerce.view", "commerce.integrations.manage"] }, posture: { checkout: "disabled", livePaymentCapture: "disabled", fulfillmentSubmission: "disabled" }, providers: [], business: {}, completeness: {}, counts: {}, checkedAt: "2026-08-28T00:00:00.000Z" };
-}
-
-function migration(status) {
-  const complete = status === "completed_with_blocked_products";
+async function waitForPreview() { for (let attempt = 0; attempt < 50; attempt += 1) { try { if ((await fetch(PREVIEW_ORIGIN)).ok) return; } catch { /* starting */ } await new Promise((resolve) => setTimeout(resolve, 100)); } throw new Error("Vite preview did not start."); }
+function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
+function authConfig() { return { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: "https://thirdrailify-admin.pages.dev", environment: "test", cookieMode: "host-only" }; }
+function session() { return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00Z", source: "test", locked: true } }; }
+function fulfillmentPayload(fixture) {
+  const evidence = fixture === "empty" ? [] : [
+    { id: "ord-test-fulfillment", environment: "test", paymentStatus: "paid", fulfillmentStatus: "draft", providerOrderRecorded: false, createdAt: "2026-08-28T00:00:00Z", updatedAt: "2026-08-28T00:01:00Z" },
+    { id: "ord-live-fulfillment", environment: "live", paymentStatus: "paid", fulfillmentStatus: "submitted", providerOrderRecorded: true, createdAt: "2026-08-28T01:00:00Z", updatedAt: "2026-08-28T01:01:00Z" },
+  ]; const status = (state, detail) => ({ state, detail });
   return {
-    ok: true,
-    migration: { id: "permanent-printful-2026-08", status, phase: complete ? "completed" : "source_files", currentProduct: complete ? null : { id: "product-400904088", title: "Third Railify™ | Throw Blanket", legacySourceProductId: "400904088", migrationStatus: "resolving_files" }, fileProgress: complete ? null : { resolved: 0, total: 3 }, completedProducts: complete ? 36 : 10, processedProducts: complete ? 49 : 23, remainingProducts: complete ? 0 : 26, totalProducts: 49, productsCreated: complete ? 36 : 10, productsAdopted: 0, variantsMapped: complete ? 1000 : 185, providerFailures: 21, providerRequestCount: 409, providerState: complete ? "completed" : "ready", retryAt: null, lastError: null, canResume: false, checkpointState: complete ? "verified" : "checkpointed", scopes: ["file_library", "orders", "sync_products", "webhooks"], targetVerified: true, sourceVerified: true, blockedProducts: Array.from({ length: 13 }, (_, index) => ({ productId: `blocked-${index}` })) },
-    catalogue: { plannedProductCreates: 49, targetNativeKeeps: 1, eligibleVariants: 1317, deferredVariants: 5, d1Products: 50, d1Variants: 1323, verifiedProducts: complete ? 36 : 10, mappedVariants: complete ? 1000 : 185, blockedProducts: 13, fileMappings: { unique: 29, originalExact: 0, targetExisting: 0, printfulPreviewRehydrated: 29, unresolved: 13 } },
-    safety: { checkoutEnabled: false, livePaymentCaptureEnabled: false, fulfillmentEnabled: false, printfulOrderMode: "draft_only", commerceOrders: 0, prohibitedCommerceOrders: 0, wixSourceReadOnly: true, failClosed: true, printfulOrdersCreated: 0, printfulWebhooksMutated: 0 },
+    ok: true, databaseConfigured: true, authority: "Commerce D1 + server runtime configured-state projection", access: { isMasterAdmin: true, capabilities: ["commerce.view"] },
+    readiness: { provider: status("configured", "Persisted Printful configuration is internally consistent."), catalogue: status("partial", "238 variants meet the mapping contract."), customerShippingData: status("not_implemented", "Customer shipping-address capture is not implemented."), paymentAuthority: status("test_evidence_only", "One preserved signed-webhook TEST payment exists."), printfulOrderMode: status("draft_only", "Canonical mode: draft_only."), fulfillment: status("disabled", "Fulfillment is intentionally disabled until production activation."), tracking: status("not_implemented", "No normalized shipment or tracking fields exist."), production: status("blocked", "Canonical production commerce remains blocked.") },
+    provider: { name: "Printful", state: "connected", configured: true, targetStoreConfigured: true, storeType: "native", credentialConfigured: true, configurationEvidence: "persisted_prior_verification", scopes: { products: true, files: true, orders: true, webhooks: true, evidenceRecorded: true }, orderMode: "draft_only", providerOrderMode: "draft_only", orderModeConsistent: true, fulfillmentEnabled: false, localProviderOrderCount: fixture === "empty" ? 0 : 1, lastProviderOrderAt: fixture === "empty" ? null : "2026-08-28T01:01:00Z", lastConfigurationEvidenceAt: "2026-08-28T00:00:00Z" },
+    migration: { id: "permanent-printful-2026-08", status: "waiting", phase: "source_files", manuallyPaused: true, verifiedProducts: 12, mappedVariants: 238, blockedProducts: 28, deferredVariants: 5, providerRequestCount: 419, providerFailures: 36, updatedAt: "2026-08-28T00:00:00Z", completedAt: null, mutableFromThisRoute: false },
+    mapping: { storefrontProducts: 49, storefrontVariants: 1317, totalProducts: 50, totalVariants: 1323, mappedProviderProducts: 12, mappedProviderVariants: 238, unmappedVariants: 1052, blockedProducts: 28, blockedVariants: 0, deferredVariants: 5, nonSellableVariants: 1323, potentiallyFulfillableVariants: 0, contract: "Printful + mapped + target product ID + target Sync Variant ID + target-verified/native migration" },
+    pipeline: [["order_record","Order recorded",true,"commerce_orders","Checkout core","Implemented; local record precedes payment provider creation."],["payment_confirmed","Payment confirmed",true,"commerce_orders.payment_status + signed Stripe webhook receipt","Signed Stripe webhook","Implemented with TEST-only evidence."],["fulfillment_eligible","Fulfillment eligibility",true,"Local settings, order, item snapshot, and provider mappings","Future local workflow","Preparation logic implemented; submission remains disabled."],["provider_draft","Provider draft",false,"No local provider-order record exists","Not implemented","Preview only; no Printful request is made."],["submitted","Provider submitted",false,"commerce_orders.printful_order_id when present","Not implemented","No Printful orders have been submitted."],["shipment","Shipped / delivered",false,"No persisted authority","Not implemented","No shipment or tracking workflow is implemented."]].map(([id,label,implemented,authority,transition,detail]) => ({ id,label,implemented,authority,transition,detail })),
+    shipping: { customerData: { state: "not_implemented", persistedFields: [], orderSpecificPiiProjectedHere: false }, rates: { state: "not_configured", strategy: "unconfigured", providerQuotePathImplemented: false, providerQuoteCalled: false } }, tracking: { state: "not_implemented", persistedFields: [], shipmentPollingImplemented: false, providerPollingPerformed: false },
+    draftPreview: { builderVersion: "printful-draft-preview-v1", kind: "draft_preview", eligible: false, blockers: [{ code: "variant_not_sellable", message: "The authoritative variant is not currently sellable." }, { code: "shipping_strategy_missing", message: "No authoritative shipping-rate strategy is configured." }, { code: "fulfillment_disabled", message: "Fulfillment submission is intentionally disabled." }], labels: ["DRAFT PREVIEW", "NO PROVIDER REQUEST", "NOT SUBMITTED"], reference: "DRAFT-PREVIEW-NOT-AN-ORDER", environment: "test", item: { productId: "product-authority", product: "Authoritative product", variantId: "variant-authority", variant: "11 oz / Black", provider: "printful", mappedProviderVariant: "target-variant-authority", quantity: 1 }, requirements: { recipient: { source: "synthetic_fixture", complete: true, missing: [], countryCode: "CA", postalCodePresent: true }, shipping: { required: true, strategy: "unconfigured", configured: false } }, safePayloadPreview: { externalReference: "DRAFT-PREVIEW-NOT-AN-ORDER", recipient: { source: "synthetic_fixture", countryCode: "CA", postalCodePresent: true }, items: [{ providerVariantId: "target-variant-authority", quantity: 1 }], shipping: { strategy: "unconfigured" } }, submission: { available: false, mode: "draft_only", networkRequestMade: false, providerOrderCreated: false, localOrderMutated: false, migrationMutated: false } },
+    gates: [["business","Business information","incomplete","Legal identity incomplete.","/commerce/business"],["tax_documents","Tax & documents","blocked","Tax strategy unconfigured.","/commerce/tax"],["payments","Payment authority","disabled","TEST evidence only.","/commerce/payments"],["customer_emails","Customer emails","disabled","Customer sends disabled.","/commerce/emails"],["checkout","Customer checkout","disabled","Normal checkout is intentionally disabled.","/commerce/payments"],["customer_shipping","Customer shipping data","blocked","Customer shipping-address capture is not implemented.","/orders"],["shipping_rates","Shipping rate strategy","blocked","No shipping strategy or live provider quote path is configured.",null],["product_mapping","Product mapping","blocked","No potentially fulfillable variants.","/products"],["printful_provider","Printful provider","ready","Persisted local configuration is internally consistent.",null],["printful_order_mode","Printful order mode","disabled","Draft-only is the maximum permitted mode.",null],["fulfillment","Fulfillment submission","disabled","Fulfillment submission is intentionally disabled.",null],["live_payments","Live payment capture","disabled","Live payment capture is intentionally disabled.","/commerce/payments"]].map(([id,label,state,detail,href]) => ({id,label,state,detail,href})),
+    dependencies: { business: { href: "/commerce/business" }, taxDocuments: { href: "/commerce/tax" }, customerEmails: { href: "/commerce/emails", shipmentTemplate: { configured: true, state: "incomplete", revision: 1, updatedAt: "2026-08-28T00:00:00Z" }, sendsEnabled: false }, payments: { href: "/commerce/payments" }, products: { href: "/products" }, orders: { href: "/orders" } },
+    evidence: { recent: evidence, counts: { totalOrders: fixture === "empty" ? 1 : 2, testOrders: 1, liveOrders: fixture === "empty" ? 0 : 1, providerOrders: fixture === "empty" ? 0 : 1, fulfillmentEvidence: evidence.length }, lastAudit: null },
+    technical: { builderVersion: "printful-draft-preview-v1", providerCallsOnRead: false, providerCallsOnPreview: false, previewPersists: false, previewAuditedAsMutation: false, shippingDataCapability: "not_implemented", shippingRateCapability: "not_configured", trackingCapability: "not_implemented" }, safety: { checkoutEnabled: false, controlledTestCheckoutEnabled: false, livePaymentCaptureEnabled: false, fulfillmentEnabled: false, orderMode: "draft_only", providerSubmissionAvailable: false, previewOnly: true, mutationsAvailableFromThisRoute: false }, canonicalReadiness: null, checkedAt: "2026-08-29T00:00:00Z",
   };
 }

@@ -21,8 +21,6 @@ import {
   getCommerceMediaLimits,
   ingestMerchandisingProductMedia,
   uploadMerchandisingProductMedia,
-  executePermanentPrintfulMigration,
-  getPermanentPrintfulMigration,
   saveFeaturedProducts,
   saveMerchandisingProduct,
   saveMerchandisingVariant,
@@ -48,7 +46,6 @@ import {
   type MerchandisingVariant,
   type ProductBulkOperation,
   type ProductListFilters,
-  type PermanentPrintfulMigrationPayload,
   type ProviderStatus,
   type CommerceMediaLimits,
 } from "../commerce/client";
@@ -66,7 +63,7 @@ const COMMERCE_WORKSPACES = [
   { to: "/commerce/business", eyebrow: "Merchant profile", title: "Business information", text: "Public storefront details kept separate from encrypted private Canadian fields.", icon: "business" },
   { to: "/commerce/tax", eyebrow: "Canadian custody", title: "Tax & documents", text: "BN and GST/HST custody with controlled invoice and receipt presentation.", icon: "tax" },
   { to: "/commerce/emails", eyebrow: "Lifecycle templates", title: "Customer emails", text: "Structured plain-text templates with delivery intentionally disabled.", icon: "emails" },
-  { to: "/commerce/fulfillment", eyebrow: "Provider bridge", title: "Fulfillment integrations", text: "Printful draft-only migration planning with explicit submission gates.", icon: "fulfillment" },
+  { to: "/commerce/fulfillment", eyebrow: "Operations control", title: "Fulfillment & shipping", text: "Readiness, mappings, delivery dependencies, draft preview, and production locks.", icon: "fulfillment" },
 ] as const;
 
 export function CommerceOverviewPage() {
@@ -267,69 +264,6 @@ function EmailTemplatePreview({ template, preview }: { template: CommerceTemplat
 */
 export { CustomerEmailsPage } from "./CustomerEmailsPage";
 
-export function FulfillmentIntegrationsPage() {
-  const { csrfToken, access } = useAuth();
-  const { startLoading } = useOutletContext<AdminShellOutletContext>();
-  const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
-  const [migration, setMigration] = useState<PermanentPrintfulMigrationPayload | null>(null);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const migrationLoopRunning = useRef(false);
-  const load = useCallback(async () => {
-    const stop = startLoading("Loading Printful connection status"); setError("");
-    try {
-      setPayload(await getCommerceOverview());
-      if (access.isMasterAdmin) setMigration(await getPermanentPrintfulMigration());
-    }
-    catch (reason) { setError(errorMessage(reason, "Printful connection status is unavailable.")); }
-    finally { stop(); }
-  }, [access.isMasterAdmin, startLoading]);
-  useEffect(() => { void load(); }, [load]);
-  const continueMigration = useCallback(async () => {
-    if (!csrfToken || !access.isMasterAdmin || migrationLoopRunning.current) return;
-    migrationLoopRunning.current = true;
-    setBusy(true); setError(""); setMessage("");
-    try {
-      const next = await executePermanentPrintfulMigration(csrfToken, setMigration);
-      setMigration(next);
-      if (["completed", "completed_with_blocked_products"].includes(next.migration.status)) setMessage(next.migration.status === "completed" ? "PERMANENT CATALOGUE MIGRATED" : "CATALOGUE MIGRATED WITH BLOCKED PRODUCTS RECORDED");
-      else if (next.migration.status === "blocked") setError(next.migration.lastError?.message || "The migration stopped safely on a provider or identity conflict.");
-    }
-    catch (reason) { setError(errorMessage(reason, "The permanent Printful migration paused safely. Reload this page to resume from D1.")); }
-    finally { migrationLoopRunning.current = false; setBusy(false); }
-  }, [access.isMasterAdmin, csrfToken]);
-  const state = migration?.migration;
-  const catalogue = migration?.catalogue;
-  const safety = migration?.safety;
-  const migrationComplete = Boolean(state && ["completed", "completed_with_blocked_products"].includes(state.status));
-  const canExecute = Boolean(access.isMasterAdmin && csrfToken && payload?.databaseConfigured && payload.printfulSecretConfigured && safety?.failClosed && state && ["ready", "running", "waiting"].includes(state.status) && !busy);
-  const canResume = Boolean(access.isMasterAdmin && csrfToken && payload?.databaseConfigured && payload.printfulSecretConfigured && state?.status === "blocked" && state.canResume && !busy);
-  return <>
-    <CommerceHeading eyebrow="Permanent catalogue authority" title="Fulfillment integrations" summary="The accepted 49-product Wix catalogue is loaded in Commerce D1 and ready for a resumable migration to the permanent native Printful store. The legacy Wix source is read only; checkout and fulfillment remain disabled." status={migrationComplete ? "connected" : state?.status === "blocked" ? "error" : "pending"} statusLabel={migrationComplete ? "Permanent catalogue migrated" : state?.status === "blocked" ? "Migration blocked safely" : "Ready for permanent migration"} />
-    {error && <div className="admin-alert" role="alert">{error}</div>}
-    {message && <div className="auth-success" role="status">{message}</div>}
-    <section className="provider-detail-grid">
-      <DetailCard title="Permanent target" status={state?.targetVerified ? "connected" : "pending"} statusLabel={state?.targetVerified ? "Token accepted" : "Verified before first write"} lead="Third Railify API"><dl><Fact term="Store ID" value="18668025" /><Fact term="Store type" value="native" /><Fact term="Credential" value={payload?.printfulSecretConfigured ? "Configured / server only" : "Not configured"} /><Fact term="Product write scope" value={state?.scopes ? "Verified" : "Pending protected preflight"} /><Fact term="Planned creates" value={String(catalogue?.plannedProductCreates ?? 49)} /><Fact term="Existing target-native keep" value={String(catalogue?.targetNativeKeeps ?? 1)} /><Fact term="Order mode" value={safety?.printfulOrderMode === "draft_only" ? "Draft only" : "Unsafe / unknown"} /><Fact term="Checkout" value={safety?.checkoutEnabled ? "Unsafe / unknown" : "Disabled"} /><Fact term="Fulfillment" value={safety?.fulfillmentEnabled ? "Unsafe / unknown" : "Disabled"} /><Fact term="Webhooks" value="Not configured" /></dl></DetailCard>
-      <DetailCard title="Legacy source" status="legacy_production" statusLabel="Read only" lead="Third Railify Official"><dl><Fact term="Store ID" value="16847493" /><Fact term="Store type" value="wix" /><Fact term="Credential use" value="GET only" /><Fact term="Allowed reads" value="Sync product / Sync Variant / original file" /><Fact term="Write access used" value="None" /><Fact term="Wix storefront" value="Live / untouched" /></dl></DetailCard>
-      <DetailCard title="Permanent D1 catalogue" status="connected" statusLabel="Authoritative" lead="Accepted evidence / 2026-08-28"><dl><Fact term="D1 products" value={String(catalogue?.d1Products ?? 50)} /><Fact term="D1 variants" value={String(catalogue?.d1Variants ?? 1323)} /><Fact term="Planned target creates" value={String(catalogue?.plannedProductCreates ?? 49)} /><Fact term="Eligible variants" value={String(catalogue?.eligibleVariants ?? 1317)} /><Fact term="Deferred variants" value={String(catalogue?.deferredVariants ?? 5)} /><Fact term="Manual review" value="1 — Raider's Goblet excluded" /><Fact term="Maximum variants / product" value="96 / 100" /><Fact term="My Balloon" value="Preserved private / non-sellable" /></dl></DetailCard>
-      <DetailCard title="Permanent Printful migration" status={migrationComplete ? "connected" : state?.status === "blocked" ? "error" : "pending"} statusLabel={state?.manuallyPaused ? "Paused" : humanize(state?.status || "ready")} lead={state?.currentProduct?.title || "Server-owned D1 queue"}><dl>
-        <Fact term="Processed" value={`${state?.processedProducts ?? state?.completedProducts ?? 0} / ${state?.totalProducts ?? 49}`} /><Fact term="Verified" value={String(catalogue?.verifiedProducts ?? state?.productsCreated ?? 0)} /><Fact term="Remaining" value={String(state?.remainingProducts ?? Math.max(0, (state?.totalProducts ?? 49) - (state?.completedProducts ?? 0)))} /><Fact term="Current phase" value={humanize(state?.phase || "ready")} /><Fact term="File resolution" value={state?.fileProgress ? `${state.fileProgress.resolved} / ${state.fileProgress.total}` : "Awaiting current product"} /><Fact term="Provider state" value={state?.manuallyPaused ? "Paused" : humanize(state?.providerState || "ready")} />
-        <Fact term="Products created" value={String(state?.productsCreated ?? 0)} /><Fact term="Products adopted" value={String(state?.productsAdopted ?? 0)} /><Fact term="Blocked" value={String(catalogue?.blockedProducts ?? 0)} /><Fact term="Variants mapped" value={String(state?.variantsMapped ?? 0)} />
-        <Fact term="Unique file mappings" value={String(catalogue?.fileMappings?.unique ?? 0)} /><Fact term="Original / exact artwork" value={String(catalogue?.fileMappings?.originalExact ?? 0)} /><Fact term="Target-existing files" value={String(catalogue?.fileMappings?.targetExisting ?? 0)} /><Fact term="Printful previews rehydrated" value={String(catalogue?.fileMappings?.printfulPreviewRehydrated ?? 0)} /><Fact term="Unresolved artwork" value={String(catalogue?.fileMappings?.unresolved ?? 0)} />
-        <Fact term="Provider failures" value={String(state?.providerFailures ?? 0)} /><Fact term="Error code" value={state?.lastError?.code || "None"} /><Fact term="D1 mapping state" value={state?.checkpointState ? humanize(state.checkpointState) : "Checkpointed"} />
-      </dl>
-        <div className={`catalogue-snapshot-state is-${state?.status || "ready"}`} aria-live="polite"><strong>{migrationComplete ? "PERMANENT CATALOGUE MIGRATED" : state?.status === "blocked" && state.canResume ? "PERMANENT MIGRATION — BLOCKED — CHECKPOINTED" : state?.status === "blocked" ? "MIGRATION STOPPED SAFELY" : ["running", "waiting"].includes(state?.status || "") ? "PERMANENT MIGRATION — CHECKPOINTED" : "READY FOR PERMANENT MIGRATION"}</strong><p>{state?.lastError?.message || (migrationComplete ? "All provider-accepted products and active variants are verified and mapped in Commerce D1; any individual artwork blocks are recorded for review. Checkout and fulfillment remain disabled." : "The server resolves source artwork through target IDs, original provider URLs, exact local recovery, or target-side Printful preview rehydration, and checkpoints all progress in D1.")}</p></div>
-        {access.isMasterAdmin && state && ["ready", "running", "waiting"].includes(state.status) && <button type="button" className="secondary-button" onClick={() => void continueMigration()} disabled={!canExecute}>{state.status === "ready" ? "EXECUTE PERMANENT PRINTFUL CATALOGUE MIGRATION" : "CONTINUE PERMANENT PRINTFUL MIGRATION FROM CHECKPOINT"}</button>}
-        {access.isMasterAdmin && state?.status === "blocked" && state.canResume && <button type="button" className="secondary-button" onClick={() => void continueMigration()} disabled={!canResume}>RESUME PERMANENT PRINTFUL CATALOGUE MIGRATION</button>}
-        {busy && <p className="commerce-action-note">This browser run is continuing automatically. Rate limits and file-processing waits are honored until it completes or the page is closed.</p>}
-        {!access.isMasterAdmin && <p className="commerce-action-note">Master Admin authority is required for this provider-write migration.</p>}
-      </DetailCard>
-    </section>
-    {!payload && !error && <CommerceState>Loading truthful Printful status…</CommerceState>}
-    <section className="transaction-model" aria-labelledby="transaction-model-title"><p className="eyebrow">Safety remains locked</p><h2 id="transaction-model-title">Catalogue migration does not activate orders</h2><div><article><span>01</span><strong>Customer checkout</strong><p>{safety?.checkoutEnabled ? "Unexpectedly enabled" : "Disabled"}; live payment capture remains {safety?.livePaymentCaptureEnabled ? "unexpectedly enabled" : "disabled"}.</p></article><article><span>02</span><strong>Printful fulfillment</strong><p>{safety?.fulfillmentEnabled ? "Unexpectedly enabled" : "Disabled"}; no order or webhook mutation is part of this migration.</p></article></div></section>
-  </>;
-}
 
 export function CommerceProductsPage() {
   const { csrfToken } = useAuth();
@@ -922,7 +856,6 @@ function CommerceHeading({ eyebrow, title, summary, status, statusLabel }: { eye
 function SectionTitle({ id, eyebrow, title }: { id: string; eyebrow: string; title: string }) { return <div className="section-heading"><div><p className="eyebrow">{eyebrow}</p><h2 id={id}>{title}</h2></div></div>; }
 function StatusBadge({ status, label }: { status: CommerceStatus; label?: string }) { return <span className={`commerce-status commerce-status--${status}`}>{label || labelStatus(status)}</span>; }
 function ProviderCard({ provider }: { provider: ProviderStatus }) { const stripeConnected = provider.provider === "stripe" && provider.status === "connected" && provider.environment === "test" && provider.apiConfigured; const printfulConnected = provider.provider === "printful" && provider.status === "connected" && provider.apiConfigured; const webhookOperational = provider.provider === "stripe" && provider.webhookConfigured && provider.webhookSigningConfigured; return <article className="provider-card"><div><span>{provider.label}</span><StatusBadge status={provider.status} label={stripeConnected ? "Test API connected" : printfulConnected ? "API connected" : undefined} /></div><dl>{provider.integrationMode && <Fact term="Integration" value={humanize(provider.integrationMode)} />}<Fact term="Custody" value={humanize(provider.credentialCustody)} /><Fact term="Environment" value={provider.provider === "printful" ? "Real API / pre-cutover rollout" : provider.environment === "test" ? "TEST" : humanize(provider.environment)} />{provider.countryCode && <Fact term="Country" value={provider.countryCode.toUpperCase() === "CA" ? "Canada" : provider.countryCode} />}{provider.currencyCode && <Fact term="Currency" value={provider.currencyCode.toUpperCase()} />}{provider.provider === "stripe" && <><Fact term="Account" value={metadataText(provider, "accountDisplayName") || (provider.accountCreated ? "Created" : "Not confirmed")} />{provider.externalAccountId && <Fact term="Account ID" value={compactAccountId(provider.externalAccountId)} />}<Fact term="API" value={stripeConnected ? "Test API connected" : "Not configured"} /><Fact term="Webhook endpoint" value={webhookOperational ? "Operational / configured" : provider.webhookEndpointReady ? "Ready for configuration" : "Unavailable"} /><Fact term="Webhook signing" value={webhookOperational ? "Configured / verified" : provider.webhookSigningConfigured ? "Configured — awaiting verified event" : "Not configured"} /><Fact term="Checkout engine" value="Implemented / gated" /><Fact term="Public checkout" value={provider.checkoutEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payments" value={provider.livePaymentsEnabled ? "Enabled" : "Disabled"} /><Fact term="Live payouts" value={provider.livePayoutReadiness === "verified" ? "Verified" : "Unverified"} />{provider.lastSynchronizedAt && <Fact term="Last synchronized" value={formatSynchronizedAt(provider.lastSynchronizedAt)} />}</>}{provider.provider === "printful" && <><Fact term="API" value={printfulConnected ? "Connected" : "Verification pending"} /><Fact term="Store" value={metadataText(provider, "storeName") || "Awaiting verification"} /><Fact term="Store ID" value={provider.externalAccountId || "Awaiting verification"} /><Fact term="Products" value={metadataNumberText(provider, "productCount")} /><Fact term="Order mode" value="Draft only" /><Fact term="Automatic fulfillment" value="Disabled" /><Fact term="Existing Wix store" value="Unaffected" /></>}</dl></article>; }
-function DetailCard({ title, status, statusLabel, lead, children }: { title: string; status: CommerceStatus; statusLabel?: string; lead: string; children: ReactNode }) { return <article className="provider-detail"><header><div><p>{lead}</p><h2>{title}</h2></div><StatusBadge status={status} label={statusLabel} /></header>{children}</article>; }
 function PaymentStateChip({ state, label }: { state: PaymentAuthorityState | PaymentGateState; label?: string }) { return <span className={`payment-state payment-state--${state}`}>{label || paymentStateLabel(state)}</span>; }
 function PaymentMetric({ label, value, state }: { label: string; value: string; state: PaymentAuthorityState }) { return <article className={`is-${state}`}><span>{label}</span><strong>{value}</strong><i aria-hidden="true" /></article>; }
 function PaymentMethodMark({ id }: { id: PaymentsControlPlanePayload["paymentMethods"][number]["id"] }) { return id === "apple_pay" || id === "google_pay" ? <span className={`payment-method-mark is-${id}`} aria-hidden="true" /> : <span className="payment-method-mark is-card" aria-hidden="true"><AdminIcon name="payments" size={19} /></span>; }

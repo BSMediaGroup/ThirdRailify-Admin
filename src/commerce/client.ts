@@ -87,6 +87,32 @@ export type PaymentsControlPlanePayload = {
   technical: { checkoutArchitecture: "stripe_hosted_checkout_sessions"; directMerchant: boolean; stripeConnect: false; connectedAccounts: false; stripeAccountHeader: false; destinationCharges: false; applicationFees: false; transfers: false; publishableKeyRequired: false; providerMutationAvailable: false };
   checkedAt: string;
 };
+export type FulfillmentStatusProjection = { state: string; detail: string };
+export type FulfillmentGate = { id: string; label: string; state: "ready" | "incomplete" | "disabled" | "blocked" | "optional"; detail: string; href: string | null };
+export type FulfillmentDraftPreview = {
+  builderVersion: string; kind: "draft_preview"; eligible: boolean; blockers: Array<{ code: string; message: string }>;
+  labels: string[]; reference: string; environment: "test" | "live";
+  item: null | { productId: string; product: string; variantId: string; variant: string; provider: string; mappedProviderVariant: string | null; quantity: number | null };
+  requirements: { recipient: { source: string; complete: boolean; missing: string[]; countryCode: string | null; postalCodePresent: boolean }; shipping: { required: boolean; strategy: string; configured: boolean } };
+  safePayloadPreview: null | { externalReference: string; recipient: { source: string; countryCode: string | null; postalCodePresent: boolean }; items: Array<{ providerVariantId: string; quantity: number | null }>; shipping: { strategy: string } };
+  submission: { available: false; mode: string; networkRequestMade: false; providerOrderCreated: false; localOrderMutated: false; migrationMutated: false };
+};
+export type FulfillmentShippingPayload = {
+  ok: boolean; databaseConfigured: boolean; authority: string; access: CommerceAccess;
+  readiness: { provider: FulfillmentStatusProjection; catalogue: FulfillmentStatusProjection; customerShippingData: FulfillmentStatusProjection; paymentAuthority: FulfillmentStatusProjection; printfulOrderMode: FulfillmentStatusProjection; fulfillment: FulfillmentStatusProjection; tracking: FulfillmentStatusProjection; production: FulfillmentStatusProjection };
+  provider: { name: "Printful"; state: string; configured: boolean; targetStoreConfigured: boolean; storeType: string | null; credentialConfigured: boolean; configurationEvidence: string; scopes: { products: boolean; files: boolean; orders: boolean; webhooks: boolean; evidenceRecorded: boolean }; orderMode: string; providerOrderMode: string; orderModeConsistent: boolean; fulfillmentEnabled: boolean; localProviderOrderCount: number; lastProviderOrderAt: string | null; lastConfigurationEvidenceAt: string | null };
+  migration: { id: string; status: string; phase: string; manuallyPaused: boolean; verifiedProducts: number; mappedVariants: number; blockedProducts: number; deferredVariants: number; providerRequestCount: number; providerFailures: number; updatedAt: string | null; completedAt: string | null; mutableFromThisRoute: false };
+  mapping: { storefrontProducts: number; storefrontVariants: number; totalProducts: number; totalVariants: number; mappedProviderProducts: number; mappedProviderVariants: number; unmappedVariants: number; blockedProducts: number; blockedVariants: number; deferredVariants: number; nonSellableVariants: number; potentiallyFulfillableVariants: number; contract: string };
+  pipeline: Array<{ id: string; label: string; implemented: boolean; authority: string; transition: string; detail: string }>;
+  shipping: { customerData: { state: string; persistedFields: string[]; orderSpecificPiiProjectedHere: false }; rates: { state: string; strategy: string; providerQuotePathImplemented: false; providerQuoteCalled: false } };
+  tracking: { state: string; persistedFields: string[]; shipmentPollingImplemented: false; providerPollingPerformed: false };
+  draftPreview: FulfillmentDraftPreview; gates: FulfillmentGate[];
+  dependencies: { business: { href: string }; taxDocuments: { href: string }; customerEmails: { href: string; shipmentTemplate: { configured: boolean; state: string; revision: number | null; updatedAt: string | null }; sendsEnabled: boolean }; payments: { href: string }; products: { href: string }; orders: { href: string } };
+  evidence: { recent: Array<{ id: string; environment: "test" | "live"; paymentStatus: string; fulfillmentStatus: string; providerOrderRecorded: boolean; createdAt: string; updatedAt: string }>; counts: { totalOrders: number; testOrders: number; liveOrders: number; providerOrders: number; fulfillmentEvidence: number }; lastAudit: null | { action: string; result: string; createdAt: string } };
+  technical: { builderVersion: string; providerCallsOnRead: false; providerCallsOnPreview: false; previewPersists: false; previewAuditedAsMutation: false; shippingDataCapability: string; shippingRateCapability: string; trackingCapability: string };
+  safety: { checkoutEnabled: boolean; controlledTestCheckoutEnabled: boolean; livePaymentCaptureEnabled: boolean; fulfillmentEnabled: boolean; orderMode: string; providerSubmissionAvailable: false; previewOnly: true; mutationsAvailableFromThisRoute: false };
+  canonicalReadiness: ProductionReadiness | null; checkedAt: string;
+};
 export type TemplatesPayload = { ok: boolean; databaseConfigured: boolean; access: CommerceAccess; templates: CommerceTemplate[] };
 export type TaxRegistration = { id: string; registrationType: "gst_hst" | "qst" | "pst" | "rst" | "other"; jurisdiction: string; countryCode: string; provinceCode: string | null; maskedIdentifier: string; status: string; effectiveDate: string | null; expiresAt: string | null; notes: string; documentDisclosureEnabled: boolean; revision: number; updatedAt: string };
 export type TaxPayload = {
@@ -281,6 +307,7 @@ type SnapshotContinuationPayload = {
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
 export function getPaymentsControlPlane() { return adminApi<PaymentsControlPlanePayload>("/api/admin/commerce/payments"); }
+export function getFulfillmentShipping() { return adminApi<FulfillmentShippingPayload>("/api/admin/commerce/fulfillment"); }
 export function verifyStripeConnection(csrfToken: string) {
   return adminApi<CommerceOverviewPayload>("/api/admin/commerce/stripe/verify", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
 }

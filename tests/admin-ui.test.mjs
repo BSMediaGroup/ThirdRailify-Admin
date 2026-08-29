@@ -121,6 +121,16 @@ test("Orders is a read-only paginated management surface with isolated TEST evid
   assert.match(shell, /area\.path\.toLowerCase\(\) === location\.pathname\.toLowerCase\(\)/); assert.match(shell, /navigate\(`\$\{canonical\}/);
 });
 
+test("Fulfillment & Shipping uses the dedicated read-only control plane and exposes no provider or migration action", async () => {
+  const [app, navigation, page, client, route] = await Promise.all([read("src/App.tsx"), read("src/config/navigation.ts"), read("src/pages/FulfillmentShippingPage.tsx"), read("src/commerce/client.ts"), read("functions/api/admin/commerce/[[path]].js")]);
+  assert.match(app, /path="commerce\/fulfillment" element=\{<FulfillmentShippingPage/);
+  assert.match(navigation, /path: "\/commerce\/fulfillment"[\s\S]{0,100}label: "Fulfillment & Shipping"/);
+  for (const label of ["Server-derived readiness", "Order fulfillment pipeline", "Product & variant mapping health", "Draft order preview", "Recent fulfillment evidence", "Advanced / technical"]) assert.match(page, new RegExp(label));
+  for (const forbidden of ["executePermanentPrintfulMigration", "getPermanentPrintfulMigration", "CONTINUE PERMANENT PRINTFUL", "RESUME PERMANENT PRINTFUL", "Fulfill Now", "Create Printful Order"]) assert.doesNotMatch(page, new RegExp(forbidden));
+  assert.match(client, /getFulfillmentShipping\(\).*\/api\/admin\/commerce\/fulfillment/);
+  assert.match(route, /path === "fulfillment"[\s\S]{0,180}requireCommerceCapability\(env, session, "commerce\.view"\)[\s\S]{0,180}fulfillmentShippingPayload/);
+});
+
 test("Shop is an expandable Products, Collections, Orders group with dirty-only ordering UX", async () => {
   const [navigation, app, page, styles, headers] = await Promise.all([read("src/config/navigation.ts"), read("src/App.tsx"), read("src/pages/CommercePages.tsx"), read("src/styles/global.css"), read("public/_headers")]);
   assert.match(navigation, /path: "\/shop"[\s\S]{0,120}label: "Shop"/);

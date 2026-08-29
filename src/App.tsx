@@ -14,11 +14,11 @@ import {
   CommerceOverviewPage,
   CommerceCollectionsPage,
   CommerceProductsPage,
-  FulfillmentIntegrationsPage,
   PaymentsPayoutsPage,
   TaxDocumentsPage,
 } from "./pages/CommercePages";
 import { CustomerEmailsPage } from "./pages/CustomerEmailsPage";
+import { FulfillmentShippingPage } from "./pages/FulfillmentShippingPage";
 import {
   GoatModerationPage,
   GoatsCommentsPage,
@@ -53,7 +53,7 @@ export function App() {
         <Route path="commerce/business" element={<BusinessInformationPage />} />
         <Route path="commerce/tax" element={<TaxDocumentsPage />} />
         <Route path="commerce/emails" element={<CustomerEmailsPage />} />
-        <Route path="commerce/fulfillment" element={<FulfillmentIntegrationsPage />} />
+        <Route path="commerce/fulfillment" element={<FulfillmentShippingPage />} />
         <Route path="goats" element={<GoatsOverviewPage />} />
         <Route path="goats/pending" element={<GoatsQueuePage status="pending" />} />
         <Route path="goats/approved" element={<GoatsQueuePage status="approved" />} />

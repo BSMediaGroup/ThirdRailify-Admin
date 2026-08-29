@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-08-29 — Fulfillment & Shipping control plane
+
+CURRENT VER=0.0.0-seed
+
+PENDING VER=0.1.0-alpha.0
+
+- Rebuilt `/commerce/fulfillment` as the authoritative read-only Fulfillment & Shipping workspace without a migration. The new `commerce.view` projection combines canonical production readiness, safe Printful configured-state evidence, the paused permanent catalogue checkpoint, exact product/variant mapping-contract counts, local order/provider-order evidence, and runtime schema capability detection for customer delivery, rates, shipments, and tracking.
+- Added a pure non-network `preparePrintfulDraftOrder` layer and a server-selected deterministic synthetic preview. It resolves provider identity only from D1, validates quantity, product/variant state, mapping consistency, recipient structure, shipping strategy, payment environment, order mode, and fulfillment gates, and returns safe blockers plus a high-level preview while guaranteeing no provider request, provider/local order creation, fulfillment transition, audit mutation, or migration mutation.
+- Replaced the migration continuation surface with a compact responsive operations workspace: eight server-derived readiness states, safe Printful card, real lifecycle authority, mapping health, conspicuous draft-only/not-submitted preview, customer-data/rate/tracking gaps, canonical production lock matrix, adjacent-owner links, deliberate empty/local evidence states, and collapsed technical proof. No submit, retry, quote, polling, provider verification, migration continuation, activation, payment, email, or document control is exposed.
+- Added focused Node 22.16.0 server, route, pure-builder, static UI, and Playwright coverage at 1440, 768, and 390 pixels for authentication/origin/`commerce.view`, configured-state redaction, TEST-only payment evidence, exact mappings, fail-closed validation, browser-provider-ID rejection, missing shipping/rate/tracking capability, TEST/LIVE evidence separation, accessibility, responsive overflow, and zero mutations/provider calls. Checkout, controlled TEST checkout, live payments, fulfillment, customer emails, tax, remote D1, deployment, Public, and the permanent Printful checkpoint remain unchanged.
+
 ## 2026-08-29 — Customer Emails control plane
 
 CURRENT VER=0.0.0-seed

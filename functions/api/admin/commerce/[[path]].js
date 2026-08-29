@@ -59,6 +59,7 @@ import {
   businessInformationPayload,
   createTaxRegistration,
   customerEmailsControlPlanePayload,
+  fulfillmentShippingPayload,
   issueOrderDocumentAccess,
   orderDocumentPreviewPayload,
   paymentsControlPlanePayload,
@@ -115,6 +116,9 @@ async function handleGet(request, env, path) {
   } else if (path === "payments") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await paymentsControlPlanePayload(env, session);
+  } else if (path === "fulfillment") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await fulfillmentShippingPayload(env, session);
   } else if (path === "products/list") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductListPayload(env, session, Object.fromEntries(new URL(request.url).searchParams));

@@ -149,11 +149,11 @@ export const adminAreas: AdminArea[] = [
   {
     path: "/commerce/fulfillment",
     parentPath: "/commerce",
-    label: "Fulfillment Integrations",
+    label: "Fulfillment & Shipping",
     shortLabel: "Fulfillment",
     icon: "fulfillment",
-    summary: "Printful draft-only planning and adapter boundaries.",
-    futureScope: ["Manual/API store", "Draft orders", "Explicit confirmation gates"],
+    summary: "Fulfillment readiness, delivery dependencies, mappings, and locked draft preparation.",
+    futureScope: ["Customer delivery authority", "Shipping rates", "Explicit production activation"],
   },
   {
     path: "/media",
