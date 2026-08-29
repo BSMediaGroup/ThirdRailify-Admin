@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-08-29 — Global Admin button system
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Consolidated every routed Admin native button behind one graphite/gold baseline and shared height, compact-height, icon-size, padding, gap, radius, transition, disabled-opacity, and focus-ring tokens. Added explicit primary, secondary, ghost, danger, danger-outline, text, compact, icon, and button-link semantics without creating page-specific button systems.
+- Repaired hover, pressed, focus-visible, disabled, icon alignment, and native file-selector presentation so raw and route-specific controls cannot fall back to browser-default grey, outset borders, or system-button typography.
+- Added source-level design-system coverage, computed-style assertions across the responsive Overview fixture, and a complete configured-route audit at 1440 and 390 pixels. Focused visual suites exercised Overview, Inbox, Watch, Site Content, Products, Collections, Orders, every Commerce control plane, GOATS Emails, Wheels Library/Access/Results/detail, and placeholder Media/Membership/Integrations/Settings surfaces. No route authority, auth, Commerce, GOATS, Wheels, D1, R2, migration, provider, payment, fulfilment, or Public projection changed.
+- Deployed the fresh Admin build first as `d079d3f0` (`https://d079d3f0.thirdrailify-admin.pages.dev`). Stable and immutable aliases serve `index-KpzKCxbo.css`; representative stable routes returned 200 after release.
+
 ## 2026-08-29 — Third Railify transactional branding restoration
 
 - Restored the canonical structured commerce renderer to a GOATS-proven Third Railify shell using the approved lightning logo and published American Captain, Blinker, and Geist Mono assets, with responsive email-safe HTML plus a semantic plaintext fallback across all seven customer lifecycle templates.

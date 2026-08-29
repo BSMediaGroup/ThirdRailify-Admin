@@ -28,6 +28,7 @@ test("Watch Admin renders empty and retained archives with direct source links r
       const pathname = new URL(request.url()).pathname;
       if (pathname === "/api/auth/config") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(authConfig()) });
       if (pathname === "/api/auth/session") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(session()) });
+      if (pathname === "/api/admin/inbox/summary") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] }) });
       if (pathname === "/api/admin/watch") {
         assert.equal(request.method(), "POST");
         assert.equal(request.headers()["x-csrf-token"], "browser-fixture-csrf");

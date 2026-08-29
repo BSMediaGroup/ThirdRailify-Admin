@@ -4,6 +4,15 @@ import test from "node:test";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
 
+test("Admin controls share one tokenized semantic button system", async () => {
+  const styles = await read("src/styles/global.css");
+  for (const token of ["--control-height", "--control-compact-height", "--control-icon-size", "--control-padding-inline", "--control-gap", "--control-radius", "--control-transition", "--control-disabled-opacity", "--control-focus-ring"]) assert.match(styles, new RegExp(token));
+  for (const variant of ["primary-button", "secondary-button", "ghost-button", "danger-button", "danger-outline-button", "text-button", "compact-button", "icon-button"]) assert.match(styles, new RegExp(`\\.${variant}`));
+  assert.match(styles, /button \{[^}]*min-height: var\(--control-height\);[^}]*appearance: none;[^}]*var\(--control-padding-inline\)[^}]*linear-gradient/);
+  assert.match(styles, /button:focus-visible \{[^}]*var\(--control-focus-ring\)/);
+  assert.match(styles, /input\[type="file"\]::file-selector-button/);
+});
+
 test("Admin sidebar keeps branding outside the independently scrollable navigation region", async () => {
   const [shell, styles] = await Promise.all([
     read("src/components/AdminShell.tsx"),

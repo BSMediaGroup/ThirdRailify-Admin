@@ -108,6 +108,12 @@ Tax & Documents reads require `commerce.view`; tax-registration mutations requir
 
 Customer Emails reads require `commerce.view`; template writes retain `commerce.templates.manage`, exact Admin origin, CSRF, rate limiting, server validation, optimistic template revisions, and bounded body-free commerce audit. `functions/_shared/commerce-control-plane.js` projects only configured-state metadata from the server-owned Resend credential, `MAIL_FROM`, and `MAIL_REPLY_TO`; it does not query Resend or claim domain/provider verification. `src/pages/CustomerEmailsPage.tsx` edits only the seven persisted email kinds, renders synthetic previews through the canonical server renderer in a sandboxed frame, and shows masked bounded `commerce_email_deliveries` evidence. Business Information owns merchant identity/contact, Tax & Documents owns receipt/invoice content, Orders owns order-specific communication history, and D1 owns the global `transactional_email_enabled` gate and deterministic delivery ledger. The page exposes no test-send, retry, resend, provider-connect, customer-document issuance, or production-enable control; no production lifecycle trigger is implemented.
 
+## Admin control system
+
+`src/styles/global.css` owns the application-wide button/control tokens: normal and compact heights, icon size, inline padding, icon gap, radius, transition, disabled opacity, and branded focus ring. Every native Admin `button` receives the dark graphite secondary baseline, so routed pages cannot fall back to browser `ButtonFace`; semantic classes then select `primary-button`, `secondary-button`, `ghost-button`, `danger-button`, `danger-outline-button`, `text-button`, `compact-button`, or `icon-button`. `button-link` is the anchor equivalent of the primary action. Native file selectors inherit the compact dark/gold treatment while remaining platform-accessible.
+
+Route-specific styles may change layout or represent real segmented/tab controls, but they must retain the shared typography, focus, disabled, pressed, and alignment behavior. Browser coverage inspects computed styles rather than accepting class names alone.
+
 ## Structure
 
 ```text

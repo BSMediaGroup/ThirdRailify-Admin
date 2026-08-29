@@ -26,6 +26,7 @@ test("GOATS navigation and branded email workspace render responsively", async (
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/auth/config") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(authConfig()) });
       if (path === "/api/auth/session") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(session()) });
+      if (path === "/api/admin/inbox/summary") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] }) });
       if (path === "/api/admin/goats/templates") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, templates: templates() }) });
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: "not_found" }) });
     });

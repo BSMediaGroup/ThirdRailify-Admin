@@ -38,6 +38,18 @@ test("Admin overview reports real cross-system state responsively without deferr
     assert.equal(rolePresentation.textOverflow, "clip");
     assert.equal(rolePresentation.whiteSpace, "normal");
     assert.equal(rolePresentation.scrollWidth <= Math.ceil(rolePresentation.width), true, `account level is fully readable at ${width}x${height}`);
+    const buttonAudit = await page.locator("button").evaluateAll((buttons) => buttons.filter((button) => {
+      const box = button.getBoundingClientRect(); return box.width > 0 && box.height > 0 && !button.disabled;
+    }).map((button) => {
+      const style = getComputedStyle(button); const background = style.backgroundColor.replaceAll(" ", "");
+      const defaultGrey = new Set(["rgb(239,239,239)", "rgb(240,240,240)", "rgb(221,221,221)", "rgba(239,239,239,1)"]);
+      const reasons = [];
+      if (!style.fontFamily.toLowerCase().includes("blinker")) reasons.push(`font:${style.fontFamily}`);
+      if (["outset", "ridge"].includes(style.borderStyle)) reasons.push(`border:${style.borderStyle}`);
+      if (defaultGrey.has(background) && style.backgroundImage === "none") reasons.push(`background:${style.backgroundColor}`);
+      return { label: button.getAttribute("aria-label") || button.textContent?.trim().slice(0, 60) || button.className, reasons };
+    }).filter((item) => item.reasons.length));
+    assert.deepEqual(buttonAudit, [], `visible enabled controls use the Admin design system at ${width}x${height}`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `no horizontal overflow at ${width}x${height}`);
     assert.deepEqual(errors, [], `no page errors at ${width}x${height}`);
     const copy = await page.locator("body").innerText(); const normalizedCopy = copy.replace(/\s+/g, " ");
@@ -150,10 +162,11 @@ test("Admin sidebar scroll keeps the branding panel fixed on desktop and mobile"
       const firstLink = sidebar.querySelector(".primary-nav .nav-link");
       if (!(brand instanceof HTMLElement) || !(scroller instanceof HTMLElement) || !(firstLink instanceof HTMLElement)) return null;
       const brandBox = brand.getBoundingClientRect(); const linkBox = firstLink.getBoundingClientRect();
-      return { brandTop: brandBox.top, brandBottom: brandBox.bottom, linkTop: linkBox.top, scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight, sidebarOverflow: getComputedStyle(sidebar).overflowY };
+      return { brandTop: brandBox.top, brandBottom: brandBox.bottom, brandHeight: brandBox.height, linkTop: linkBox.top, scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight, sidebarOverflow: getComputedStyle(sidebar).overflowY };
     });
     assert.ok(before, `sidebar regions exist at ${width}x${height}`);
     assert.equal(before.sidebarOverflow, "hidden", `outer sidebar does not scroll at ${width}x${height}`);
+    assert.equal(Math.abs(before.brandHeight - 96) < 0.5, true, `brand panel uses compact vertical spacing at ${width}x${height}`);
     assert.equal(before.scrollHeight > before.clientHeight, true, `navigation region overflows at ${width}x${height}`);
 
     await page.locator(".sidebar-scroll-region").evaluate((scroller) => { scroller.scrollTop = 260; });
