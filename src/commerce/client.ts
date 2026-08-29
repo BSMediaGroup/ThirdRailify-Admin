@@ -42,6 +42,29 @@ export type CommerceTemplate = {
   templateKey: string; templateKind: "email" | "document"; displayName: string; subject: string; preheader: string; heading: string; introduction: string; bodyBlocks: string[];
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; enabled: boolean; revision: number;
 };
+export type CustomerEmailTemplate = CommerceTemplate & { purpose: string; updatedAt: string | null; productionTriggerImplemented: false };
+export type CustomerEmailDelivery = {
+  id: string; templateKey: string; templateRevision: number; orderId: string | null; environment: "test" | "live" | "unknown";
+  purpose: "test_preview" | "transactional"; status: "pending" | "sending" | "sent" | "failed"; attemptCount: number;
+  maskedRecipient: string; providerMessageReference: string | null; failure: string | null; createdAt: string | null; updatedAt: string | null; sentAt: string | null;
+};
+export type CustomerEmailsPayload = {
+  ok: boolean; databaseConfigured: boolean; authority: string; access: CommerceAccess;
+  provider: { name: "Resend"; configured: boolean; credentialConfigured: boolean; senderConfigured: boolean; replyToConfigured: boolean; externalVerification: "unverified"; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null };
+  sender: { source: "server_environment"; providerCredentialConfigured: boolean; fromDisplayName: string | null; fromAddress: string | null; fromAddressConfigured: boolean; replyToAddress: string | null; replyToConfigured: boolean; sendingDomain: string | null; externallyVerified: false; businessDisplayName?: string | null; businessSupportEmail?: string | null };
+  templates: CustomerEmailTemplate[];
+  mergeVariables: Array<{ key: string; group: string; description: string }>;
+  readiness: { state: "ready" | "ready_but_disabled" | "incomplete" | "action_required"; configurationReady: boolean; configuredTemplates: number; totalTemplates: number; minimumReadyTemplates: number; customerSendsEnabled: boolean; productionLifecycleImplemented: false };
+  dependencies: {
+    business: { complete: boolean; canonicalReady: boolean; displayName: string | null; supportEmail: string | null; href: string };
+    documents: { receipt: { configured: boolean; status: string; enabled: boolean; revision: number | null }; invoice: { configured: boolean; status: string; enabled: boolean; revision: number | null }; customerAccessEnabled: boolean; href: string };
+    orders: { href: string; orderSpecificHistoryOwner: true }; paypalRequired: false;
+  };
+  deliveries: { recent: CustomerEmailDelivery[]; counts: { total: number; test: number; live: number; unknown: number; sent: number; failed: number; pending: number; sending: number }; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null; idempotency: { implemented: true; authority: string; retriesAvailableFromThisRoute: false } };
+  canonicalReadiness: null | { productionReady: boolean; communications: ReadinessDomain };
+  safety: { customerSendsEnabled: boolean; mutableFromThisRoute: false; testSendExposed: false; previewMutates: false; providerCallsOnRead: false; providerCallsOnPreview: false; productionLifecycleImplemented: false };
+  checkedAt: string;
+};
 export type PaymentAuthorityState = "configured" | "verified" | "unverified" | "disabled" | "unavailable";
 export type PaymentGateState = "ready" | "action_required" | "disabled" | "unverified" | "not_applicable";
 export type PaymentGate = { id: string; label: string; state: PaymentGateState; detail: string; href: string | null };
@@ -405,11 +428,18 @@ export function saveBusinessProfile(csrfToken: string, body: Record<string, unkn
   return adminApi<BusinessPayload>("/api/admin/commerce/business", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
 export function getCommerceTemplates() { return adminApi<TemplatesPayload>("/api/admin/commerce/templates"); }
+export function getCustomerEmailsControlPlane() { return adminApi<CustomerEmailsPayload>("/api/admin/commerce/emails"); }
 export function getTaxRegistrations() { return adminApi<TaxPayload>("/api/admin/commerce/tax"); }
 export function createTaxRegistration(csrfToken: string, body: Record<string, unknown>) { return adminApi<TaxPayload>("/api/admin/commerce/tax", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
 export function saveTaxRegistration(csrfToken: string, id: string, body: Record<string, unknown>) { return adminApi<TaxPayload>(`/api/admin/commerce/tax/${encodeURIComponent(id)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
 export function saveCommerceTemplate(csrfToken: string, template: CommerceTemplate) {
-  return adminApi<TemplatesPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(template) });
+  const body: CommerceTemplate = {
+    templateKey: template.templateKey, templateKind: template.templateKind, displayName: template.displayName, subject: template.subject,
+    preheader: template.preheader, heading: template.heading, introduction: template.introduction, bodyBlocks: template.bodyBlocks,
+    ctaLabel: template.ctaLabel, ctaUrl: template.ctaUrl, supportText: template.supportText, footer: template.footer,
+    accentColor: template.accentColor, status: template.status, enabled: template.enabled, revision: template.revision,
+  };
+  return adminApi<TemplatesPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
 export function previewCommerceTemplate(csrfToken: string, template: CommerceTemplate, orderId?: string) { return adminApi<TemplatePreviewPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}/preview`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ template, ...(orderId ? { orderId } : {}) }) }); }
 export function sendCommerceTemplateTest(csrfToken: string, templateKey: string, recipient: string, orderId?: string) { return adminApi<{ ok: true; duplicate: boolean; status: string; recipient: string }>(`/api/admin/commerce/templates/${encodeURIComponent(templateKey)}/send-test`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ recipient, ...(orderId ? { orderId } : {}) }) }); }

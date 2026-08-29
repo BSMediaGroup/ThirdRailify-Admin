@@ -11,6 +11,7 @@ import {
   isCommerceDbConfigured,
   maskTaxIdentifier,
   requireCommerceDb,
+  templatesPayload,
   validateTemplate,
   writeCommerceAudit,
 } from "./commerce-core.js";
@@ -504,19 +505,172 @@ function serializeWebhookEvidence(row) { return row ? { eventId: safeProviderId(
 
 export async function templatePreviewPayload(env, session, templateKey, input) {
   await commerceAccessForSession(env, session);
-  const source = await templateRow(requireCommerceDb(env), templateKey);
+  const db = requireCommerceDb(env);
+  const source = await templateRow(db, templateKey);
   const template = input?.template ? validateTemplate({ ...input.template, templateKey }) : serializeTemplateForValidation(source);
-  const fixture = input?.orderId ? await orderVariables(requireCommerceDb(env), input.orderId) : syntheticVariables();
+  const fixture = input?.orderId ? await orderVariables(db, input.orderId) : await syntheticVariables(db);
   return { ok: true, preview: renderCommerceTemplate(template, fixture.variables), source: fixture.source, test: fixture.test, orderId: fixture.orderId || null, variables: fixture.variables };
 }
+
+const CUSTOMER_EMAIL_LIFECYCLES = Object.freeze({
+  order_confirmation: "Confirms that the payment and local order record were accepted.",
+  shipment_notification: "Presents fulfillment and tracking information after a shipment is confirmed.",
+  cancellation: "Explains that an order was cancelled.",
+  refund: "Explains a persisted refund outcome.",
+  payment_failure: "Explains that payment was not completed.",
+  invoice_notification: "Wraps a safe customer link to an invoice document.",
+  receipt_notification: "Wraps a safe customer link to a payment receipt.",
+});
+
+const CUSTOMER_EMAIL_VARIABLES = Object.freeze([
+  { key: "customer_name", group: "Customer", description: "Synthetic customer name in preview; workflow-provided name during delivery." },
+  { key: "order_reference", group: "Order", description: "Opaque local order reference." },
+  { key: "order_total", group: "Order", description: "Order total formatted from integer minor units." },
+  { key: "currency", group: "Order", description: "Canonical commerce currency code." },
+  { key: "product_summary", group: "Order", description: "Bounded plain-text item summary." },
+  { key: "shipping_method", group: "Fulfillment", description: "Workflow-provided shipping method when available." },
+  { key: "tracking_number", group: "Fulfillment", description: "Workflow-provided tracking number when available." },
+  { key: "merchant_name", group: "Business", description: "Storefront trading name from Business Information." },
+  { key: "support_email", group: "Business", description: "Public support contact from Business Information." },
+  { key: "receipt_url", group: "Document", description: "Opaque customer-document URL minted only by the legitimate delivery workflow." },
+]);
+
+export async function customerEmailsControlPlanePayload(env, session) {
+  const access = await commerceAccessForSession(env, session);
+  const sender = senderProjection(env);
+  if (!isCommerceDbConfigured(env)) {
+    return {
+      ok: true, databaseConfigured: false, authority: "Commerce D1 + server environment", access,
+      provider: providerProjection(env, sender, null, null), sender,
+      templates: [],
+      mergeVariables: CUSTOMER_EMAIL_VARIABLES,
+      readiness: { state: "action_required", configurationReady: false, configuredTemplates: 0, totalTemplates: 0, minimumReadyTemplates: 2, customerSendsEnabled: false, productionLifecycleImplemented: false },
+      dependencies: emptyEmailDependencies(),
+      deliveries: emptyEmailDeliveries(),
+      canonicalReadiness: null,
+      safety: emailSafety(false),
+      checkedAt: nowIso(),
+    };
+  }
+
+  const db = requireCommerceDb(env);
+  const [templatePayload, timestampsResult, readiness, profile, settingsResult, recentResult, countsResult, lastSuccess, lastFailure] = await Promise.all([
+    templatesPayload(env, session),
+    db.prepare("SELECT template_key,updated_at FROM commerce_templates WHERE template_kind='email' ORDER BY template_key").all(),
+    productionReadinessPayload(env, session),
+    db.prepare("SELECT trading_name,currency_code,public_contact_email,support_email,legal_business_name_ciphertext,private_address_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
+    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('transactional_email_enabled','customer_document_access_enabled')").all(),
+    db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id
+                ORDER BY d.created_at DESC,d.id DESC LIMIT 12`).all(),
+    db.prepare(`SELECT CASE WHEN d.purpose='test_preview' OR o.environment='test' THEN 'test' WHEN o.environment='live' THEN 'live' ELSE 'unknown' END environment,d.status,COUNT(*) count
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id GROUP BY environment,d.status`).all(),
+    db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id WHERE d.status='sent' ORDER BY COALESCE(d.sent_at,d.updated_at) DESC,d.id DESC LIMIT 1`).first(),
+    db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id WHERE d.status='failed' ORDER BY d.updated_at DESC,d.id DESC LIMIT 1`).first(),
+  ]);
+  const timestamps = Object.fromEntries((timestampsResult?.results || []).map((row) => [row.template_key, cleanText(row.updated_at, 80) || null]));
+  const emailTemplates = templatePayload.templates.filter((template) => template.templateKind === "email").map((template) => emailTemplateProjection(template, timestamps[template.templateKey]));
+  const documentTemplates = Object.fromEntries(templatePayload.templates.filter((template) => template.templateKind === "document").map((template) => [template.templateKey, template]));
+  const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, false)]));
+  const customerSendsEnabled = settings.transactional_email_enabled === true;
+  const configuredTemplates = emailTemplates.filter((template) => template.status === "ready" && template.enabled).length;
+  const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && configuredTemplates >= 2;
+  const manageSensitiveEvidence = access.isMasterAdmin || access.capabilities.includes("commerce.templates.manage");
+  const recent = (recentResult?.results || []).map((row) => serializeEmailDelivery(row, manageSensitiveEvidence));
+  const counts = { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 };
+  for (const row of countsResult?.results || []) {
+    const count = Number(row.count || 0); counts.total += count;
+    if (row.environment in counts) counts[row.environment] += count;
+    if (row.status in counts) counts[row.status] += count;
+  }
+  const businessContactComplete = Boolean(cleanText(profile?.trading_name, 160) && (cleanText(profile?.support_email, 254) || cleanText(profile?.public_contact_email, 254)));
+  const communications = readiness.domains.communications;
+  return {
+    ok: true, databaseConfigured: true, authority: "Commerce D1 + server environment", access,
+    provider: providerProjection(env, sender, lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null),
+    sender: { ...sender, businessDisplayName: cleanText(profile?.trading_name, 160) || null, businessSupportEmail: cleanText(profile?.support_email || profile?.public_contact_email, 254) || null },
+    templates: emailTemplates,
+    mergeVariables: CUSTOMER_EMAIL_VARIABLES,
+    readiness: {
+      state: customerSendsEnabled ? (communications.ready ? "ready" : "action_required") : configurationReady ? "ready_but_disabled" : "incomplete",
+      configurationReady, configuredTemplates, totalTemplates: emailTemplates.length, minimumReadyTemplates: 2,
+      customerSendsEnabled, productionLifecycleImplemented: false,
+    },
+    dependencies: {
+      business: { complete: businessContactComplete, canonicalReady: readiness.domains.business.ready, displayName: cleanText(profile?.trading_name, 160) || null, supportEmail: cleanText(profile?.support_email || profile?.public_contact_email, 254) || null, href: "/commerce/business" },
+      documents: {
+        receipt: templateDependency(documentTemplates.payment_receipt), invoice: templateDependency(documentTemplates.invoice_document),
+        customerAccessEnabled: settings.customer_document_access_enabled === true, href: "/commerce/tax",
+      },
+      orders: { href: "/orders", orderSpecificHistoryOwner: true },
+      paypalRequired: false,
+    },
+    deliveries: { recent, counts, lastSuccessful: lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailed: lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } },
+    canonicalReadiness: { productionReady: readiness.productionReady, communications },
+    safety: emailSafety(customerSendsEnabled),
+    checkedAt: nowIso(),
+  };
+}
+
+function emailTemplateProjection(template, updatedAt = null) {
+  return { ...template, purpose: CUSTOMER_EMAIL_LIFECYCLES[template.templateKey] || "Persisted customer lifecycle template.", updatedAt, productionTriggerImplemented: false };
+}
+
+function senderProjection(env) {
+  const rawFrom = cleanText(env?.MAIL_FROM, 254);
+  const bracketed = rawFrom.match(/^(.+?)\s*<([^<>]+)>$/);
+  const candidateAddress = cleanText(bracketed?.[2] || rawFrom, 254).toLowerCase();
+  const fromAddress = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateAddress) ? candidateAddress : null;
+  const replyCandidate = cleanText(env?.MAIL_REPLY_TO, 254).toLowerCase();
+  const replyToAddress = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyCandidate) ? replyCandidate : null;
+  return {
+    source: "server_environment", providerCredentialConfigured: Boolean(String(env?.RESEND_API_KEY || "").trim()),
+    fromDisplayName: bracketed ? cleanText(bracketed[1].replace(/^['\"]|['\"]$/g, ""), 160) || null : null,
+    fromAddress, fromAddressConfigured: Boolean(fromAddress), replyToAddress, replyToConfigured: Boolean(replyToAddress),
+    sendingDomain: fromAddress ? fromAddress.split("@").at(-1) : null, externallyVerified: false,
+  };
+}
+
+function providerProjection(env, sender, lastSuccessful, lastFailed) {
+  return { name: "Resend", configured: Boolean(String(env?.RESEND_API_KEY || "").trim() && sender.fromAddressConfigured), credentialConfigured: sender.providerCredentialConfigured, senderConfigured: sender.fromAddressConfigured, replyToConfigured: sender.replyToConfigured, externalVerification: "unverified", lastSuccessful, lastFailed };
+}
+
+function serializeEmailDelivery(row, includeProviderReference) {
+  const environment = row?.purpose === "test_preview" || row?.environment === "test" ? "test" : row?.environment === "live" ? "live" : "unknown";
+  return {
+    id: cleanText(row?.id, 160), templateKey: cleanText(row?.template_key, 60), templateRevision: Number(row?.template_revision || 1),
+    orderId: cleanText(row?.order_id, 160) || null, environment, purpose: row?.purpose === "test_preview" ? "test_preview" : "transactional",
+    status: ["pending", "sending", "sent", "failed"].includes(row?.status) ? row.status : "pending", attemptCount: Number(row?.attempt_count || 0),
+    maskedRecipient: maskEmail(row?.recipient_email), providerMessageReference: includeProviderReference ? cleanText(row?.provider_message_id, 200) || null : null,
+    failure: row?.status === "failed" ? "Provider delivery failed; no raw provider response is exposed." : null,
+    createdAt: cleanText(row?.created_at, 80) || null, updatedAt: cleanText(row?.updated_at, 80) || null, sentAt: cleanText(row?.sent_at, 80) || null,
+  };
+}
+
+function maskEmail(value) {
+  const normalized = cleanText(value, 254).toLowerCase(); const separator = normalized.lastIndexOf("@");
+  if (separator < 1) return "Not available";
+  const local = normalized.slice(0, separator); const domain = normalized.slice(separator + 1);
+  return `${local.slice(0, 1)}${local.length > 1 ? "***" : ""}@${domain}`;
+}
+
+function templateDependency(template) { return { configured: Boolean(template?.status === "ready" && template?.enabled), status: template?.status || "not_configured", enabled: Boolean(template?.enabled), revision: template?.revision || null }; }
+function emptyEmailDependencies() { return { business: { complete: false, canonicalReady: false, displayName: null, supportEmail: null, href: "/commerce/business" }, documents: { receipt: templateDependency(null), invoice: templateDependency(null), customerAccessEnabled: false, href: "/commerce/tax" }, orders: { href: "/orders", orderSpecificHistoryOwner: true }, paypalRequired: false }; }
+function emptyEmailDeliveries() { return { recent: [], counts: { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 }, lastSuccessful: null, lastFailed: null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } }; }
+function emailSafety(customerSendsEnabled) { return { customerSendsEnabled, mutableFromThisRoute: false, testSendExposed: false, previewMutates: false, providerCallsOnRead: false, providerCallsOnPreview: false, productionLifecycleImplemented: false }; }
 
 export function validateTemplatePlaceholders(template) {
   const unknown = new Set();
   for (const value of templateTextValues(template)) {
-    for (const match of String(value || "").matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)) {
-      if (!COMMERCE_TEMPLATE_VARIABLES.includes(match[1].toLowerCase())) unknown.add(match[1].toLowerCase());
+    const text = String(value || "");
+    for (const match of text.matchAll(/\{\{([^{}]*)\}\}/g)) {
+      const key = match[1].trim().toLowerCase();
+      if (!/^[a-z0-9_]+$/i.test(key) || !COMMERCE_TEMPLATE_VARIABLES.includes(key)) unknown.add(key || "invalid");
     }
-    if (/\{\{[^}]*$|^[^{]*\}\}/.test(String(value || ""))) throw new AuthFailure(400, "template_placeholder_invalid", "A template placeholder is malformed.");
+    const remainder = text.replace(/\{\{[^{}]*\}\}/g, "");
+    if (remainder.includes("{{") || remainder.includes("}}")) throw new AuthFailure(400, "template_placeholder_invalid", "A template placeholder is malformed.");
   }
   if (unknown.size) throw new AuthFailure(400, "template_placeholder_unknown", `Unsupported template variables: ${[...unknown].join(", ")}.`);
   return true;
@@ -543,7 +697,7 @@ export async function sendTestTemplateEmail(env, session, templateKey, input, fe
   const db = requireCommerceDb(env);
   const row = await templateRow(db, templateKey);
   if (row.template_kind !== "email") throw new AuthFailure(409, "template_email_required", "Only customer email templates can be test-sent.");
-  const fixture = input?.orderId ? await orderVariables(db, input.orderId) : syntheticVariables();
+  const fixture = input?.orderId ? await orderVariables(db, input.orderId) : await syntheticVariables(db);
   const rendered = renderCommerceTemplate(serializeTemplateForValidation(row), fixture.variables);
   const eventKey = `test-preview:${row.template_key}:${row.revision}:${fixture.orderId || "synthetic"}:${recipient}`;
   const deliveryKey = await commerceEmailDeliveryKey({ templateKey: row.template_key, templateRevision: Number(row.revision), orderId: fixture.orderId, eventKey, recipient, purpose: "test_preview" });
@@ -722,8 +876,10 @@ function json(value, fallback) { try { return value && typeof value === "object"
 function documentTypeValue(value) { const type = cleanText(value, 20).toLowerCase(); if (!new Set(["receipt", "invoice"]).has(type)) throw new AuthFailure(400, "document_type_invalid", "The document type is invalid."); return type; }
 function serializeTemplateForValidation(row) { return { templateKey: row.template_key, displayName: row.display_name, subject: row.subject, preheader: row.preheader, heading: row.heading, introduction: row.introduction, bodyBlocks: json(row.body_blocks_json, []), ctaLabel: row.cta_label, ctaUrl: row.cta_url, supportText: row.support_text, footer: row.footer, accentColor: row.accent_color, status: row.status, enabled: row.enabled === 1, revision: Number(row.revision), templateKind: row.template_kind }; }
 async function templateRow(db, key) { const templateKey = cleanText(key, 60); const row = await db.prepare("SELECT * FROM commerce_templates WHERE template_key=?").bind(templateKey).first(); if (!row) throw new AuthFailure(404, "template_not_found", "The commerce template was not found."); return row; }
-function syntheticVariables() { return { source: "synthetic_fixture", test: true, orderId: null, variables: { order_reference: "TEST-ORDER-PREVIEW", customer_name: "Preview customer", merchant_name: "Third Railify Official", order_total: "15.00", currency: "CAD", product_summary: "Third Rail Farm | Black Glossy Mug — 11 oz / Black × 1", support_email: "info@thirdrailify.com", receipt_url: "https://example.invalid/test-receipt", shipping_method: "Not configured", tracking_number: "Not available" } }; }
-async function orderVariables(db, orderId) { const id = validId(orderId, "order_id_invalid"); const [order, items] = await Promise.all([db.prepare("SELECT id,environment,currency_code,customer_gross_amount FROM commerce_orders WHERE id=?").bind(id).first(), db.prepare("SELECT product_name,variant_name,quantity FROM commerce_order_items WHERE order_id=? ORDER BY line_number").bind(id).all()]); if (!order) throw new AuthFailure(404, "order_not_found", "The commerce order was not found."); return { source: "selected_order", test: order.environment === "test", orderId: id, variables: { order_reference: id, customer_name: "Customer", merchant_name: "Third Railify Official", order_total: (Number(order.customer_gross_amount) / 100).toFixed(2), currency: cleanText(order.currency_code, 3).toUpperCase(), product_summary: (items?.results || []).map((item) => `${cleanText(item.product_name, 240)}${item.variant_name ? ` — ${cleanText(item.variant_name, 300)}` : ""} × ${Number(item.quantity)}`).join("; "), support_email: "info@thirdrailify.com", receipt_url: "", shipping_method: "Not configured", tracking_number: "Not available" } }; }
+async function syntheticVariables(db) { const profile = await emailBusinessIdentity(db); return { source: "synthetic_fixture", test: true, orderId: null, variables: { order_reference: "TEST-ORDER-PREVIEW", customer_name: "Preview customer", merchant_name: profile.merchantName, order_total: formatMinorUnits(1500), currency: profile.currency, product_summary: "Third Rail Farm | Black Glossy Mug — 11 oz / Black × 1", support_email: profile.supportEmail, receipt_url: "https://example.invalid/customer-document-preview", shipping_method: "Not configured", tracking_number: "Not available" } }; }
+async function orderVariables(db, orderId) { const id = validId(orderId, "order_id_invalid"); const [order, items, profile] = await Promise.all([db.prepare("SELECT id,environment,currency_code,customer_gross_amount FROM commerce_orders WHERE id=?").bind(id).first(), db.prepare("SELECT product_name,variant_name,quantity FROM commerce_order_items WHERE order_id=? ORDER BY line_number").bind(id).all(), emailBusinessIdentity(db)]); if (!order) throw new AuthFailure(404, "order_not_found", "The commerce order was not found."); return { source: "selected_order", test: order.environment === "test", orderId: id, variables: { order_reference: id, customer_name: "Customer", merchant_name: profile.merchantName, order_total: formatMinorUnits(order.customer_gross_amount), currency: cleanText(order.currency_code, 3).toUpperCase() || profile.currency, product_summary: (items?.results || []).map((item) => `${cleanText(item.product_name, 240)}${item.variant_name ? ` — ${cleanText(item.variant_name, 300)}` : ""} × ${Number(item.quantity)}`).join("; "), support_email: profile.supportEmail, receipt_url: "", shipping_method: "Not configured", tracking_number: "Not available" } }; }
+async function emailBusinessIdentity(db) { const row = await db.prepare("SELECT trading_name,currency_code,public_contact_email,support_email FROM commerce_business_profiles WHERE id='primary'").first(); return { merchantName: cleanText(row?.trading_name, 160) || "Third Railify Official", currency: cleanText(row?.currency_code, 3).toUpperCase() || "CAD", supportEmail: cleanText(row?.support_email || row?.public_contact_email, 254) || "info@thirdrailify.com" }; }
+function formatMinorUnits(value) { const amount = Number(value); if (!Number.isSafeInteger(amount) || amount < 0) return "0.00"; return `${Math.floor(amount / 100)}.${String(amount % 100).padStart(2, "0")}`; }
 function templateTextValues(template) { return [template.subject, template.preheader, template.heading, template.introduction, ...(template.bodyBlocks || []), template.ctaLabel, template.ctaUrl, template.supportText, template.footer]; }
 function escapeHtml(value) { return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;"); }
 function escapeAttribute(value) { const text = cleanText(value, 500); if (!(text.startsWith("/") && !text.startsWith("//")) && !/^https:\/\//i.test(text)) return "#"; return escapeHtml(text); }

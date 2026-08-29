@@ -58,6 +58,7 @@ import { commerceMediaLimits, ingestCommerceProductMedia, uploadCommerceProductM
 import {
   businessInformationPayload,
   createTaxRegistration,
+  customerEmailsControlPlanePayload,
   issueOrderDocumentAccess,
   orderDocumentPreviewPayload,
   paymentsControlPlanePayload,
@@ -102,6 +103,9 @@ async function handleGet(request, env, path) {
   } else if (path === "templates") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await templatesPayload(env, session);
+  } else if (path === "emails") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await customerEmailsControlPlanePayload(env, session);
   } else if (path === "tax") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await taxRegistrationsPayload(env, session);

@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { Link, useOutletContext } from "react-router-dom";
 import paypalFeatureIcon from "../../assets/icons/paypal.svg";
 import stripeFeatureIcon from "../../assets/icons/stripeicon.svg";
-import trZapColorIcon from "../../assets/icons/trzapcolorcon.svg";
 import { useAuth } from "../auth/AuthProvider";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { AdminIcon } from "../components/AdminIcon";
@@ -11,9 +10,6 @@ import { OrdersManagementPage } from "./OrdersManagementPage";
 import {
   getCommerceOverview,
   getPaymentsControlPlane,
-  getCommerceTemplates,
-  previewCommerceTemplate,
-  sendCommerceTemplateTest,
   getMerchandisingProductList,
   getCollectionOptions,
   getCollectionList,
@@ -27,7 +23,6 @@ import {
   uploadMerchandisingProductMedia,
   executePermanentPrintfulMigration,
   getPermanentPrintfulMigration,
-  saveCommerceTemplate,
   saveFeaturedProducts,
   saveMerchandisingProduct,
   saveMerchandisingVariant,
@@ -48,7 +43,6 @@ import {
   type CollectionListFilters,
   type CollectionProductListPayload,
   type CollectionBulkOperation,
-  type CommerceTemplate,
   type MerchandisingListPayload,
   type MerchandisingProduct,
   type MerchandisingVariant,
@@ -56,8 +50,6 @@ import {
   type ProductListFilters,
   type PermanentPrintfulMigrationPayload,
   type ProviderStatus,
-  type TemplatesPayload,
-  type TemplatePreviewPayload,
   type CommerceMediaLimits,
 } from "../commerce/client";
 
@@ -182,6 +174,7 @@ function PaymentsControlPlane({ payload, canManagePayments, canVerify, busy, onV
 export { BusinessInformationPage } from "./BusinessInformationPage";
 export { TaxDocumentsPage } from "./TaxDocumentsPage";
 
+/* Superseded by the dedicated authoritative CustomerEmailsPage component.
 export function CustomerEmailsPage() {
   const { csrfToken } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
@@ -270,6 +263,9 @@ function EmailTemplatePreview({ template, preview }: { template: CommerceTemplat
     </article>
   </section>;
 }
+
+*/
+export { CustomerEmailsPage } from "./CustomerEmailsPage";
 
 export function FulfillmentIntegrationsPage() {
   const { csrfToken, access } = useAuth();

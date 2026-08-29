@@ -25,6 +25,8 @@
     "test:browser:payments": "node --test --test-concurrency=1 tests/payments-browser.test.mjs",
     "test:tax": "node --test --test-concurrency=1 tests/tax-documents-control-plane.test.mjs tests/commerce-control-plane.test.mjs",
     "test:browser:tax": "node --test --test-concurrency=1 tests/tax-documents-browser.test.mjs",
+    "test:emails": "node --test --test-concurrency=1 tests/customer-emails-control-plane.test.mjs",
+    "test:browser:emails": "node --test --test-concurrency=1 tests/customer-emails-browser.test.mjs",
     "test:browser:commerce": "node --test --test-concurrency=1 tests/commerce-browser.test.mjs",
     "test:browser:commerce-control": "node --test --test-concurrency=1 tests/commerce-control-browser.test.mjs",
     "test:browser:overview": "node --test --test-concurrency=1 tests/overview-browser.test.mjs",

@@ -14,11 +14,11 @@ import {
   CommerceOverviewPage,
   CommerceCollectionsPage,
   CommerceProductsPage,
-  CustomerEmailsPage,
   FulfillmentIntegrationsPage,
   PaymentsPayoutsPage,
   TaxDocumentsPage,
 } from "./pages/CommercePages";
+import { CustomerEmailsPage } from "./pages/CustomerEmailsPage";
 import {
   GoatModerationPage,
   GoatsCommentsPage,

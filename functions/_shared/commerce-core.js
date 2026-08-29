@@ -1317,14 +1317,14 @@ export async function updateTemplate(env, session, templateKey, input) {
     )
     .run();
   if (Number(updated?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "template_revision_conflict", "This template changed after you opened it. Reload the latest version before saving.");
-  const action = template.templateKey === "payment_receipt" ? "receipt_template_updated" : template.templateKey === "invoice_document" ? "invoice_template_updated" : "commerce_template_updated";
+  const action = template.templateKey === "payment_receipt" ? "receipt_template_updated" : template.templateKey === "invoice_document" ? "invoice_template_updated" : "customer_email_template_updated";
   await writeCommerceAudit(env, {
     actorAccountId: session.accountId,
     action,
     targetType: "commerce_template",
     targetId: template.templateKey,
     result: "success",
-    metadata: { status: template.status, revisionSource: "admin" },
+    metadata: { templateKind: template.templateKind, status: template.status, enabled: template.enabled, revision: revision + 1, revisionSource: "admin" },
   });
   return templatesPayload(env, session);
 }
@@ -1485,8 +1485,8 @@ export function validateTemplate(raw) {
     templateKey,
     templateKind: blueprint.templateKind,
     displayName: plainTemplateText(raw?.displayName ?? blueprint.displayName, 120, true),
-    subject: plainTemplateText(raw?.subject, 160, true),
-    preheader: plainTemplateText(raw?.preheader, 200),
+    subject: headerTemplateText(raw?.subject, 160, true, "subject"),
+    preheader: headerTemplateText(raw?.preheader, 200, false, "preheader"),
     heading: plainTemplateText(raw?.heading, 160, true),
     introduction: plainTemplateText(raw?.introduction, 1000),
     bodyBlocks: Array.isArray(raw?.bodyBlocks) ? raw.bodyBlocks.slice(0, 8).map((value) => plainTemplateText(value, 1000, true)) : [],
@@ -2132,14 +2132,24 @@ function plainTemplateText(value, maxLength, required = false) {
   return text;
 }
 
+function headerTemplateText(value, maxLength, required, field) {
+  const raw = String(value ?? "");
+  if (raw.length > maxLength) throw new AuthFailure(400, `template_${field}_too_long`, `The email ${field} is too long.`);
+  if (/[\r\n\u0000-\u001f\u007f]/.test(raw)) throw new AuthFailure(400, `template_${field}_invalid`, `The email ${field} cannot contain line breaks or control characters.`);
+  return plainTemplateText(raw, maxLength, required);
+}
+
 function validateTemplateVariables(template) {
   const values = [template.subject, template.preheader, template.heading, template.introduction, ...template.bodyBlocks, template.ctaLabel, template.ctaUrl, template.supportText, template.footer];
   const unknown = new Set();
   for (const value of values) {
-    for (const match of String(value || "").matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)) {
-      if (!COMMERCE_TEMPLATE_VARIABLES.includes(match[1].toLowerCase())) unknown.add(match[1].toLowerCase());
+    const text = String(value || "");
+    for (const match of text.matchAll(/\{\{([^{}]*)\}\}/g)) {
+      const key = match[1].trim().toLowerCase();
+      if (!/^[a-z0-9_]+$/i.test(key) || !COMMERCE_TEMPLATE_VARIABLES.includes(key)) unknown.add(key || "invalid");
     }
-    if (/\{\{[^}]*$|^[^{]*\}\}/.test(String(value || ""))) throw new AuthFailure(400, "template_placeholder_invalid", "A template placeholder is malformed.");
+    const remainder = text.replace(/\{\{[^{}]*\}\}/g, "");
+    if (remainder.includes("{{") || remainder.includes("}}")) throw new AuthFailure(400, "template_placeholder_invalid", "A template placeholder is malformed.");
   }
   if (unknown.size) throw new AuthFailure(400, "template_placeholder_unknown", `Unsupported template variables: ${[...unknown].join(", ")}.`);
 }

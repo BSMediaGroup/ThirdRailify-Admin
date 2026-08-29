@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-08-29 — Customer Emails control plane
+
+CURRENT VER=0.0.0-seed
+
+PENDING VER=0.1.0-alpha.0
+
+- Rebuilt `/commerce/emails` as the authoritative Customer Emails workspace without a migration. A dedicated authenticated projection now combines the existing seven revisioned email templates, Resend/server sender configured-state metadata, Business Information identity/contact dependencies, Tax & Documents receipt/invoice readiness, the canonical commerce communications gate, and a bounded masked delivery ledger without exposing credentials, token hashes, message bodies, raw provider responses, or full recipient addresses.
+- Added a dense responsive sender/readiness hero, server-owned sender and provider cards, desktop lifecycle navigation plus mobile selector, structured dirty-aware editor, save/discard controls, optimistic revision errors, exact merge-variable help and insertion, template/global-gate separation, sandboxed canonical HTML preview with unmistakably synthetic data, document/business/order dependency cards, TEST/LIVE delivery evidence, deliberate empty states, and collapsed technical/idempotency evidence. No test-send, retry, resend, provider-management, or production-enable control is exposed.
+- Tightened authoritative template validation so subject/preheader line breaks, control characters, and overlength values fail closed, while malformed, unknown, and object-traversal-style placeholders are rejected. Email template audit records contain only kind/state/enabled/revision metadata—not subject, body, customer PII, document URLs, or secrets.
+- Added focused Node 22.16.0 server and Playwright coverage for authentication/origin/capability boundaries, sender/provider secret-safe projection, seven real email types, injection and placeholder validation, revisioned saves, body-free audit, masked TEST/LIVE delivery evidence, provider-unconfigured and no-history states, and proven non-mutating/no-provider preview behavior at 1440, 768, and 390 pixels. Customer sending, document access, checkout, payments, fulfillment, provider APIs, remote D1, migrations, deployment, Public, and the paused Printful checkpoint remain unchanged.
+
 ## 2026-08-29 — Tax & Documents control plane
 
 CURRENT VER=0.0.0-seed
