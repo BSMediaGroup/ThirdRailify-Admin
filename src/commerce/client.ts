@@ -41,6 +41,7 @@ export type BusinessPayload = { ok: boolean; databaseConfigured: boolean; encryp
 export type CommerceTemplate = {
   templateKey: string; templateKind: "email" | "document"; displayName: string; subject: string; preheader: string; heading: string; introduction: string; bodyBlocks: string[];
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; enabled: boolean; revision: number;
+  validity?: { state: "valid" | "invalid"; action: "none" | "action_required"; code: string | null; message: string | null };
 };
 export type CustomerEmailTemplate = CommerceTemplate & { purpose: string; updatedAt: string | null; productionTriggerImplemented: false };
 export type CustomerEmailDelivery = {
@@ -60,7 +61,7 @@ export type CustomerEmailsPayload = {
     documents: { receipt: { configured: boolean; status: string; enabled: boolean; revision: number | null }; invoice: { configured: boolean; status: string; enabled: boolean; revision: number | null }; customerAccessEnabled: boolean; href: string };
     orders: { href: string; orderSpecificHistoryOwner: true }; paypalRequired: false;
   };
-  deliveries: { recent: CustomerEmailDelivery[]; counts: { total: number; test: number; live: number; unknown: number; sent: number; failed: number; pending: number; sending: number }; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null; idempotency: { implemented: true; authority: string; retriesAvailableFromThisRoute: false } };
+  deliveries: { state: "available" | "unavailable"; recent: CustomerEmailDelivery[]; counts: { total: number; test: number; live: number; unknown: number; sent: number; failed: number; pending: number; sending: number }; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null; idempotency: { implemented: true; authority: string; retriesAvailableFromThisRoute: false } };
   canonicalReadiness: null | { productionReady: boolean; communications: ReadinessDomain };
   safety: { customerSendsEnabled: boolean; mutableFromThisRoute: false; testSendExposed: false; previewMutates: false; providerCallsOnRead: false; providerCallsOnPreview: false; productionLifecycleImplemented: false };
   checkedAt: string;
@@ -104,7 +105,7 @@ export type FulfillmentShippingPayload = {
   migration: { id: string; status: string; phase: string; manuallyPaused: boolean; verifiedProducts: number; mappedVariants: number; blockedProducts: number; deferredVariants: number; providerRequestCount: number; providerFailures: number; updatedAt: string | null; completedAt: string | null; mutableFromThisRoute: false };
   mapping: { storefrontProducts: number; storefrontVariants: number; totalProducts: number; totalVariants: number; mappedProviderProducts: number; mappedProviderVariants: number; unmappedVariants: number; blockedProducts: number; blockedVariants: number; deferredVariants: number; nonSellableVariants: number; potentiallyFulfillableVariants: number; contract: string };
   pipeline: Array<{ id: string; label: string; implemented: boolean; authority: string; transition: string; detail: string }>;
-  shipping: { customerData: { state: string; persistedFields: string[]; orderSpecificPiiProjectedHere: false }; rates: { state: string; strategy: string; providerQuotePathImplemented: boolean; providerQuoteCalled: false } };
+  shipping: { schema: { state: "ready" | "migration_required" | "unavailable"; migration: "0015_checkout_shipping_foundation.sql"; quoteTable: boolean; deliverySnapshotTable: boolean }; customerData: { state: string; persistedFields: string[]; orderSpecificPiiProjectedHere: false }; rates: { state: string; strategy: string; providerQuotePathImplemented: boolean; providerQuoteCalled: false } };
   tracking: { state: string; persistedFields: string[]; shipmentPollingImplemented: false; providerPollingPerformed: false };
   draftPreview: FulfillmentDraftPreview; gates: FulfillmentGate[];
   dependencies: { business: { href: string }; taxDocuments: { href: string }; customerEmails: { href: string; shipmentTemplate: { configured: boolean; state: string; revision: number | null; updatedAt: string | null }; sendsEnabled: boolean }; payments: { href: string }; products: { href: string }; orders: { href: string } };
@@ -460,16 +461,19 @@ export function getCustomerEmailsControlPlane() { return adminApi<CustomerEmails
 export function getTaxRegistrations() { return adminApi<TaxPayload>("/api/admin/commerce/tax"); }
 export function createTaxRegistration(csrfToken: string, body: Record<string, unknown>) { return adminApi<TaxPayload>("/api/admin/commerce/tax", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
 export function saveTaxRegistration(csrfToken: string, id: string, body: Record<string, unknown>) { return adminApi<TaxPayload>(`/api/admin/commerce/tax/${encodeURIComponent(id)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) }); }
-export function saveCommerceTemplate(csrfToken: string, template: CommerceTemplate) {
-  const body: CommerceTemplate = {
+function commerceTemplateInput(template: CommerceTemplate): CommerceTemplate {
+  return {
     templateKey: template.templateKey, templateKind: template.templateKind, displayName: template.displayName, subject: template.subject,
     preheader: template.preheader, heading: template.heading, introduction: template.introduction, bodyBlocks: template.bodyBlocks,
     ctaLabel: template.ctaLabel, ctaUrl: template.ctaUrl, supportText: template.supportText, footer: template.footer,
     accentColor: template.accentColor, status: template.status, enabled: template.enabled, revision: template.revision,
   };
+}
+export function saveCommerceTemplate(csrfToken: string, template: CommerceTemplate) {
+  const body = commerceTemplateInput(template);
   return adminApi<TemplatesPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }
-export function previewCommerceTemplate(csrfToken: string, template: CommerceTemplate, orderId?: string) { return adminApi<TemplatePreviewPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}/preview`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ template, ...(orderId ? { orderId } : {}) }) }); }
+export function previewCommerceTemplate(csrfToken: string, template: CommerceTemplate, orderId?: string) { return adminApi<TemplatePreviewPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}/preview`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ template: commerceTemplateInput(template), ...(orderId ? { orderId } : {}) }) }); }
 export function sendCommerceTemplateTest(csrfToken: string, templateKey: string, recipient: string, orderId?: string) { return adminApi<{ ok: true; duplicate: boolean; status: string; recipient: string }>(`/api/admin/commerce/templates/${encodeURIComponent(templateKey)}/send-test`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ recipient, ...(orderId ? { orderId } : {}) }) }); }
 export function getMerchandisingProducts() { return adminApi<MerchandisingPayload>("/api/admin/commerce/products"); }
 export function getMerchandisingProduct(productId: string) { return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}`); }

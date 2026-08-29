@@ -215,7 +215,7 @@ export async function productionReadinessPayload(env, session) {
     db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled','live_payment_capture_enabled','fulfillment_submission_enabled','stripe_api_configured','stripe_webhook_configured','stripe_test_checkout_enabled','tax_calculation_provider','stripe_tax_enabled','shipping_strategy','transactional_email_enabled','customer_document_access_enabled')").all(),
     db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN visibility='public' AND status='active' THEN 1 ELSE 0 END) public_count FROM commerce_products").first(),
     db.prepare("SELECT status,phase,products_verified,variants_mapped,safe_state_json FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08'").first(),
-    db.prepare("SELECT template_kind,status,enabled,COUNT(*) count FROM commerce_templates GROUP BY template_kind,status,enabled").all(),
+    templatesPayload(env, session),
     db.prepare("SELECT id,payment_status,fulfillment_status,environment,customer_gross_amount,stripe_checkout_session_id,printful_order_id FROM commerce_orders WHERE id=?").bind(ACCEPTED_TEST_ORDER_ID).first(),
     db.prepare("SELECT provider_event_id FROM commerce_webhook_events WHERE provider='stripe' AND provider_event_id='evt_1U9OysB2jGrq9Tn1apdsFgi2' AND related_object_id='cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC' AND processing_status='processed' AND result_code='payment_confirmed'").first(),
   ]);
@@ -223,8 +223,9 @@ export async function productionReadinessPayload(env, session) {
   const providers = Object.fromEntries((providersResult?.results || []).map((row) => [row.provider, { ...row, metadata: json(row.safe_metadata_json, {}) }]));
   const migrationState = json(migration?.safe_state_json, {});
   const activeTaxCount = (registrations?.results || []).filter((row) => ["verified", "active"].includes(row.status)).reduce((sum, row) => sum + Number(row.count || 0), 0);
-  const emailReadyCount = (templatesResult?.results || []).filter((row) => row.template_kind === "email" && row.status === "ready" && row.enabled === 1).reduce((sum, row) => sum + Number(row.count || 0), 0);
-  const receiptTemplateReady = (templatesResult?.results || []).some((row) => row.template_kind === "document" && row.status === "ready" && row.enabled === 1 && Number(row.count) > 0);
+  const readableTemplates = templatesResult?.templates || [];
+  const emailReadyCount = readableTemplates.filter((template) => template.templateKind === "email" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
+  const receiptTemplateReady = readableTemplates.some((template) => template.templateKind === "document" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled);
   const legalIdentity = Boolean(profile?.legal_business_name_ciphertext && profile?.business_registration_number_ciphertext);
   const address = Boolean(profile?.private_address_ciphertext);
   const merchantIdentity = Boolean(profile?.trading_name && profile?.country_code === "CA" && profile?.province_code === "ON" && profile?.currency_code === "CAD");
@@ -252,6 +253,7 @@ export async function productionReadinessPayload(env, session) {
 
 const PRINTFUL_DRAFT_BUILDER_VERSION = "printful-draft-preview-v1";
 const DELIVERY_SNAPSHOT_COLUMNS = ["order_id", "recipient_ciphertext", "destination_country_code", "shipping_strategy", "display_shipping_method", "shipping_amount", "currency_code", "source_quote_id"];
+const SHIPPING_QUOTE_COLUMNS = ["id", "environment", "cart_fingerprint", "recipient_fingerprint", "currency_code", "shipping_strategy", "rate_options_json", "expires_at"];
 const TRACKING_COLUMNS = ["tracking_number", "tracking_url", "carrier", "shipped_at", "delivered_at", "printful_shipment_id", "provider_order_status"];
 
 export async function fulfillmentShippingPayload(env, session) {
@@ -259,7 +261,36 @@ export async function fulfillmentShippingPayload(env, session) {
   if (!isCommerceDbConfigured(env)) return emptyFulfillmentShippingPayload(access, env);
 
   const db = requireCommerceDb(env);
-  const [canonicalReadiness, providerRow, settingsResult, productCounts, variantCounts, migrationRow, orderCounts, recentOrdersResult, orderColumnsResult, deliveryColumnsResult, shipmentTemplate, lastAudit, candidate] = await Promise.all([
+  const [deliveryColumnsResult, quoteColumnsResult] = await Promise.all([
+    db.prepare("PRAGMA table_info(commerce_order_delivery_snapshots)").all(),
+    db.prepare("PRAGMA table_info(commerce_shipping_quotes)").all(),
+  ]);
+  const deliveryColumns = new Set((deliveryColumnsResult?.results || []).map((row) => cleanText(row.name, 80).toLowerCase()));
+  const quoteColumns = new Set((quoteColumnsResult?.results || []).map((row) => cleanText(row.name, 80).toLowerCase()));
+  const shippingColumns = DELIVERY_SNAPSHOT_COLUMNS.filter((column) => deliveryColumns.has(column));
+  const shippingQuoteColumns = SHIPPING_QUOTE_COLUMNS.filter((column) => quoteColumns.has(column));
+  const shippingDataImplemented = shippingColumns.length === DELIVERY_SNAPSHOT_COLUMNS.length;
+  const shippingQuoteStorageImplemented = shippingQuoteColumns.length === SHIPPING_QUOTE_COLUMNS.length;
+  const shippingSchemaReady = shippingDataImplemented && shippingQuoteStorageImplemented;
+  const orderCountsSql = shippingDataImplemented
+    ? `SELECT COUNT(*) total,
+      SUM(CASE WHEN environment='test' THEN 1 ELSE 0 END) test_orders,
+      SUM(CASE WHEN environment='live' THEN 1 ELSE 0 END) live_orders,
+      SUM(CASE WHEN printful_order_id IS NOT NULL THEN 1 ELSE 0 END) provider_orders,
+      SUM(CASE WHEN fulfillment_status<>'disabled' THEN 1 ELSE 0 END) fulfillment_evidence,
+      SUM(CASE WHEN environment='test' AND EXISTS (SELECT 1 FROM commerce_order_delivery_snapshots d WHERE d.order_id=commerce_orders.id) THEN 1 ELSE 0 END) test_shipping_snapshots,
+      SUM(CASE WHEN environment='live' AND EXISTS (SELECT 1 FROM commerce_order_delivery_snapshots d WHERE d.order_id=commerce_orders.id) THEN 1 ELSE 0 END) live_shipping_snapshots,
+      MAX(CASE WHEN printful_order_id IS NOT NULL THEN updated_at END) last_provider_order_at
+      FROM commerce_orders`
+    : `SELECT COUNT(*) total,
+      SUM(CASE WHEN environment='test' THEN 1 ELSE 0 END) test_orders,
+      SUM(CASE WHEN environment='live' THEN 1 ELSE 0 END) live_orders,
+      SUM(CASE WHEN printful_order_id IS NOT NULL THEN 1 ELSE 0 END) provider_orders,
+      SUM(CASE WHEN fulfillment_status<>'disabled' THEN 1 ELSE 0 END) fulfillment_evidence,
+      0 test_shipping_snapshots,0 live_shipping_snapshots,
+      MAX(CASE WHEN printful_order_id IS NOT NULL THEN updated_at END) last_provider_order_at
+      FROM commerce_orders`;
+  const [canonicalReadiness, providerRow, settingsResult, productCounts, variantCounts, migrationRow, orderCounts, recentOrdersResult, orderColumnsResult, shipmentTemplate, lastAudit, candidate] = await Promise.all([
     productionReadinessPayload(env, session),
     db.prepare("SELECT status,environment,integration_mode,external_account_id,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider='printful'").first(),
     db.prepare(`SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN (
@@ -291,21 +322,12 @@ export async function fulfillmentShippingPayload(env, session) {
         AND v.target_printful_sync_variant_id IS NOT NULL AND v.migration_status IN ('target_verified','target_native') THEN 1 ELSE 0 END) potentially_fulfillable
       FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id`).first(),
     db.prepare("SELECT status,phase,products_verified,variants_mapped,provider_request_count,provider_failures,safe_state_json,updated_at,completed_at FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08'").first(),
-    db.prepare(`SELECT COUNT(*) total,
-      SUM(CASE WHEN environment='test' THEN 1 ELSE 0 END) test_orders,
-      SUM(CASE WHEN environment='live' THEN 1 ELSE 0 END) live_orders,
-      SUM(CASE WHEN printful_order_id IS NOT NULL THEN 1 ELSE 0 END) provider_orders,
-      SUM(CASE WHEN fulfillment_status<>'disabled' THEN 1 ELSE 0 END) fulfillment_evidence,
-      SUM(CASE WHEN environment='test' AND EXISTS (SELECT 1 FROM commerce_order_delivery_snapshots d WHERE d.order_id=commerce_orders.id) THEN 1 ELSE 0 END) test_shipping_snapshots,
-      SUM(CASE WHEN environment='live' AND EXISTS (SELECT 1 FROM commerce_order_delivery_snapshots d WHERE d.order_id=commerce_orders.id) THEN 1 ELSE 0 END) live_shipping_snapshots,
-      MAX(CASE WHEN printful_order_id IS NOT NULL THEN updated_at END) last_provider_order_at
-      FROM commerce_orders`).first(),
+    db.prepare(orderCountsSql).first(),
     db.prepare(`SELECT id,environment,payment_status,fulfillment_status,
       CASE WHEN printful_order_id IS NULL THEN 0 ELSE 1 END provider_order_recorded,created_at,updated_at
       FROM commerce_orders WHERE fulfillment_status<>'disabled' OR printful_order_id IS NOT NULL
       ORDER BY updated_at DESC,id DESC LIMIT 8`).all(),
     db.prepare("PRAGMA table_info(commerce_orders)").all(),
-    db.prepare("PRAGMA table_info(commerce_order_delivery_snapshots)").all(),
     db.prepare("SELECT status,enabled,revision,updated_at FROM commerce_templates WHERE template_key='shipment_notification'").first(),
     db.prepare(`SELECT action,result,created_at FROM commerce_audit
       WHERE action LIKE '%fulfillment%' OR action LIKE '%shipment%' OR action LIKE 'printful.order%'
@@ -327,10 +349,7 @@ export async function fulfillmentShippingPayload(env, session) {
   const providerMetadata = json(providerRow?.safe_metadata_json, {});
   const migrationState = json(migrationRow?.safe_state_json, {});
   const orderColumns = new Set((orderColumnsResult?.results || []).map((row) => cleanText(row.name, 80).toLowerCase()));
-  const deliveryColumns = new Set((deliveryColumnsResult?.results || []).map((row) => cleanText(row.name, 80).toLowerCase()));
-  const shippingColumns = DELIVERY_SNAPSHOT_COLUMNS.filter((column) => deliveryColumns.has(column));
   const trackingColumns = TRACKING_COLUMNS.filter((column) => orderColumns.has(column));
-  const shippingDataImplemented = shippingColumns.length === DELIVERY_SNAPSHOT_COLUMNS.length;
   const trackingImplemented = trackingColumns.length > 0;
   const orderModeSetting = cleanText(settings.printful_order_mode, 40).toLowerCase() || "unconfigured";
   const orderModeProvider = cleanText(providerMetadata.order_mode || providerMetadata.mode, 40).toLowerCase() || "unconfigured";
@@ -363,7 +382,7 @@ export async function fulfillmentShippingPayload(env, session) {
   const readiness = {
     provider: statusProjection(providerConfigured ? "configured" : credentialConfigured || targetStoreConfigured ? "incomplete" : "unverified", providerConfigured ? "Persisted Printful configuration is internally consistent." : "Printful configuration is incomplete or not backed by all required local evidence."),
     catalogue: statusProjection(mapping.potentiallyFulfillableVariants > 0 && mapping.blockedProducts === 0 ? "ready" : mapping.mappedProviderVariants > 0 ? "partial" : "blocked", `${mapping.mappedProviderVariants} variants meet the provider mapping contract; ${mapping.potentiallyFulfillableVariants} are currently potentially fulfillable.`),
-    customerShippingData: statusProjection(shippingDataImplemented ? number(orderCounts?.test_shipping_snapshots) + number(orderCounts?.live_shipping_snapshots) > 0 ? "available" : "implemented_no_evidence" : "not_implemented", shippingDataImplemented ? "Encrypted order delivery snapshots are implemented; customer PII is not projected here." : "Customer shipping-address capture is not implemented."),
+    customerShippingData: statusProjection(shippingDataImplemented ? number(orderCounts?.test_shipping_snapshots) + number(orderCounts?.live_shipping_snapshots) > 0 ? "available" : "implemented_no_evidence" : "migration_required", shippingDataImplemented ? "Encrypted order delivery snapshots are implemented; customer PII is not projected here." : "Commerce migration 0015 is required before encrypted delivery snapshots are available."),
     paymentAuthority: statusProjection(paymentTestEvidence ? "test_evidence_only" : settings.live_payment_capture_enabled === true ? "ready" : "production_disabled", paymentTestEvidence ? "One preserved signed-webhook TEST payment exists; it is not production authority." : "Production payment authority is disabled."),
     printfulOrderMode: statusProjection(orderModeConsistent && orderModeSetting === "draft_only" ? "draft_only" : orderModeSetting === "live" ? "live" : "disabled", orderModeConsistent ? `Canonical mode: ${orderModeSetting}.` : "Provider metadata and the canonical setting disagree."),
     fulfillment: statusProjection(fulfillmentEnabled ? "enabled" : "disabled", fulfillmentEnabled ? "Fulfillment submission is enabled." : "Fulfillment is intentionally disabled until production activation."),
@@ -398,7 +417,7 @@ export async function fulfillmentShippingPayload(env, session) {
     },
     mapping,
     pipeline: [
-      pipelineStage("order_record", "Order recorded", true, "commerce_orders + encrypted delivery snapshot when shipping is required", "Checkout core", "Implemented; local order and delivery snapshot precede payment provider creation."),
+      pipelineStage("order_record", "Order recorded", shippingDataImplemented, shippingDataImplemented ? "commerce_orders + encrypted delivery snapshot when shipping is required" : "commerce_orders; delivery snapshot schema pending", "Checkout core", shippingDataImplemented ? "Implemented; local order and delivery snapshot precede payment provider creation." : "Commerce migration 0015 is required for delivery snapshots."),
       pipelineStage("payment_confirmed", "Payment confirmed", true, "commerce_orders.payment_status + signed Stripe webhook receipt", "Signed Stripe webhook", paymentTestEvidence ? "Implemented with TEST-only evidence." : "Implemented; no canonical evidence recorded."),
       pipelineStage("fulfillment_eligible", "Fulfillment eligibility", true, "Local settings, order, item snapshot, and provider mappings", "Future local workflow", "Preparation logic implemented; submission remains disabled."),
       pipelineStage("provider_draft", "Provider draft", false, "No local provider-order record exists", "Not implemented", "Preview only; no Printful request is made."),
@@ -406,12 +425,13 @@ export async function fulfillmentShippingPayload(env, session) {
       pipelineStage("shipment", "Shipped / delivered", trackingImplemented, trackingImplemented ? "Normalized shipment fields" : "No persisted authority", "Not implemented", trackingImplemented ? "Schema capability exists." : "No shipment or tracking workflow is implemented."),
     ],
     shipping: {
-      customerData: { state: shippingDataImplemented ? number(orderCounts?.test_shipping_snapshots) + number(orderCounts?.live_shipping_snapshots) > 0 ? "available" : "implemented_no_evidence" : "not_implemented", persistedFields: shippingDataImplemented ? ["encrypted_recipient", "destination_country", "destination_region", "shipping_method", "shipping_amount", "currency", "source_quote"] : [], orderSpecificPiiProjectedHere: false },
-      rates: { state: shippingStrategy === "unconfigured" ? "implemented_disabled" : "configured", strategy: shippingStrategy, providerQuotePathImplemented: true, providerQuoteCalled: false },
+      schema: { state: shippingSchemaReady ? "ready" : "migration_required", migration: "0015_checkout_shipping_foundation.sql", quoteTable: shippingQuoteStorageImplemented, deliverySnapshotTable: shippingDataImplemented },
+      customerData: { state: shippingDataImplemented ? number(orderCounts?.test_shipping_snapshots) + number(orderCounts?.live_shipping_snapshots) > 0 ? "available" : "implemented_no_evidence" : "migration_required", persistedFields: shippingDataImplemented ? ["encrypted_recipient", "destination_country", "destination_region", "shipping_method", "shipping_amount", "currency", "source_quote"] : [], orderSpecificPiiProjectedHere: false },
+      rates: { state: !shippingQuoteStorageImplemented ? "migration_required" : shippingStrategy === "unconfigured" ? "implemented_disabled" : "configured", strategy: shippingStrategy, providerQuotePathImplemented: true, providerQuoteCalled: false },
     },
     tracking: { state: trackingImplemented ? "implemented_no_evidence" : "not_implemented", persistedFields: trackingColumns, shipmentPollingImplemented: false, providerPollingPerformed: false },
     draftPreview,
-    gates: fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSetting, orderModeConsistent, fulfillmentEnabled, shippingDataImplemented, shippingStrategy, mapping, settings }),
+    gates: fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSetting, orderModeConsistent, fulfillmentEnabled, shippingDataImplemented, shippingSchemaReady, shippingStrategy, mapping, settings }),
     dependencies: {
       business: { href: "/commerce/business" }, taxDocuments: { href: "/commerce/tax" }, customerEmails: { href: "/commerce/emails", shipmentTemplate: templateDependencyState(shipmentTemplate), sendsEnabled: settings.transactional_email_enabled === true },
       payments: { href: "/commerce/payments" }, products: { href: "/products" }, orders: { href: "/orders" },
@@ -421,7 +441,7 @@ export async function fulfillmentShippingPayload(env, session) {
       counts: { totalOrders: number(orderCounts?.total), testOrders: number(orderCounts?.test_orders), liveOrders: number(orderCounts?.live_orders), providerOrders: number(orderCounts?.provider_orders), fulfillmentEvidence: number(orderCounts?.fulfillment_evidence), testShippingSnapshots: number(orderCounts?.test_shipping_snapshots), liveShippingSnapshots: number(orderCounts?.live_shipping_snapshots) },
       lastAudit: lastAudit ? { action: cleanText(lastAudit.action, 120), result: cleanText(lastAudit.result, 40), createdAt: cleanText(lastAudit.created_at, 80) } : null,
     },
-    technical: { builderVersion: PRINTFUL_DRAFT_BUILDER_VERSION, providerCallsOnRead: false, providerCallsOnPreview: false, previewPersists: false, previewAuditedAsMutation: false, shippingDataCapability: shippingDataImplemented ? "implemented" : "not_implemented", shippingRateCapability: shippingStrategy === "unconfigured" ? "implemented_disabled" : "configured", trackingCapability: trackingImplemented ? "implemented" : "not_implemented" },
+    technical: { builderVersion: PRINTFUL_DRAFT_BUILDER_VERSION, providerCallsOnRead: false, providerCallsOnPreview: false, previewPersists: false, previewAuditedAsMutation: false, shippingDataCapability: shippingDataImplemented ? "implemented" : "migration_required", shippingRateCapability: !shippingQuoteStorageImplemented ? "migration_required" : shippingStrategy === "unconfigured" ? "implemented_disabled" : "configured", trackingCapability: trackingImplemented ? "implemented" : "not_implemented" },
     safety: { checkoutEnabled: settings.checkout_enabled === true, controlledTestCheckoutEnabled: settings.stripe_test_checkout_enabled === true, livePaymentCaptureEnabled: settings.live_payment_capture_enabled === true, fulfillmentEnabled, orderMode: orderModeSetting, providerSubmissionAvailable: false, previewOnly: true, mutationsAvailableFromThisRoute: false },
     canonicalReadiness, checkedAt: nowIso(),
   };
@@ -845,28 +865,36 @@ export async function customerEmailsControlPlanePayload(env, session) {
   }
 
   const db = requireCommerceDb(env);
-  const [templatePayload, timestampsResult, readiness, profile, settingsResult, recentResult, countsResult, lastSuccess, lastFailure] = await Promise.all([
+  const [templatePayload, readiness, profile, settingsResult] = await Promise.all([
     templatesPayload(env, session),
-    db.prepare("SELECT template_key,updated_at FROM commerce_templates WHERE template_kind='email' ORDER BY template_key").all(),
     productionReadinessPayload(env, session),
     db.prepare("SELECT trading_name,currency_code,public_contact_email,support_email,legal_business_name_ciphertext,private_address_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
     db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('transactional_email_enabled','customer_document_access_enabled')").all(),
-    db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
-                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id
-                ORDER BY d.created_at DESC,d.id DESC LIMIT 12`).all(),
-    db.prepare(`SELECT CASE WHEN d.purpose='test_preview' OR o.environment='test' THEN 'test' WHEN o.environment='live' THEN 'live' ELSE 'unknown' END environment,d.status,COUNT(*) count
-                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id GROUP BY environment,d.status`).all(),
-    db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
-                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id WHERE d.status='sent' ORDER BY COALESCE(d.sent_at,d.updated_at) DESC,d.id DESC LIMIT 1`).first(),
-    db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
-                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id WHERE d.status='failed' ORDER BY d.updated_at DESC,d.id DESC LIMIT 1`).first(),
   ]);
+  const [timestampsRead, recentRead, countsRead, lastSuccessRead, lastFailureRead] = await Promise.all([
+    optionalD1Read(() => db.prepare("SELECT template_key,updated_at FROM commerce_templates WHERE template_kind='email' ORDER BY template_key").all(), { results: [] }),
+    optionalD1Read(() => db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id
+                ORDER BY d.created_at DESC,d.id DESC LIMIT 12`).all(), { results: [] }),
+    optionalD1Read(() => db.prepare(`SELECT CASE WHEN d.purpose='test_preview' OR o.environment='test' THEN 'test' WHEN o.environment='live' THEN 'live' ELSE 'unknown' END environment,d.status,COUNT(*) count
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id GROUP BY environment,d.status`).all(), { results: [] }),
+    optionalD1Read(() => db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id WHERE d.status='sent' ORDER BY COALESCE(d.sent_at,d.updated_at) DESC,d.id DESC LIMIT 1`).first(), null),
+    optionalD1Read(() => db.prepare(`SELECT d.id,d.template_key,d.template_revision,d.order_id,d.purpose,d.status,d.provider_message_id,d.attempt_count,d.created_at,d.updated_at,d.sent_at,d.recipient_email,o.environment
+                FROM commerce_email_deliveries d LEFT JOIN commerce_orders o ON o.id=d.order_id WHERE d.status='failed' ORDER BY d.updated_at DESC,d.id DESC LIMIT 1`).first(), null),
+  ]);
+  const timestampsResult = timestampsRead.value;
+  const recentResult = recentRead.value;
+  const countsResult = countsRead.value;
+  const lastSuccess = lastSuccessRead.value;
+  const lastFailure = lastFailureRead.value;
+  const deliveryHistoryAvailable = recentRead.available && countsRead.available && lastSuccessRead.available && lastFailureRead.available;
   const timestamps = Object.fromEntries((timestampsResult?.results || []).map((row) => [row.template_key, cleanText(row.updated_at, 80) || null]));
   const emailTemplates = templatePayload.templates.filter((template) => template.templateKind === "email").map((template) => emailTemplateProjection(template, timestamps[template.templateKey]));
   const documentTemplates = Object.fromEntries(templatePayload.templates.filter((template) => template.templateKind === "document").map((template) => [template.templateKey, template]));
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, false)]));
   const customerSendsEnabled = settings.transactional_email_enabled === true;
-  const configuredTemplates = emailTemplates.filter((template) => template.status === "ready" && template.enabled).length;
+  const configuredTemplates = emailTemplates.filter((template) => template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
   const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && configuredTemplates >= 2;
   const manageSensitiveEvidence = access.isMasterAdmin || access.capabilities.includes("commerce.templates.manage");
   const recent = (recentResult?.results || []).map((row) => serializeEmailDelivery(row, manageSensitiveEvidence));
@@ -898,7 +926,7 @@ export async function customerEmailsControlPlanePayload(env, session) {
       orders: { href: "/orders", orderSpecificHistoryOwner: true },
       paypalRequired: false,
     },
-    deliveries: { recent, counts, lastSuccessful: lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailed: lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } },
+    deliveries: { state: deliveryHistoryAvailable ? "available" : "unavailable", recent, counts, lastSuccessful: lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailed: lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } },
     canonicalReadiness: { productionReady: readiness.productionReady, communications },
     safety: emailSafety(customerSendsEnabled),
     checkedAt: nowIso(),
@@ -947,9 +975,9 @@ function maskEmail(value) {
   return `${local.slice(0, 1)}${local.length > 1 ? "***" : ""}@${domain}`;
 }
 
-function templateDependency(template) { return { configured: Boolean(template?.status === "ready" && template?.enabled), status: template?.status || "not_configured", enabled: Boolean(template?.enabled), revision: template?.revision || null }; }
+function templateDependency(template) { return { configured: Boolean(template?.validity?.state !== "invalid" && template?.status === "ready" && template?.enabled), status: template?.validity?.state === "invalid" ? "invalid" : template?.status || "not_configured", enabled: Boolean(template?.validity?.state !== "invalid" && template?.enabled), revision: template?.revision || null }; }
 function emptyEmailDependencies() { return { business: { complete: false, canonicalReady: false, displayName: null, supportEmail: null, href: "/commerce/business" }, documents: { receipt: templateDependency(null), invoice: templateDependency(null), customerAccessEnabled: false, href: "/commerce/tax" }, orders: { href: "/orders", orderSpecificHistoryOwner: true }, paypalRequired: false }; }
-function emptyEmailDeliveries() { return { recent: [], counts: { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 }, lastSuccessful: null, lastFailed: null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } }; }
+function emptyEmailDeliveries() { return { state: "unavailable", recent: [], counts: { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 }, lastSuccessful: null, lastFailed: null, idempotency: { implemented: true, authority: "Server-generated deterministic delivery key", retriesAvailableFromThisRoute: false } }; }
 function emailSafety(customerSendsEnabled) { return { customerSendsEnabled, mutableFromThisRoute: false, testSendExposed: false, previewMutates: false, providerCallsOnRead: false, providerCallsOnPreview: false, productionLifecycleImplemented: false }; }
 
 export function validateTemplatePlaceholders(template) {
@@ -1174,11 +1202,11 @@ function emptyFulfillmentShippingPayload(access, env) {
     migration: { id: "permanent-printful-2026-08", status: "unavailable", phase: "unavailable", manuallyPaused: true, verifiedProducts: 0, mappedVariants: 0, blockedProducts: 0, deferredVariants: 0, providerRequestCount: 0, providerFailures: 0, updatedAt: null, completedAt: null, mutableFromThisRoute: false },
     mapping: { storefrontProducts: 0, storefrontVariants: 0, totalProducts: 0, totalVariants: 0, mappedProviderProducts: 0, mappedProviderVariants: 0, unmappedVariants: 0, blockedProducts: 0, blockedVariants: 0, deferredVariants: 0, nonSellableVariants: 0, potentiallyFulfillableVariants: 0, contract: "Printful + mapped + target product ID + target Sync Variant ID + target-verified/native migration" },
     pipeline: [],
-    shipping: { customerData: { state: "not_implemented", persistedFields: [], orderSpecificPiiProjectedHere: false }, rates: { state: "not_configured", strategy: "unconfigured", providerQuotePathImplemented: false, providerQuoteCalled: false } },
+    shipping: { schema: { state: "unavailable", migration: "0015_checkout_shipping_foundation.sql", quoteTable: false, deliverySnapshotTable: false }, customerData: { state: "unavailable", persistedFields: [], orderSpecificPiiProjectedHere: false }, rates: { state: "unavailable", strategy: "unconfigured", providerQuotePathImplemented: false, providerQuoteCalled: false } },
     tracking: { state: "not_implemented", persistedFields: [], shipmentPollingImplemented: false, providerPollingPerformed: false },
     draftPreview, gates: [],
     dependencies: { business: { href: "/commerce/business" }, taxDocuments: { href: "/commerce/tax" }, customerEmails: { href: "/commerce/emails", shipmentTemplate: { configured: false, state: "not_configured", revision: null, updatedAt: null }, sendsEnabled: false }, payments: { href: "/commerce/payments" }, products: { href: "/products" }, orders: { href: "/orders" } },
-    evidence: { recent: [], counts: { totalOrders: 0, testOrders: 0, liveOrders: 0, providerOrders: 0, fulfillmentEvidence: 0 }, lastAudit: null },
+    evidence: { recent: [], counts: { totalOrders: 0, testOrders: 0, liveOrders: 0, providerOrders: 0, fulfillmentEvidence: 0, testShippingSnapshots: 0, liveShippingSnapshots: 0 }, lastAudit: null },
     technical: { builderVersion: PRINTFUL_DRAFT_BUILDER_VERSION, providerCallsOnRead: false, providerCallsOnPreview: false, previewPersists: false, previewAuditedAsMutation: false, shippingDataCapability: "not_implemented", shippingRateCapability: "not_configured", trackingCapability: "not_implemented" },
     safety: { checkoutEnabled: false, controlledTestCheckoutEnabled: false, livePaymentCaptureEnabled: false, fulfillmentEnabled: false, orderMode: "draft_only", providerSubmissionAvailable: false, previewOnly: true, mutationsAvailableFromThisRoute: false },
     canonicalReadiness: null, checkedAt: nowIso(),
@@ -1199,7 +1227,7 @@ function serializeDraftCandidate(row) {
 function statusProjection(state, detail) { return { state, detail }; }
 function pipelineStage(id, label, implemented, authority, transition, detail) { return { id, label, implemented: Boolean(implemented), authority, transition, detail }; }
 function templateDependencyState(row) { return row ? { configured: true, state: row.status === "ready" && row.enabled === 1 ? "ready" : row.status === "disabled" ? "disabled" : "incomplete", revision: Number(row.revision), updatedAt: cleanText(row.updated_at, 80) || null } : { configured: false, state: "not_configured", revision: null, updatedAt: null }; }
-function fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSetting, orderModeConsistent, fulfillmentEnabled, shippingDataImplemented, shippingStrategy, mapping, settings }) {
+function fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSetting, orderModeConsistent, fulfillmentEnabled, shippingDataImplemented, shippingSchemaReady, shippingStrategy, mapping, settings }) {
   const gate = (id, label, state, detail, href = null) => ({ id, label, state, detail, href });
   const domainGate = (id, label, value, href) => gate(id, label, value.ready ? "ready" : value.details?.enabled === false || value.details?.sendEnabled === false ? "disabled" : "incomplete", value.summary, href);
   return [
@@ -1208,8 +1236,8 @@ function fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSet
     domainGate("payments", "Payment authority", canonicalReadiness.domains.payments, "/commerce/payments"),
     domainGate("customer_emails", "Customer emails", canonicalReadiness.domains.communications, "/commerce/emails"),
     gate("checkout", "Customer checkout", settings.checkout_enabled === true ? "ready" : "disabled", settings.checkout_enabled === true ? "Normal checkout is enabled." : "Normal checkout is intentionally disabled.", "/commerce/payments"),
-    gate("customer_shipping", "Customer shipping data", shippingDataImplemented ? "ready" : "blocked", shippingDataImplemented ? "Normalized delivery data is available." : "Customer shipping-address capture is not implemented.", "/orders"),
-    gate("shipping_rates", "Shipping rate strategy", shippingStrategy === "unconfigured" ? "blocked" : "ready", shippingStrategy === "unconfigured" ? "The server quote adapter is implemented, but the canonical shipping strategy is unconfigured." : `Configured strategy: ${shippingStrategy}.`, null),
+    gate("customer_shipping", "Customer shipping data", shippingDataImplemented ? "ready" : "blocked", shippingDataImplemented ? "Normalized delivery data is available." : "Commerce migration 0015 is required for encrypted delivery snapshots.", "/orders"),
+    gate("shipping_rates", "Shipping rate strategy", !shippingSchemaReady || shippingStrategy === "unconfigured" ? "blocked" : "ready", !shippingSchemaReady ? "Commerce migration 0015 is required for persisted shipping quotes." : shippingStrategy === "unconfigured" ? "The server quote adapter is implemented, but the canonical shipping strategy is unconfigured." : `Configured strategy: ${shippingStrategy}.`, null),
     gate("product_mapping", "Product mapping", mapping.potentiallyFulfillableVariants > 0 && mapping.blockedProducts === 0 ? "ready" : "blocked", `${mapping.mappedProviderVariants} mapped variants; ${mapping.blockedProducts} blocked products; ${mapping.potentiallyFulfillableVariants} potentially fulfillable variants.`, "/products"),
     gate("printful_provider", "Printful provider", providerConfigured ? "ready" : "incomplete", providerConfigured ? "Persisted local configuration is internally consistent." : "Provider configuration is incomplete or unverified.", null),
     gate("printful_order_mode", "Printful order mode", orderModeConsistent && orderModeSetting === "draft_only" ? "disabled" : "blocked", orderModeConsistent && orderModeSetting === "draft_only" ? "Draft-only is the maximum permitted mode; submission remains unavailable." : "The canonical and provider modes are unsafe or contradictory.", null),
@@ -1218,6 +1246,10 @@ function fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSet
   ];
 }
 function number(value) { const result = Number(value); return Number.isSafeInteger(result) && result >= 0 ? result : 0; }
+async function optionalD1Read(read, fallback) {
+  try { return { available: true, value: await read() }; }
+  catch { return { available: false, value: fallback }; }
+}
 function domain(ready, summary, details) { return { ready: Boolean(ready), status: ready ? "ready" : "blocked", summary, details }; }
 function validId(value, code) { const id = cleanText(value, 160); if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id)) throw new AuthFailure(400, code, "The identifier is invalid."); return id; }
 function optionalDate(value, code) { const text = cleanText(value, 10); if (!text) return null; if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T00:00:00Z`))) throw new AuthFailure(400, code, "Enter a valid ISO date."); return text; }

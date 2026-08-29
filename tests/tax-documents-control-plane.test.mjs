@@ -31,7 +31,8 @@ test("receipt and invoice templates enforce structured allowlists and optimistic
   await assert.rejects(updateTemplate(env, master, "payment_receipt", { ...template, footer: "Stale overwrite" }), /changed after you opened it/i);
   await assert.rejects(updateTemplate(env, master, "invoice_document", { ...serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='invoice_document'").first()), heading: "{{unknown_legal_value}}" }), /Unsupported template variables/i);
   await assert.rejects(updateTemplate(env, master, "invoice_document", { ...serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='invoice_document'").first()), introduction: '<img src=x onerror="send()">' }), /structured plain text/i);
-  const before = await tableCounts(harness.commerceDb); const preview = await templatePreviewPayload(env, master, "payment_receipt", { template: receipt }); const after = await tableCounts(harness.commerceDb);
+  const previewInput = serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='payment_receipt'").first());
+  const before = await tableCounts(harness.commerceDb); const preview = await templatePreviewPayload(env, master, "payment_receipt", { template: previewInput }); const after = await tableCounts(harness.commerceDb);
   assert.equal(preview.test, true); assert.equal(preview.source, "synthetic_fixture"); assert.match(preview.preview.text, /TEST-ORDER-PREVIEW/); assert.deepEqual(after, before);
   const audits = await harness.commerceDb.prepare("SELECT action,metadata_json FROM commerce_audit WHERE target_id='payment_receipt'").all(); assert.equal(audits.results.at(-1).action, "receipt_template_updated"); assert.doesNotMatch(JSON.stringify(audits.results), /<img|unknown_legal_value/);
 });

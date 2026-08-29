@@ -57,6 +57,39 @@ test("Customer Emails read and synthetic preview are non-mutating and never call
   const wrongOrigin = await commerceRequest({ request: jsonRequest(url, { method: "GET", origin: "https://evil.example", cookie: session.cookie }), env, data: {} }); assert.equal(wrongOrigin.status, 403);
 });
 
+test("Customer Emails isolates an unsafe persisted template and keeps sibling, sender, and delivery projections available", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { RESEND_API_KEY: "configured-but-unused", MAIL_FROM: "Sender <sender@example.test>" });
+  await harness.commerceDb.prepare("UPDATE commerce_templates SET subject='<script>unsafe persisted value</script>',status='ready',enabled=1 WHERE template_key='order_confirmation'").run();
+
+  const payload = await customerEmailsControlPlanePayload(env, master);
+  assert.equal(payload.templates.length, 7);
+  const invalid = payload.templates.find((template) => template.templateKey === "order_confirmation");
+  const sibling = payload.templates.find((template) => template.templateKey === "shipment_notification");
+  assert.deepEqual(invalid.validity, {
+    state: "invalid", action: "action_required", code: "unsafe_template_content",
+    message: "Persisted template fields require review before this template can be previewed or enabled.",
+  });
+  assert.equal(invalid.enabled, false); assert.equal(invalid.status, "disabled"); assert.equal(invalid.subject, "");
+  assert.equal(sibling.validity.state, "valid"); assert.match(sibling.subject, /shipped/i);
+  assert.equal(payload.provider.name, "Resend"); assert.equal(payload.sender.fromAddress, "sender@example.test");
+  assert.equal(payload.readiness.configuredTemplates, 0); assert.equal(payload.readiness.totalTemplates, 7);
+  assert.doesNotMatch(JSON.stringify(payload), /unsafe persisted value|<script>/i);
+
+  const siblingPreview = await templatePreviewPayload(env, master, sibling.templateKey, {});
+  assert.equal(siblingPreview.ok, true);
+  await assert.rejects(updateTemplate(env, master, sibling.templateKey, { ...serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key=?").bind(sibling.templateKey).first()), purpose: "projection-only" }), /template fields are invalid/i);
+});
+
+test("Customer Emails treats delivery history as optional without collapsing template and sender authority", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { MAIL_FROM: "Sender <sender@example.test>" });
+  await harness.commerceDb.prepare("DROP TABLE commerce_email_deliveries").run();
+  const payload = await customerEmailsControlPlanePayload(env, master);
+  assert.equal(payload.templates.length, 7); assert.equal(payload.deliveries.state, "unavailable");
+  assert.deepEqual(payload.deliveries.recent, []); assert.equal(payload.sender.fromAddress, "sender@example.test");
+});
+
 test("email subject and preheader reject header injection and template audit remains body-free", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness);
   const row = await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='order_confirmation'").first(); const template = serializeTemplate(row);

@@ -53,7 +53,12 @@ async function routeFixture(route, fixture) {
   if (path === "/api/auth/session") return json(route, { ok: true, authenticated: true, csrfToken: "fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-29T00:00:00Z", lastLoginAt: null, source: "test", locked: true } });
   if (path === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
   if (path === "/api/admin/commerce/emails") return json(route, emailPayload(fixture));
-  if (/\/api\/admin\/commerce\/templates\/[^/]+\/preview$/.test(path)) { fixture.previewCalls += 1; return json(route, previewPayload(request.postDataJSON().template)); }
+  if (/\/api\/admin\/commerce\/templates\/[^/]+\/preview$/.test(path)) {
+    fixture.previewCalls += 1;
+    const template = request.postDataJSON().template;
+    assert.deepEqual(Object.keys(template).sort(), ["accentColor", "bodyBlocks", "ctaLabel", "ctaUrl", "displayName", "enabled", "footer", "heading", "introduction", "preheader", "revision", "status", "subject", "supportText", "templateKey", "templateKind"].sort());
+    return json(route, previewPayload(template));
+  }
   if (/\/api\/admin\/commerce\/templates\/[^/]+$/.test(path)) { const body = request.postDataJSON(); const index = fixture.templates.findIndex((item) => item.templateKey === body.templateKey); fixture.templates[index] = { ...fixture.templates[index], ...body, revision: body.revision + 1, updatedAt: "2026-08-29T04:00:00Z" }; return json(route, { ok: true, databaseConfigured: true, access: access(), templates: fixture.templates }); }
   if (/send-test|resend|retry/.test(path)) { fixture.sendCalls += 1; return json(route, { ok: false }, 500); }
   return json(route, { ok: false, error: "not_found" }, 404);

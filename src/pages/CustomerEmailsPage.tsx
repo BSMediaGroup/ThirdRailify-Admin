@@ -51,10 +51,10 @@ export function CustomerEmailsPage() {
     const stop = startLoading("Loading customer email authority"); setBusy("load"); setError("");
     try {
       const next = await getCustomerEmailsControlPlane();
-      const key = next.templates[0]?.templateKey || "";
+      const key = next.templates.find((item) => item.validity?.state !== "invalid")?.templateKey || next.templates[0]?.templateKey || "";
       const template = next.templates.find((item) => item.templateKey === key) || null;
       setPayload(next); setSelected(key); setDraft(template); setPreview(null); setPreviewRevision("");
-      if (template && csrfToken) await renderPreview(template);
+      if (template && template.validity?.state !== "invalid" && csrfToken) await renderPreview(template);
     } catch (reason) { setError(errorMessage(reason, "Customer email authority is restricted or unavailable.")); }
     finally { setBusy(""); stop(); }
   }, [csrfToken, renderPreview, startLoading]);
@@ -79,7 +79,7 @@ export function CustomerEmailsPage() {
     if (dirty && !window.confirm("Discard unsaved changes and open another template?")) return;
     const template = payload.templates.find((item) => item.templateKey === key) || null;
     setSelected(key); setDraft(template); setPreview(null); setPreviewRevision(""); setError(""); setMessage("");
-    if (template) await renderPreview(template);
+    if (template && template.validity?.state !== "invalid") await renderPreview(template);
   };
 
   const change = <K extends keyof CustomerEmailTemplate>(key: K, value: CustomerEmailTemplate[K]) => setDraft((current) => current ? { ...current, [key]: value } : current);
@@ -122,9 +122,9 @@ export function CustomerEmailsPage() {
           <select id="customer-email-template-select" value={selected} onChange={(event) => void choose(event.target.value)}>{payload.templates.map((template) => <option key={template.templateKey} value={template.templateKey}>{template.displayName} — {template.status}</option>)}</select>
         </div>
         <div className="customer-email-workspace">
-          <nav aria-label="Customer email template types">{payload.templates.map((template) => <button type="button" key={template.templateKey} className={template.templateKey === selected ? "is-active" : ""} onClick={() => void choose(template.templateKey)} aria-current={template.templateKey === selected ? "page" : undefined}><span><strong>{template.displayName}</strong><small>{template.purpose}</small></span><EmailChip tone={template.status === "ready" && template.enabled ? "good" : template.status === "disabled" ? "quiet" : "warn"}>{template.status === "ready" && template.enabled ? "Configured" : humanize(template.status)}</EmailChip></button>)}</nav>
+          <nav aria-label="Customer email template types">{payload.templates.map((template) => <button type="button" key={template.templateKey} className={template.templateKey === selected ? "is-active" : ""} onClick={() => void choose(template.templateKey)} aria-current={template.templateKey === selected ? "page" : undefined}><span><strong>{template.displayName}</strong><small>{template.purpose}</small></span><EmailChip tone={template.validity?.state === "invalid" ? "bad" : template.status === "ready" && template.enabled ? "good" : template.status === "disabled" ? "quiet" : "warn"}>{template.validity?.state === "invalid" ? "Action required" : template.status === "ready" && template.enabled ? "Configured" : humanize(template.status)}</EmailChip></button>)}</nav>
           <div className="customer-email-editor-shell">
-            <header className="customer-email-editor-head"><div><p className="eyebrow">{humanize(draft.templateKey)}</p><h3>{draft.displayName}</h3><p>{draft.purpose}</p></div><div className="customer-email-editor-meta"><EmailChip tone={dirty ? "warn" : "quiet"}>{dirty ? "Unsaved" : "Saved"}</EmailChip><span>Revision {draft.revision}</span><span>{draft.updatedAt ? `Updated ${formatTimestamp(draft.updatedAt)}` : "No update timestamp"}</span></div></header>
+            <header className="customer-email-editor-head"><div><p className="eyebrow">{humanize(draft.templateKey)}</p><h3>{draft.displayName}</h3><p>{draft.validity?.state === "invalid" ? draft.validity.message : draft.purpose}</p></div><div className="customer-email-editor-meta"><EmailChip tone={draft.validity?.state === "invalid" ? "bad" : dirty ? "warn" : "quiet"}>{draft.validity?.state === "invalid" ? "Action required" : dirty ? "Unsaved" : "Saved"}</EmailChip><span>Revision {draft.revision}</span><span>{draft.updatedAt ? `Updated ${formatTimestamp(draft.updatedAt)}` : "No update timestamp"}</span></div></header>
             <div className="customer-email-editor-grid">
               <form className="customer-email-form" onSubmit={(event) => void save(event)} noValidate>
                 {fieldErrors.form && <div className="customer-email-form-error" role="alert">{fieldErrors.form}</div>}

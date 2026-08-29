@@ -1245,7 +1245,7 @@ export async function updateBusinessProfile(env, session, input) {
 export async function templatesPayload(env, session) {
   const access = await commerceAccessForSession(env, session);
   if (!isCommerceDbConfigured(env)) {
-    return { ok: true, databaseConfigured: false, access, templates: TEMPLATE_BLUEPRINTS };
+    return { ok: true, databaseConfigured: false, access, templates: TEMPLATE_BLUEPRINTS.map((template) => ({ ...template, validity: validTemplateReadState() })) };
   }
   const result = await requireCommerceDb(env)
     .prepare("SELECT * FROM commerce_templates ORDER BY template_key")
@@ -1817,7 +1817,7 @@ function providerBlueprints(env) {
 }
 
 function serializeTemplate(row) {
-  return {
+  const stored = {
     templateKey: row.template_key,
     templateKind: row.template_kind || "email",
     displayName: row.display_name || String(row.template_key || "").replaceAll("_", " "),
@@ -1835,6 +1835,47 @@ function serializeTemplate(row) {
     enabled: row.enabled === 1,
     revision: Number(row.revision || 1),
   };
+  try {
+    return { ...validateTemplate(stored), revision: stored.revision, validity: validTemplateReadState() };
+  } catch (error) {
+    const templateKey = cleanText(row?.template_key, 60);
+    const blueprint = TEMPLATE_BLUEPRINTS.find((item) => item.templateKey === templateKey);
+    const displayName = safeStoredTemplateLabel(row?.display_name, templateKey);
+    return {
+      templateKey,
+      templateKind: blueprint?.templateKind || (row?.template_kind === "document" ? "document" : "email"),
+      displayName,
+      subject: "",
+      preheader: "",
+      heading: "",
+      introduction: "",
+      bodyBlocks: [],
+      ctaLabel: "",
+      ctaUrl: "",
+      supportText: "",
+      footer: "",
+      accentColor: "#f3c928",
+      status: "disabled",
+      enabled: false,
+      revision: Number.isSafeInteger(stored.revision) && stored.revision >= 1 ? stored.revision : 1,
+      validity: {
+        state: "invalid",
+        action: "action_required",
+        code: error instanceof AuthFailure ? error.code : "template_storage_invalid",
+        message: "Persisted template fields require review before this template can be previewed or enabled.",
+      },
+    };
+  }
+}
+
+function validTemplateReadState() {
+  return { state: "valid", action: "none", code: null, message: null };
+}
+
+function safeStoredTemplateLabel(value, templateKey) {
+  const label = cleanText(value, 120);
+  if (label && !/[\u0000-\u001f\u007f]/.test(label) && !/<\/?[a-z][^>]*>|javascript\s*:|on[a-z]+\s*=/i.test(label)) return label;
+  return cleanText(templateKey, 60).replaceAll("_", " ") || "Invalid commerce template";
 }
 
 function serializeMerchandisingProduct(row, variants = [], collections = []) {

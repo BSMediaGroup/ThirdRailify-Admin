@@ -1,5 +1,11 @@
 # Bump notes
 
+## 2026-08-29 — Emergency Admin commerce regression repair
+
+- Restored Customer Emails preview compatibility by keeping server-only projection metadata out of strict template mutation payloads. Persisted templates now validate independently at the read boundary: safe legacy/current rows hydrate normally, while an unsafe row is redacted, disabled in projection, and marked `action_required` without suppressing valid siblings, sender/provider readiness, or optional delivery-ledger state.
+- Made Fulfillment & Shipping detect the exact `0015_checkout_shipping_foundation.sql` quote/snapshot schema before aggregate reads. Missing tables now project `migration_required` while the rest of the read-only Printful, mapping, readiness, blocker, dependency, and safety authority remains available; schema errors no longer masquerade as account-service outages.
+- Added authenticated cross-commerce GET smoke coverage, exact regressions for both deployed failures, clean-through-0015 additive migration coverage, strict unsafe-template/write rejection, optional email-history degradation, responsive Customer Emails/Fulfillment browser coverage, and zero-provider-call assertions. No commerce gate or provider workflow is activated.
+
 ## 2026-08-29 — Wheels V1.1 custom-media authority
 
 CURRENT VER=0.1.0-alpha.0

@@ -219,6 +219,13 @@ export function errorResponse(error, request, env) {
       { status: error.status, headers: { ...corsHeaders(request, env), ...error.headers } },
     );
   }
+  if (/no such (?:table|column)/i.test(String(error?.message || error || ""))) {
+    console.error("service_schema_mismatch", { errorName: cleanText(error?.name, 80) || "Error" });
+    return jsonResponse(
+      { ok: false, error: "service_schema_mismatch", message: "The service database schema is not compatible with this deployment." },
+      { status: 503, headers: corsHeaders(request, env) },
+    );
+  }
   return jsonResponse(
     { ok: false, error: "auth_unavailable", message: "The account service is temporarily unavailable." },
     { status: 500, headers: corsHeaders(request, env) },

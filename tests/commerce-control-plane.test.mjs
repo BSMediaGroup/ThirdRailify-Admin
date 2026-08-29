@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import {
   customerDocumentByToken,
   businessInformationPayload,
@@ -16,10 +17,13 @@ import {
   validateTemplatePlaceholders,
 } from "../functions/_shared/commerce-control-plane.js";
 import { businessProfilePayload, updateBusinessProfile, updateTemplate } from "../functions/_shared/commerce-core.js";
+import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
+import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
 
 const master = { accountId: "master-admin", account: { adminLevel: "master" } };
 const acceptedOrderId = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
+const adminOrigin = "https://thirdrailify-admin.pages.dev";
 
 test("permanent business profile keeps safe defaults and encrypts private legal fields with purpose-bound custody", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
@@ -133,6 +137,32 @@ test("central readiness is derived and keeps test acceptance separate from produ
   assert.equal(payload.domains.checkout.details.normalCheckoutEnabled, false); assert.equal(payload.domains.tax.details.calculationProvider, "unconfigured");
   assert.doesNotMatch(JSON.stringify(payload), /secret|identifier_ciphertext|tax_registration/);
   assert.equal("production_ready" in payload, false);
+});
+
+test("authenticated Commerce GET projections smoke across every control-plane surface without provider calls", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness);
+  await harness.commerceDb.prepare("INSERT INTO commerce_orders(id,payment_status,fulfillment_status,currency_code,customer_gross_amount,environment,checkout_status,created_at,updated_at) VALUES('ord-control-smoke','pending','disabled','CAD',0,'test','checkout_pending','2026-08-29T00:00:00Z','2026-08-29T00:00:00Z')").run();
+  await ensureEnvironmentMasters(env);
+  const account = await loadAccountByEmail(env, "master-one@example.test");
+  const session = await createSession(env, new Request(`${adminOrigin}/`, { headers: { Origin: adminOrigin } }), account, adminOrigin);
+  const cookie = cookiePair(session.cookie);
+  let providerCalls = 0;
+  const paths = [
+    "overview", "payments", "business", "tax", "emails", "fulfillment",
+    "products/list?page=1&pageSize=20", "collections/list?page=1&pageSize=20", "orders?page=1&pageSize=20", "orders/ord-control-smoke",
+  ];
+  for (const path of paths) {
+    const response = await commerceRequest({
+      request: jsonRequest(`${adminOrigin}/api/admin/commerce/${path}`, { method: "GET", origin: adminOrigin, cookie }),
+      env,
+      data: { commerceFetch: async () => { providerCalls += 1; throw new Error("provider call forbidden"); } },
+    });
+    assert.equal(response.status, 200, path);
+    const payload = await response.json(); assert.equal(payload.ok, true, path);
+    assert.doesNotMatch(JSON.stringify(payload), /The template fields are invalid|The account service is temporarily unavailable/i, path);
+  }
+  assert.equal(providerCalls, 0);
 });
 
 async function seedAcceptedOrder(db) {

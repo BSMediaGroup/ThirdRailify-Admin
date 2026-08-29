@@ -4,7 +4,7 @@ import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[
 import { fulfillmentShippingPayload, preparePrintfulDraftOrder } from "../functions/_shared/commerce-control-plane.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
-import { commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
+import { applySqlBatches, commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
 
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const ACCEPTED_ORDER = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
@@ -39,6 +39,20 @@ test("Fulfillment & Shipping projects canonical local authority without secrets,
   assert.doesNotMatch(serialized, /printful-server-secret|authorization|bearer|credential_ciphertext|safe_metadata_json|private_address|recipient_email|100 Preview Street|N6A 1A1/i);
 });
 
+test("0015 applies additively after the existing sequence and preserves templates and commerce rows", async (t) => {
+  const harness = await createCommerceDatabases({ commerceMigrationCount: 14 }); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { PRINTFUL_STORE_ID: "18668025" });
+  await harness.commerceDb.prepare("INSERT INTO commerce_orders(id,payment_status,fulfillment_status,currency_code,customer_gross_amount,environment,checkout_status,created_at,updated_at) VALUES('ord-before-0015','pending','disabled','CAD',0,'test','checkout_pending','2026-08-29T00:00:00Z','2026-08-29T00:00:00Z')").run();
+  const templatesBefore = Number((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_templates").first()).count);
+  await applySqlBatches(harness.commerceDb, harness.commerceMigrations[14]);
+  const tables = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('commerce_shipping_quotes','commerce_order_delivery_snapshots') ORDER BY name").all();
+  assert.deepEqual(tables.results.map((row) => row.name), ["commerce_order_delivery_snapshots", "commerce_shipping_quotes"]);
+  assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_templates").first()).count), templatesBefore);
+  assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_orders WHERE id='ord-before-0015'").first()).count), 1);
+  const payload = await fulfillmentShippingPayload(env, master);
+  assert.equal(payload.shipping.schema.state, "ready"); assert.equal(payload.shipping.schema.quoteTable, true); assert.equal(payload.shipping.schema.deliverySnapshotTable, true);
+});
+
 test("pure Printful draft preparation succeeds structurally only with complete internal authority and fails closed deterministically", () => {
   const candidate = {
     productId: "product-authority", productTitle: "Authoritative product", productStatus: "active", productVisibility: "public", productTargetId: "target-product-authority", productMigrationStatus: "target_verified",
@@ -63,6 +77,27 @@ test("pure Printful draft preparation succeeds structurally only with complete i
     assert.equal(result.eligible, false, expectedCode); assert.ok(result.blockers.some((item) => item.code === expectedCode), expectedCode);
     assert.equal(result.submission.networkRequestMade, false); assert.equal(result.submission.providerOrderCreated, false);
   }
+});
+
+test("Fulfillment reports migration_required when 0015 tables are absent without impersonating an account outage", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { PRINTFUL_API_TOKEN: "unused-server-secret", PRINTFUL_STORE_ID: "18668025" });
+  await harness.commerceDb.prepare("DROP TABLE commerce_order_delivery_snapshots").run();
+  await harness.commerceDb.prepare("DROP TABLE commerce_shipping_quotes").run();
+  await seedFulfillmentAuthority(harness.commerceDb);
+
+  const payload = await fulfillmentShippingPayload(env, master);
+  assert.equal(payload.ok, true); assert.equal(payload.shipping.schema.state, "migration_required");
+  assert.equal(payload.shipping.schema.migration, "0015_checkout_shipping_foundation.sql");
+  assert.equal(payload.shipping.schema.quoteTable, false); assert.equal(payload.shipping.schema.deliverySnapshotTable, false);
+  assert.equal(payload.shipping.customerData.state, "migration_required"); assert.equal(payload.shipping.rates.state, "migration_required");
+  assert.equal(payload.readiness.customerShippingData.state, "migration_required");
+  assert.equal(payload.provider.orderMode, "draft_only"); assert.equal(payload.safety.fulfillmentEnabled, false);
+  assert.deepEqual(payload.evidence.counts.testShippingSnapshots, 0); assert.deepEqual(payload.evidence.counts.liveShippingSnapshots, 0);
+
+  const session = await authenticatedMaster(env);
+  const response = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/fulfillment`, { method: "GET", origin: ADMIN_ORIGIN, cookie: session.cookie }), env, data: {} });
+  assert.equal(response.status, 200); assert.equal((await response.json()).shipping.schema.state, "migration_required");
 });
 
 test("authenticated fulfillment route requires commerce.view, ignores browser provider IDs, and remains read-only", async (t) => {
