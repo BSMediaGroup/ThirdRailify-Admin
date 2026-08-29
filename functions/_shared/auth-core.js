@@ -220,6 +220,12 @@ export function errorResponse(error, request, env) {
       { status: error.status, headers: { ...corsHeaders(request, env), ...error.headers } },
     );
   }
+  if (error?.name === "PrintfulApiError") {
+    return jsonResponse(
+      { ok: false, error: "printful_provider_rejected", message: "Printful could not complete the draft request." },
+      { status: 502, headers: corsHeaders(request, env) },
+    );
+  }
   if (/no such (?:table|column)/i.test(String(error?.message || error || ""))) {
     console.error("service_schema_mismatch", { errorName: cleanText(error?.name, 80) || "Error" });
     return jsonResponse(

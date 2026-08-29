@@ -10,6 +10,7 @@ import {
   reconcileStoredPrintfulOrder,
   reducePrintfulProviderState,
 } from "../functions/_shared/printful-fulfillment.js";
+import { buildPrintfulOrderExternalId } from "../functions/_shared/printful-api.js";
 
 async function seedOrder(db, id = "ord-lifecycle") {
   await db.batch([
@@ -94,13 +95,16 @@ test("wrong store, conflicting relationship, malformed tracking, and unsupported
 });
 
 test("future V1 reconciliation uses only an injected GET boundary", async (t) => {
-  const harness = await createCommerceDatabases(); t.after(harness.dispose); await seedOrder(harness.commerceDb);
+  const localOrderId = "ord_11111111-1111-4111-8111-111111111111";
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); await seedOrder(harness.commerceDb, localOrderId);
   const env = commerceEnvironment(harness, { PRINTFUL_STORE_ID: "18668025", PRINTFUL_API_TOKEN: "synthetic-token" });
   let calls = 0;
-  const result = await reconcileStoredPrintfulOrder(env, "ord-lifecycle", async (url, init) => {
-    calls += 1; assert.equal(url, "https://api.printful.com/orders/@ord-lifecycle"); assert.equal(init.method, "GET");
-    return new Response(JSON.stringify(order("draft", 1787961600)), { status: 200, headers: { "Content-Type": "application/json" } });
+  const canonical = await buildPrintfulOrderExternalId(localOrderId);
+  const result = await reconcileStoredPrintfulOrder(env, localOrderId, async (url, init) => {
+    calls += 1; assert.equal(url, `https://api.printful.com/orders/@${canonical}`); assert.equal(init.method, "GET");
+    const payload = order("draft", 1787961600); payload.result.external_id = canonical;
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
   });
   assert.equal(result.created, true); assert.equal(calls, 1);
-  await assert.rejects(reconcileStoredPrintfulOrder(env, "ord-lifecycle"), (error) => error.code === "printful_reconciliation_fetch_required");
+  await assert.rejects(reconcileStoredPrintfulOrder(env, localOrderId), (error) => error.code === "printful_reconciliation_fetch_required");
 });

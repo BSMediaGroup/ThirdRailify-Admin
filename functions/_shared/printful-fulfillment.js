@@ -5,6 +5,7 @@ import {
   requireCommerceDb,
   writeCommerceAudit,
 } from "./commerce-core.js";
+import { buildPrintfulOrderExternalId } from "./printful-api.js";
 
 const encoder = new TextEncoder();
 const PRINTFUL_ORDERS_URL = "https://api.printful.com/orders";
@@ -170,7 +171,11 @@ export async function reconcilePrintfulOrderEvidence(env, rawEvidence, options =
   if (evidence.provider !== "printful" || evidence.providerStoreId !== expectedStoreId) {
     throw new AuthFailure(409, "printful_store_mismatch", "Printful evidence does not match the configured store.");
   }
-  const order = await db.prepare("SELECT id,environment,fulfillment_provider,printful_order_id FROM commerce_orders WHERE id=? LIMIT 1").bind(evidence.externalId).first();
+  const explicitLocalOrderId = safeExternalId(options.localOrderId);
+  const existingRelationship = explicitLocalOrderId ? null : await db.prepare(`SELECT order_id FROM commerce_fulfillment_orders
+    WHERE provider='printful' AND provider_store_id=? AND external_id=? LIMIT 1`).bind(expectedStoreId, evidence.externalId).first();
+  const localOrderId = explicitLocalOrderId || existingRelationship?.order_id || evidence.externalId;
+  const order = await db.prepare("SELECT id,environment,fulfillment_provider,printful_order_id FROM commerce_orders WHERE id=? LIMIT 1").bind(localOrderId).first();
   if (!order) throw new AuthFailure(404, "printful_local_order_not_found", "No local commerce order matches the Printful external identifier.");
   if (order.fulfillment_provider !== "printful") throw new AuthFailure(409, "printful_local_provider_conflict", "The local order has a different fulfillment provider.");
   const environment = order.environment === "live" ? "live" : "test";
@@ -435,16 +440,17 @@ export async function reconcileStoredPrintfulOrder(env, rawOrderId, fetchImpl) {
   const token = String(env?.PRINTFUL_API_TOKEN || "").trim();
   const storeId = requiredNumericId(env?.PRINTFUL_STORE_ID, "printful_store_not_configured");
   if (!token || token.length > 4096) throw new AuthFailure(503, "printful_api_not_configured", "Printful reconciliation is not configured.");
-  const response = await fetchImpl(`${PRINTFUL_ORDERS_URL}/@${encodeURIComponent(orderId)}`, {
+  const externalId = await buildPrintfulOrderExternalId(orderId);
+  const response = await fetchImpl(`${PRINTFUL_ORDERS_URL}/@${encodeURIComponent(externalId)}`, {
     method: "GET", redirect: "manual", headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "X-PF-Store-Id": storeId },
   });
   if (!response?.ok) throw new AuthFailure(502, "printful_reconciliation_failed", "Printful order reconciliation failed.");
   let payload;
   try { payload = await response.json(); } catch { throw new AuthFailure(502, "printful_reconciliation_response_invalid", "Printful returned invalid reconciliation evidence."); }
-  const evidence = normalizePrintfulOrderEvidence(payload, { expectedStoreId: storeId, expectedExternalId: orderId });
+  const evidence = normalizePrintfulOrderEvidence(payload, { expectedStoreId: storeId, expectedExternalId: externalId });
   const existing = await db.prepare("SELECT provider_order_id FROM commerce_fulfillment_orders WHERE order_id=? AND provider='printful'").bind(orderId).first();
   if (existing && existing.provider_order_id !== evidence.providerOrderId) throw new AuthFailure(409, "printful_order_relationship_conflict", "Printful reconciliation conflicts with local authority.");
-  return reconcilePrintfulOrderEvidence(env, evidence, { expectedStoreId: storeId });
+  return reconcilePrintfulOrderEvidence(env, evidence, { expectedStoreId: storeId, localOrderId: orderId });
 }
 
 async function reconcileFulfillmentItems(db, fulfillmentOrderId, localItems, providerItems, timestamp) {

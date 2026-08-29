@@ -36,7 +36,10 @@ function enhanceTable(table: HTMLTableElement, pathname: string, index: number) 
   table.classList.add("resizable-admin-table");
   addResetControl(table, key);
   const stored = readWidths(key, headers.length);
-  const widths = headers.map((header, column) => clamp(stored?.[column] ?? (Number(header.dataset.columnWidth) || Math.ceil(header.getBoundingClientRect().width)), minimum(header), maximum(header)));
+  const defaults = headers.map((header) => clamp(Number(header.dataset.columnWidth) || Math.ceil(header.getBoundingClientRect().width), minimum(header), maximum(header)));
+  const widths = stored
+    ? headers.map((header, column) => clamp(stored[column], minimum(header), maximum(header)))
+    : fitDefaultWidths(table, headers, defaults);
   const colgroup = document.createElement("colgroup");
   widths.forEach((width) => { const col = document.createElement("col"); col.style.width = `${width}px`; colgroup.append(col); });
   table.prepend(colgroup);
@@ -99,7 +102,8 @@ function resetTable(table: HTMLTableElement) {
   const headers = [...table.querySelectorAll<HTMLTableCellElement>(":scope > thead > tr:first-child > th")];
   const colgroup = table.querySelector<HTMLTableColElement>(":scope > colgroup");
   if (!colgroup) return;
-  const widths = headers.map((header) => clamp(Number(header.dataset.columnWidth) || Math.ceil(header.scrollWidth + 28), minimum(header), maximum(header)));
+  const defaults = headers.map((header) => clamp(Number(header.dataset.columnWidth) || Math.ceil(header.scrollWidth + 28), minimum(header), maximum(header)));
+  const widths = fitDefaultWidths(table, headers, defaults);
   try { window.localStorage.removeItem(`${STORAGE_PREFIX}:${table.dataset.resizableKey}`); } catch { /* UI preference persistence is optional. */ }
   applyWidths(table, colgroup, widths);
   headers.forEach((header, index) => header.querySelector(".column-resize-handle")?.setAttribute("aria-valuenow", String(widths[index])));
@@ -110,6 +114,22 @@ function applyWidths(table: HTMLTableElement, colgroup: HTMLTableColElement, wid
   applyTableWidth(table, widths);
 }
 function applyTableWidth(table: HTMLTableElement, widths: number[]) { table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`; table.style.minWidth = "100%"; }
+function fitDefaultWidths(table: HTMLTableElement, headers: HTMLTableCellElement[], widths: number[]) {
+  const available = table.parentElement?.clientWidth || 0;
+  const total = widths.reduce((sum, width) => sum + width, 0);
+  const minimums = headers.map(minimum);
+  const minimumTotal = minimums.reduce((sum, width) => sum + width, 0);
+  if (!available || total <= available || minimumTotal > available) return widths;
+  const flexibleTotal = total - minimumTotal;
+  if (flexibleTotal <= 0) return widths;
+  const targetFlexible = available - minimumTotal;
+  const fitted = widths.map((width, index) => minimums[index] + Math.floor((width - minimums[index]) * targetFlexible / flexibleTotal));
+  let remainder = available - fitted.reduce((sum, width) => sum + width, 0);
+  for (let index = 0; remainder > 0 && index < fitted.length; index = (index + 1) % fitted.length) {
+    if (fitted[index] < widths[index]) { fitted[index] += 1; remainder -= 1; }
+  }
+  return fitted;
+}
 function minimum(header: HTMLTableCellElement) { return clamp(Number(header.dataset.columnMin) || MIN_WIDTH, 48, MAX_WIDTH); }
 function maximum(header: HTMLTableCellElement) { return clamp(Number(header.dataset.columnMax) || MAX_WIDTH, minimum(header), 900); }
 function clamp(value: number, min: number, max: number) { return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min)); }

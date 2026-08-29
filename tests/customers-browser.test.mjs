@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import { chromium } from "playwright-core";
 
@@ -13,7 +15,7 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   t.after(() => server.kill()); await waitForServer();
   const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
 
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, reducedMotion: "reduce" });
   const page = await context.newPage(); const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) errors.push(message.text()); });
@@ -25,6 +27,8 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   assert.match(await page.locator(".customer-table").innerText(), /Guest Buyer[\s\S]*Guest[\s\S]*guest@example\.test/i);
   assert.match(await page.locator(".customer-table").innerText(), /TEST · 1/);
   assert.doesNotMatch(await page.locator("body").innerText(), /ciphertext-fixture|fingerprint-fixture|session-token-fixture|password-hash-fixture/);
+  await assertNoPhantomHorizontalScrollbar(page, ".customer-table-wrap");
+  await capture(page, "customers-1920.png");
 
   const resize = page.getByRole("separator", { name: "Resize Customer" });
   const initialWidth = Number(await resize.getAttribute("aria-valuenow"));
@@ -36,6 +40,14 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   assert.equal(Number(await page.getByRole("separator", { name: "Resize Customer" }).getAttribute("aria-valuenow")), resizedWidth);
   await page.getByRole("button", { name: "Reset columns" }).click();
   assert.equal(await page.evaluate(() => localStorage.getItem("thirdrailify.admin.table-widths.v1:customers")), null);
+  await assertNoPhantomHorizontalScrollbar(page, ".customer-table-wrap");
+  await page.evaluate(() => localStorage.setItem("thirdrailify.admin.table-widths.v1:customers", JSON.stringify(Array(8).fill(560))));
+  await page.reload(); await page.getByText("Guest Buyer", { exact: true }).waitFor();
+  await page.getByRole("separator", { name: "Resize Customer" }).waitFor();
+  assert.equal(await page.locator(".customer-table-wrap").evaluate((wrapper) => wrapper.scrollWidth > wrapper.clientWidth), true, "Customers retains horizontal scrolling for genuinely oversized columns");
+  await page.getByRole("button", { name: "Reset columns" }).click();
+  await page.waitForFunction(() => { const wrapper = document.querySelector(".customer-table-wrap"); return wrapper && wrapper.scrollWidth <= wrapper.clientWidth + 1; });
+  await assertNoPhantomHorizontalScrollbar(page, ".customer-table-wrap");
 
   const guestRow = page.getByRole("row", { name: /Open customer Guest Buyer/ });
   await guestRow.focus(); await page.keyboard.press("Enter");
@@ -49,6 +61,8 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   await page.getByRole("heading", { level: 1, name: "Accounts & access" }).waitFor();
   await page.getByText("Buyer Account", { exact: true }).waitFor();
   assert.equal(await page.getByRole("separator").count(), 7);
+  await assertNoPhantomHorizontalScrollbar(page, ".accounts-table-wrap");
+  await capture(page, "access-1920.png");
   const buyerRow = page.getByRole("row", { name: /Open account Buyer Account/ });
   await buyerRow.getByRole("button", { name: "Disable" }).click();
   await page.getByRole("alertdialog", { name: "Disable account?" }).waitFor();
@@ -98,4 +112,30 @@ function buyerAccount() { return { id: ACCOUNT_ID, email: "buyer@example.test", 
 function accountsPayload() { return { ok: true, accounts: [masterAccount(), buyerAccount()], access: { isAdmin: true, isMasterAdmin: true }, checkedAt: "2026-08-29T02:00:00.000Z" }; }
 function accountDetail() { return { ok: true, account: buyerAccount(), sessions: [{ id: "session-safe-id", createdAt: "2026-08-29T00:00:00.000Z", expiresAt: "2099-08-29T00:00:00.000Z", lastSeenAt: "2026-08-29T01:00:00.000Z", revokedAt: null, sourceOrigin: ORIGIN, userAgentRecorded: true }], audit: [{ id: "audit-safe-id", eventType: "auth_signin", result: "success", provider: "email", createdAt: "2026-08-29T01:00:00.000Z" }], access: { isAdmin: true, isMasterAdmin: true }, checkedAt: "2026-08-29T02:00:00.000Z" }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
+async function capture(page, filename) {
+  if (!process.env.CUSTOMERS_SCREENSHOT_DIR) return;
+  await mkdir(process.env.CUSTOMERS_SCREENSHOT_DIR, { recursive: true });
+  await page.screenshot({ path: path.join(process.env.CUSTOMERS_SCREENSHOT_DIR, filename), fullPage: true });
+}
+async function assertNoPhantomHorizontalScrollbar(page, selector) {
+  const geometry = await page.locator(selector).evaluate((wrapper) => {
+    const table = wrapper.querySelector("table");
+    const finalHandle = wrapper.querySelector("th:last-child .column-resize-handle");
+    const wrapperBox = wrapper.getBoundingClientRect();
+    const tableBox = table?.getBoundingClientRect();
+    const handleBox = finalHandle?.getBoundingClientRect();
+    return {
+      overflowX: getComputedStyle(wrapper).overflowX,
+      clientWidth: wrapper.clientWidth,
+      scrollWidth: wrapper.scrollWidth,
+      tableRight: tableBox?.right ?? 0,
+      handleRight: handleBox?.right ?? 0,
+      wrapperRight: wrapperBox.right,
+    };
+  });
+  assert.equal(geometry.overflowX, "auto", `${selector} retains scrolling for genuine overflow`);
+  assert.ok(geometry.scrollWidth <= geometry.clientWidth + 1, `${selector} has no horizontal scroll range when its table fits: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.tableRight <= geometry.wrapperRight + 1, `${selector} table stays inside its wrapper`);
+  assert.ok(geometry.handleRight <= geometry.wrapperRight + 1, `${selector} final resize handle stays inside its wrapper`);
+}
 async function waitForServer() { for (let attempt = 0; attempt < 80; attempt += 1) { try { if ((await fetch(ORIGIN)).ok) return; } catch { /* Vite is starting. */ } await new Promise((resolve) => setTimeout(resolve, 100)); } throw new Error("Customer browser test server did not start."); }

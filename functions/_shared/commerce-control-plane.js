@@ -22,6 +22,14 @@ import {
   normalizePrintfulOrderEvidence,
   reconcilePrintfulOrderEvidence,
 } from "./printful-fulfillment.js";
+import {
+  buildPrintfulDraftCreateRequest,
+  buildPrintfulOrderExternalId,
+  normalizePrintfulApiError,
+  PRINTFUL_ORDERS_URL,
+  PRINTFUL_TARGET_STORE_ID,
+  PrintfulApiError,
+} from "./printful-api.js";
 
 export { COMMERCE_TEMPLATE_VARIABLES };
 
@@ -30,7 +38,6 @@ const TAX_STATUSES = new Set(["unverified", "pending", "verified", "active", "in
 const ACCEPTED_TEST_ORDER_ID = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
 const ACCEPTED_TEST_SESSION_ID = "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC";
 const ACCEPTED_TEST_EVENT_ID = "evt_1U9OysB2jGrq9Tn1apdsFgi2";
-const PRINTFUL_ORDERS_URL = "https://api.printful.com/orders";
 
 export async function businessInformationPayload(env, session) {
   const business = await businessProfilePayload(env, session);
@@ -531,7 +538,6 @@ export function preparePrintfulDraftOrder(input) {
     },
     safePayloadPreview: safeItem?.mappedProviderVariant ? { externalReference: cleanText(input?.reference, 160) || "DRAFT-PREVIEW", recipient: { source: cleanText(recipient?.source, 40) || "missing", countryCode: cleanText(recipient?.countryCode, 2).toUpperCase() || null, postalCodePresent: Boolean(cleanText(recipient?.postalCode, 24)) }, items: [{ providerVariantId: safeItem.mappedProviderVariant, quantity: safeItem.quantity }], shipping: { strategy: shippingStrategy, method: shippingMethod || null } } : null,
     ...(input?.projection === "internal" && safeItem?.mappedProviderVariant ? { internalDraftPayload: {
-      external_id: cleanText(input?.reference, 160) || "DRAFT-PREVIEW",
       shipping: providerShippingMethodId || null,
       recipient: {
         name: cleanText(recipient?.name, 120), address1: cleanText(recipient?.address1, 180),
@@ -540,7 +546,7 @@ export function preparePrintfulDraftOrder(input) {
         country_code: cleanText(recipient?.countryCode, 2).toUpperCase(), zip: cleanText(recipient?.postalCode, 24),
         ...(cleanText(recipient?.phone, 32) ? { phone: cleanText(recipient.phone, 32) } : {}),
       },
-      items: [{ ...(safeItem.localOrderItemId ? { external_id: safeItem.localOrderItemId } : {}), sync_variant_id: safeItem.mappedProviderVariant, quantity: safeItem.quantity }],
+      items: [{ sync_variant_id: safeItem.mappedProviderVariant, quantity: safeItem.quantity }],
     } } : {}),
     submission: { available: false, mode: orderMode || "unconfigured", networkRequestMade: false, providerOrderCreated: false, localOrderMutated: false, migrationMutated: false },
   };
@@ -588,10 +594,28 @@ export async function prepareStoredPrintfulDraftOrder(env, rawOrderId) {
   });
 }
 
-export async function createStoredPrintfulDraftOrder(env, session, rawOrderId, fetchImpl = fetch) {
+export async function diagnoseStoredPrintfulDraftOrder(env, rawOrderId, options = {}) {
+  const orderId = validId(rawOrderId, "order_id_invalid");
+  validateDraftRepairConstraints(orderId, options);
+  const prepared = await prepareStoredPrintfulDraftOrder(env, orderId);
+  const unexpectedBlockers = prepared.blockers.filter((entry) => entry.code !== "fulfillment_disabled");
+  requireDraftAcceptance(unexpectedBlockers.length === 0 && prepared.internalDraftPayload, unexpectedBlockers[0]?.code || "printful_draft_preparation_invalid", unexpectedBlockers[0]?.message || "The authoritative draft payload is unavailable.");
+  const request = await buildPrintfulDraftCreateRequest({
+    localOrderId: orderId,
+    targetStoreId: env?.PRINTFUL_STORE_ID,
+    shippingCode: prepared.internalDraftPayload.shipping,
+    recipient: prepared.internalDraftPayload.recipient,
+    syncVariantId: prepared.internalDraftPayload.items?.[0]?.sync_variant_id,
+    quantity: prepared.internalDraftPayload.items?.[0]?.quantity,
+  });
+  return { ok: true, orderId, request: request.diagnostic };
+}
+
+export async function createStoredPrintfulDraftOrder(env, session, rawOrderId, fetchImpl = fetch, options = {}) {
   const db = requireCommerceDb(env);
   const orderId = validId(rawOrderId, "order_id_invalid");
-  const [order, itemResult, delivery, settingsResult, provider, migration] = await Promise.all([
+  validateDraftRepairConstraints(orderId, options);
+  const [order, itemResult, delivery, settingsResult, provider, migration, normalized] = await Promise.all([
     db.prepare(`SELECT o.id,o.environment,o.payment_status,o.fulfillment_status,o.stripe_checkout_session_id,
       o.printful_order_id,o.safe_metadata_json,o.payment_confirmed_at,o.customer_id,o.updated_at,
       c.id linked_customer_id,c.customer_kind,c.contact_name_ciphertext,c.contact_email_ciphertext
@@ -604,6 +628,7 @@ export async function createStoredPrintfulDraftOrder(env, session, rawOrderId, f
       'printful_order_mode','shipping_strategy')`).all(),
     db.prepare("SELECT status,environment,integration_mode,external_account_id,currency_code,safe_metadata_json FROM commerce_provider_connections WHERE provider='printful'").first(),
     db.prepare("SELECT status,phase,step_lease_token FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08'").first(),
+    db.prepare("SELECT * FROM commerce_fulfillment_orders WHERE order_id=? AND provider='printful' LIMIT 1").bind(orderId).first(),
   ]);
   if (!order) throw new AuthFailure(404, "order_not_found", "The commerce order was not found.");
 
@@ -624,47 +649,75 @@ export async function createStoredPrintfulDraftOrder(env, session, rawOrderId, f
   requireDraftAcceptance(settings.checkout_enabled === false && settings.live_payment_capture_enabled === false, "printful_draft_live_gate_open", "Normal checkout and live payments must remain disabled.");
   requireDraftAcceptance(settings.fulfillment_submission_enabled === false && providerMetadata.fulfillment_enabled !== true, "printful_draft_fulfillment_gate_open", "Fulfillment must remain disabled while creating the unconfirmed draft.");
   requireDraftAcceptance(settings.transactional_email_enabled === false && settings.stripe_tax_enabled === false, "printful_draft_side_effect_gate_open", "Customer email and Stripe Tax must remain disabled.");
-  requireDraftAcceptance(settings.stripe_test_checkout_enabled === true, "printful_draft_acceptance_closed", "The controlled TEST acceptance window is not open.");
+  if (options.allowClosedAcceptance !== true) requireDraftAcceptance(settings.stripe_test_checkout_enabled === true, "printful_draft_acceptance_closed", "The controlled TEST acceptance window is not open.");
   requireDraftAcceptance(settings.printful_order_mode === "draft_only" && cleanText(providerMetadata.order_mode || providerMetadata.mode, 40) === "draft_only", "printful_draft_mode_invalid", "Printful must remain in draft_only mode.");
-  requireDraftAcceptance(settings.shipping_strategy === "printful_dynamic", "printful_draft_shipping_invalid", "The order must use the controlled Printful shipping strategy.");
+  if (options.allowClosedAcceptance !== true) requireDraftAcceptance(settings.shipping_strategy === "printful_dynamic", "printful_draft_shipping_invalid", "The order must use the controlled Printful shipping strategy.");
   requireDraftAcceptance(provider?.status === "connected" && provider?.environment === "staging" && provider?.integration_mode === "fulfillment" && String(provider?.currency_code || "").toUpperCase() === "CAD", "printful_draft_provider_invalid", "The configured Printful staging provider is unavailable.");
   requireDraftAcceptance(providerMetadata.api_configured === true && isPrintfulCredentialConfigured(env), "printful_draft_provider_unconfigured", "Printful order authority is not configured.");
-  requireDraftAcceptance(cleanText(provider?.external_account_id, 40) === cleanText(env?.PRINTFUL_STORE_ID, 40), "printful_draft_store_mismatch", "The Printful target store does not match the configured authority.");
+  requireDraftAcceptance(cleanText(provider?.external_account_id, 40) === PRINTFUL_TARGET_STORE_ID && cleanText(env?.PRINTFUL_STORE_ID, 40) === PRINTFUL_TARGET_STORE_ID, "printful_draft_store_mismatch", "The Printful target store does not match the configured authority.");
   requireDraftAcceptance(migration && new Set(["completed", "completed_with_blocked_products"]).has(migration.status) && migration.phase === "completed" && !migration.step_lease_token, "printful_draft_migration_active", "The permanent Printful migration is not terminal.");
   requireDraftAcceptance(items.length === 1 && item && Number(item.quantity) === 1, "printful_draft_item_count_invalid", "The controlled acceptance draft is limited to one item at quantity one.");
-  requireDraftAcceptance(item.product_id === settings.stripe_test_checkout_product_id && item.variant_id === settings.stripe_test_checkout_variant_id, "printful_draft_candidate_mismatch", "The paid order does not match the configured acceptance candidate.");
+  const expectedProductId = cleanText(options.expectedProductId || settings.stripe_test_checkout_product_id, 160);
+  const expectedVariantId = cleanText(options.expectedVariantId || settings.stripe_test_checkout_variant_id, 160);
+  requireDraftAcceptance(Boolean(expectedProductId && expectedVariantId) && item.product_id === expectedProductId && item.variant_id === expectedVariantId, "printful_draft_candidate_mismatch", "The paid order does not match the configured acceptance candidate.");
   requireDraftAcceptance(delivery && delivery.recipient_ciphertext && delivery.source_quote_id && delivery.provider_shipping_method_id, "printful_draft_delivery_missing", "The paid order has no authoritative encrypted delivery and shipping selection.");
 
-  if (order.printful_order_id) {
-    requireDraftAcceptance(existingMetadata.printfulOrderStatus === "draft" && existingMetadata.printfulConfirmationStatus === "unconfirmed", "printful_draft_local_state_invalid", "The stored provider order is not an unconfirmed draft.");
+  const externalId = await buildPrintfulOrderExternalId(orderId);
+
+  if (order.printful_order_id || normalized) {
+    const providerOrderId = cleanText(order.printful_order_id || normalized?.provider_order_id, 80);
+    requireDraftAcceptance(Boolean(providerOrderId), "printful_draft_local_state_invalid", "The stored provider order identifier is invalid.");
+    requireDraftAcceptance(!normalized || (normalized.provider_store_id === PRINTFUL_TARGET_STORE_ID && normalized.external_id === externalId && normalized.provider_state === "draft" && normalized.confirmation_state === "unconfirmed"), "printful_draft_local_state_invalid", "The normalized provider order is not the expected unconfirmed draft.");
+    requireDraftAcceptance(!order.printful_order_id || (existingMetadata.printfulOrderStatus === "draft" && existingMetadata.printfulConfirmationStatus === "unconfirmed"), "printful_draft_local_state_invalid", "The stored provider order is not an unconfirmed draft.");
     await reconcilePrintfulOrderEvidence(env, {
-      provider: "printful", providerStoreId: cleanText(provider.external_account_id, 40), providerOrderId: cleanText(order.printful_order_id, 80),
-      externalId: existingMetadata.printfulExternalId || orderId, providerStatus: "draft", providerState: "draft", confirmationState: "unconfirmed",
+      provider: "printful", providerStoreId: cleanText(provider.external_account_id, 40), providerOrderId,
+      externalId, providerStatus: "draft", providerState: "draft", confirmationState: "unconfirmed",
       providerCreatedAt: null, providerUpdatedAt: null, occurredAt: cleanText(existingMetadata.printfulDraftRecordedAt || order.updated_at, 80) || nowIso(),
       failureCategory: null, items: [], shipments: [],
-    }, { expectedStoreId: provider.external_account_id });
-    return printfulDraftResult(orderId, order.printful_order_id, existingMetadata.printfulExternalId || orderId, false, true);
+    }, { expectedStoreId: provider.external_account_id, localOrderId: orderId });
+    return printfulDraftResult(orderId, providerOrderId, externalId, false, true, null);
   }
 
   const prepared = await prepareStoredPrintfulDraftOrder(env, orderId);
   const unexpectedBlockers = prepared.blockers.filter((entry) => entry.code !== "fulfillment_disabled");
   requireDraftAcceptance(unexpectedBlockers.length === 0 && prepared.internalDraftPayload, unexpectedBlockers[0]?.code || "printful_draft_preparation_invalid", unexpectedBlockers[0]?.message || "The authoritative draft payload is unavailable.");
-  const externalId = orderId;
+  const createRequest = await buildPrintfulDraftCreateRequest({
+    localOrderId: orderId,
+    targetStoreId: provider.external_account_id,
+    shippingCode: prepared.internalDraftPayload.shipping,
+    recipient: prepared.internalDraftPayload.recipient,
+    syncVariantId: prepared.internalDraftPayload.items?.[0]?.sync_variant_id,
+    quantity: prepared.internalDraftPayload.items?.[0]?.quantity,
+  });
   const headers = printfulOrderHeaders(env);
   let providerOrder = null;
-  const lookup = await boundedPrintfulFetch(fetchImpl, `${PRINTFUL_ORDERS_URL}/@${encodeURIComponent(externalId)}`, { method: "GET", redirect: "manual", headers });
-  if (lookup.status === 200) providerOrder = await normalizePrintfulDraftResponse(lookup, externalId, provider.external_account_id);
-  else if (lookup.status !== 404) throw new AuthFailure(502, "printful_draft_reconciliation_failed", "Printful draft reconciliation failed before create.");
+  providerOrder = await lookupPrintfulDraft(fetchImpl, headers, externalId, provider.external_account_id, createRequest.payloadDigest, "printful_order_reconcile_before_create");
 
   let created = false;
   if (!providerOrder) {
-    const response = await boundedPrintfulFetch(fetchImpl, `${PRINTFUL_ORDERS_URL}?confirm=false&update_existing=false`, {
-      method: "POST", redirect: "manual", headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ ...prepared.internalDraftPayload, external_id: externalId }),
-    });
-    if (!response.ok) throw new AuthFailure(502, "printful_draft_create_rejected", "Printful rejected the unconfirmed draft request.");
-    providerOrder = await normalizePrintfulDraftResponse(response, externalId, provider.external_account_id);
-    created = true;
+    let response;
+    try {
+      response = await boundedPrintfulFetch(fetchImpl, createRequest.url, {
+        method: createRequest.method, redirect: "manual", headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(createRequest.body),
+      }, { operation: "printful_order_draft_create", payloadDigest: createRequest.payloadDigest });
+    } catch (error) {
+      providerOrder = await lookupPrintfulDraft(fetchImpl, headers, externalId, provider.external_account_id, createRequest.payloadDigest, "printful_order_reconcile_after_ambiguous_create");
+      if (!providerOrder) throw error;
+    }
+    if (response && !response.ok) {
+      const rejection = await normalizePrintfulApiError(response, { operation: "printful_order_draft_create", payloadDigest: createRequest.payloadDigest });
+      providerOrder = await lookupPrintfulDraft(fetchImpl, headers, externalId, provider.external_account_id, createRequest.payloadDigest, "printful_order_reconcile_after_rejection");
+      if (!providerOrder) throw rejection;
+    }
+    if (response?.ok) {
+      try { providerOrder = await normalizePrintfulDraftResponse(response, externalId, provider.external_account_id); }
+      catch (error) {
+        providerOrder = await lookupPrintfulDraft(fetchImpl, headers, externalId, provider.external_account_id, createRequest.payloadDigest, "printful_order_reconcile_after_invalid_response");
+        if (!providerOrder) throw error;
+      }
+      created = true;
+    }
   }
 
   const timestamp = nowIso();
@@ -683,9 +736,14 @@ export async function createStoredPrintfulDraftOrder(env, session, rawOrderId, f
     const recoveredMetadata = json(recovered?.safe_metadata_json, {});
     requireDraftAcceptance(recovered?.printful_order_id === providerOrder.id && recoveredMetadata.printfulConfirmationStatus === "unconfirmed", "printful_draft_link_failed", "The Printful draft could not be linked to the local order.");
   }
-  await reconcilePrintfulOrderEvidence(env, providerOrder.evidence, { expectedStoreId: provider.external_account_id, actorAccountId: session?.accountId });
+  await reconcilePrintfulOrderEvidence(env, providerOrder.evidence, { expectedStoreId: provider.external_account_id, actorAccountId: session?.accountId, localOrderId: orderId });
   await writeCommerceAudit(env, { actorAccountId: session?.accountId || null, action: created ? "printful.order_draft_created" : "printful.order_draft_reconciled", targetType: "commerce_order", targetId: orderId, result: "success", metadata: { provider: "printful", environment: "test", confirmed: false } });
-  return printfulDraftResult(orderId, providerOrder.id, externalId, created, !created);
+  return printfulDraftResult(orderId, providerOrder.id, externalId, created, !created, createRequest.diagnostic);
+}
+
+function validateDraftRepairConstraints(orderId, options) {
+  const expectedOrderId = cleanText(options?.expectedOrderId, 160);
+  if (expectedOrderId && orderId !== expectedOrderId) throw new AuthFailure(409, "printful_draft_order_mismatch", "The controlled Printful draft order does not match the bounded acceptance order.");
 }
 
 function requireDraftAcceptance(condition, code, message) {
@@ -700,12 +758,19 @@ function printfulOrderHeaders(env) {
   };
 }
 
-async function boundedPrintfulFetch(fetchImpl, url, init) {
+async function boundedPrintfulFetch(fetchImpl, url, init, diagnostic = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
   try { return await fetchImpl(url, { ...init, signal: controller.signal }); }
-  catch { throw new AuthFailure(502, "printful_draft_provider_unavailable", "Printful draft reconciliation or creation is temporarily unavailable."); }
+  catch { throw new PrintfulApiError({ operation: diagnostic.operation || "printful_request", safeMessage: "Printful transport failed before a complete response was received.", retryable: true, payloadDigest: diagnostic.payloadDigest || null }); }
   finally { clearTimeout(timeout); }
+}
+
+async function lookupPrintfulDraft(fetchImpl, headers, externalId, storeId, payloadDigest, operation) {
+  const response = await boundedPrintfulFetch(fetchImpl, `${PRINTFUL_ORDERS_URL}/@${encodeURIComponent(externalId)}`, { method: "GET", redirect: "manual", headers }, { operation, payloadDigest });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await normalizePrintfulApiError(response, { operation, payloadDigest });
+  return normalizePrintfulDraftResponse(response, externalId, storeId);
 }
 
 async function normalizePrintfulDraftResponse(response, externalId, storeId) {
@@ -722,8 +787,8 @@ async function normalizePrintfulDraftResponse(response, externalId, storeId) {
   return { id, evidence: normalizePrintfulOrderEvidence(result, { expectedStoreId: storeId, expectedExternalId: externalId, occurredAt: nowIso() }) };
 }
 
-function printfulDraftResult(orderId, providerOrderId, externalId, created, reconciled) {
-  return { ok: true, orderId, providerOrderId: cleanText(providerOrderId, 80), externalId, status: "draft", confirmed: false, created, reconciled };
+function printfulDraftResult(orderId, providerOrderId, externalId, created, reconciled, request) {
+  return { ok: true, orderId, providerOrderId: cleanText(providerOrderId, 80), externalId, status: "draft", confirmed: false, created, reconciled, ...(request ? { request } : {}) };
 }
 
 export async function paymentsControlPlanePayload(env, session) {

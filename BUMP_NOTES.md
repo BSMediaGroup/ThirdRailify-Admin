@@ -1,5 +1,11 @@
 # Bump notes
 
+## 2026-08-30 — Admin table overflow correction
+
+- Removed phantom horizontal scroll ranges from `/customers` and `/access`: default resizable-column widths now contract proportionally to the available table wrapper while retaining column minimums, and the final resize handle stays inside the table boundary. User-expanded columns still produce genuine horizontal scrolling when their stored width exceeds the wrapper.
+- Added browser geometry coverage for both desktop tables, reset behavior, intentional oversized-column overflow, and the existing responsive card layouts. No Account, Customer, Commerce, D1, authorization, or persistence behavior changed.
+- Deployed the isolated Admin-only correction from the prior stable source as `fea680ac-329e-4eff-b919-e65dd8b970d2` (`https://fea680ac.thirdrailify-admin.pages.dev`). Stable and immutable serve the same `index-CXT89j7G.js` and `index-WluE-yuh.css` assets; the shipped resize handle is contained at `right: 0`.
+
 ## 2026-08-30 — Wheels V1.7 portable config validation
 
 CURRENT VER=0.1.0-alpha.0

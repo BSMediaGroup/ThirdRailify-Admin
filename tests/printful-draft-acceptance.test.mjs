@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createStoredPrintfulDraftOrder } from "../functions/_shared/commerce-control-plane.js";
+import { buildPrintfulOrderExternalId } from "../functions/_shared/printful-api.js";
 import { createStripeCheckoutSession } from "../functions/_shared/checkout-core.js";
 import {
   commerceEnvironment,
@@ -26,7 +27,7 @@ function runtime(harness) {
 async function seedPaidAcceptance(harness) {
   const db = harness.commerceDb;
   await insertTestProduct(db, { title: "Controlled Tee", unitAmount: 3050, targetPrintfulProductId: "target-product-001", migrationStatus: "target_verified" });
-  await insertTestVariant(db, { unitAmount: 3050, migrationStatus: "target_verified" });
+  await insertTestVariant(db, { unitAmount: 3050, migrationStatus: "target_verified", targetPrintfulSyncVariantId: "5464856039" });
   await enableControlledTestCheckout(db);
   const quote = await insertTestShippingQuote(db);
   const provider = await db.prepare("SELECT safe_metadata_json FROM commerce_provider_connections WHERE provider='printful'").first();
@@ -71,22 +72,24 @@ async function seedPaidAcceptance(harness) {
 test("controlled paid TEST order creates at most one unconfirmed Printful draft and reconciles locally", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const created = await seedPaidAcceptance(harness);
-  const localItem = await harness.commerceDb.prepare("SELECT id FROM commerce_order_items WHERE order_id=?").bind(created.orderId).first();
+  const canonicalExternalId = await buildPrintfulOrderExternalId(created.orderId);
   const calls = [];
   const printful = async (url, init) => {
     calls.push({ url, method: init.method, body: init.body ? JSON.parse(init.body) : null });
     if (init.method === "GET") return Response.json({ code: 404, result: [] }, { status: 404 });
-    assert.equal(url, "https://api.printful.com/orders?confirm=false&update_existing=false");
+    assert.equal(url, "https://api.printful.com/orders");
     assert.equal("confirm" in calls.at(-1).body, false);
-    assert.equal(calls.at(-1).body.external_id, created.orderId);
+    assert.equal(calls.at(-1).body.external_id, canonicalExternalId);
+    assert.equal(calls.at(-1).body.external_id.length, 32);
     assert.equal(calls.at(-1).body.shipping, "STANDARD");
-    assert.deepEqual(calls.at(-1).body.items, [{ external_id: localItem.id, sync_variant_id: "target-variant-001", quantity: 1 }]);
+    assert.deepEqual(calls.at(-1).body.items, [{ sync_variant_id: 5464856039, quantity: 1 }]);
     assert.equal(calls.at(-1).body.recipient.address1, "100 Test Street");
-    return Response.json({ code: 200, result: { id: 700001, external_id: created.orderId, store: 18668025, status: "draft" } });
+    return Response.json({ code: 200, result: { id: 700001, external_id: canonicalExternalId, store: 18668025, status: "draft", items: [{ id: 700002, sync_variant_id: 5464856039, quantity: 1 }] } });
   };
 
   const result = await createStoredPrintfulDraftOrder(runtime(harness), { accountId: "master-test" }, created.orderId, printful);
-  assert.deepEqual(result, { ok: true, orderId: created.orderId, providerOrderId: "700001", externalId: created.orderId, status: "draft", confirmed: false, created: true, reconciled: false });
+  assert.equal(result.externalId, canonicalExternalId); assert.equal(result.providerOrderId, "700001"); assert.equal(result.status, "draft"); assert.equal(result.confirmed, false); assert.equal(result.created, true); assert.equal(result.reconciled, false);
+  assert.equal(result.request.confirmBehavior, "query_parameter_omitted_draft_default");
   assert.equal(calls.filter((call) => call.method === "POST").length, 1);
   assert.equal(calls.some((call) => /\/confirm(?:ation)?(?:\?|$)/.test(call.url)), false);
 
@@ -96,6 +99,9 @@ test("controlled paid TEST order creates at most one unconfirmed Printful draft 
   assert.equal(safe.printfulOrderStatus, "draft"); assert.equal(safe.printfulConfirmationStatus, "unconfirmed");
   assert.doesNotMatch(JSON.stringify(safe), /Checkout Fixture|100 Test Street|N6A 1A1/);
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_audit WHERE action='printful.order_draft_created'").first()).count, 1);
+  const normalized = await harness.commerceDb.prepare("SELECT provider_store_id,provider_order_id,external_id,environment,provider_state,fulfillment_state,confirmation_state FROM commerce_fulfillment_orders WHERE order_id=?").bind(created.orderId).first();
+  assert.deepEqual(normalized, { provider_store_id: "18668025", provider_order_id: "700001", external_id: canonicalExternalId, environment: "test", provider_state: "draft", fulfillment_state: "unfulfilled", confirmation_state: "unconfirmed" });
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_fulfillment_order_items WHERE ordered_quantity=1").first()).count, 1);
 
   const repeatedCalls = [];
   const repeated = await createStoredPrintfulDraftOrder(runtime(harness), { accountId: "master-test" }, created.orderId, async (...args) => { repeatedCalls.push(args); throw new Error("provider must not be called"); });
