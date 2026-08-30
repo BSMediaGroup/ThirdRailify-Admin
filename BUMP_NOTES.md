@@ -1,5 +1,23 @@
 # Bump notes
 
+## 2026-08-31 - Admin operations directories and access presentation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced `/media`, `/membership`, `/integrations`, and `/settings` scaffold cards with honest read-only capability directories backed by existing sanitized Admin clients, explicit loading/error states, and clearly disabled deferred controls where no authority exists.
+- Added exact gold Master, magenta/purple Full, and grayscale Regular chips to `/access`, plus shared presentation-only lightning/check shield suffix badges in the compact header and two-row account menu. Authorization remains server-owned and unchanged.
+- Corrected Commerce Intelligence reporting-title alignment and restored clear right/card gutters around table column-reset controls across desktop and narrow layouts.
+- Added focused route, access-role, account-menu, and responsive analytics geometry coverage. No migration, database/provider/payment/order/refund/donation/purchase, deployment, DNS, secret, or Cloudflare resource mutation occurred.
+
+## 2026-08-31 - Final Printful V2 readback and OAuth transition follow-up
+
+- Consumed the final authorized `GET /v2/webhooks` budget without another POST. HTTP 200 again used top-level `data` and `extra`, but the configuration had persisted: the custom Admin callback, exact 12-event reducer intersection, public key, and null expiry all read back. Totals are now GET 3 and POST 1.
+- Configuration and readback are verified, but the prior POST did not place the signing secret in verified custody. Existing Cloudflare secret names are presence-only and cannot prove current public-key identity, so the receiver and signed delivery remain fail-closed. The configurator now recognizes both documented `result` and observed `data` readbacks so an existing configuration suppresses every POST. Added `docs/PRINTFUL_V2_WEBHOOK_SUPPORT.md` for provider-supported recovery or authorized recreation guidance.
+- Tightened the bounded OAuth provider diagnostic so only length/character-bounded response-key names and enum-like provider error tokens can enter audit metadata; authorization codes, tokens, descriptions, PII, secrets, and arbitrary provider text remain excluded.
+- Re-read production/preview Pages variables, Commerce/Media Worker bindings, bot ingress URLs, auth/provider evidence, Commerce gates/counters, and TEST draft `174104132` without writes. PayPal onboarding remains independent of Printful support and was not started.
+
 ## 2026-08-31 - Wheels V1.10 and Stage V1.1 authority
 
 CURRENT VER=0.1.0-alpha.0

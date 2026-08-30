@@ -126,8 +126,9 @@ async function parseResponse(response) {
 }
 
 export function webhookResult(payload) {
-  return payload?.result && typeof payload.result === "object" && !Array.isArray(payload.result)
-    ? payload.result
+  if (payload?.result && typeof payload.result === "object" && !Array.isArray(payload.result)) return payload.result;
+  return payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+    ? payload.data
     : null;
 }
 

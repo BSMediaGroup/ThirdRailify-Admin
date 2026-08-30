@@ -193,7 +193,11 @@ test("OAuth token exchange failures expose only bounded provider diagnostics", a
   const env = authEnvironment({ prepare() {} });
   await assert.rejects(
     exchangeOAuthCode(env, "twitter", "authorization-code", { pkce_verifier: "pkce-verifier" }, async () =>
-      Response.json({ error: "invalid_client", error_description: "sensitive provider detail" }, { status: 401 }),
+      Response.json({
+        error: "invalid_client",
+        error_description: "sensitive provider detail",
+        ["unsafe key " + "x".repeat(200)]: "must not become an audit key",
+      }, { status: 401 }),
     ),
     (error) => {
       assert.equal(error.code, "oauth_exchange_failed");
@@ -203,6 +207,17 @@ test("OAuth token exchange failures expose only bounded provider diagnostics", a
         error: "invalid_client",
       });
       assert.equal(JSON.stringify(error.providerDiagnostic).includes("sensitive provider detail"), false);
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    exchangeOAuthCode(env, "twitter", "authorization-code", { pkce_verifier: "pkce-verifier" }, async () =>
+      Response.json({ error: "invalid client: sensitive detail" }, { status: 401 }),
+    ),
+    (error) => {
+      assert.equal(error.providerDiagnostic.error, null);
+      assert.deepEqual(error.providerDiagnostic.responseKeys, ["error"]);
       return true;
     },
   );

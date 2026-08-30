@@ -31,8 +31,9 @@ import {
   GoatsQueuePage,
 } from "./pages/GoatsAdminPages";
 import { WheelAdminDetailPage, WheelsAccessPage, WheelsLibraryPage, WheelsResultsPage, WheelsStagesPage } from "./pages/WheelsAdminPages";
+import { IntegrationsOperationsPage, MediaOperationsPage, MembershipOperationsPage, SettingsOperationsPage } from "./pages/OperationsPages";
 
-const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats", "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results"]);
+const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/media", "/membership", "/integrations", "/settings", "/goats", "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results"]);
 
 export function App() {
   return (
@@ -44,6 +45,10 @@ export function App() {
         <Route path="access" element={<AccountsPage />} />
         <Route path="watch" element={<WatchAdminPage />} />
         <Route path="content" element={<SiteContentPage />} />
+        <Route path="media" element={<MediaOperationsPage />} />
+        <Route path="membership" element={<MembershipOperationsPage />} />
+        <Route path="integrations" element={<IntegrationsOperationsPage />} />
+        <Route path="settings" element={<SettingsOperationsPage />} />
         <Route path="wheels" element={<WheelsLibraryPage />} />
         <Route path="wheels/stages" element={<WheelsStagesPage />} />
         <Route path="wheels/access" element={<WheelsAccessPage />} />

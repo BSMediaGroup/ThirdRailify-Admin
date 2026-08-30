@@ -62,11 +62,36 @@ test("Printful V2 setup posts the official result-level contract once and stores
   });
 });
 
-test("response parsing accepts only the documented top-level result object", () => {
+test("response parsing accepts the documented result and observed production data contracts only", () => {
   assert.equal(webhookResult({ result: configured() })?.public_key, PUBLIC_KEY);
+  assert.equal(webhookResult({ data: configured() })?.public_key, PUBLIC_KEY);
   assert.equal(webhookResult(configured()), null);
-  assert.equal(webhookResult({ data: configured() }), null);
   assert.equal(webhookResult({ result: [] }), null);
+  assert.equal(webhookResult({ data: [] }), null);
+});
+
+test("an existing observed data-level configuration suppresses every POST", async () => {
+  const calls = [];
+  const outcome = await configurePrintfulV2Webhook({
+    token: "provider-token-not-logged",
+    storeId: "18668025",
+    tokenClass: "store_level_private_token",
+    fetchImpl: async (_url, init) => {
+      calls.push(init.method);
+      return new Response(JSON.stringify({ data: configured(), extra: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    storeSecrets: async () => { throw new Error("existing configuration must not rewrite secrets"); },
+  });
+
+  assert.deepEqual(calls, ["GET"]);
+  assert.deepEqual(outcome.calls, { get: 1, post: 0 });
+  assert.equal(outcome.configured, true);
+  assert.equal(outcome.readbackVerified, true);
+  assert.equal(outcome.created, false);
+  assert.equal(outcome.secretsStored, false);
 });
 
 test("an HTTP success without signing material stops with a sanitized provider support packet", async () => {

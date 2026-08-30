@@ -26,6 +26,15 @@ test("Commerce Intelligence is responsive, currency-safe, and explicit about unk
     assert.equal(await page.getByText("TEST", { exact: true }).count(), 0);
     assert.equal(await page.getByText(/^Profit$/i).count(), 0);
     assert.equal(await page.getByRole("link", { name: "ord-live-browser" }).getAttribute("href"), "/orders?query=ord-live-browser");
+    const reportingGutter = await page.locator(".intelligence-method").evaluate((card) => {
+      const heading = card.querySelector("h2")?.getBoundingClientRect(); const box = card.getBoundingClientRect();
+      return heading ? heading.left - box.left : 0;
+    });
+    assert.ok(reportingGutter >= 20, `reporting title keeps its card gutter at ${viewport.width}px`);
+    for (const button of await page.getByRole("button", { name: "Reset columns" }).all()) {
+      const gutter = await button.evaluate((node) => { const wrapper = node.parentElement?.getBoundingClientRect(); const box = node.getBoundingClientRect(); return wrapper ? wrapper.right - box.right : 0; });
+      assert.ok(gutter >= (viewport.width <= 480 ? 13 : 19), `table reset control keeps a right gutter at ${viewport.width}px`);
+    }
     const geometry = await page.evaluate(() => ({ fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth, viewport: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
     assert.equal(geometry.fits, true, `no page overflow at ${viewport.width}px: ${JSON.stringify(geometry)}`);
     assert.deepEqual(errors, [], `no browser errors at ${viewport.width}px`);

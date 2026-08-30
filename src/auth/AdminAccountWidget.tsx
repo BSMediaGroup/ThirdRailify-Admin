@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { AdminIcon } from "../components/AdminIcon";
+import { AccountAccessBadge, accountAccessLabel, normalizeAccountAccess } from "../components/AccountAccessBadge";
 import { useAuth } from "./AuthProvider";
 import type { AuthAccount } from "./types";
 
@@ -16,7 +17,8 @@ export function AdminAccountWidget({ unreadCount = 0 }: { unreadCount?: number }
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
   }, [open]);
   if (!account) return null;
-  const accessLabel = account.adminLevel === "master" ? "Master Admin" : "Full Admin";
+  const accessLabel = accountAccessLabel(normalizeAccountAccess(account));
+  const secondaryIdentity = account.email || (account.username ? `@${account.username}` : "Third Railify account");
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
     const index = controls.indexOf(document.activeElement as HTMLElement);
@@ -27,12 +29,12 @@ export function AdminAccountWidget({ unreadCount = 0 }: { unreadCount?: number }
   };
   return <div className="admin-account" ref={root}>
     <button className="admin-account__trigger" type="button" onClick={() => setOpen((value) => !value)} aria-label={`${account.displayName} account menu`} aria-haspopup="menu" aria-expanded={open}>
-      <span className="admin-account__avatar-wrap"><AdminAvatar account={account} />{unreadCount ? <i className="admin-account__badge" aria-label={`${unreadCount} unread inbox messages`}>{unreadCount > 9 ? "9+" : unreadCount}</i> : null}</span><span><strong>{account.displayName}</strong><small>{accessLabel.toUpperCase()}</small></span><b aria-hidden="true">&#9662;</b>
+      <span className="admin-account__avatar-wrap"><AdminAvatar account={account} />{unreadCount ? <i className="admin-account__badge" aria-label={`${unreadCount} unread inbox messages`}>{unreadCount > 9 ? "9+" : unreadCount}</i> : null}</span><span><strong className="account-identity-name"><span>{account.displayName}</span><AccountAccessBadge account={account} /></strong><small>{secondaryIdentity}</small></span><b aria-hidden="true">&#9662;</b>
     </button>
     {open && <div className="admin-account__menu" role="menu" aria-label="Admin account menu" onKeyDown={handleMenuKeyDown}>
       <div className="admin-account__identity">
         <AdminAvatar account={account} />
-        <div><strong>{account.displayName}</strong><span>{account.email || (account.username ? `@${account.username}` : "Third Railify account")}</span><small>{accessLabel}</small></div>
+        <div><strong className="account-identity-name"><span>{account.displayName}</span><AccountAccessBadge account={account} /></strong><span>{secondaryIdentity}</span></div>
       </div>
       <dl className="admin-account__overview">
         <div><dt>Display name</dt><dd>{account.displayName}</dd></div>

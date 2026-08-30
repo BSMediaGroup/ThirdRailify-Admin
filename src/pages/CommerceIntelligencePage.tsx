@@ -67,7 +67,7 @@ function Report({ report, onPage }: { report: CommerceIntelligenceReport; onPage
     <OrderEconomics report={report} onPage={onPage} />
     <section className="intelligence-split"><DonationPanel report={report} /><RefundPanel report={report} /></section>
     <CoveragePanel report={report} />
-    <section className="intelligence-method"><p className="eyebrow">Reporting basis</p><h2>Definitions travel with the numbers.</h2><div>{Object.entries(report.semantics).map(([key, value]) => <article key={key}><strong>{humanize(key)}</strong><p>{value}</p></article>)}</div><p>“Contribution margin” is limited to fully evidenced direct transaction inputs. It is not a complete business earnings measure.</p></section>
+    <section className="intelligence-method"><header><div><p className="eyebrow">Reporting basis</p><h2>Definitions travel with the numbers.</h2></div></header><div>{Object.entries(report.semantics).map(([key, value]) => <article key={key}><strong>{humanize(key)}</strong><p>{value}</p></article>)}</div><p>“Contribution margin” is limited to fully evidenced direct transaction inputs. It is not a complete business earnings measure.</p></section>
   </>;
 }
 

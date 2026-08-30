@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { onRequest } from "../functions/_middleware.js";
 import { configuredOrigins, safeReturnPath } from "../functions/_shared/auth-core.js";
+import { oauthCallbackUrl } from "../functions/_shared/oauth-providers.js";
 
 const env = {
   THIRDRAILIFY_PUBLIC_ORIGIN: "https://thirdrailify.com",
@@ -28,6 +29,15 @@ test("production origins are exact and return paths cannot escape", () => {
   assert.deepEqual([...configuredOrigins(env)].sort(), ["https://admin.thirdrailify.com", "https://thirdrailify.com"]);
   for (const value of ["https://evil.example/", "//evil.example/", "/api/admin/status", "javascript:alert(1)"]) assert.equal(safeReturnPath(value), "/account");
   assert.equal(safeReturnPath("/account/orders?state=open"), "/account/orders?state=open");
+});
+
+test("every production OAuth callback is generated from the custom Admin authority", () => {
+  assert.deepEqual(Object.fromEntries(["discord", "google", "github", "twitter"].map((provider) => [provider, oauthCallbackUrl(env, provider)])), {
+    discord: "https://admin.thirdrailify.com/api/auth/oauth/discord/callback",
+    google: "https://admin.thirdrailify.com/api/auth/oauth/google/callback",
+    github: "https://admin.thirdrailify.com/api/auth/oauth/github/callback",
+    twitter: "https://admin.thirdrailify.com/api/auth/oauth/twitter/callback",
+  });
 });
 
 test("Admin production presentation is canonical and not globally labelled staging", async () => {

@@ -126,6 +126,32 @@ test("Admin account exits preserve identity and the refusal screen links to Publ
   assert.match(provider, /window\.open\("about:blank", "_blank"\)/);
 });
 
+test("Admin operational routes replace scaffolds and keep access visuals presentation-only", async () => {
+  const [app, operations, access, badge, styles] = await Promise.all([
+    read("src/App.tsx"), read("src/pages/OperationsPages.tsx"), read("src/pages/AccountsPage.tsx"), read("src/components/AccountAccessBadge.tsx"), read("src/styles/global.css"),
+  ]);
+  for (const [path, page] of [["media", "MediaOperationsPage"], ["membership", "MembershipOperationsPage"], ["integrations", "IntegrationsOperationsPage"], ["settings", "SettingsOperationsPage"]]) assert.match(app, new RegExp(`path="${path}" element=\\{<${page}`));
+  for (const label of ["Media library", "Accounts, not subscribers", "Provider directory", "Configuration directory", "Not yet configurable"]) assert.match(operations, new RegExp(label));
+  assert.match(operations, /Promise\.allSettled/);
+  assert.match(operations, /no R2 object key is exposed/);
+  assert.match(operations, /performs no provider verification call/);
+  assert.match(operations, /select disabled/);
+  assert.match(access, /<AccountRoleChip account=\{account\}/);
+  assert.match(badge, /master_admin[\s\S]*full_admin[\s\S]*regular_user/);
+  assert.match(badge, /role === "admin" && account\.adminLevel === "master"/);
+  assert.doesNotMatch(badge, /isAdmin|isMasterAdmin|throw new AuthFailure/);
+  for (const selector of ["account-role-chip--master_admin", "account-role-chip--full_admin", "account-role-chip--regular_user"]) assert.match(styles, new RegExp(`\\.${selector}`));
+});
+
+test("Admin account identity uses suffix badges without an obsolete status dot or third identity row", async () => {
+  const [widget, badge] = await Promise.all([read("src/auth/AdminAccountWidget.tsx"), read("src/components/AccountAccessBadge.tsx")]);
+  assert.match(widget, /account-identity-name[\s\S]*<AccountAccessBadge account=\{account\}/);
+  assert.doesNotMatch(widget, /admin-account__identity[\s\S]{0,260}<small>\{accessLabel\}<\/small>/);
+  assert.doesNotMatch(widget, /status-dot|online-dot|presence-dot/);
+  assert.match(badge, /aria-label=\{label\}/);
+  assert.match(badge, /title=\{label\}/);
+});
+
 test("Watch authority failures render unknown archive state instead of false zero counts", async () => {
   const page = await read("src/pages/WatchAdminPage.tsx");
   assert.match(page, /summary \? `\$\{summary\.retained\} \/ 24` : "— \/ 24"/);

@@ -20,7 +20,7 @@ test("every configured Admin route rejects browser-default controls at desktop a
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   t.after(() => browser.close());
 
-  for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
     const pageErrors = [];
@@ -45,6 +45,11 @@ test("every configured Admin route rejects browser-default controls at desktop a
       }).filter((item) => item.reasons.length));
       assert.deepEqual(audit, [], `${route} uses the Admin control system at ${viewport.width}px`);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${route} has no horizontal overflow at ${viewport.width}px`);
+      if (["/media", "/membership", "/integrations", "/settings"].includes(route)) {
+        assert.equal(await page.locator(".placeholder-panel").count(), 0, `${route} no longer renders the generic scaffold`);
+        assert.equal(await page.locator(".operations-panel").count() > 0, true, `${route} has purpose-built operational content`);
+      }
+      if (route === "/settings") assert.equal(await page.locator(".deferred-settings :is(input, select, button):disabled").count(), 3, "deferred settings are genuinely disabled");
     }
     assert.deepEqual(pageErrors, [], `route matrix has no React page errors at ${viewport.width}px`);
     await context.close();

@@ -63,6 +63,8 @@ const PROVIDERS = {
 };
 
 const GOOGLE_DISABLED_MESSAGE = "Available after site migration";
+const PROVIDER_ERROR_ENUM = /^[a-z][a-z0-9_]{0,79}$/;
+const PROVIDER_RESPONSE_KEY = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/;
 
 export function knownProvider(provider) {
   return Object.prototype.hasOwnProperty.call(PROVIDERS, provider);
@@ -162,12 +164,25 @@ export async function exchangeOAuthCode(env, provider, code, transaction, fetchI
     const failure = new AuthFailure(400, "oauth_exchange_failed", "The OAuth provider did not complete sign-in.");
     failure.providerDiagnostic = {
       httpStatus: response.status,
-      responseKeys: payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort().slice(0, 12) : [],
-      error: cleanText(payload?.error, 80) || null,
+      responseKeys: providerResponseKeys(payload),
+      error: providerErrorEnum(payload?.error),
     };
     throw failure;
   }
   return accessToken;
+}
+
+function providerResponseKeys(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  return Object.keys(payload)
+    .filter((key) => PROVIDER_RESPONSE_KEY.test(key))
+    .sort()
+    .slice(0, 12);
+}
+
+function providerErrorEnum(value) {
+  const token = String(value || "").trim();
+  return PROVIDER_ERROR_ENUM.test(token) ? token : null;
 }
 
 export async function fetchOAuthIdentity(env, provider, accessToken, fetchImpl = fetch) {

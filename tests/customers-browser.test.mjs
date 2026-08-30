@@ -60,6 +60,22 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   await page.goto(`${ORIGIN}/access`);
   await page.getByRole("heading", { level: 1, name: "Accounts & access" }).waitFor();
   await page.getByText("Buyer Account", { exact: true }).waitFor();
+  assert.equal(await page.locator(".account-role-chip--master_admin", { hasText: "Master Admin" }).count(), 1);
+  assert.equal(await page.locator(".account-role-chip--full_admin", { hasText: "Full Admin" }).count(), 1);
+  assert.equal(await page.locator(".account-role-chip--regular_user", { hasText: "Regular User" }).count(), 1);
+  await page.getByRole("button", { name: "Master Admin account menu" }).click();
+  assert.equal(await page.locator(".admin-account__identity .account-access-badge--master_admin").getAttribute("aria-label"), "Master Admin");
+  const identityLine = await page.locator(".admin-account__identity .account-identity-name").evaluate((row) => {
+    const name = row.querySelector("span:first-child"); const badge = row.querySelector(".account-access-badge");
+    const nameBox = name?.getBoundingClientRect(); const badgeBox = badge?.getBoundingClientRect();
+    return { display: getComputedStyle(row).display, fontSize: name ? getComputedStyle(name).fontSize : "", nameRight: nameBox?.right || 0, badgeLeft: badgeBox?.left || 0, nameTop: nameBox?.top || 0, badgeTop: badgeBox?.top || 0 };
+  });
+  assert.equal(identityLine.display, "flex", "inline-flex identity is blockified only as the grid item; its children remain one flex row");
+  assert.equal(identityLine.fontSize, "13.28px", "display name keeps the original identity typography");
+  assert.ok(identityLine.badgeLeft > identityLine.nameRight && Math.abs(identityLine.badgeTop - identityLine.nameTop) < 4, "badge stays inline after the display name");
+  assert.equal(await page.locator(".admin-account__identity > div > small").count(), 0, "identity header has no obsolete third role row");
+  assert.equal(await page.locator(".admin-account__identity i, .admin-account__trigger > i").count(), 0, "identity widget has no status dot");
+  await page.getByRole("button", { name: "Master Admin account menu" }).click();
   assert.equal(await page.getByRole("separator").count(), 7);
   await assertNoPhantomHorizontalScrollbar(page, ".accounts-table-wrap");
   await capture(page, "access-1920.png");
@@ -110,7 +126,8 @@ function customersPayload() { return { ok: true, databaseConfigured: true, autho
 function customerDetail() { return { ...customersPayload(), customer: { ...guestCustomer(), orders: [{ id: "ord_11111111-1111-4111-8111-111111111111", environment: "test", paymentStatus: "paid", fulfillmentStatus: "disabled", fulfillment: { state: "unfulfilled", shipped: false, trackingAvailable: false, shipmentCount: 0 }, totalAmount: 2500, refundAmount: 0, currencyCode: "CAD", createdAt: "2026-08-29T01:00:00.000Z", paymentConfirmedAt: "2026-08-29T01:01:00.000Z", delivery: { countryCode: "CA", regionCode: "ON", method: "Standard delivery", historicalSnapshot: true }, documentCount: 0, emailCount: 0 }], orderPage: 1, orderPageSize: 20, orderTotalPages: 1, communication: { documents: 0, deliveries: 0, boundedToVisibleOrders: true }, technical: { revision: 1, linkedAccountId: null } } }; }
 function masterAccount() { return { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], identities: [], role: "admin", adminLevel: "master", status: "active", emailVerified: true, emailVerifiedAt: "2026-08-29T00:00:00.000Z", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-29T00:00:00.000Z", lastLoginAt: "2026-08-29T00:00:00.000Z", source: "test", locked: true, customer: null }; }
 function buyerAccount() { return { id: ACCOUNT_ID, email: "buyer@example.test", displayName: "Buyer Account", username: "buyer", avatarUrl: null, providers: ["email"], identities: [{ provider: "email", subject: "buyer@example.test", username: "buyer", email: "buyer@example.test", emailVerified: true }], role: "user", adminLevel: "none", status: "active", emailVerified: true, emailVerifiedAt: "2026-08-20T00:00:00.000Z", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-29T00:00:00.000Z", lastLoginAt: "2026-08-29T00:00:00.000Z", source: "email", locked: false, customer: { id: CUSTOMER_ID, orderCount: 1, lastOrderAt: "2026-08-29T01:00:00.000Z" } }; }
-function accountsPayload() { return { ok: true, accounts: [masterAccount(), buyerAccount()], access: { isAdmin: true, isMasterAdmin: true }, checkedAt: "2026-08-29T02:00:00.000Z" }; }
+function fullAdminAccount() { return { ...buyerAccount(), id: "full-admin", email: "full@example.test", displayName: "Full Admin", username: "full", role: "admin", adminLevel: "full", customer: null }; }
+function accountsPayload() { return { ok: true, accounts: [masterAccount(), fullAdminAccount(), buyerAccount()], access: { isAdmin: true, isMasterAdmin: true }, checkedAt: "2026-08-29T02:00:00.000Z" }; }
 function accountDetail() { return { ok: true, account: buyerAccount(), sessions: [{ id: "session-safe-id", createdAt: "2026-08-29T00:00:00.000Z", expiresAt: "2099-08-29T00:00:00.000Z", lastSeenAt: "2026-08-29T01:00:00.000Z", revokedAt: null, sourceOrigin: ORIGIN, userAgentRecorded: true }], audit: [{ id: "audit-safe-id", eventType: "auth_signin", result: "success", provider: "email", createdAt: "2026-08-29T01:00:00.000Z" }], access: { isAdmin: true, isMasterAdmin: true }, checkedAt: "2026-08-29T02:00:00.000Z" }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function capture(page, filename) {

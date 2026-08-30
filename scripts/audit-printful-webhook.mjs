@@ -1,4 +1,5 @@
 import { loadEnvFile } from "node:process";
+import { webhookResult } from "./configure-printful-v2-webhook.mjs";
 
 try { loadEnvFile(new URL("../.env", import.meta.url)); } catch { /* Cloudflare-only credentials are valid. */ }
 
@@ -14,7 +15,7 @@ const response = await fetch("https://api.printful.com/v2/webhooks?show_expired=
 });
 const payload = await response.json().catch(() => null);
 if (!response.ok) throw new Error(`Printful webhook audit failed with HTTP ${response.status}.`);
-const result = payload?.result && typeof payload.result === "object" ? payload.result : {};
+const result = webhookResult(payload) || {};
 const events = Array.isArray(result.events) ? result.events.map((event) => ({ type: String(event?.type || ""), usesDefaultUrl: !event?.url })).filter((event) => event.type).sort((a, b) => a.type.localeCompare(b.type)) : [];
 console.log(JSON.stringify({
   ok: true,
