@@ -186,6 +186,7 @@ test("Overview is a fail-soft operational snapshot rather than a deferred founda
   assert.match(page, /overview-pulse__credential/);
   assert.match(page, /Account level \/ server verified/);
   assert.match(page, /access\.isMasterAdmin \? "Master" : "Full Admin"/);
+  assert.match(page, /access\.isMasterAdmin \? <AccountAccessIcon kind="master_admin" \/> : <AdminIcon name="shield" size=\{28\} \/>/);
   assert.doesNotMatch(page, /Authenticated foundation|Still intentionally deferred|Products and orders remain provider-neutral shells/);
   assert.match(styles, /\.overview-module-grid/);
   assert.match(styles, /\.overview-analytics__panel/);

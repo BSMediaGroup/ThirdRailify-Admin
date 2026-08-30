@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { adminCapabilityIds } from "../auth/capabilities";
 import { readBannerSettings, type BannerSettings } from "../banner/client";
 import { getCommerceOverview, type CommerceOverviewPayload } from "../commerce/client";
+import { AccountAccessIcon } from "../components/AccountAccessBadge";
 import { AdminIcon } from "../components/AdminIcon";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { getGoatsOverview, type GoatAdminSummary } from "../goats/client";
@@ -84,7 +85,7 @@ export function OverviewPage() {
         <div className="overview-pulse__top"><span><i className={errorCount ? "is-warning" : ""} />System pulse</span><small>{loading ? "Reading authorities" : refreshedAt ? formatTime(refreshedAt) : "Not checked"}</small></div>
         <div className="overview-pulse__body">
           <div className="overview-pulse__credential">
-            <span className="overview-pulse__shield" aria-hidden="true"><AdminIcon name="shield" size={28} /></span>
+            <span className="overview-pulse__shield" data-access-icon={access.isMasterAdmin ? "master_admin" : "full_admin"} aria-hidden="true">{access.isMasterAdmin ? <AccountAccessIcon kind="master_admin" /> : <AdminIcon name="shield" size={28} />}</span>
             <div><small>Session role</small><strong>{access.isMasterAdmin ? "Master" : "Full Admin"}</strong><span>Account level / server verified</span></div>
           </div>
           <div className="overview-pulse__readout"><strong>{loading && !hasSnapshot ? "—" : `${reportingSources}/${expectedSources}`}</strong><span>sources reporting</span></div>
