@@ -7,7 +7,7 @@ import { chromium } from "playwright-core";
 const ORIGIN = "http://127.0.0.1:44208";
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const ROUTES = [
-  "/", "/inbox", "/watch", "/content", "/shop", "/products", "/collections", "/orders", "/customers",
+  "/", "/analytics", "/inbox", "/watch", "/content", "/shop", "/products", "/collections", "/orders", "/customers",
   "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment",
   "/media", "/goats", "/goats/pending", "/goats/approved", "/goats/rejected", "/goats/comments", "/goats/settings", "/goats/emails",
   "/wheels", "/wheels/access", "/wheels/results", "/membership", "/access", "/integrations", "/settings",
@@ -56,6 +56,7 @@ async function respond(route) {
   if (pathname === "/api/auth/config") return json(route, { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: ORIGIN, environment: "test", cookieMode: "host-only" });
   if (pathname === "/api/auth/session") return json(route, { ok: true, authenticated: true, csrfToken: "route-audit-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-29T00:00:00.000Z", lastLoginAt: null, source: "test", locked: true } });
   if (pathname === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
+  if (pathname === "/api/admin/analytics") return json(route, { ok: true, range: "7d", generatedAt: "2026-08-31T00:00:00.000Z", timezone: "UTC", configured: true, coverage: { start: null, end: null, totalEvents: 0, lastIngestedAt: null }, windows: {}, selected: { views: 0, sessions: 0, pagesPerSession: null, comparisonComplete: false, previous: { views: 0, sessions: 0, pagesPerSession: null }, deltas: { views: { available: false, value: null, direction: "unavailable" }, sessions: { available: false, value: null, direction: "unavailable" } } }, bucket: "day", series: [], pages: [], sources: [], devices: [], geography: [], revenue: { available: true, profitAvailable: false, profitUnavailableReason: "Cost data unavailable.", currencies: [] } });
   return json(route, { ok: false, error: "route_audit_unavailable", message: "Authority intentionally unavailable in the visual route audit." }, 503);
 }
 

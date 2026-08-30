@@ -18,6 +18,14 @@ export const adminAreas: AdminArea[] = [
     futureScope: ["Authenticated system posture", "Live authority summaries", "Actionable moderation queues"],
   },
   {
+    path: "/analytics",
+    label: "Audience Analytics",
+    shortLabel: "Analytics",
+    icon: "overview",
+    summary: "Privacy-minimized first-party audience activity and truthful revenue pulse.",
+    futureScope: ["Rolling traffic comparisons", "Coarse activity map", "Authoritative collected revenue"],
+  },
+  {
     path: "/watch",
     label: "Watch / Broadcast",
     shortLabel: "Watch",

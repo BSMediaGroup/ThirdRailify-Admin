@@ -104,7 +104,7 @@ The CLI authenticates against PayPal's Live OAuth service, reconciles and reads 
 
 ## Webhook note
 
-Third Railify already has a PayPal webhook receiver. Do **not** manually create another PayPal webhook unless the setup CLI explicitly says manual intervention is required.
+Third Railify already has a PayPal webhook receiver at `https://admin.thirdrailify.com/api/webhooks/paypal`. Do **not** manually create another PayPal webhook unless the setup CLI explicitly says manual intervention is required.
 
 The implemented event set is:
 
@@ -151,4 +151,3 @@ One-time donations can activate independently after their Live PayPal gates pass
 - [ ] No Live Order, Capture, donation, or real-money payment occurred during setup.
 - [ ] Temporary secondary-user access was removed or reduced after verification.
 - [ ] Stripe remains disabled and PayPal remains preferred.
-

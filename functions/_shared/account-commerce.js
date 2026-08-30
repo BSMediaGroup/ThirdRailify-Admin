@@ -263,6 +263,48 @@ export async function accountOrderDetail(env, accountId, rawOrderId) {
   };
 }
 
+export async function accountInboxMessages(env, accountId, input = {}) {
+  const account = await requireActiveAccount(env, accountId);
+  const db = requireCommerceDb(env);
+  const unreadOnly = input.unread === true || input.unread === "true";
+  const state = unreadOnly ? "AND s.read_at IS NULL" : "";
+  const [result, counts] = await Promise.all([
+    db.prepare(`SELECT m.id,m.category,m.source_type,m.source_id,m.title,m.preview,m.body_text,m.action_url,m.action_label,m.detail_json,m.created_at,m.expires_at,s.read_at
+      FROM account_inbox_messages m LEFT JOIN account_inbox_states s ON s.message_id=m.id AND s.account_id=?
+      WHERE m.account_id=? AND s.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?) ${state}
+      ORDER BY m.created_at DESC LIMIT 100`).bind(account.id, account.id, nowIso()).all(),
+    db.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN s.read_at IS NULL THEN 1 ELSE 0 END) unread
+      FROM account_inbox_messages m LEFT JOIN account_inbox_states s ON s.message_id=m.id AND s.account_id=?
+      WHERE m.account_id=? AND s.deleted_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>?)`).bind(account.id, account.id, nowIso()).first(),
+  ]);
+  return { ok: true, authority: "Admin Commerce D1", items: (result?.results || []).map(accountInboxProjection), total: Number(counts?.total || 0), unread: Number(counts?.unread || 0) };
+}
+
+export async function mutateAccountInbox(env, accountId, input = {}) {
+  const account = await requireActiveAccount(env, accountId);
+  assertOnlyFields(input, new Set(["ids", "action"]), "account_inbox_fields_invalid");
+  const ids = Array.isArray(input.ids) ? [...new Set(input.ids.map((id) => cleanText(id, 80)).filter((id) => /^[A-Za-z0-9_-]{16,80}$/.test(id)))].slice(0, 100) : [];
+  const action = cleanText(input.action, 20);
+  if (!ids.length || !new Set(["read", "unread", "delete"]).has(action)) throw new AuthFailure(400, "account_inbox_mutation_invalid", "Select at least one valid message and action.");
+  const db = requireCommerceDb(env);
+  const placeholders = ids.map(() => "?").join(",");
+  const owned = await db.prepare(`SELECT id FROM account_inbox_messages WHERE account_id=? AND id IN (${placeholders})`).bind(account.id, ...ids).all();
+  const allowed = (owned?.results || []).map((row) => row.id);
+  if (!allowed.length) throw new AuthFailure(404, "account_inbox_message_not_found", "The selected message was not found.");
+  const timestamp = nowIso();
+  for (const id of allowed) {
+    if (action === "unread") await db.prepare(`INSERT INTO account_inbox_states(message_id,account_id,read_at,deleted_at,updated_at) VALUES(?,?,NULL,NULL,?) ON CONFLICT(message_id,account_id) DO UPDATE SET read_at=NULL,updated_at=excluded.updated_at WHERE account_inbox_states.deleted_at IS NULL`).bind(id, account.id, timestamp).run();
+    else await db.prepare(`INSERT INTO account_inbox_states(message_id,account_id,read_at,deleted_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(message_id,account_id) DO UPDATE SET read_at=excluded.read_at,deleted_at=excluded.deleted_at,updated_at=excluded.updated_at`).bind(id, account.id, timestamp, action === "delete" ? timestamp : null, timestamp).run();
+  }
+  return { ok: true, action, updated: allowed.length };
+}
+
+function accountInboxProjection(row) {
+  return { id: cleanText(row.id, 80), category: cleanText(row.category, 40), sourceType: cleanText(row.source_type, 80), sourceId: cleanText(row.source_id, 160), title: cleanText(row.title, 160), preview: cleanText(row.preview, 320), body: cleanText(row.body_text, 4000), actionUrl: safeAccountPath(row.action_url), actionLabel: cleanText(row.action_label, 60) || null, details: safeJson(row.detail_json, {}), createdAt: cleanText(row.created_at, 80), expiresAt: cleanText(row.expires_at, 80) || null, readAt: cleanText(row.read_at, 80) || null, unread: !row.read_at };
+}
+
+function safeAccountPath(value) { const path = cleanText(value, 512); return /^\/(?!api\/)[a-z0-9/_?&=.%:-]*$/i.test(path) ? path : null; }
+
 async function requireActiveAccount(env, rawAccountId) {
   const accountId = cleanText(rawAccountId, 160);
   if (!accountId) throw new AuthFailure(401, "account_required", "A signed-in account is required.");

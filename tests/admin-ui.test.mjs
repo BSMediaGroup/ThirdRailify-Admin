@@ -197,3 +197,17 @@ test("Shop is an expandable Products, Collections, Orders group with dirty-only 
   assert.match(page, /getCollectionList/); assert.match(page, /bulkUpdateCollections/); assert.match(page, /updateCollectionMemberships/); assert.match(page, /No standalone collection image field exists/);
   assert.match(styles, /\.featured-dirty-rail/); assert.match(styles, /\.collection-membership-grid/); assert.match(styles, /\.collection-admin-list > article/); assert.match(headers, /img-src[^;]*https:\/\/static\.wixstatic\.com/); assert.match(headers, /img-src[^;]*https:\/\/thirdrailify\.pages\.dev/);
 });
+
+test("Analytics and inbox surfaces expose truthful states, bulk controls, and accessible details", async () => {
+  const [app, navigation, analytics, inbox, inboxClient, styles] = await Promise.all([
+    read("src/App.tsx"), read("src/config/navigation.ts"), read("src/pages/AnalyticsPage.tsx"),
+    read("src/pages/InboxPage.tsx"), read("src/inbox/client.ts"), read("src/styles/global.css"),
+  ]);
+  assert.match(app, /path="analytics" element=\{<AnalyticsPage/);
+  assert.match(navigation, /path: "\/analytics"[\s\S]{0,120}Audience Analytics/);
+  for (const text of ["Audience activity map", "Traffic comparison matrix", "Collected, not profit", "Preceding period unavailable", "No events retained yet"]) assert.match(analytics, new RegExp(text));
+  assert.match(analytics, /import\("maplibre-gl"\)/); assert.match(analytics, /role="img"[\s\S]{0,80}aria-label="World map/);
+  assert.match(inbox, /role="dialog"/); assert.match(inbox, /Mark unread/); assert.match(inbox, /inbox-message__actions/); assert.match(inbox, /Delete/);
+  assert.match(inboxClient, /mutateInboxMessages/); assert.match(inboxClient, /"read" \| "unread" \| "delete"/);
+  assert.match(styles, /\.message-lightbox/); assert.match(styles, /\.analytics-map-panel/); assert.match(styles, /prefers-reduced-motion/);
+});

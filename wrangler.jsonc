@@ -24,7 +24,8 @@
     "CONTACT_TO_EMAIL": "info@thirdrailify.com",
     "CONTACT_CC_EMAIL": "thirdmailify@gmail.com",
     "PRINTFUL_STORE_ID": "18668025",
-    "PRINTFUL_WIX_SOURCE_STORE_ID": "16847493"
+    "PRINTFUL_WIX_SOURCE_STORE_ID": "16847493",
+    "VITE_ANALYTICS_MAP_STYLE_URL": "https://tiles.openfreemap.org/styles/dark"
   },
   "env": {
     "preview": {
@@ -78,7 +79,8 @@
         "CONTACT_TO_EMAIL": "info@thirdrailify.com",
         "CONTACT_CC_EMAIL": "thirdmailify@gmail.com",
         "PRINTFUL_STORE_ID": "18668025",
-        "PRINTFUL_WIX_SOURCE_STORE_ID": "16847493"
+        "PRINTFUL_WIX_SOURCE_STORE_ID": "16847493",
+        "VITE_ANALYTICS_MAP_STYLE_URL": "https://tiles.openfreemap.org/styles/dark"
       }
     }
   },

@@ -26,6 +26,8 @@
     "test:orders": "node --test --test-concurrency=1 tests/orders-management.test.mjs tests/orders-browser.test.mjs",
     "test:customers": "node --test --test-concurrency=1 tests/customers-management.test.mjs tests/customers-browser.test.mjs tests/resizable-table-inventory.test.mjs",
     "test:account-commerce": "node --test --test-concurrency=1 tests/account-commerce.test.mjs",
+    "test:analytics": "node --test --test-concurrency=1 tests/analytics-inbox.test.mjs",
+    "test:browser:inbox": "node --test --test-concurrency=1 tests/inbox-browser.test.mjs",
     "test:payments": "node --test --test-concurrency=1 tests/payments-control-plane.test.mjs tests/stripe-webhook.test.mjs tests/stripe-acceptance-closure.test.mjs",
     "test:paypal": "node --test --test-concurrency=1 tests/paypal-payments.test.mjs",
     "test:browser:payments": "node --test --test-concurrency=1 tests/payments-browser.test.mjs",
@@ -47,6 +49,7 @@
     "commerce:media:backfill": "node scripts/backfill-commerce-media.mjs --upload",
     "commerce:media:verify-live": "node scripts/verify-live-commerce-media.mjs",
     "commerce:printful:verify-permanent": "node scripts/verify-permanent-printful-token.mjs",
+    "commerce:printful:webhook": "node scripts/configure-printful-v2-webhook.mjs",
     "commerce:worker:build": "wrangler deploy --config commerce-worker/wrangler.jsonc --dry-run --outdir .wrangler/commerce-worker-build",
     "commerce:launch": "node scripts/commerce-launch.mjs",
     "commerce:paypal": "node scripts/commerce-paypal.mjs",
@@ -56,6 +59,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "maplibre-gl": "6.6.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "6.30.1"

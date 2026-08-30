@@ -5,6 +5,7 @@ import { AreaPage } from "./pages/AreaPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { InboxPage } from "./pages/InboxPage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { WatchAdminPage } from "./pages/WatchAdminPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { SiteContentPage } from "./pages/SiteContentPage";
@@ -30,7 +31,7 @@ import {
 } from "./pages/GoatsAdminPages";
 import { WheelAdminDetailPage, WheelsAccessPage, WheelsLibraryPage, WheelsResultsPage, WheelsStagesPage } from "./pages/WheelsAdminPages";
 
-const implementedPaths = new Set(["/", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats", "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results"]);
+const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats", "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results"]);
 
 export function App() {
   return (
@@ -38,6 +39,7 @@ export function App() {
       <Route element={<AdminShell />}>
         <Route index element={<OverviewPage />} />
         <Route path="inbox" element={<InboxPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="access" element={<AccountsPage />} />
         <Route path="watch" element={<WatchAdminPage />} />
         <Route path="content" element={<SiteContentPage />} />

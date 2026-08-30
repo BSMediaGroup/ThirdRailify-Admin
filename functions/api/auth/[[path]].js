@@ -407,7 +407,15 @@ async function handleOAuthCallback(request, env, provider, fetchImpl) {
     }
     return handoffRedirect(env, await createHandoff(env, account.id, transaction.target_origin, transaction.return_to));
   } catch (error) {
-    await safeAudit(env, { eventType: "oauth_login", provider, result: "failure", metadata: { category: error?.code || "provider_error" } });
+    await safeAudit(env, {
+      eventType: "oauth_login",
+      provider,
+      result: "failure",
+      metadata: {
+        category: error?.code || "provider_error",
+        ...(error?.providerDiagnostic ? { provider_diagnostic: error.providerDiagnostic } : {}),
+      },
+    });
     const target = configuredOrigins(env).has(transaction.target_origin)
       ? transaction.target_origin
       : normalizeOrigin(env?.THIRDRAILIFY_ADMIN_ORIGIN);

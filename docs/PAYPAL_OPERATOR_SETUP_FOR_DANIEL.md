@@ -36,7 +36,7 @@ Before credentials, expect:
 - PayPal Live capture disabled
 - emergency pause clear
 
-`status` is provider-read-only: it checks named Cloudflare binding presence and sanitized Commerce D1 evidence and makes zero PayPal calls.
+`status` is provider-read-only: it checks named Cloudflare binding presence and sanitized Commerce D1 evidence and makes zero PayPal calls. Future Sandbox and Live onboarding must use `https://admin.thirdrailify.com/api/webhooks/paypal` as the canonical callback.
 
 ## Sandbox configuration
 
@@ -228,4 +228,3 @@ If Shawn created a temporary PayPal Business secondary user for Daniel:
 - [ ] Store activation occurred only if every current canonical hard gate passed.
 - [ ] Emergency pause still closes checkout, donations, Live capture, and fulfillment through the canonical path.
 - [ ] Temporary PayPal secondary-user access was removed or reduced.
-

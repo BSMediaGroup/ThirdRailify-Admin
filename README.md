@@ -1,5 +1,17 @@
 # Third Railify Admin
 
+## Audience Analytics V1 and message controls (local implementation)
+
+The authenticated `/analytics` workspace is the reporting authority for first-party Public traffic. `POST /api/internal/analytics/ingest` accepts only exact-Public-origin, timely HMAC-signed events using `THIRDRAILIFY_ANALYTICS_INGEST_SECRET`; `GET /api/admin/analytics` requires the established Admin session and returns private/no-store aggregates. The dashboard provides exact trailing 24-hour, 7-day, 30-day, and 90-day totals; preceding-window coverage/deltas; UTC trends; top routes, sources, and devices; a lazy MapLibre/OpenFreeMap coarse activity map with a non-map regional fallback; and truthful LIVE Commerce revenue grouped by currency.
+
+Revenue definitions are deliberately narrow: merchandise includes LIVE orders whose payment state is `paid`, `partially_refunded`, or `refunded`; donations include LIVE `completed`, `refunded`, or `reversed` donation authority. Gross is collected merchandise plus donations, refunded/reversed is shown separately, and net collected subtracts those reversals. TEST/sandbox, pending, failed, cancelled, and disputed records are excluded. The page does not label revenue as profit because complete authoritative processor fees and fulfilment costs do not exist for every transaction.
+
+Migration `commerce-migrations/0024_analytics_and_message_controls.sql` adds `analytics_events` and its reporting indexes, adds per-Admin `deleted_at` inbox state, and creates recipient-scoped `account_inbox_messages` / `account_inbox_states`. Admin and Public inboxes support individual/bulk read, unread, and soft-delete actions plus accessible full-detail lightboxes while preserving message CTAs.
+
+Rollout is intentionally manual: back up and inspect Commerce D1, apply only migration `0024`, configure the same encrypted `THIRDRAILIFY_ANALYTICS_INGEST_SECRET` on Admin and Public, retain `VITE_ANALYTICS_MAP_STYLE_URL=https://tiles.openfreemap.org/styles/dark` (or another approved no-key style), deploy Admin before Public, then verify authenticated reads, signed ingestion, stable custom-origin collection, map fallback, and no browser-secret exposure. No remote migration, deployment, DNS/domain, provider, payment, or commerce-gate change occurred in this local task.
+
+Repository tree additions: `commerce-migrations/0024_analytics_and_message_controls.sql`, `functions/_shared/analytics.js`, `functions/api/internal/analytics/ingest.js`, `functions/api/admin/analytics.js`, `src/analytics/client.ts`, `src/pages/AnalyticsPage.tsx`, `tests/analytics-inbox.test.mjs`, and `tests/inbox-browser.test.mjs`. The commerce migration sequence is current through additive `0024`.
+
 Commerce payments use PayPal Orders API v2 as the preferred direct-merchant rail for store purchases and one-time donations. Stripe is retained as a configured but disabled future option. PayPal documentation: [commerce operations](docs/PAYPAL_COMMERCE.md), [owner setup for Shawn](docs/PAYPAL_SETUP_FOR_SHAWN.md), and [operator setup for Daniel](docs/PAYPAL_OPERATOR_SETUP_FOR_DANIEL.md).
 
 ## Replacement commerce catalogue authority
@@ -18,7 +30,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 
 The canonical Admin origin is `https://admin.thirdrailify.com`; Public links use `https://thirdrailify.com`. The old Admin Pages hostname retains `/api/*` and webhook compatibility while browser navigation becomes non-canonical. Sessions remain host-only; no cookie is broadened to all subdomains.
 
-Production Google OAuth is enabled through the existing centralized Admin callback after operator confirmation of Google Branding/Audience, Search Console ownership, and exact custom plus transitional redirect URIs. Discord, GitHub, Google, and X all use the custom Admin callbacks for normal production starts; the old Pages callbacks remain only for bounded rollback compatibility until legitimate custom-domain sign-ins pass. Preview Google OAuth remains intentionally disabled. Provider secrets remain encrypted Admin-only bindings and normal OAuth accounts never inherit an Admin role.
+Production Google OAuth is enabled through the centralized Admin callback with exact `openid email profile` scopes. Legitimate custom-domain Google and X sign-ins passed through the centralized Account authority without role escalation; X required the official confidential-client token form and a matching rotated OAuth 2.0 Client Secret. Their legacy Pages callbacks can now be removed. Discord and GitHub retain their legacy callbacks only until provider-specific custom-domain acceptance passes. Preview Google OAuth remains intentionally disabled. Provider secrets remain encrypted Admin-only bindings and normal OAuth accounts never inherit an Admin role.
 
 ## Current state
 

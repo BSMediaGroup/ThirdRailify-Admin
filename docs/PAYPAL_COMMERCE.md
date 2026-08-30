@@ -23,7 +23,7 @@ npm run commerce:paypal -- verify live
 
 `configure` reads `PAYPAL_<ENV>_CLIENT_ID` and `PAYPAL_<ENV>_CLIENT_SECRET` from the named process environment or uses masked interactive prompts. It validates OAuth, reconciles exactly one canonical webhook, stores all three bindings through `wrangler pages secret put` stdin, deploys Admin, and then records only sanitized OAuth/webhook readback evidence in Commerce D1. Never put credentials in CLI arguments, source, committed JSON, or browser storage.
 
-Register the canonical Admin URL `/api/webhooks/paypal` for exactly:
+Future onboarding must register the canonical production Admin URL `https://admin.thirdrailify.com/api/webhooks/paypal` for exactly:
 
 - `CHECKOUT.ORDER.APPROVED`
 - `CHECKOUT.PAYMENT-APPROVAL.REVERSED`

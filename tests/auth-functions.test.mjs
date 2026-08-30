@@ -16,6 +16,7 @@ import {
 } from "../functions/_shared/auth-core.js";
 import {
   configuredOAuthProviders,
+  exchangeOAuthCode,
   oauthCallbackUrl,
   oauthProviderConfig,
   oauthProviderStates,
@@ -159,6 +160,52 @@ test("existing Master secrets are verified without applying the new-password len
   );
   assert.equal(login.status, 200);
   assert.equal((await login.json()).account.id, "env-master-1");
+});
+
+test("X confidential-client token exchange uses Basic authentication without a duplicate client_id", async () => {
+  const env = authEnvironment({ prepare() {} });
+  const calls = [];
+  const accessToken = await exchangeOAuthCode(
+    env,
+    "twitter",
+    "authorization-code",
+    { pkce_verifier: "pkce-verifier" },
+    async (input, init) => {
+      calls.push({ input: String(input), init });
+      return Response.json({ access_token: "x-access-token" });
+    },
+  );
+
+  assert.equal(accessToken, "x-access-token");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].input, "https://api.x.com/2/oauth2/token");
+  const headers = new Headers(calls[0].init.headers);
+  assert.equal(headers.get("Authorization"), `Basic ${btoa(`${env.X_OAUTH_CLIENT_ID}:${env.X_OAUTH_CLIENT_SECRET}`)}`);
+  const body = new URLSearchParams(calls[0].init.body);
+  assert.equal(body.has("client_id"), false);
+  assert.equal(body.has("client_secret"), false);
+  assert.equal(body.get("grant_type"), "authorization_code");
+  assert.equal(body.get("redirect_uri"), `${ADMIN_ORIGIN}/api/auth/oauth/twitter/callback`);
+  assert.equal(body.get("code_verifier"), "pkce-verifier");
+});
+
+test("OAuth token exchange failures expose only bounded provider diagnostics", async () => {
+  const env = authEnvironment({ prepare() {} });
+  await assert.rejects(
+    exchangeOAuthCode(env, "twitter", "authorization-code", { pkce_verifier: "pkce-verifier" }, async () =>
+      Response.json({ error: "invalid_client", error_description: "sensitive provider detail" }, { status: 401 }),
+    ),
+    (error) => {
+      assert.equal(error.code, "oauth_exchange_failed");
+      assert.deepEqual(error.providerDiagnostic, {
+        httpStatus: 401,
+        responseKeys: ["error", "error_description"],
+        error: "invalid_client",
+      });
+      assert.equal(JSON.stringify(error.providerDiagnostic).includes("sensitive provider detail"), false);
+      return true;
+    },
+  );
 });
 
 test("site transfer establishes one-time host sessions in both directions", async (t) => {

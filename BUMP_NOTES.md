@@ -1,5 +1,25 @@
 # Bump notes
 
+## 2026-08-31 - Audience Analytics V1 and inbox message controls
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added migration `0024_analytics_and_message_controls.sql` for privacy-minimized idempotent analytics events and indexed time/session/path/geographic reporting, per-Admin soft deletion, and recipient-owned Public account message/state tables.
+- Added exact-origin, timely, timing-safe HMAC ingestion plus authenticated private/no-store Admin reporting for 24-hour, 7-day, 30-day, and 90-day totals, preceding-period completeness, zero-denominator deltas, UTC series, routes, sources, devices, and capped coarse geography without IPs, identities, event IDs, or session IDs in map responses.
+- Added `/analytics` with freshness/configuration/partial-history/error states, responsive KPIs and comparison matrix, lazy MapLibre/OpenFreeMap activity map and regional fallback, lightweight trend, supporting insights, and currency-separated truthful revenue pulse.
+- Revenue includes successful LIVE merchandise and donation authority only, reports reversals separately, excludes TEST/sandbox/pending/failed/cancelled/disputed records, avoids order/payment double counting, and explicitly omits profit because complete fee/cost inputs are unavailable.
+- Upgraded Admin and Public account inbox authority with individual/bulk read, unread, and recipient-scoped soft delete plus accessible full-detail lightboxes and preserved CTAs. Added focused migration, privacy, revenue, auth, idempotency, comparison, and inbox tests plus responsive browser interaction coverage.
+- Production requires a D1 backup/schema check, deliberate application of only `0024`, identical encrypted `THIRDRAILIFY_ANALYTICS_INGEST_SECRET` custody in both Pages projects, Admin-first deployment, then stable-origin authenticated/network/map verification. No remote migration, deployment, DNS/domain, provider, payment, or commerce-gate change occurred.
+
+## 2026-08-31 - Post-cutover auth acceptance and Printful V2 support packet
+
+- Completed legitimate custom-domain Google and X acceptance through the centralized Account authority. Google created/reused the intended normal identity, Public/Admin transfer evidence was consumed once, and Admin/master role counts did not increase. X initially failed at token exchange because the confidential request duplicated `client_id`; after aligning the request with X's official Basic-auth contract, a sanitized provider audit identified `unauthorized_client`. The operator regenerated the matching OAuth 2.0 Client Secret into encrypted Pages custody, and the final X login created a normal-user identity and consumed its Public handoff.
+- Deployed only the isolated X auth correction and bounded safe provider diagnostic as Admin production deployment `a2c1a7cb`; no concurrent Analytics/Inbox work was included. Google and X legacy Pages callbacks can now be removed. Discord has no post-cutover success evidence and GitHub has no successful identity evidence, so their transitional callbacks remain until provider-specific custom-domain acceptance passes.
+- Diagnosed Printful V2 against the official contract and store-scoped token for `18668025`. The reducer/event intersection is exactly 12 supported order/shipment lifecycle events. GET count was 2 and POST count was 1. The authorized POST returned HTTP 200 with top-level `data` and `extra` instead of documented `result`, so strict parsing stopped with `PRINTFUL_PROVIDER_SUPPORT_REQUIRED`; no signing keys or Cloudflare bindings were changed, no retry occurred, and configured/readback/signed-delivery states remain `no`.
+- Reconfirmed the custom Public/Admin/CDN authorities, production-only domain-cutover switches, preview-disabled Google, canonical future PayPal callback, intentionally disabled YouTube publication, and fail-closed commerce posture. PayPal onboarding and all commerce/payment/fulfillment/email/tax gates remain untouched.
+
 ## 2026-08-30 - Wheels Stage V1 authority
 
 - Added normalized `wheel_stages` and `wheel_stage_items` authority with public/private lifecycle, maximum-six membership, revision checks, creator bounds, independent member access, signed internal/Public projections, audit events, and Stage-only delete semantics that preserve Wheels and official results.

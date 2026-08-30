@@ -1,7 +1,7 @@
 export type InboxMessage = {
   id: string; category: string; sourceType: string; sourceId: string; title: string; preview: string;
   body: string; actionUrl: string | null; actionLabel: string | null; createdAt: string;
-  resolvedAt: string | null; readAt: string | null; unread: boolean;
+  resolvedAt: string | null; readAt: string | null; unread: boolean; deletedAt: string | null;
 };
 
 export type InboxSummary = {
@@ -15,6 +15,7 @@ export async function getInboxSummary() { return request<InboxSummary>("/api/adm
 export async function getInboxMessages(unread = false) { return request<{ ok: true; items: InboxMessage[]; total: number }>(`/api/admin/inbox?unread=${unread}`); }
 export async function markInboxRead(id: string, csrfToken: string) { return request<{ ok: true }>(`/api/admin/inbox/${encodeURIComponent(id)}/read`, "POST", {}, csrfToken); }
 export async function markAllInboxRead(csrfToken: string) { return request<{ ok: true }>("/api/admin/inbox/read-all", "POST", {}, csrfToken); }
+export async function mutateInboxMessages(ids: string[], action: "read" | "unread" | "delete", csrfToken: string) { return request<{ ok: true; updated: number }>("/api/admin/inbox/bulk", "POST", { ids, action }, csrfToken); }
 
 async function request<T>(url: string, method = "GET", body?: Record<string, unknown>, csrfToken = "") {
   const headers: Record<string, string> = { Accept: "application/json" };

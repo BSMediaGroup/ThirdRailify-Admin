@@ -13,6 +13,7 @@ import {
   adminInboxSummary,
   markAdminInboxRead,
   markAllAdminInboxRead,
+  mutateAdminInboxMessages,
 } from "../../../_shared/admin-inbox.js";
 
 const ROUTE_PREFIX = "/api/admin/inbox";
@@ -30,10 +31,13 @@ export async function onRequest({ request, env }) {
     if (request.method === "POST") {
       requireAdminOrigin(request, env);
       await requireCsrf(request, session);
-      await readJsonBody(request);
+      const body = await readJsonBody(request);
       if (path === "read-all") return response(await markAllAdminInboxRead(env, session.accountId), request, env);
+      if (path === "bulk") return response(await mutateAdminInboxMessages(env, session.accountId, body), request, env);
       const read = path.match(/^([^/]+)\/read$/);
       if (read) return response(await markAdminInboxRead(env, session.accountId, decodePart(read[1])), request, env);
+      const mutation = path.match(/^([^/]+)\/(unread|delete)$/);
+      if (mutation) return response(await mutateAdminInboxMessages(env, session.accountId, { ids: [decodePart(mutation[1])], action: mutation[2] }), request, env);
     }
     throw new AuthFailure(404, "not_found", "The Admin inbox route was not found.");
   } catch (error) {

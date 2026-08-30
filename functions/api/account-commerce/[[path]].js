@@ -8,6 +8,8 @@ import {
   accountCommerceOverview,
   accountOrderDetail,
   accountOrderHistory,
+  accountInboxMessages,
+  mutateAccountInbox,
   enforceAccountCommerceRateLimit,
   readAccountCommerceInternalBody,
   verifyAccountCommerceInternalRequest,
@@ -28,6 +30,8 @@ export async function onRequest({ request, env }) {
     const internalPath = path.slice("internal/".length);
     let payload;
     if (internalPath === "overview") payload = await accountCommerceOverview(env, accountId);
+    else if (internalPath === "inbox") payload = await accountInboxMessages(env, accountId, input);
+    else if (internalPath === "inbox/mutate") payload = await mutateAccountInbox(env, accountId, input);
     else if (internalPath === "contact") payload = await accountCommerceContactUpdate(env, accountId, input);
     else if (internalPath === "addresses/create") payload = await accountAddressCreate(env, accountId, input);
     else if (internalPath === "orders") payload = await accountOrderHistory(env, accountId, input);

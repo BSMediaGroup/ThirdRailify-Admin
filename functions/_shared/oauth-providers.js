@@ -145,7 +145,6 @@ export async function exchangeOAuthCode(env, provider, code, transaction, fetchI
   const headers = { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" };
   if (provider === "twitter") {
     headers.Authorization = `Basic ${btoa(`${config.clientId}:${config.clientSecret}`)}`;
-    body.set("client_id", config.clientId);
   } else {
     body.set("client_id", config.clientId);
     body.set("client_secret", config.clientSecret);
@@ -160,7 +159,13 @@ export async function exchangeOAuthCode(env, provider, code, transaction, fetchI
   const payload = await response.json().catch(() => null);
   const accessToken = cleanText(payload?.access_token, 4096);
   if (!response.ok || !accessToken) {
-    throw new AuthFailure(400, "oauth_exchange_failed", "The OAuth provider did not complete sign-in.");
+    const failure = new AuthFailure(400, "oauth_exchange_failed", "The OAuth provider did not complete sign-in.");
+    failure.providerDiagnostic = {
+      httpStatus: response.status,
+      responseKeys: payload && typeof payload === "object" && !Array.isArray(payload) ? Object.keys(payload).sort().slice(0, 12) : [],
+      error: cleanText(payload?.error, 80) || null,
+    };
+    throw failure;
   }
   return accessToken;
 }
