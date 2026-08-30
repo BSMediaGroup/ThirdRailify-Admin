@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
 
-const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
-const PUBLIC_ORIGIN = "https://thirdrailify.pages.dev";
+const ADMIN_ORIGIN = String(process.env.THIRDRAILIFY_ADMIN_ORIGIN || "https://admin.thirdrailify.com").replace(/\/$/, "");
+const PUBLIC_ORIGIN = String(process.env.THIRDRAILIFY_PUBLIC_ORIGIN || "https://thirdrailify.com").replace(/\/$/, "");
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const resultsDirectory = join(tmpdir(), "thirdrailify-live-commerce-media");
 await mkdir(resultsDirectory, { recursive: true });

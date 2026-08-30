@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 
 const chrome = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-const adminOrigin = "https://thirdrailify-admin.pages.dev";
-const publicOrigin = "https://thirdrailify.pages.dev";
+const adminOrigin = String(process.env.THIRDRAILIFY_ADMIN_ORIGIN || "https://admin.thirdrailify.com").replace(/\/$/, "");
+const publicOrigin = String(process.env.THIRDRAILIFY_PUBLIC_ORIGIN || "https://thirdrailify.com").replace(/\/$/, "");
 const sessionId = "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC";
 
 const statusResponse = await fetch(`${publicOrigin}/api/commerce/order-status?session_id=${sessionId}`);

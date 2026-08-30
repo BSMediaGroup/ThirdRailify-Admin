@@ -1,4 +1,4 @@
-const baseUrl = String(process.env.COMMERCE_ADMIN_ORIGIN || "https://thirdrailify-admin.pages.dev").replace(/\/$/, "");
+const baseUrl = String(process.env.COMMERCE_ADMIN_ORIGIN || "https://admin.thirdrailify.com").replace(/\/$/, "");
 const command = process.argv[2] || "plan";
 const execute = process.argv.includes("--execute");
 const cookie = String(process.env.COMMERCE_ADMIN_SESSION_COOKIE || "");

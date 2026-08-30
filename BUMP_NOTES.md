@@ -1,5 +1,11 @@
 # Bump notes
 
+## 2026-08-30 - Canonical production domain cutover
+
+- Activated `https://admin.thirdrailify.com` as the canonical Admin UI and deployed `4a72bc5d-cbe3-4ebe-81f2-2ec5ec0c6ea8`. The old Pages hostname redirects browser GET/HEAD outside `/api/*` while preserving API and webhook methods/bodies.
+- Production origins and `THIRDRAILIFY_DOMAIN_CUTOVER_ACTIVE=true` were read back; preview retains Pages origins and host-only cookies. Permanent operator URL defaults now target the custom Admin hostname.
+- Provider callback changes remain explicit dashboard actions because no safe repository updater/readback exists. Commerce settings and row fingerprints were identical before/after with `rows_written=0`; DNSSEC is enabled in Cloudflare and awaits the GoDaddy parent DS.
+
 ## 2026-08-30 - Wheels V1.8 segment-style media authority
 
 CURRENT VER=0.1.0-alpha.0

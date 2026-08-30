@@ -229,4 +229,4 @@ Official draws reject browser-supplied winners, use Web Crypto rejection samplin
 
 ## Cloudflare and domain safety
 
-See `CLOUDFLARE_AUTH_SETUP.md` for account infrastructure and `CLOUDFLARE_COMMERCE_SETUP.md` for the staged commerce setup and remaining disabled activation gates. `COMMERCE_ARCHITECTURE.md`, `WIX_COMMERCE_AUDIT.md`, and `STRIPE_CANADA_FEASIBILITY.md` record the direct dedicated-account design, source evidence, and remaining off-code checks. Do not attach `admin.thirdrailify.com` during staging.
+See `CLOUDFLARE_AUTH_SETUP.md` for account infrastructure, `docs/DOMAIN_CUTOVER.md` for the completed canonical-domain transition, and `CLOUDFLARE_COMMERCE_SETUP.md` for the remaining disabled Commerce activation gates. `COMMERCE_ARCHITECTURE.md`, `WIX_COMMERCE_AUDIT.md`, and `STRIPE_CANADA_FEASIBILITY.md` record the direct dedicated-account design, source evidence, and remaining off-code checks. `https://admin.thirdrailify.com` is canonical; the old Pages hostname remains only for browser redirect and machine-route compatibility.
