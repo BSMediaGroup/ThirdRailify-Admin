@@ -1,5 +1,6 @@
 import { AuthFailure, cleanText, nowIso, randomId } from "./auth-core.js";
 import { requireCommerceDb, writeCommerceAudit } from "./commerce-core.js";
+import { paypalCredentials } from "./paypal-client.js";
 
 export const LIVE_ACTIVATION_CONFIRMATION = "ACTIVATE LIVE COMMERCE";
 export const EMERGENCY_PAUSE_CONFIRMATION = "PAUSE LIVE COMMERCE";
@@ -21,7 +22,7 @@ export async function commerceLaunchPlan(env) {
   const db = requireCommerceDb(env);
   const [settingsResult, providersResult, launch, marketsResult, migration, counts, templates, jobs, printfulDeliveries, business] = await Promise.all([
     db.prepare("SELECT setting_key,value_json FROM commerce_settings").all(),
-    db.prepare("SELECT provider,status,environment,integration_mode,external_account_id,country_code,currency_code,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider IN ('stripe','printful')").all(),
+    db.prepare("SELECT provider,status,environment,integration_mode,external_account_id,country_code,currency_code,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider IN ('paypal','stripe','printful')").all(),
     db.prepare("SELECT * FROM commerce_launch_state WHERE id='production'").first(),
     db.prepare("SELECT country_code,display_name,status,strategy,revision FROM commerce_shipping_markets ORDER BY country_code").all(),
     db.prepare("SELECT status,phase,step_lease_token,safe_state_json FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08'").first(),
@@ -40,18 +41,20 @@ export async function commerceLaunchPlan(env) {
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
   const providers = Object.fromEntries((providersResult?.results || []).map((row) => [row.provider, { ...row, metadata: json(row.safe_metadata_json, {}) }]));
-  const stripe = providers.stripe || null;
+  const paypal = providers.paypal || null;
   const printful = providers.printful || null;
+  const paypalLive = paypalCredentials(env, "live");
   const markets = marketsResult?.results || [];
   const activeMarkets = markets.filter((market) => market.status === "active" && market.strategy === "printful_dynamic");
   const migrationState = json(migration?.safe_state_json, {});
   const configuredEmailTemplates = (templates?.results || []).filter((template) => template.status === "ready" && Number(template.enabled) === 1).length;
   const hardGates = [
     gate("merchant_identity", Boolean(cleanText(business?.trading_name, 160) && business?.country_code === "CA" && business?.currency_code === "CAD" && cleanText(business?.support_email, 254) && business?.legal_business_name_ciphertext && business?.private_address_ciphertext), "The Canadian merchant identity, support contact, encrypted legal name, and encrypted private address are configured."),
-    gate("stripe_live_credential", isLiveStripeSecret(env), "A distinct server-only Stripe LIVE secret is configured."),
-    gate("stripe_live_account", stripe?.status === "connected" && stripe?.environment === "live" && stripe?.integration_mode === "direct_merchant" && stripe?.country_code === "CA" && String(stripe?.currency_code || "").toLowerCase() === "cad" && stripe?.metadata?.charges_enabled === true && stripe?.metadata?.details_submitted === true && settings.stripe_live_api_verified === true, "The matched Canadian CAD Stripe account has LIVE charges enabled and details submitted."),
-    gate("stripe_live_webhook", isLiveStripeWebhookSecret(env) && settings.stripe_live_webhook_configured === true && stripe?.metadata?.live_webhook_configured === true, "A distinct signed LIVE Stripe webhook is configured and read back."),
-    gate("stripe_tax", settings.stripe_tax_enabled === true && settings.tax_calculation_provider === "stripe_tax" && stripe?.metadata?.tax_ready === true, "Stripe Tax settings are configured without inventing registrations."),
+    gate("paypal_preferred", settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && paypal?.integration_mode === "direct_merchant", "PayPal is preferred and Stripe is retained but disabled."),
+    gate("paypal_live_credential", paypalLive.configured && Boolean(paypalLive.expectedMerchantId) && settings.paypal_live_configured === true, "Distinct server-only PayPal LIVE credentials and the expected merchant identity are configured."),
+    gate("paypal_live_account", paypal?.status === "connected" && paypal?.environment === "live" && paypal?.country_code === "CA" && String(paypal?.currency_code || "").toUpperCase() === "CAD" && paypal?.metadata?.live?.merchant_id_verified === true, "The Canadian CAD PayPal merchant identity has been verified by provider readback."),
+    gate("paypal_live_webhook", Boolean(paypalLive.webhookId) && settings.paypal_live_webhook_configured === true && paypal?.metadata?.live?.webhook_configured === true, "The exact PayPal LIVE webhook is registered and its identifier is stored as a server secret."),
+    gate("tax_policy", settings.tax_calculation_provider === "not_collecting", "An explicit server-authoritative tax policy is configured without inventing registrations."),
     gate("printful_store", printful?.status === "connected" && printful?.integration_mode === "fulfillment" && String(printful?.external_account_id || "") === "18668025" && printful?.metadata?.api_configured === true && hasPrintfulSecret(env), "The native Printful target store 18668025 is verified."),
     gate("printful_v2_webhook", settings.printful_v2_webhook_configured === true && hasPrintfulWebhookSecrets(env), "The signed Printful V2 webhook is configured and read back."),
     gate("catalogue", Number(counts?.eligible_variants || 0) > 0 && Number(counts?.eligible_sellable_variants || 0) === Number(counts?.eligible_variants || 0) && Number(counts?.ineligible_sellable_variants || 0) === 0, "Every eligible target-verified variant is sellable and blocked variants remain unavailable."),
@@ -79,6 +82,11 @@ export async function commerceLaunchPlan(env) {
       fulfillmentEnabled: settings.fulfillment_submission_enabled === true,
       transactionalEmailEnabled: settings.transactional_email_enabled === true,
       stripeTaxEnabled: settings.stripe_tax_enabled === true,
+      preferredPaymentProvider: settings.preferred_payment_provider || "paypal",
+      paypalStoreCheckoutEnabled: settings.paypal_store_checkout_enabled === true,
+      paypalDonationsEnabled: settings.paypal_donations_enabled === true,
+      paypalLiveCaptureEnabled: settings.paypal_live_capture_enabled === true,
+      stripeEnabled: settings.stripe_enabled === true,
       emergencyPaused: settings.commerce_emergency_paused === true,
     },
     catalogue: {
@@ -130,8 +138,15 @@ export async function activateCommerceLaunch(env, input, actorAccountId) {
     setting(db, "commerce_environment", "production", timestamp, actorAccountId),
     setting(db, "printful_order_mode", "draft_then_confirm", timestamp, actorAccountId),
     setting(db, "commerce_launch_revision", nextRevision, timestamp, actorAccountId),
-    db.prepare(`UPDATE commerce_provider_connections SET environment='live',safe_metadata_json=json_set(safe_metadata_json,
-      '$.checkout_enabled',json('true'),'$.live_payments_enabled',json('true')),updated_at=? WHERE provider='stripe'`).bind(timestamp),
+    setting(db, "paypal_store_checkout_enabled", true, timestamp, actorAccountId),
+    setting(db, "paypal_donations_enabled", true, timestamp, actorAccountId),
+    setting(db, "paypal_live_capture_enabled", true, timestamp, actorAccountId),
+    setting(db, "stripe_enabled", false, timestamp, actorAccountId),
+    db.prepare(`UPDATE commerce_payment_provider_state SET preferred_provider='paypal',stripe_enabled=0,paypal_live_configured=1,
+      paypal_store_checkout_enabled=1,paypal_live_capture_enabled=1,paypal_donations_enabled=1,emergency_paused=0,
+      revision=revision+1,transition_reason='Authorized PayPal production commerce activation.',updated_by_actor=?,updated_at=? WHERE id='primary'`).bind(cleanText(actorAccountId,160)||"deployment-cli",timestamp),
+    db.prepare(`UPDATE commerce_provider_connections SET environment='live',status='connected',safe_metadata_json=json_set(safe_metadata_json,
+      '$.preferred',json('true'),'$.store_checkout_enabled',json('true'),'$.donations_enabled',json('true'),'$.live_capture_enabled',json('true')),updated_at=? WHERE provider='paypal'`).bind(timestamp),
     db.prepare(`UPDATE commerce_provider_connections SET environment='production',safe_metadata_json=json_set(safe_metadata_json,
       '$.fulfillment_enabled',json('true'),'$.order_mode','draft_then_confirm'),updated_at=? WHERE provider='printful'`).bind(timestamp),
     db.prepare("UPDATE commerce_products SET checkout_environment='live',updated_at=? WHERE status='active' AND visibility='public'").bind(timestamp),
@@ -141,7 +156,7 @@ export async function activateCommerceLaunch(env, input, actorAccountId) {
       .bind(auditId, cleanText(actorAccountId, 160) || null, "commerce.production_activated", "commerce_launch_state", "production", JSON.stringify({ revision: nextRevision, planDigest: plan.digest, transactionalEmailEnabled: emailEnabled }), timestamp),
   ];
   const updates = await db.batch(statements);
-  if (changes(updates[10]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during activation.");
+  if (changes(updates[15]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during activation.");
   return commerceLaunchPlan(env);
 }
 
@@ -160,14 +175,20 @@ export async function pauseCommerceLaunch(env, input, actorAccountId) {
     setting(db, "fulfillment_submission_enabled", false, timestamp, actorAccountId),
     setting(db, "commerce_emergency_paused", true, timestamp, actorAccountId),
     setting(db, "commerce_launch_revision", nextRevision, timestamp, actorAccountId),
-    db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.checkout_enabled',json('false'),'$.live_payments_enabled',json('false')),updated_at=? WHERE provider='stripe'").bind(timestamp),
+    setting(db, "paypal_store_checkout_enabled", false, timestamp, actorAccountId),
+    setting(db, "paypal_donations_enabled", false, timestamp, actorAccountId),
+    setting(db, "paypal_live_capture_enabled", false, timestamp, actorAccountId),
+    setting(db, "stripe_enabled", false, timestamp, actorAccountId),
+    db.prepare(`UPDATE commerce_payment_provider_state SET stripe_enabled=0,paypal_store_checkout_enabled=0,paypal_live_capture_enabled=0,
+      paypal_donations_enabled=0,emergency_paused=1,revision=revision+1,transition_reason=?,updated_by_actor=?,updated_at=? WHERE id='primary'`).bind(reason,cleanText(actorAccountId,160)||"deployment-cli",timestamp),
+    db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.store_checkout_enabled',json('false'),'$.donations_enabled',json('false'),'$.live_capture_enabled',json('false')),updated_at=? WHERE provider='paypal'").bind(timestamp),
     db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.fulfillment_enabled',json('false')),updated_at=? WHERE provider='printful'").bind(timestamp),
     db.prepare("UPDATE commerce_launch_state SET state='paused',revision=?,paused_at=?,pause_reason=?,updated_by_actor=?,updated_at=? WHERE id='production' AND revision=?")
       .bind(nextRevision, timestamp, reason, cleanText(actorAccountId, 160) || "deployment-cli", timestamp, revision),
     db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,?,?,?,'success',?,?)")
       .bind(randomId(), cleanText(actorAccountId, 160) || null, "commerce.emergency_paused", "commerce_launch_state", "production", JSON.stringify({ revision: nextRevision, reason }), timestamp),
   ]);
-  if (changes(updates[7]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during the emergency pause.");
+  if (changes(updates[12]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during the emergency pause.");
   return commerceLaunchPlan(env);
 }
 
@@ -192,8 +213,6 @@ function setting(db, key, value, timestamp, actor) {
 }
 
 function gate(id, ready, detail) { return { id, ready: Boolean(ready), state: ready ? "ready" : "blocked", detail }; }
-function isLiveStripeSecret(env) { return /^sk_live_[A-Za-z0-9_]{8,}$/.test(String(env?.STRIPE_LIVE_SECRET_KEY || "").trim()); }
-function isLiveStripeWebhookSecret(env) { return /^whsec_[^\s]{6,}$/.test(String(env?.STRIPE_LIVE_WEBHOOK_SECRET || "").trim()); }
 function hasPrintfulSecret(env) { const value = String(env?.PRINTFUL_API_TOKEN || "").trim(); return value.length >= 16 && value.length <= 4096; }
 function hasPrintfulWebhookSecrets(env) { const publicKey = String(env?.PRINTFUL_WEBHOOK_V2_PUBLIC_KEY || "").trim(); const secret = String(env?.PRINTFUL_WEBHOOK_V2_SECRET_HEX || "").trim(); return /^[A-Za-z0-9+/_=-]{4,512}$/.test(publicKey) && /^[0-9a-fA-F]{64,1024}$/.test(secret) && secret.length % 2 === 0; }
 function changes(result) { return Number(result?.meta?.changes || 0); }

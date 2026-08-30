@@ -31,6 +31,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0018_printful_fulfillment_lifecycle.sql", import.meta.url),
   new URL("../commerce-migrations/0019_account_address_book.sql", import.meta.url),
   new URL("../commerce-migrations/0020_commerce_launch_operations.sql", import.meta.url),
+  new URL("../commerce-migrations/0021_paypal_direct_merchant.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";
@@ -235,6 +236,7 @@ export async function enableTestCheckout(db) {
     ).bind(JSON.stringify(metadata)),
     db.prepare("UPDATE commerce_settings SET value_json = 'true' WHERE setting_key IN ('checkout_enabled', 'stripe_api_configured', 'stripe_webhook_configured')"),
     db.prepare("UPDATE commerce_settings SET value_json = 'false' WHERE setting_key IN ('live_payment_capture_enabled', 'fulfillment_submission_enabled')"),
+    db.prepare("INSERT INTO commerce_settings(setting_key,value_json,classification,updated_at) VALUES ('preferred_payment_provider','\"stripe\"','safe','test'),('stripe_enabled','true','safe','test') ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at"),
   ]);
 }
 
@@ -264,6 +266,8 @@ export async function enableControlledTestCheckout(db, productId = "product-test
       ["stripe_test_checkout_enabled", true],
       ["stripe_test_checkout_product_id", productId],
       ["stripe_test_checkout_variant_id", variantId],
+      ["preferred_payment_provider", "stripe"],
+      ["stripe_enabled", true],
     ].map(([key, value]) => db.prepare(
       `INSERT INTO commerce_settings (setting_key, value_json, classification, updated_at)
        VALUES (?, ?, 'safe', ?) ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`,

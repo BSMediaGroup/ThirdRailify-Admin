@@ -8,6 +8,8 @@ import {
   normalizePrintfulApiError,
 } from "./printful-api.js";
 import { normalizePrintfulOrderEvidence, reconcilePrintfulOrderEvidence } from "./printful-fulfillment.js";
+import { PayPalApiError } from "./paypal-client.js";
+import { processPayPalRecoveryJob } from "./paypal-commerce.js";
 
 const MAX_BATCH = 10;
 const LEASE_MS = 2 * 60 * 1000;
@@ -33,13 +35,15 @@ export async function processCommerceJobs(env, fetchImpl = fetch, now = Date.now
         ? await submitPaidLiveOrder(env, job.order_id, fetchImpl)
         : job.job_kind === "fulfillment_reconcile"
           ? await reconcileLiveProviderOrder(env, job.order_id, fetchImpl)
-          : await processEmailJob(env, job, fetchImpl);
+          : job.job_kind.startsWith("paypal_")
+            ? await processPayPalRecoveryJob(env, job, fetchImpl)
+            : await processEmailJob(env, job, fetchImpl);
       await db.prepare("UPDATE commerce_operation_jobs SET state='completed',lease_token=NULL,lease_expires_at=NULL,last_error_json='{}',completed_at=?,updated_at=? WHERE id=? AND lease_token=?")
         .bind(nowIso(now), nowIso(now), job.id, leaseToken).run();
       results.push({ id: job.id, state: "completed", result });
     } catch (error) {
       const safe = await persistProviderDiagnostic(env, error, job);
-      const retryable = error instanceof PrintfulApiError ? error.retryable : error instanceof AuthFailure ? error.status >= 500 : true;
+      const retryable = error instanceof PrintfulApiError || error instanceof PayPalApiError ? error.retryable : error instanceof AuthFailure ? error.status >= 500 : true;
       const terminal = !retryable || Number(job.attempt_count) >= Number(job.max_attempts);
       const delay = Math.min(6 * 60 * 60 * 1000, 30_000 * (2 ** Math.min(8, Number(job.attempt_count))));
       await db.prepare(`UPDATE commerce_operation_jobs SET state=?,lease_token=NULL,lease_expires_at=NULL,next_attempt_at=?,last_error_json=?,updated_at=?
@@ -76,13 +80,20 @@ export async function commerceJobsPayload(env) {
 
 async function submitPaidLiveOrder(env, orderId, fetchImpl) {
   const db = requireCommerceDb(env);
-  const [order, settingsResult, signedPayment] = await Promise.all([
-    db.prepare("SELECT id,environment,payment_status,fulfillment_status,currency_code,customer_gross_amount,cart_digest,stripe_checkout_session_id,printful_order_id FROM commerce_orders WHERE id=?").bind(orderId).first(),
+  const [order, settingsResult, paymentAuthority] = await Promise.all([
+    db.prepare("SELECT id,environment,customer_payment_provider,payment_status,fulfillment_status,currency_code,customer_gross_amount,cart_digest,stripe_checkout_session_id,printful_order_id FROM commerce_orders WHERE id=?").bind(orderId).first(),
     db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('fulfillment_submission_enabled','commerce_emergency_paused','printful_order_mode')").all(),
-    db.prepare("SELECT provider_event_id,payload_sha256 FROM commerce_webhook_events WHERE provider='stripe' AND livemode=1 AND processing_status='processed' AND result_code='payment_confirmed' AND related_object_id=(SELECT stripe_checkout_session_id FROM commerce_orders WHERE id=?) LIMIT 1").bind(orderId).first(),
+    db.prepare(`SELECT provider,evidence_id FROM (
+      SELECT 'paypal' provider,id evidence_id,updated_at evidence_at FROM commerce_payment_attempts
+        WHERE commerce_order_id=? AND provider='paypal' AND environment='live' AND normalized_state='completed'
+      UNION ALL
+      SELECT 'stripe' provider,provider_event_id evidence_id,processed_at evidence_at FROM commerce_webhook_events
+        WHERE provider='stripe' AND livemode=1 AND processing_status='processed' AND result_code='payment_confirmed'
+          AND related_object_id=(SELECT stripe_checkout_session_id FROM commerce_orders WHERE id=?))
+      ORDER BY evidence_at DESC LIMIT 1`).bind(orderId,orderId).first(),
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, null)]));
-  requireLiveOrder(order, signedPayment, settings);
+  requireLiveOrder(order, paymentAuthority, settings);
   const prepared = await prepareStoredPrintfulDraftOrder(env, orderId);
   if (!prepared.eligible || !prepared.internalDraftPayload) throw new AuthFailure(409, prepared.blockers[0]?.code || "printful_order_not_eligible", prepared.blockers[0]?.message || "The order is not eligible for Printful submission.");
   const request = await buildPrintfulProductionDraftCreateRequest({
@@ -183,8 +194,8 @@ async function enqueueDueReconciliationJobs(db, timestamp) {
   }
 }
 
-function requireLiveOrder(order, signedPayment, settings) {
-  if (!order || order.environment !== "live" || order.payment_status !== "paid" || !signedPayment || order.currency_code !== "CAD" || !order.cart_digest) throw new AuthFailure(409, "live_payment_authority_invalid", "A genuinely signed successful LIVE Stripe payment is required.");
+function requireLiveOrder(order, paymentAuthority, settings) {
+  if (!order || order.environment !== "live" || order.payment_status !== "paid" || !paymentAuthority || paymentAuthority.provider !== order.customer_payment_provider || order.currency_code !== "CAD" || !order.cart_digest) throw new AuthFailure(409, "live_payment_authority_invalid", "Genuine provider-confirmed LIVE payment authority is required.");
   if (settings.fulfillment_submission_enabled !== true || settings.commerce_emergency_paused === true || settings.printful_order_mode !== "draft_then_confirm") throw new AuthFailure(409, "fulfillment_gate_closed", "New provider submission is currently paused.");
   if (String(order.printful_order_id || "") === "174104132") throw new AuthFailure(409, "preserved_printful_order_rejected", "The preserved TEST Printful draft can never enter automatic fulfillment.");
 }
@@ -229,9 +240,9 @@ async function boundedFetch(fetchImpl, url, init) {
 }
 
 async function persistProviderDiagnostic(env, error, job) {
-  const safe = error instanceof PrintfulApiError ? error.toSafeJSON() : { operation: job.job_kind, httpStatus: error instanceof AuthFailure ? error.status : null, providerCode: error instanceof AuthFailure ? error.code : "operation_failed", providerErrorCode: null, safeMessage: cleanText(error?.message, 300) || "Commerce operation failed.", requestId: null, retryable: error instanceof AuthFailure ? error.status >= 500 : true, payloadDigest: job.payload_digest };
-  if (job.job_kind.startsWith("fulfillment") || job.job_kind === "email_send") {
-    const provider = job.job_kind === "email_send" ? "resend" : "printful";
+  const safe = error instanceof PrintfulApiError ? error.toSafeJSON() : error instanceof PayPalApiError ? { operation:error.operation,httpStatus:error.httpStatus,providerCode:error.providerCode,safeMessage:error.providerReason,requestId:error.debugId,retryable:error.retryable,payloadDigest:error.payloadDigest||job.payload_digest } : { operation: job.job_kind, httpStatus: error instanceof AuthFailure ? error.status : null, providerCode: error instanceof AuthFailure ? error.code : "operation_failed", providerErrorCode: null, safeMessage: cleanText(error?.message, 300) || "Commerce operation failed.", requestId: null, retryable: error instanceof AuthFailure ? error.status >= 500 : true, payloadDigest: job.payload_digest };
+  if (job.job_kind.startsWith("fulfillment") || job.job_kind.startsWith("paypal_") || job.job_kind === "email_send") {
+    const provider = job.job_kind === "email_send" ? "resend" : job.job_kind.startsWith("paypal_") ? "paypal" : "printful";
     await requireCommerceDb(env).prepare(`INSERT INTO commerce_provider_diagnostics
       (id,provider,operation_kind,http_status,provider_code,provider_reason,request_id,payload_digest,retryable,occurred_at)
       VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(`cpd_${randomId()}`, provider, safe.operation || job.job_kind, safe.httpStatus, safe.providerCode || safe.providerErrorCode, safe.safeMessage, safe.requestId, safe.payloadDigest || job.payload_digest, safe.retryable ? 1 : 0, nowIso()).run();

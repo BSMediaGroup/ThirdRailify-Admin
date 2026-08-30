@@ -1,5 +1,12 @@
 # Bump notes
 
+## 2026-08-30 - PayPal direct-merchant payment authority
+
+- Added migration `0021_paypal_direct_merchant.sql`, provider-neutral payment attempts, donation authority, normalized PayPal webhook evidence, diagnostics, and recovery jobs.
+- Added server-created/server-captured PayPal Orders v2 flows for store purchases and one-time donations, verified webhook reduction, and Commerce Worker reconciliation.
+- Made PayPal preferred and Stripe configured/disabled while preserving all Stripe TEST evidence and code. All production payment and fulfillment gates remain closed pending legitimate PayPal credentials and webhook readback.
+- Added PayPal-first Payments, Orders, Customers, and Commerce Overview projections without page-load provider calls or secret projection.
+
 ## 2026-08-30 - Account V2 commerce authority
 
 CURRENT VER=0.1.0-alpha.0

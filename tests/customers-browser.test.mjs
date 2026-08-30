@@ -53,7 +53,7 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   await guestRow.focus(); await page.keyboard.press("Enter");
   await page.getByRole("dialog", { name: "Guest Buyer" }).waitFor();
   assert.match(new URL(page.url()).search, /customer=cst_/);
-  assert.match(await page.getByRole("dialog").innerText(), /No Account linkage[\s\S]*TEST gross[\s\S]*historical delivery snapshot/i);
+  assert.match(await page.getByRole("dialog").innerText(), /No Account linkage[\s\S]*TEST order gross[\s\S]*historical delivery snapshot/i);
   await page.keyboard.press("Escape"); await page.getByRole("dialog").waitFor({ state: "detached" });
   assert.equal(await guestRow.evaluate((element) => element === document.activeElement), true);
 

@@ -1,5 +1,7 @@
 # Third Railify Admin
 
+Commerce payments use PayPal Orders API v2 as the preferred direct-merchant rail for store purchases and one-time donations. Stripe is retained as a configured but disabled future option. See [PayPal commerce operations](docs/PAYPAL_COMMERCE.md) for secrets, webhook events, gates, launch, and rollback.
+
 ## Replacement commerce catalogue authority
 
 Commerce D1 (`thirdrailify-commerce`) is the merchandising and CAD price authority for the replacement shop. `/products` manages product presentation, public visibility, deterministic ordering, bounded quantities, variant labels/options, integer-minor-unit CAD prices, and display-versus-checkout readiness. Provider identities and migration provenance are read-only integration metadata.

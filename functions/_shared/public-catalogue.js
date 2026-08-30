@@ -111,9 +111,15 @@ function serializePublicProduct(row, variants, collections) {
 }
 
 async function publicCheckoutEnabled(db) {
-  const result = await db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled','live_payment_capture_enabled','fulfillment_submission_enabled','commerce_emergency_paused')").all();
+  const result = await db.prepare(`SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN (
+    'commerce_environment','preferred_payment_provider','paypal_sandbox_configured','paypal_sandbox_webhook_configured',
+    'paypal_live_configured','paypal_live_webhook_configured','paypal_store_checkout_enabled','paypal_live_capture_enabled',
+    'fulfillment_submission_enabled','commerce_emergency_paused')`).all();
   const settings = Object.fromEntries((result?.results || []).map((row) => { try { return [row.setting_key, JSON.parse(row.value_json)]; } catch { return [row.setting_key, null]; } }));
-  return settings.checkout_enabled === true && settings.live_payment_capture_enabled === true && settings.fulfillment_submission_enabled === true && settings.commerce_emergency_paused !== true;
+  const live = settings.commerce_environment === "production";
+  const credentialsReady = live ? settings.paypal_live_configured === true : settings.paypal_sandbox_configured === true;
+  const webhookReady = live ? settings.paypal_live_webhook_configured === true : settings.paypal_sandbox_webhook_configured === true;
+  return settings.preferred_payment_provider === "paypal" && settings.paypal_store_checkout_enabled === true && credentialsReady && webhookReady && settings.commerce_emergency_paused !== true && (!live || (settings.paypal_live_capture_enabled === true && settings.fulfillment_submission_enabled === true));
 }
 
 function serializePublicCollection(row, productIds) {

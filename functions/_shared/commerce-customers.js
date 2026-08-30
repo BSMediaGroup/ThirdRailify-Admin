@@ -103,7 +103,7 @@ export async function customerDetailPayload(env, session, rawCustomerId, input =
   const totalPages = Number(row.total_orders || 0) ? Math.ceil(Number(row.total_orders) / pageSize) : 0;
   const page = totalPages ? Math.min(requestedPage, totalPages) : 1;
   const offset = (page - 1) * pageSize;
-  const [ordersResult, accountResult] = await Promise.all([
+  const [ordersResult, accountResult, donationsResult] = await Promise.all([
     db.prepare(`SELECT o.id,o.environment,o.payment_status,o.fulfillment_status,o.currency_code,
         o.customer_gross_amount,o.refund_amount,o.created_at,o.payment_confirmed_at,
         d.destination_country_code,d.destination_region_code,d.display_shipping_method,
@@ -117,6 +117,7 @@ export async function customerDetailPayload(env, session, rawCustomerId, input =
       WHERE o.customer_id=? ORDER BY o.created_at DESC,o.id ASC LIMIT ? OFFSET ?`)
       .bind(customerId, pageSize, offset).all(),
     row.linked_account_id ? accountMap(env, [row.linked_account_id]) : Promise.resolve(new Map()),
+    db.prepare("SELECT id,environment,amount_minor,status,created_at,completed_at FROM commerce_donations WHERE customer_id=? ORDER BY created_at DESC LIMIT 100").bind(customerId).all(),
   ]);
   const customer = await serializeCustomerRow(env, row, accountResult.get(row.linked_account_id));
   return {
@@ -124,6 +125,7 @@ export async function customerDetailPayload(env, session, rawCustomerId, input =
     customer: {
       ...customer,
       orders: (ordersResult?.results || []).map(serializeCustomerOrder),
+      donations: (donationsResult?.results || []).map((donation) => ({ id:cleanText(donation.id,80),environment:donation.environment === "live" ? "live" : "sandbox",amount:Number(donation.amount_minor||0),currencyCode:"CAD",status:cleanText(donation.status,40),createdAt:cleanText(donation.created_at,80),completedAt:cleanText(donation.completed_at,80)||null })),
       orderPage: page, orderPageSize: pageSize, orderTotalPages: totalPages,
       communication: {
         documents: (ordersResult?.results || []).reduce((sum, order) => sum + Number(order.document_count || 0), 0),
@@ -172,6 +174,8 @@ async function serializeCustomerRow(env, row, account) {
       liveOrderCount: Number(row.live_orders || 0), testOrderCount: Number(row.test_orders || 0),
       livePaidOrderCount: Number(row.live_paid_orders || 0), testPaidOrderCount: Number(row.test_paid_orders || 0),
       liveSpendAmount: Number(row.live_spend_amount || 0), testSpendAmount: Number(row.test_spend_amount || 0),
+      donationCount: Number(row.donation_count || 0), completedDonationCount: Number(row.completed_donations || 0),
+      liveDonationAmount: Number(row.live_donation_amount || 0), sandboxDonationAmount: Number(row.sandbox_donation_amount || 0),
       currencyCode: "CAD", firstOrderAt: cleanText(row.first_order_at, 80) || null, lastOrderAt: cleanText(row.last_order_at, 80) || null,
     },
   };
@@ -240,6 +244,10 @@ function customerStatsCte() {
       COALESCE(SUM(CASE WHEN o.environment='live' AND o.payment_status='paid' THEN o.customer_gross_amount ELSE 0 END),0) live_spend_amount,
       COALESCE(SUM(CASE WHEN o.environment='test' AND o.payment_status='paid' THEN o.customer_gross_amount ELSE 0 END),0) test_spend_amount,
       MIN(o.created_at) first_order_at,MAX(o.created_at) last_order_at
+      ,(SELECT COUNT(*) FROM commerce_donations d WHERE d.customer_id=c.id) donation_count
+      ,(SELECT COUNT(*) FROM commerce_donations d WHERE d.customer_id=c.id AND d.status='completed') completed_donations
+      ,(SELECT COALESCE(SUM(d.amount_minor),0) FROM commerce_donations d WHERE d.customer_id=c.id AND d.environment='live' AND d.status='completed') live_donation_amount
+      ,(SELECT COALESCE(SUM(d.amount_minor),0) FROM commerce_donations d WHERE d.customer_id=c.id AND d.environment='sandbox' AND d.status='completed') sandbox_donation_amount
     FROM commerce_customers c LEFT JOIN commerce_orders o ON o.customer_id=c.id GROUP BY c.id
   )`;
 }

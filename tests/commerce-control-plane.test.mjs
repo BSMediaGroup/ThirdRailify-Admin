@@ -133,7 +133,7 @@ test("central readiness is derived and keeps test acceptance separate from produ
   await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key IN ('stripe_api_configured','stripe_webhook_configured')").run();
   await harness.commerceDb.prepare("INSERT INTO commerce_catalogue_migrations (id,status,phase,products_verified,variants_mapped,safe_state_json,updated_at) VALUES ('permanent-printful-2026-08','waiting','source_files',12,238,?,'now')").bind(JSON.stringify({ plannedProducts: 49, manualPause: true, blockedProducts: Array.from({ length: 28 }, (_, index) => ({ index })) })).run();
   const payload = await productionReadinessPayload(env, master);
-  assert.equal(payload.productionReady, false); assert.equal(payload.domains.payments.details.testAcceptancePassed, true); assert.equal(payload.domains.payments.ready, false);
+  assert.equal(payload.productionReady, false); assert.equal(payload.domains.payments.details.stripeHistoricalAcceptancePassed, true); assert.equal(payload.domains.payments.details.stripeEnabled, false); assert.equal(payload.domains.payments.ready, false);
   assert.equal(payload.domains.catalogue.ready, true); assert.equal(payload.domains.shipping.ready, false); assert.equal(payload.domains.fulfillment.details.migrationPaused, true); assert.equal(payload.domains.fulfillment.details.processedProducts, 40);
   assert.equal(payload.domains.checkout.details.normalCheckoutEnabled, false); assert.equal(payload.domains.tax.details.calculationProvider, "unconfigured");
   assert.doesNotMatch(JSON.stringify(payload), /secret|identifier_ciphertext|tax_registration/);
