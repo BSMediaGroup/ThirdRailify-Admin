@@ -13,7 +13,7 @@ const MESSAGE_LIMIT = 5;
 const HOME_RAIL_ITEM_LIMIT = 8;
 
 export const DEFAULT_BANNER_CONFIG = Object.freeze({
-  normal: { enabled: false, dismissible: false, messages: [], mode: "static", speed: "normal" },
+  normal: { enabled: false, dismissible: false, messages: [], mode: "static", speed: "normal", glyph: "zap", glyphSize: "medium" },
   live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: null, ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" },
   homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT", "ABOOT NOTHING", "POP CULTURE BEAT DOWN"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap", glyphSize: "medium" },
 });
@@ -23,7 +23,7 @@ export function normalizeBannerConfig(value) {
   const normal = value.normal;
   const live = value.live;
   const homeRail = value.homeRail;
-  if (!allowedKeys(normal, ["enabled", "dismissible", "messages", "mode", "speed"]) || !requiredKeys(normal, ["enabled", "messages", "mode", "speed"]) || typeof normal.enabled !== "boolean" || (normal.dismissible !== undefined && typeof normal.dismissible !== "boolean") || !Array.isArray(normal.messages) || normal.messages.length > MESSAGE_LIMIT || !MODES.has(normal.mode) || !SPEEDS.has(normal.speed)) invalid("banner_normal_invalid", "The normal banner settings are invalid.");
+  if (!allowedKeys(normal, ["enabled", "dismissible", "messages", "mode", "speed", "glyph", "glyphSize"]) || !requiredKeys(normal, ["enabled", "messages", "mode", "speed"]) || typeof normal.enabled !== "boolean" || (normal.dismissible !== undefined && typeof normal.dismissible !== "boolean") || !Array.isArray(normal.messages) || normal.messages.length > MESSAGE_LIMIT || !MODES.has(normal.mode) || !SPEEDS.has(normal.speed) || (normal.glyph !== undefined && !HOME_RAIL_GLYPHS.has(normal.glyph)) || (normal.glyphSize !== undefined && !HOME_RAIL_GLYPH_SIZES.has(normal.glyphSize))) invalid("banner_normal_invalid", "The normal banner settings are invalid.");
   const messages = normal.messages.map(normalizeMessage);
   if (normal.enabled && messages.length === 0) invalid("banner_message_required", "Add at least one message before enabling the normal banner.");
   if (!exactKeys(live, ["enabled", "label", "showTitle", "supportingText", "ctaLabel", "animation", "intensity"]) || typeof live.enabled !== "boolean" || typeof live.showTitle !== "boolean") invalid("banner_live_invalid", "The Live Now banner settings are invalid.");
@@ -36,7 +36,7 @@ export function normalizeBannerConfig(value) {
   const items = homeRail.items.map((item, index) => requiredText(item, 80, "banner_home_rail_item_invalid", `Homepage rail item ${index + 1} must contain no more than 80 characters.`));
   if (!HOME_RAIL_MODES.has(homeRail.mode) || !SPEEDS.has(homeRail.speed) || !HOME_RAIL_EASINGS.has(homeRail.easing) || !HOME_RAIL_GLYPHS.has(homeRail.glyph) || (homeRail.glyphSize !== undefined && !HOME_RAIL_GLYPH_SIZES.has(homeRail.glyphSize))) invalid("banner_home_rail_invalid", "Choose supported homepage rail presentation settings.");
   return {
-    normal: { enabled: normal.enabled, dismissible: normal.dismissible ?? false, messages, mode: normal.mode, speed: normal.speed },
+    normal: { enabled: normal.enabled, dismissible: normal.dismissible ?? false, messages, mode: normal.mode, speed: normal.speed, glyph: normal.glyph ?? "zap", glyphSize: normal.glyphSize ?? "medium" },
     live: { enabled: live.enabled, label, showTitle: live.showTitle, supportingText, ctaLabel, animation: live.animation, intensity: live.intensity },
     homeRail: { enabled: homeRail.enabled, items, mode: homeRail.mode, speed: homeRail.speed, easing: homeRail.easing, glyph: homeRail.glyph, glyphSize: homeRail.glyphSize ?? "medium" },
   };

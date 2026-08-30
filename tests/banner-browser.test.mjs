@@ -40,15 +40,36 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     assert.ok(Math.abs((labelBox.y + labelBox.height / 2) - (iconBox.y + iconBox.height / 2)) <= 1, `${width}px label and external icon are vertically aligned`);
     if (width <= 760) assert.ok(linkBox.width >= 300, `${width}px Public link uses the available mobile width`);
     await page.getByText("Fixture preview only").waitFor();
-    assert.equal(await page.getByLabel("Divider size").inputValue(), "large");
+    const normalPanel = page.locator('section[aria-labelledby="normal-banner-title"]');
+    const railPanel = page.locator('section[aria-labelledby="home-rail-title"]');
+    assert.equal(await railPanel.locator("label", { hasText: "Divider size" }).locator("select").inputValue(), "large");
+    assert.equal(await normalPanel.locator("label", { hasText: "Ticker divider icon" }).locator("select").inputValue(), "zap");
+    assert.equal(await normalPanel.locator("label", { hasText: "Ticker divider size" }).locator("select").inputValue(), "large");
     assert.equal(await page.getByText("Allow visitors to dismiss this banner with a close button").locator("..").locator("input").isChecked(), true);
     const normalPreview = page.locator(".admin-banner-preview--normal");
     assert.equal(Math.round((await normalPreview.boundingBox()).height), 31);
-    const normalMotion = await page.locator(".admin-banner-preview__ticker > div").evaluate((element) => ({ name: getComputedStyle(element).animationName, duration: element.getAnimations()[0]?.effect?.getTiming().duration }));
-    assert.deepEqual(normalMotion, { name: "admin-banner-ticker", duration: 30000 });
+    const previewDismissBox = await page.getByRole("button", { name: "Dismiss announcement preview" }).boundingBox();
+    const normalPreviewBox = await normalPreview.boundingBox();
+    assert.ok(previewDismissBox && normalPreviewBox); assert.ok(Math.abs(normalPreviewBox.x + normalPreviewBox.width - previewDismissBox.x - previewDismissBox.width - 6) <= 1, `${width}px preview dismiss control is pinned to the banner edge`);
+    const normalSegments = page.locator(".admin-banner-preview__ticker-track > .admin-banner-preview__ticker-segment");
+    assert.equal(await normalSegments.count(), 2);
+    await page.waitForFunction(() => { const ticker = document.querySelector(".admin-banner-preview__ticker"); const segment = document.querySelector(".admin-banner-preview__ticker-track > .admin-banner-preview__ticker-segment"); return ticker && segment && segment.getBoundingClientRect().width > ticker.getBoundingClientRect().width; });
+    const normalGeometry = await page.locator(".admin-banner-preview__ticker-track").evaluate((element) => { const segments = [...element.children]; const repetitions = segments[0].querySelectorAll(":scope > .admin-banner-preview__ticker-item").length; const duration = element.getAnimations()[0]?.effect?.getTiming().duration; return { name: getComputedStyle(element).animationName, cycleDuration: duration / repetitions, segmentWidths: segments.map((segment) => segment.getBoundingClientRect().width), trackWidth: element.getBoundingClientRect().width }; });
+    assert.equal(normalGeometry.name, "admin-banner-ticker"); assert.equal(normalGeometry.cycleDuration, 30000); assert.ok(Math.abs(normalGeometry.segmentWidths[0] - normalGeometry.segmentWidths[1]) < 1); assert.ok(Math.abs(normalGeometry.trackWidth - normalGeometry.segmentWidths[0] * 2) < 1);
+    assert.equal(await normalSegments.first().locator(".admin-banner-preview__ticker-item").count(), await normalSegments.first().locator(".admin-banner-preview__divider").count());
+    assert.equal(Math.round((await normalSegments.first().locator(".admin-banner-preview__divider").first().boundingBox()).width), 14);
+    await normalPanel.locator("label", { hasText: "Ticker divider icon" }).locator("select").selectOption("dot");
+    await normalPanel.locator("label", { hasText: "Ticker divider size" }).locator("select").selectOption("small");
+    assert.equal(await normalPreview.locator(".admin-banner-preview__divider--dot").first().textContent(), "•");
+    assert.equal(Math.round((await normalPreview.locator(".admin-banner-preview__divider--dot").first().boundingBox()).width), 7);
+    await normalPanel.locator("label", { hasText: "Ticker divider icon" }).locator("select").selectOption("zap");
+    await normalPanel.locator("label", { hasText: "Ticker divider size" }).locator("select").selectOption("large");
     assert.deepEqual(await page.locator(".admin-banner-preview--normal b").first().evaluate((element) => ({ border: getComputedStyle(element).borderStyle, height: Math.round(element.getBoundingClientRect().height), fontSize: getComputedStyle(element).fontSize })), { border: "solid", height: 22, fontSize: "8px" });
     await page.getByLabel("Presentation mode").selectOption("crossfade");
+    assert.equal(await normalPreview.locator(".admin-banner-preview__divider").count(), 0);
     assert.deepEqual(await page.locator(".admin-banner-preview--normal.is-crossfade .admin-banner-preview__crossfade > .is-active").evaluate((element) => ({ duration: getComputedStyle(element).transitionDuration, easing: getComputedStyle(element).transitionTimingFunction })), { duration: "1.25s, 0s", easing: "cubic-bezier(0.4, 0, 0.2, 1), linear" });
+    await page.getByLabel("Presentation mode").selectOption("static");
+    assert.equal(await normalPreview.locator(".admin-banner-preview__divider").count(), 0);
     await page.getByLabel("Presentation mode").selectOption("ticker");
     await page.getByRole("button", { name: "Dismiss announcement preview" }).click();
     await page.getByText("Dismissed for this preview").waitFor();
@@ -64,7 +85,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     await page.getByLabel("Animation treatment").selectOption("pulse-sweep");
     assert.equal(Math.round((await page.locator(".admin-banner-preview--live").boundingBox()).height), 31);
     await page.getByRole("heading", { level: 2, name: "Homepage content rail" }).waitFor();
-    assert.equal(await page.getByText("Third Railify triple zap").count(), 1);
+    assert.equal(await page.getByText("Third Railify triple zap").count(), 2);
     const preview = page.locator(".admin-home-rail-preview"); const previewSegments = preview.locator(".admin-home-rail-preview__track > .admin-home-rail-preview__segment");
     assert.equal(await previewSegments.count(), 2);
     await page.waitForFunction(() => { const rail = document.querySelector(".admin-home-rail-preview"); const segment = document.querySelector(".admin-home-rail-preview__track > .admin-home-rail-preview__segment"); return rail && segment && segment.getBoundingClientRect().width > rail.getBoundingClientRect().width; });
@@ -87,7 +108,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     const message = page.getByLabel(/Message text/).first(); await message.fill("Updated staging announcement");
     await page.getByText("Unsaved changes").waitFor(); await page.getByRole("button", { name: "Save banner settings" }).click();
     await page.getByText("Saved revision 2.").waitFor(); assert.equal(stored.normal.messages[0].text, "Updated staging announcement");
-    assert.equal(stored.normal.dismissible, true); assert.equal(stored.homeRail.glyphSize, "large");
+    assert.equal(stored.normal.dismissible, true); assert.equal(stored.normal.glyph, "zap"); assert.equal(stored.normal.glyphSize, "large"); assert.equal(stored.homeRail.glyphSize, "large");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${width}px has no horizontal overflow`);
     assert.deepEqual(errors, [], `${width}px has no console errors`);
     if (process.env.BANNER_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", `thirdrailify-admin-banner-${width}.png`), fullPage: true });
@@ -95,7 +116,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
   }
 });
 
-function initialConfig() { return { normal: { enabled: true, dismissible: true, messages: [{ text: "Initial announcement", ctaLabel: "Watch", href: "/watch", newTab: false }], mode: "ticker", speed: "normal" }, homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap", glyphSize: "large" }, live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "Confirmed Watch signal", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" } }; }
+function initialConfig() { return { normal: { enabled: true, dismissible: true, messages: [{ text: "Initial announcement", ctaLabel: "Watch", href: "/watch", newTab: false }], mode: "ticker", speed: "normal", glyph: "zap", glyphSize: "large" }, homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap", glyphSize: "large" }, live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "Confirmed Watch signal", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" } }; }
 function session() { return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00.000Z", lastLoginAt: null, source: "test", locked: true } }; }
 function authConfig() { return { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: "https://thirdrailify-admin.pages.dev", environment: "test", cookieMode: "host-only" }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }

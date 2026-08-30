@@ -11,7 +11,7 @@ import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-he
 
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const VALID = {
-  normal: { enabled: true, dismissible: true, messages: [{ text: "A concise announcement", ctaLabel: "Learn more", href: "/watch", newTab: false }], mode: "ticker", speed: "slow" },
+  normal: { enabled: true, dismissible: true, messages: [{ text: "A concise announcement", ctaLabel: "Learn more", href: "/watch", newTab: false }], mode: "ticker", speed: "slow", glyph: "zap", glyphSize: "large" },
   live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "The rail is active", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" },
   homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap", glyphSize: "large" },
 };
@@ -19,12 +19,16 @@ const VALID = {
 test("banner defaults and valid normal/live modes normalize to a bounded safe model", () => {
   assert.deepEqual(normalizeBannerConfig(DEFAULT_BANNER_CONFIG), DEFAULT_BANNER_CONFIG);
   for (const mode of ["static", "ticker", "crossfade"]) assert.equal(normalizeBannerConfig({ ...VALID, normal: { ...VALID.normal, mode } }).normal.mode, mode);
+  for (const glyph of ["zap", "arrow", "diamond", "dot"]) assert.equal(normalizeBannerConfig({ ...VALID, normal: { ...VALID.normal, glyph } }).normal.glyph, glyph);
+  for (const glyphSize of ["small", "medium", "large"]) assert.equal(normalizeBannerConfig({ ...VALID, normal: { ...VALID.normal, glyphSize } }).normal.glyphSize, glyphSize);
   for (const mode of ["marquee", "crossfade", "static"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, mode } }).homeRail.mode, mode);
   for (const glyph of ["zap", "arrow", "diamond", "dot"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, glyph } }).homeRail.glyph, glyph);
   for (const glyphSize of ["small", "medium", "large"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, glyphSize } }).homeRail.glyphSize, glyphSize);
   assert.equal(normalizeBannerConfig(VALID).normal.messages[0].href, "/watch");
   const legacy = normalizeBannerConfig({ ...VALID, normal: { enabled: true, messages: VALID.normal.messages, mode: "ticker", speed: "slow" }, homeRail: { enabled: true, items: VALID.homeRail.items, mode: "marquee", speed: "normal", easing: "linear", glyph: "zap" } });
   assert.equal(legacy.normal.dismissible, false);
+  assert.equal(legacy.normal.glyph, "zap");
+  assert.equal(legacy.normal.glyphSize, "medium");
   assert.equal(legacy.homeRail.glyphSize, "medium");
 });
 
@@ -35,6 +39,8 @@ test("malformed, oversized, unsafe-link, and unsupported banner values are rejec
     { ...VALID, normal: { ...VALID.normal, messages: [{ ...VALID.normal.messages[0], href: "javascript:alert(1)" }] } },
     { ...VALID, normal: { ...VALID.normal, messages: [{ ...VALID.normal.messages[0], href: "/api/private" }] } },
     { ...VALID, normal: { ...VALID.normal, mode: "blink" } },
+    { ...VALID, normal: { ...VALID.normal, glyph: "emoji" } },
+    { ...VALID, normal: { ...VALID.normal, glyphSize: "huge" } },
     { ...VALID, live: { ...VALID.live, animation: "flash" } },
     { ...VALID, live: { ...VALID.live, intensity: "extreme" } },
     { ...VALID, homeRail: { ...VALID.homeRail, glyph: "emoji" } },
