@@ -87,6 +87,11 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   await page.getByRole("button", { name: "Cancel" }).click();
   await buyerRow.click();
   await page.getByRole("dialog", { name: "Buyer Account" }).waitFor();
+  const regularBadge = page.getByRole("dialog", { name: "Buyer Account" }).locator(".account-access-badge--regular_user");
+  assert.equal(await regularBadge.getAttribute("aria-label"), "Regular User");
+  assert.equal(await regularBadge.locator(".account-access-badge__verified").count(), 1, "Regular User uses the outlined verified badge");
+  assert.equal(await regularBadge.locator(".account-access-badge__shield").count(), 0, "Regular User does not reuse an Admin shield");
+  assert.equal(await regularBadge.locator(".account-access-badge__verified").evaluate((icon) => getComputedStyle(icon).fill), "none");
   assert.match(await page.getByRole("dialog").innerText(), /1 active · 1 retained[\s\S]*Connected Customer/i);
   await page.getByRole("dialog").getByText("Technical and audit metadata", { exact: true }).click();
   assert.match(await page.getByRole("dialog").innerText(), /Session tokens[\s\S]*Never exposed/i);

@@ -277,7 +277,7 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
         maxPitch: 0,
         dragRotate: false,
         pitchWithRotate: false,
-        renderWorldCopies: false,
+        renderWorldCopies: true,
         scrollZoom: false,
         touchPitch: false,
         attributionControl: false,
@@ -348,6 +348,11 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
     instance.on("sourcedata", onSourceData);
     instance.on("idle", markReady);
     instance.on("error", onMapError);
+    instance.once("load", () => {
+      if (cancelled) return;
+      instance.resize();
+      fitAudiencePoints(instance, points);
+    });
 
     for (const point of points) {
       const element = createAudienceMarker(point);
@@ -358,9 +363,9 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
         closeOnClick: false,
         focusAfterOpen: false,
         maxWidth: "330px",
-        offset: [0, -34],
+        offset: [0, -42],
       }).setDOMContent(createAudiencePopup(point));
-      const marker = new maplibregl.Marker({ element, anchor: "center" })
+      const marker = new maplibregl.Marker({ element, anchor: "bottom" })
         .setLngLat([point.longitude, point.latitude])
         .addTo(instance);
       const openPopup = () => {
@@ -374,8 +379,6 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
       element.addEventListener("focus", openPopup);
       markers.push(marker);
     }
-    fitAudiencePoints(instance, points);
-
     void verifyAnalyticsVectorSource(probeController.signal)
       .then(() => {
         if (cancelled) return;
@@ -413,7 +416,11 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
     };
   }, [points]);
   useEffect(() => {
-    const resize = window.requestAnimationFrame(() => map.current?.resize());
+    const resize = window.requestAnimationFrame(() => {
+      if (!map.current) return;
+      map.current.resize();
+      fitAudiencePoints(map.current, points);
+    });
     if (!expanded) return () => window.cancelAnimationFrame(resize);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -432,7 +439,7 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [expanded]);
+  }, [expanded, points]);
   return (
     <section className="analytics-map-panel">
       <header>
@@ -534,7 +541,9 @@ function createAudienceMarker(point: AnalyticsReport["geography"][number]) {
   const count = document.createElement("b");
   count.textContent = compactNumber(point.views);
   core.append(count);
-  element.append(pulse, core);
+  const stem = document.createElement("span");
+  stem.className = "analytics-map-marker__stem";
+  element.append(pulse, core, stem);
   return element;
 }
 
@@ -579,11 +588,37 @@ function fitAudiencePoints(
     });
     return;
   }
-  const bounds = points.reduce(
-    (result, point) => result.extend([point.longitude, point.latitude]),
-    new maplibregl.LngLatBounds(),
+  const latitudes = points.map((point) => point.latitude);
+  const { west, east } = minimumLongitudeExtent(
+    points.map((point) => point.longitude),
   );
+  const south = Math.min(...latitudes);
+  const north = Math.max(...latitudes);
+  if (east - west < 0.001 && north - south < 0.001) {
+    instance.jumpTo({ center: [west, south], zoom: 4.25 });
+    return;
+  }
+  const bounds = new maplibregl.LngLatBounds([west, south], [east, north]);
   instance.fitBounds(bounds, { padding: 76, maxZoom: 5.5, duration: 0 });
+}
+
+function minimumLongitudeExtent(longitudes: number[]) {
+  const sorted = longitudes
+    .map((longitude) => ((((longitude + 180) % 360) + 360) % 360) - 180)
+    .sort((left, right) => left - right);
+  let largestGap = -1;
+  let gapStart = 0;
+  for (let index = 0; index < sorted.length; index += 1) {
+    const next = index === sorted.length - 1 ? sorted[0] + 360 : sorted[index + 1];
+    const gap = next - sorted[index];
+    if (gap > largestGap) {
+      largestGap = gap;
+      gapStart = index;
+    }
+  }
+  const west = sorted[(gapStart + 1) % sorted.length];
+  const rawEast = sorted[gapStart];
+  return { west, east: rawEast < west ? rawEast + 360 : rawEast };
 }
 
 function webGlSupported() {
