@@ -71,7 +71,7 @@ export function OverviewPage() {
         <p className="eyebrow"><span /> Operational overview / authenticated authority</p>
         <h1 id="overview-title">Every signal.<br /><em>One control room.</em></h1>
         <p>Current state from the real account, broadcast, commerce, community, and site-content authorities—without placeholder metrics or deferred-era copy.</p>
-        <div className="overview-hero__actions"><button className="primary-button" type="button" onClick={() => void load()} disabled={loading}><AdminIcon name="signal" size={17} />{loading ? "Refreshing…" : "Refresh overview"}</button><a className="secondary-button" href="https://thirdrailify.pages.dev/" target="_blank" rel="noreferrer">Open Public site <AdminIcon name="external" size={15} /></a></div>
+        <div className="overview-hero__actions"><button className="primary-button" type="button" onClick={() => void load()} disabled={loading}><AdminIcon name="signal" size={17} />{loading ? "Refreshing…" : "Refresh overview"}</button><a className="secondary-button" href="https://thirdrailify.com/" target="_blank" rel="noreferrer">Open Public site <AdminIcon name="external" size={15} /></a></div>
       </div>
       <aside className="overview-pulse" aria-label="Operational snapshot summary">
         <div className="overview-pulse__top"><span><i className={errorCount ? "is-warning" : ""} />System pulse</span><small>{loading ? "Reading authorities" : refreshedAt ? formatTime(refreshedAt) : "Not checked"}</small></div>

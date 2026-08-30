@@ -115,7 +115,7 @@ export function AdminShell() {
         <div className="sidebar-scroll-region">
           <div className="environment-note">
             <span className="status-dot" aria-hidden="true" />
-            <div><strong>Authenticated staging</strong><span>D1 account authority</span></div>
+            <div><strong>Authenticated control plane</strong><span>D1 account authority</span></div>
           </div>
 
           <nav className="primary-nav">

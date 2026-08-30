@@ -14,7 +14,7 @@ export const THIRD_RAIL_BRAND = Object.freeze({
   monoFont: "'Geist Mono','Courier New',monospace",
 });
 
-export const THIRD_RAIL_EMAIL_ASSET_ORIGIN = "https://thirdrailify-admin.pages.dev";
+export const THIRD_RAIL_EMAIL_ASSET_ORIGIN = "https://admin.thirdrailify.com";
 
 export function thirdRailBrandAssets(origin) {
   const assetOrigin = normalizeOrigin(origin) || THIRD_RAIL_EMAIL_ASSET_ORIGIN;

@@ -47,7 +47,7 @@ export function SiteContentPage() {
 
   return (
     <section className="site-content-page" aria-labelledby="site-content-title">
-      <header className="content-admin-heading"><div><p className="section-kicker">Site content / announcements</p><h1 id="site-content-title">Public banner</h1><p>Configure the normal announcement rail and the presentation used only when Watch confirms a genuine live broadcast.</p></div><a className="secondary-button content-admin-heading__public-link" href="https://thirdrailify.pages.dev/" target="_blank" rel="noreferrer" aria-label="Open Public site in a new tab"><span>Open Public site</span><AdminIcon name="external" size={16} /></a></header>
+      <header className="content-admin-heading"><div><p className="section-kicker">Site content / announcements</p><h1 id="site-content-title">Public banner</h1><p>Configure the normal announcement rail and the presentation used only when Watch confirms a genuine live broadcast.</p></div><a className="secondary-button content-admin-heading__public-link" href="https://thirdrailify.com/" target="_blank" rel="noreferrer" aria-label="Open Public site in a new tab"><span>Open Public site</span><AdminIcon name="external" size={16} /></a></header>
       {error && <div className="notice-card notice-card--danger" role="alert"><AdminIcon name="signal" /><div><strong>Banner configuration unavailable</strong><p>{error}</p></div><button className="button-link" type="button" onClick={() => void load()}>Reload</button></div>}
       {loading && <div className="content-admin-loading" role="status">Loading authoritative banner configuration…</div>}
       {!loading && !config && !error && <div className="content-admin-loading">Banner configuration is unavailable.</div>}

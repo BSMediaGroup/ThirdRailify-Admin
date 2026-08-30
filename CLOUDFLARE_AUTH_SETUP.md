@@ -75,7 +75,7 @@ https://thirdrailify-admin.pages.dev/api/auth/oauth/github/callback
 https://thirdrailify-admin.pages.dev/api/auth/oauth/twitter/callback
 ```
 
-Future production:
+Production:
 
 ```text
 https://admin.thirdrailify.com/api/auth/oauth/discord/callback
@@ -90,9 +90,9 @@ Discord requests `identify email`. Google requests `openid email profile`. GitHu
 
 If Cloudflare Access currently protects `thirdrailify-admin.pages.dev`, the public config/login/OAuth-start routes and every OAuth callback must remain reachable from the Public origin and providers. Either remove the outer gate once application auth is accepted or create a narrowly reviewed bypass for only the required auth routes. Do not broadly bypass `/api/admin/*`. This milestone does not alter Access.
 
-## Production transition
+## Production authority
 
-Production needs a separate reviewed database/environment decision, deployed migrations, production Turnstile hostnames, production Resend sender posture, and every production OAuth callback registered before traffic moves. Change the origins to `https://thirdrailify.com` and `https://admin.thirdrailify.com`, set `THIRDRAILIFY_AUTH_COOKIE_DOMAIN=.thirdrailify.com`, and set `AUTH_ENVIRONMENT=production` only when both custom domains are active and TLS/DNS are verified. Redeploy Admin before Public.
+Production uses `https://thirdrailify.com` and `https://admin.thirdrailify.com` as exact origins. Keep `THIRDRAILIFY_AUTH_COOKIE_DOMAIN` empty: the established host-only sessions and one-time handoff do not require a parent-domain cookie. Register every exact production OAuth callback and keep the old Admin Pages callback only for the bounded transition described in `docs/DOMAIN_CUTOVER.md`. Commerce environment and provider states remain independently fail-closed.
 
 Never copy `.env`, `.dev.vars`, database IDs, bootstrap passwords, provider secrets, the Turnstile secret, the Resend key, session tokens, one-time tokens, or OAuth codes into source control or browser-prefixed variables.
 

@@ -53,7 +53,7 @@ export function WatchAdminPage() {
   const retainedCapacity = summary ? `${summary.retained} / 24` : "— / 24";
   return (
     <section className="watch-admin-page" aria-labelledby="watch-admin-title">
-      <header className="watch-admin-heading"><div><p className="section-kicker">Broadcast authority / control room</p><h1 id="watch-admin-title">Watch / Broadcast</h1><p>Monitor the current Public signal and manage visibility for naturally retained episodes.</p></div><div className="watch-admin-heading__actions"><span className={`watch-admin-signal-badge${primary?.presentationState === "live" ? " is-live" : ""}`}><i />{signalState}</span><a className="secondary-button" href="https://thirdrailify.pages.dev/watch" target="_blank" rel="noreferrer">Public Watch <AdminIcon name="external" size={15} /></a></div></header>
+      <header className="watch-admin-heading"><div><p className="section-kicker">Broadcast authority / control room</p><h1 id="watch-admin-title">Watch / Broadcast</h1><p>Monitor the current Public signal and manage visibility for naturally retained episodes.</p></div><div className="watch-admin-heading__actions"><span className={`watch-admin-signal-badge${primary?.presentationState === "live" ? " is-live" : ""}`}><i />{signalState}</span><a className="secondary-button" href="https://thirdrailify.com/watch" target="_blank" rel="noreferrer">Public Watch <AdminIcon name="external" size={15} /></a></div></header>
       {error && <div className="notice-card notice-card--danger" role="alert"><AdminIcon name="signal" /><div><strong>Watch service unavailable</strong><p>{error}</p></div><button className="button-link" type="button" onClick={() => void load()}>Retry</button></div>}
 
       <div className="watch-admin-metrics" aria-busy={loading} aria-label={`Archive summary, retained ${retainedCapacity}`}>
@@ -67,7 +67,7 @@ export function WatchAdminPage() {
       <section className="watch-admin-current" aria-labelledby="watch-current-title">
         <div className="watch-admin-current__main"><span className="watch-admin-current__icon"><AdminIcon name="signal" size={22} /></span><div><p className="section-kicker">Current signal</p><h2 id="watch-current-title">{primary?.title || (loading ? "Checking current broadcast…" : archiveUnavailable ? "Current signal unavailable" : "No current broadcast snapshot")}</h2><p>{currentSummary(data, archiveUnavailable)}</p></div></div>
         <dl className="watch-admin-current__facts"><div><dt>Status</dt><dd>{signalState}</dd></div><div><dt>Platform</dt><dd>{primary?.platform ?? "—"}</dd></div><div><dt>Timing</dt><dd>{primary ? currentTime(primary) : "—"}</dd></div></dl>
-        <a className="button-link watch-admin-current__link" href="https://thirdrailify.pages.dev/watch" target="_blank" rel="noreferrer">Open Public Watch <AdminIcon name="external" size={15} /></a>
+        <a className="button-link watch-admin-current__link" href="https://thirdrailify.com/watch" target="_blank" rel="noreferrer">Open Public Watch <AdminIcon name="external" size={15} /></a>
       </section>
 
       <section className="watch-admin-archive" aria-labelledby="retained-title">
