@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
-import type { Map as MapLibreMap, Marker } from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { Map as MapLibreMap, MapSourceDataEvent } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { AdminShellOutletContext } from "../components/AdminShell";
+import { AdminIcon } from "../components/AdminIcon";
 import {
   AnalyticsApiError,
   getAnalytics,
@@ -12,6 +15,12 @@ import {
 } from "../analytics/client";
 
 const RANGES: RangeKey[] = ["24h", "7d", "30d", "90d"];
+const ANALYTICS_MAP_STYLE =
+  import.meta.env.VITE_ANALYTICS_MAP_STYLE_URL ||
+  "https://tiles.openfreemap.org/styles/dark";
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
+
 type AnalyticsFailure = { kind: "migration" | "auth" | "query"; message: string };
 export function AnalyticsPage() {
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
@@ -228,86 +237,199 @@ function DeltaView({ delta }: { delta: Delta }) {
 function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
   const node = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
+  const expandButton = useRef<HTMLButtonElement>(null);
   const [mapError, setMapError] = useState("");
+  const [mapState, setMapState] = useState<"loading" | "ready" | "failed">(
+    points.length ? "loading" : "ready",
+  );
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     if (!node.current || !points.length) return;
-    let cancelled = false;
-    const markers: Marker[] = [];
-    void import("maplibre-gl")
-      .then((maplibregl) => {
-        if (cancelled || !node.current) return;
-        const instance = new maplibregl.Map({
-          container: node.current,
-          style:
-            import.meta.env.VITE_ANALYTICS_MAP_STYLE_URL ||
-            "https://tiles.openfreemap.org/styles/dark",
-          center: [15, 18],
-          zoom: 1.25,
-          attributionControl: {},
-        });
-        map.current = instance;
-        instance.addControl(
-          new maplibregl.NavigationControl({ showCompass: false }),
-          "top-right",
-        );
-        instance.on("error", () =>
-          setMapError(
-            "Map tiles are unavailable; the regional list remains complete.",
-          ),
-        );
-        for (const point of points) {
-          const element = document.createElement("button");
-          element.type = "button";
-          element.className = "analytics-map-marker";
-          element.setAttribute(
-            "aria-label",
-            `${place(point)}: ${point.views} page views`,
-          );
-          element.style.setProperty(
-            "--marker-scale",
-            String(
-              Math.min(2.2, 1 + Math.log10(Math.max(1, point.views)) * 0.45),
-            ),
-          );
-          const popup = new maplibregl.Popup({
-            offset: 18,
-            closeButton: false,
-          }).setHTML(
-            `<strong>${escapeHtml(place(point))}</strong><span>${number(point.views)} views · ${number(point.sessions)} sessions</span><span>${escapeHtml(point.topPath || "No route summary")}</span><small>${escapeHtml(point.topSource || "direct")} · ${escapeHtml(formatDate(point.latestAt))}</small>`,
-          );
-          const marker = new maplibregl.Marker({ element })
-            .setLngLat([point.longitude, point.latitude])
-            .setPopup(popup)
-            .addTo(instance);
-          element.addEventListener("focus", () => marker.togglePopup());
-          markers.push(marker);
-        }
-        instance.on("load", () => {
-          if (points.length > 1) {
-            const bounds = new maplibregl.LngLatBounds();
-            points.forEach((point) =>
-              bounds.extend([point.longitude, point.latitude]),
-            );
-            instance.fitBounds(bounds, {
-              padding: 70,
-              maxZoom: 5,
-              duration: 0,
-            });
-          }
-        });
-      })
-      .catch(() =>
-        setMapError(
-          "WebGL mapping is unavailable; use the complete regional list below.",
-        ),
+    if (!webGlSupported()) {
+      setMapState("failed");
+      setMapError(
+        "WebGL mapping is unavailable; use the complete regional list below.",
       );
+      return;
+    }
+    let cancelled = false;
+    let resizeFrame = 0;
+    let observer: ResizeObserver | null = null;
+    let instance: MapLibreMap;
+    const markers: maplibregl.Marker[] = [];
+    const loadedTiles = new Set<string>();
+    const probeController = new AbortController();
+    let vectorProbeReady = false;
+    let sourceErrors = 0;
+    setMapState("loading");
+    setMapError("");
+    try {
+      instance = new maplibregl.Map({
+        container: node.current,
+        style: ANALYTICS_MAP_STYLE,
+        center: [15, 18],
+        zoom: 1.25,
+        minZoom: 1,
+        maxZoom: 12,
+        maxPitch: 0,
+        dragRotate: false,
+        pitchWithRotate: false,
+        renderWorldCopies: false,
+        scrollZoom: false,
+        touchPitch: false,
+        attributionControl: false,
+      });
+    } catch {
+      setMapState("failed");
+      setMapError(
+        "WebGL mapping is unavailable; use the complete regional list below.",
+      );
+      return;
+    }
+    map.current = instance;
+    instance.touchZoomRotate.disableRotation();
+    instance.addControl(
+      new maplibregl.NavigationControl({
+        showCompass: false,
+        visualizePitch: false,
+      }),
+      "top-left",
+    );
+    instance.addControl(
+      new maplibregl.AttributionControl({
+        compact: true,
+        customAttribution: "Audience locations are deliberately coarse",
+      }),
+      "bottom-right",
+    );
+
+    const markReady = () => {
+      if (
+        cancelled ||
+        !vectorProbeReady ||
+        !instance.isStyleLoaded() ||
+        loadedTiles.size < 1 ||
+        markers.length !== points.length
+      )
+        return;
+      const bounds = node.current?.getBoundingClientRect();
+      if (!bounds?.width || !bounds.height) return;
+      if (instance.queryRenderedFeatures().length < 1) {
+        if (sourceErrors > 0) {
+          setMapState("failed");
+          setMapError(
+            "Map geography could not render; the regional list remains complete.",
+          );
+        }
+        return;
+      }
+      setMapState("ready");
+      setMapError("");
+    };
+    const onSourceData = (event: MapSourceDataEvent) => {
+      if (event.sourceId !== "openmaptiles" || !event.coord) return;
+      const tile = event.coord.canonical;
+      loadedTiles.add(`${tile.z}/${tile.x}/${tile.y}`);
+      window.requestAnimationFrame(markReady);
+    };
+    const onMapError = (event: maplibregl.ErrorEvent) => {
+      const sourceId = "sourceId" in event ? String(event.sourceId || "") : "";
+      if (sourceId === "openmaptiles") sourceErrors += 1;
+      if (!sourceId && !instance.isStyleLoaded()) {
+        setMapState("failed");
+        setMapError(
+          "Map style could not load; the regional list remains complete.",
+        );
+      }
+    };
+    instance.on("sourcedata", onSourceData);
+    instance.on("idle", markReady);
+    instance.on("error", onMapError);
+
+    for (const point of points) {
+      const element = createAudienceMarker(point);
+      const popup = new maplibregl.Popup({
+        anchor: "bottom",
+        className: "analytics-map-popup",
+        closeButton: true,
+        closeOnClick: false,
+        focusAfterOpen: false,
+        maxWidth: "330px",
+        offset: [0, -42],
+      }).setDOMContent(createAudiencePopup(point));
+      const marker = new maplibregl.Marker({ element, anchor: "bottom" })
+        .setLngLat([point.longitude, point.latitude])
+        .addTo(instance);
+      const openPopup = () => {
+        markers.forEach((other) => {
+          if (other !== marker) other.getPopup()?.remove();
+        });
+        if (!popup.isOpen()) popup.addTo(instance);
+      };
+      marker.setPopup(popup);
+      element.addEventListener("mouseenter", openPopup);
+      element.addEventListener("focus", openPopup);
+      markers.push(marker);
+    }
+    fitAudiencePoints(instance, points);
+
+    void verifyAnalyticsVectorSource(probeController.signal)
+      .then(() => {
+        if (cancelled) return;
+        vectorProbeReady = true;
+        markReady();
+      })
+      .catch(() => {
+        if (cancelled || probeController.signal.aborted) return;
+        setMapState("failed");
+        setMapError(
+          "Map tiles are unavailable; the regional list remains complete.",
+        );
+      });
+
+    observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        instance.resize();
+        markReady();
+      });
+    });
+    observer.observe(node.current);
     return () => {
       cancelled = true;
+      probeController.abort();
+      observer?.disconnect();
+      window.cancelAnimationFrame(resizeFrame);
+      instance.off("sourcedata", onSourceData);
+      instance.off("idle", markReady);
+      instance.off("error", onMapError);
       markers.forEach((marker) => marker.remove());
-      map.current?.remove();
+      instance.remove();
       map.current = null;
     };
   }, [points]);
+  useEffect(() => {
+    const resize = window.requestAnimationFrame(() => map.current?.resize());
+    if (!expanded) return () => window.cancelAnimationFrame(resize);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const close = () => {
+      setExpanded(false);
+      window.requestAnimationFrame(() =>
+        expandButton.current?.focus({ preventScroll: true }),
+      );
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(resize);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [expanded]);
   return (
     <section className="analytics-map-panel">
       <header>
@@ -324,13 +446,37 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
           views
         </strong>
       </header>
-      <div className="analytics-map-shell">
+      <div
+        className={`analytics-map-shell${expanded ? " is-expanded" : ""}${mapState === "ready" ? " is-ready" : ""}`}
+        data-analytics-map-engine="maplibre"
+        data-analytics-map-state={mapState}
+        role={expanded ? "dialog" : undefined}
+        aria-modal={expanded || undefined}
+        aria-label={expanded ? "Fullscreen audience activity map" : undefined}
+      >
         <div
           ref={node}
           className="analytics-map"
           role="img"
           aria-label="World map of aggregated audience activity"
         />
+        <div className="analytics-map-chrome">
+          <span><i /> Live audience geography</span>
+          <button
+            ref={expandButton}
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <AdminIcon name={expanded ? "close" : "expand"} size={17} />
+            {expanded ? "Close fullscreen" : "Fullscreen map"}
+          </button>
+        </div>
+        {mapState === "loading" ? (
+          <div className="analytics-map-loading" role="status">
+            <span /> Rendering dark vector geography
+          </div>
+        ) : null}
         {mapError ? (
           <div className="analytics-map-error" role="status">
             {mapError}
@@ -359,6 +505,103 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
       </div>
     </section>
   );
+}
+
+function createAudienceMarker(point: AnalyticsReport["geography"][number]) {
+  const element = document.createElement("button");
+  element.type = "button";
+  element.className = "analytics-map-marker";
+  element.setAttribute(
+    "aria-label",
+    `${place(point)}: ${number(point.views)} page views`,
+  );
+  element.style.setProperty(
+    "--signal-scale",
+    String(Math.min(1.28, 0.92 + Math.log10(Math.max(1, point.views)) * 0.14)),
+  );
+  const pulse = document.createElement("span");
+  pulse.className = "analytics-map-marker__pulse";
+  const core = document.createElement("span");
+  core.className = "analytics-map-marker__core";
+  const count = document.createElement("b");
+  count.textContent = compactNumber(point.views);
+  core.append(count);
+  const stem = document.createElement("span");
+  stem.className = "analytics-map-marker__stem";
+  element.append(pulse, core, stem);
+  return element;
+}
+
+function createAudiencePopup(point: AnalyticsReport["geography"][number]) {
+  const card = document.createElement("article");
+  card.className = "analytics-map-card";
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "analytics-map-card__eyebrow";
+  eyebrow.textContent = "Audience signal";
+  const title = document.createElement("strong");
+  title.textContent = place(point);
+  const metrics = document.createElement("div");
+  const views = document.createElement("span");
+  const viewsValue = document.createElement("b");
+  viewsValue.textContent = number(point.views);
+  views.append(viewsValue, " views");
+  const sessions = document.createElement("span");
+  const sessionsValue = document.createElement("b");
+  sessionsValue.textContent = number(point.sessions);
+  sessions.append(sessionsValue, " sessions");
+  metrics.append(views, sessions);
+  const route = document.createElement("p");
+  route.textContent = point.topPath || "No route summary";
+  const detail = document.createElement("small");
+  detail.textContent = `${point.topSource || "direct"} · ${formatDate(point.latestAt)}`;
+  card.append(eyebrow, title, metrics, route, detail);
+  return card;
+}
+
+function fitAudiencePoints(
+  instance: MapLibreMap,
+  points: AnalyticsReport["geography"],
+) {
+  if (points.length === 1) {
+    instance.jumpTo({
+      center: [points[0].longitude, points[0].latitude],
+      zoom: 4.25,
+    });
+    return;
+  }
+  const bounds = points.reduce(
+    (result, point) => result.extend([point.longitude, point.latitude]),
+    new maplibregl.LngLatBounds(),
+  );
+  instance.fitBounds(bounds, { padding: 76, maxZoom: 5.5, duration: 0 });
+}
+
+function webGlSupported() {
+  try {
+    const canvas = document.createElement("canvas");
+    return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
+  } catch {
+    return false;
+  }
+}
+
+async function verifyAnalyticsVectorSource(signal: AbortSignal) {
+  const tileJsonResponse = await fetch("https://tiles.openfreemap.org/planet", {
+    signal,
+  });
+  if (!tileJsonResponse.ok)
+    throw new Error(`OpenFreeMap TileJSON returned ${tileJsonResponse.status}`);
+  const tileJson = (await tileJsonResponse.json()) as { tiles?: string[] };
+  const template = tileJson.tiles?.[0];
+  if (!template) throw new Error("OpenFreeMap TileJSON has no tile template");
+  const tileResponse = await fetch(
+    template.replace("{z}", "0").replace("{x}", "0").replace("{y}", "0"),
+    { signal },
+  );
+  if (!tileResponse.ok)
+    throw new Error(`OpenFreeMap tile returned ${tileResponse.status}`);
+  if ((await tileResponse.arrayBuffer()).byteLength < 1)
+    throw new Error("OpenFreeMap tile was empty");
 }
 function TrafficMatrix({ report }: { report: AnalyticsReport }) {
   return (
@@ -430,39 +673,66 @@ function MetricCell({ value, delta }: { value: number; delta: Delta }) {
   );
 }
 function Trend({ report }: { report: AnalyticsReport }) {
-  const max = Math.max(1, ...report.series.map((row) => row.views));
-  const points = report.series
-    .map(
-      (row, index) =>
-        `${report.series.length === 1 ? 50 : (index / (report.series.length - 1)) * 100},${92 - (row.views / max) * 80}`,
-    )
-    .join(" ");
+  const max = Math.max(
+    1,
+    ...report.series.flatMap((row) => [row.views, row.sessions]),
+  );
+  const views = trendPoints(report.series.map((row) => row.views), max);
+  const sessions = trendPoints(report.series.map((row) => row.sessions), max);
+  const viewsPath = smoothTrendPath(views);
+  const sessionsPath = smoothTrendPath(sessions);
+  const areaPath = views.length
+    ? `${viewsPath} L ${views.at(-1)!.x} 236 L ${views[0].x} 236 Z`
+    : "";
+  const peak = Math.max(0, ...report.series.map((row) => row.views));
+  const latest = report.series.at(-1);
+  const chartKey = report.series.map((row) => `${row.views}:${row.sessions}`).join("|");
   return (
     <article className="analytics-card analytics-trend">
       <header>
-        <h3>Audience trend</h3>
-        <span>{report.bucket}ly buckets · UTC</span>
+        <div>
+          <h3>Audience trend</h3>
+          <span>{report.bucket}ly buckets · UTC</span>
+        </div>
+        <div className="analytics-trend__legend" aria-label="Chart legend">
+          <span className="is-views"><i /> Views</span>
+          <span className="is-sessions"><i /> Sessions</span>
+        </div>
       </header>
       <svg
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
+        key={chartKey}
+        viewBox="0 0 1000 260"
         role="img"
-        aria-label={`Page-view trend across ${report.series.length} ${report.bucket}ly buckets`}
+        aria-label={`Views and sessions trend across ${report.series.length} ${report.bucket}ly buckets`}
       >
+        <title>Audience activity trend</title>
+        <desc>Animated page-view and anonymous-session lines over a page-view area gradient.</desc>
         <defs>
           <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#f3c928" stopOpacity=".38" />
+            <stop offset="0" stopColor="#ffd83d" stopOpacity=".46" />
+            <stop offset=".46" stopColor="#d7a900" stopOpacity=".18" />
             <stop offset="1" stopColor="#f3c928" stopOpacity="0" />
           </linearGradient>
+          <linearGradient id="trend-line" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#be8b00" />
+            <stop offset=".45" stopColor="#ffe56f" />
+            <stop offset="1" stopColor="#f3c928" />
+          </linearGradient>
+          <filter id="trend-glow" x="-20%" y="-80%" width="140%" height="260%">
+            <feGaussianBlur stdDeviation="5" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
         </defs>
-        <polygon points={`0,100 ${points} 100,100`} fill="url(#trend-fill)" />
-        <polyline
-          points={points}
-          fill="none"
-          stroke="#f3c928"
-          strokeWidth="2"
-          vectorEffect="non-scaling-stroke"
-        />
+        <g className="analytics-trend__grid" aria-hidden="true">
+          {[52, 98, 144, 190, 236].map((y) => <line key={y} x1="32" x2="968" y1={y} y2={y} />)}
+        </g>
+        <path className="analytics-trend__area" d={areaPath} fill="url(#trend-fill)" />
+        <path className="analytics-trend__glow" d={viewsPath} pathLength="1" />
+        <path className="analytics-trend__line is-views" d={viewsPath} pathLength="1" />
+        <path className="analytics-trend__line is-sessions" d={sessionsPath} pathLength="1" />
+        <g className="analytics-trend__points is-views" aria-hidden="true">
+          {views.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r="4.5" />)}
+        </g>
       </svg>
       <div className="analytics-trend__axis">
         <span>
@@ -472,8 +742,36 @@ function Trend({ report }: { report: AnalyticsReport }) {
           {report.series.at(-1) ? shortDate(report.series.at(-1)!.bucket) : "—"}
         </span>
       </div>
+      <dl className="analytics-trend__summary">
+        <div><dt>Window views</dt><dd>{number(report.selected.views)}</dd></div>
+        <div><dt>Peak bucket</dt><dd>{number(peak)}</dd></div>
+        <div><dt>Latest signal</dt><dd>{latest ? `${number(latest.views)} / ${number(latest.sessions)}` : "—"}</dd></div>
+      </dl>
     </article>
   );
+}
+
+type TrendPoint = { x: number; y: number };
+
+function trendPoints(values: number[], max: number): TrendPoint[] {
+  if (!values.length) return [];
+  if (values.length === 1) {
+    const y = 218 - (values[0] / max) * 174;
+    return [{ x: 32, y }, { x: 968, y }];
+  }
+  return values.map((value, index) => ({
+    x: 32 + (index / (values.length - 1)) * 936,
+    y: 218 - (value / max) * 174,
+  }));
+}
+
+function smoothTrendPath(points: TrendPoint[]) {
+  if (!points.length) return "";
+  return points.slice(1).reduce((path, point, index) => {
+    const previous = points[index];
+    const middle = (previous.x + point.x) / 2;
+    return `${path} C ${middle} ${previous.y}, ${middle} ${point.y}, ${point.x} ${point.y}`;
+  }, `M ${points[0].x} ${points[0].y}`);
 }
 function Ranking({
   title,
@@ -596,6 +894,12 @@ function AnalyticsSkeleton() {
 function number(value: number) {
   return new Intl.NumberFormat("en-AU").format(value);
 }
+function compactNumber(value: number) {
+  return new Intl.NumberFormat("en-AU", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
 function money(value: number, currency: string) {
   return new Intl.NumberFormat("en-CA", { style: "currency", currency }).format(
     value / 100,
@@ -639,14 +943,5 @@ function place(point: AnalyticsReport["geography"][number]) {
     [point.city, point.region, point.countryName || point.countryCode]
       .filter(Boolean)
       .join(", ") || "Unknown region"
-  );
-}
-function escapeHtml(value: string) {
-  return value.replace(
-    /[&<>'"]/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[
-        char
-      ]!,
   );
 }

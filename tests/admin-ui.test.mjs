@@ -206,7 +206,8 @@ test("Analytics and inbox surfaces expose truthful states, bulk controls, and ac
   assert.match(app, /path="analytics" element=\{<AnalyticsPage/);
   assert.match(navigation, /path: "\/analytics"[\s\S]{0,120}Audience Analytics/);
   for (const text of ["Audience activity map", "Traffic comparison matrix", "Collected, not profit", "Preceding period unavailable", "No events retained yet"]) assert.match(analytics, new RegExp(text));
-  assert.match(analytics, /import\("maplibre-gl"\)/); assert.match(analytics, /role="img"[\s\S]{0,80}aria-label="World map/);
+  assert.match(analytics, /import \* as maplibregl from "maplibre-gl"/); assert.match(analytics, /setWorkerUrl\(maplibreWorkerUrl\)/); assert.match(analytics, /data-analytics-map-engine="maplibre"/); assert.match(analytics, /Fullscreen audience activity map/); assert.match(analytics, /role="img"[\s\S]{0,80}aria-label="World map/);
+  assert.match(analytics, /analytics-trend__line is-views/); assert.match(styles, /analytics-line-draw/);
   assert.match(inbox, /role="dialog"/); assert.match(inbox, /Mark unread/); assert.match(inbox, /inbox-message__actions/); assert.match(inbox, /Delete/);
   assert.match(inboxClient, /mutateInboxMessages/); assert.match(inboxClient, /"read" \| "unread" \| "delete"/);
   assert.match(styles, /\.message-lightbox/); assert.match(styles, /\.analytics-map-panel/); assert.match(styles, /prefers-reduced-motion/);

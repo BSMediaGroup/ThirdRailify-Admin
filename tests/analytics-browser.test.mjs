@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import test from "node:test";
 
 import { chromium } from "playwright-core";
@@ -20,8 +22,9 @@ test("Audience Analytics renders explicit migration and ready states responsivel
       const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
       const page = await context.newPage();
       const pageErrors = [];
+      const mapRequestFailures = [];
       page.on("pageerror", (error) => pageErrors.push(error.message));
-      await page.route("https://tiles.openfreemap.org/**", (route) => route.fulfill({ status: 503, body: "Map fixture unavailable" }));
+      page.on("requestfailed", (request) => { const reason = request.failure()?.errorText || "failed"; if (request.url().startsWith("https://tiles.openfreemap.org/") && reason !== "net::ERR_ABORTED") mapRequestFailures.push(`${request.url()} ${reason}`); });
       await page.route("**/api/**", (route) => respond(route, mode));
       await page.goto(`${ORIGIN}/analytics`);
 
@@ -40,12 +43,28 @@ test("Audience Analytics renders explicit migration and ready states responsivel
         await page.getByText("Collection active").waitFor();
         await page.getByRole("heading", { name: "Where the signal lands." }).waitFor();
         await page.getByText("Sydney, New South Wales").waitFor();
-        if (viewport.width === 1440) await page.getByText(/regional list remains complete|complete regional list below/).waitFor({ timeout: 8_000 });
+        await page.locator('[data-analytics-map-state="ready"]').waitFor({ timeout: 25_000 });
+        assert.equal(await page.locator('[data-analytics-map-engine="maplibre"] .maplibregl-canvas').count(), 1);
+        assert.equal(await page.locator(".analytics-map-marker").count(), 2);
+        assert.equal(await page.locator(".analytics-trend__line.is-views").getAttribute("pathLength"), "1");
+        if (viewport.width === 1440) {
+          await page.getByRole("button", { name: "Fullscreen map" }).click();
+          const dialog = page.getByRole("dialog", { name: "Fullscreen audience activity map" });
+          await dialog.waitFor();
+          const box = await dialog.boundingBox();
+          assert.ok(box && box.width > 1300 && box.height > 800, `fullscreen map fills viewport: ${JSON.stringify(box)}`);
+          await page.screenshot({ path: join(tmpdir(), "thirdrailify-analytics-map-v2-1440x900.png") });
+          await page.keyboard.press("Escape");
+          assert.equal(await dialog.count(), 0);
+          await page.locator(".analytics-trend").scrollIntoViewIfNeeded();
+          await page.screenshot({ path: join(tmpdir(), "thirdrailify-analytics-trend-v2-1440x900.png") });
+        }
       }
 
       const overflow = await page.evaluate(() => ({ fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth, viewport: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, offenders: [...document.querySelectorAll("body *")].filter((node) => node instanceof HTMLElement && node.getBoundingClientRect().right > document.documentElement.clientWidth + 1).slice(0, 8).map((node) => ({ tag: node.tagName, className: node.className, right: Math.round(node.getBoundingClientRect().right), width: Math.round(node.getBoundingClientRect().width) })) }));
       assert.equal(overflow.fits, true, `${mode} state has no horizontal overflow at ${viewport.width}px: ${JSON.stringify(overflow)}`);
       assert.deepEqual(pageErrors, [], `${mode} state has no page errors at ${viewport.width}px`);
+      assert.deepEqual(mapRequestFailures, [], `${mode} state has no failed OpenFreeMap requests at ${viewport.width}px`);
       await context.close();
     }
   }
@@ -64,7 +83,7 @@ async function respond(route, mode) {
 
 function readyReport() {
   const metric = { views: 3, sessions: 2, pagesPerSession: 1.5, comparisonComplete: false, previous: { views: 0, sessions: 0, pagesPerSession: null }, deltas: { views: { available: false, value: null, direction: "unavailable" }, sessions: { available: false, value: null, direction: "unavailable" } } };
-  return { ok: true, range: "7d", generatedAt: new Date().toISOString(), timezone: "UTC", configured: true, coverage: { start: "2026-08-30T00:00:00.000Z", end: new Date().toISOString(), totalEvents: 3, lastIngestedAt: new Date().toISOString() }, windows: { "24h": metric, "7d": metric, "30d": metric, "90d": metric }, selected: metric, bucket: "day", series: [{ bucket: "2026-08-31T00:00:00.000Z", views: 3, sessions: 2 }], pages: [{ path: "/watch", views: 3, sessions: 2, latestAt: new Date().toISOString() }], sources: [{ source: "direct", views: 3, sessions: 2 }], devices: [{ device: "mobile", views: 3, sessions: 2 }], geography: [{ countryCode: "AU", countryName: "Australia", region: "New South Wales", city: "Sydney", latitude: -33.9, longitude: 151.2, views: 3, sessions: 2, latestAt: new Date().toISOString(), topPath: "/watch", topSource: "direct", memberViews: 1 }], revenue: { available: true, partial: false, sources: { merchandise: true, donations: true }, unavailableReason: null, profitAvailable: false, profitUnavailableReason: "Complete direct-cost evidence is unavailable.", currencies: [] } };
+  return { ok: true, range: "7d", generatedAt: new Date().toISOString(), timezone: "UTC", configured: true, coverage: { start: "2026-08-30T00:00:00.000Z", end: new Date().toISOString(), totalEvents: 3, lastIngestedAt: new Date().toISOString() }, windows: { "24h": metric, "7d": metric, "30d": metric, "90d": metric }, selected: metric, bucket: "day", series: [{ bucket: "2026-08-29T00:00:00.000Z", views: 1, sessions: 1 }, { bucket: "2026-08-30T00:00:00.000Z", views: 3, sessions: 2 }, { bucket: "2026-08-31T00:00:00.000Z", views: 2, sessions: 2 }], pages: [{ path: "/watch", views: 3, sessions: 2, latestAt: new Date().toISOString() }], sources: [{ source: "direct", views: 3, sessions: 2 }], devices: [{ device: "mobile", views: 3, sessions: 2 }], geography: [{ countryCode: "AU", countryName: "Australia", region: "New South Wales", city: "Sydney", latitude: -33.9, longitude: 151.2, views: 3, sessions: 2, latestAt: new Date().toISOString(), topPath: "/watch", topSource: "direct", memberViews: 1 }, { countryCode: "US", countryName: "United States", region: "California", city: "Los Angeles", latitude: 34.05, longitude: -118.24, views: 12, sessions: 8, latestAt: new Date().toISOString(), topPath: "/", topSource: "direct", memberViews: 0 }], revenue: { available: true, partial: false, sources: { merchandise: true, donations: true }, unavailableReason: null, profitAvailable: false, profitUnavailableReason: "Complete direct-cost evidence is unavailable.", currencies: [] } };
 }
 
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }

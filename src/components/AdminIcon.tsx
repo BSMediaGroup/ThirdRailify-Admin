@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { AdminArea } from "../config/navigation";
 
 type Props = {
-  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "chevron" | "shield" | "signal" | "collapse" | "profile" | "external" | "logout" | "eye" | "eyeOff" | "star" | "edit" | "upload" | "link" | "trash" | "moveUp" | "moveDown";
+  name: AdminArea["icon"] | "menu" | "close" | "arrow" | "chevron" | "shield" | "signal" | "collapse" | "profile" | "external" | "logout" | "eye" | "eyeOff" | "star" | "edit" | "upload" | "link" | "trash" | "moveUp" | "moveDown" | "expand";
   size?: number;
 };
 
@@ -32,6 +32,7 @@ const paths: Record<Props["name"], ReactNode> = {
   wheels: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6M5.6 5.6l4.2 4.2M14.2 14.2l4.2 4.2M18.4 5.6l-4.2 4.2M9.8 14.2l-4.2 4.2"/></>,
   menu: <><path d="M4 7h16M4 12h16M4 17h16"/></>,
   close: <><path d="m6 6 12 12M18 6 6 18"/></>,
+  expand: <><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/><path d="m4 9 5-5M20 9l-5-5M4 15l5 5M20 15l-5 5"/></>,
   arrow: <><path d="M5 12h14M14 7l5 5-5 5"/></>,
   chevron: <><path d="m9 6 6 6-6 6"/></>,
   shield: <><path d="M12 3 5 6v5c0 4.6 2.8 8.2 7 10 4.2-1.8 7-5.4 7-10V6zM9 12l2 2 4-5"/></>,
