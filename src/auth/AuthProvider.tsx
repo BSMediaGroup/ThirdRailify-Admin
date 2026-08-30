@@ -2,10 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { createSiteTransfer, endSession, fetchAuthConfig, fetchSession, submitAuth, validatedSiteTransferUrl } from "./client";
 import { AuthDialog } from "./AuthDialog";
 import type { AuthAccount, AuthConfig, AuthMode, SessionPayload } from "./types";
+import { adminCapabilityIds, type AdminCapability } from "./capabilities";
 
 type AuthContextValue = {
   loading: boolean; account: AuthAccount | null; config: AuthConfig | null; csrfToken: string; error: string;
-  access: { isAdmin: boolean; isMasterAdmin: boolean };
+  access: { isAdmin: boolean; isMasterAdmin: boolean; capabilities: string[] };
+  hasCapability: (capability: AdminCapability) => boolean;
   openAuth: (mode?: AuthMode) => void; closeAuth: () => void; applySession: (payload: SessionPayload) => Promise<void>;
   signOut: () => Promise<void>; refresh: () => Promise<void>; openPublicSite: (returnTo?: string, newTab?: boolean) => Promise<void>;
 };
@@ -18,14 +20,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<AuthAccount | null>(null);
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [csrfToken, setCsrfToken] = useState("");
-  const [access, setAccess] = useState({ isAdmin: false, isMasterAdmin: false });
+  const [access, setAccess] = useState({ isAdmin: false, isMasterAdmin: false, capabilities: [] as string[] });
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<{ open: boolean; mode: AuthMode; resetToken: string }>({ open: false, mode: "signin", resetToken: "" });
 
   const setSession = useCallback((payload: SessionPayload) => {
     setAccount(payload.authenticated ? payload.account : null);
     setCsrfToken(payload.authenticated ? payload.csrfToken || "" : "");
-    setAccess(payload.authenticated ? payload.access : { isAdmin: false, isMasterAdmin: false });
+    setAccess(payload.authenticated ? normalizeAccess(payload.access) : { isAdmin: false, isMasterAdmin: false, capabilities: [] });
   }, []);
 
   useEffect(() => {
@@ -78,11 +80,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const openAuth = useCallback((mode: AuthMode = "signin") => setDialog({ open: true, mode, resetToken: "" }), []);
   const closeAuth = useCallback(() => setDialog((current) => ({ ...current, open: false })), []);
 
-  const value = useMemo<AuthContextValue>(() => ({ loading, account, config, csrfToken, error, access, openAuth, closeAuth, applySession, signOut, refresh, openPublicSite }), [access, account, applySession, closeAuth, config, csrfToken, error, loading, openAuth, openPublicSite, refresh, signOut]);
+  const hasCapability = useCallback((capability: AdminCapability) => access.capabilities.includes(capability), [access.capabilities]);
+  const value = useMemo<AuthContextValue>(() => ({ loading, account, config, csrfToken, error, access, hasCapability, openAuth, closeAuth, applySession, signOut, refresh, openPublicSite }), [access, account, applySession, closeAuth, config, csrfToken, error, hasCapability, loading, openAuth, openPublicSite, refresh, signOut]);
   return <AuthContext.Provider value={value}>{children}{dialog.open && <AuthDialog initialMode={dialog.mode} initialError={error} resetToken={dialog.resetToken} config={config} onClose={closeAuth} onSession={applySession} />}</AuthContext.Provider>;
 }
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() { const value = useContext(AuthContext); if (!value) throw new Error("useAuth must be used inside AuthProvider"); return value; }
+
+function normalizeAccess(access: SessionPayload["access"]) {
+  if (Array.isArray(access.capabilities)) return { isAdmin: access.isAdmin, isMasterAdmin: access.isMasterAdmin, capabilities: access.capabilities };
+  if (!access.isAdmin) return { ...access, capabilities: [] };
+  const capabilities = adminCapabilityIds.filter((capability) => access.isMasterAdmin || capability !== "role_permissions.manage");
+  return { ...access, capabilities: [...capabilities] };
+}
 
 function takeSensitiveQuery() {
   const url = new URL(window.location.href);

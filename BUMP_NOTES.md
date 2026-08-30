@@ -1,5 +1,19 @@
 # Bump notes
 
+## 2026-08-31 - Full Admin capability parity and Master-owned role policy
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced historical ordinary-operation Master-only guards with one canonical capability registry across authenticated session projection, router boundaries, navigation, controls, and protected Admin Functions. Full Admin now inherits all registered normal Admin capabilities with zero override rows; Regular users remain outside the Admin control plane and unknown capability identifiers fail closed.
+- Added additive Auth D1 migration `migrations/0002_full_admin_capability_denials.sql`. It stores Full-role denials only, with timestamps and the Master actor reference. Master Admin remains unrestricted and immutable; `role_permissions.view` is permanently available to Full Admin, while `role_permissions.manage` is permanently Master-only and cannot be delegated or configured.
+- Added the substantial grouped Role Permissions & Scopes matrix to `/settings`, including role summaries, domain icons/descriptions, Default access / Restricted / Required / Master only states, explicit dirty Apply, reset-by-denial-deletion, success/error feedback, and a responsive read-only Full Admin presentation. Policy writes preserve exact origin, CSRF, canonical ID/target validation, private/no-store responses, and per-capability `auth_audit` evidence.
+- Extended normal Full Admin parity through Overview, Analytics, Inbox, Watch, Site Content, Shop/catalogue, Commerce operations, Wheels/Stages/access/results, GOATS, Users/Access, Media, VIP/Membership, Integrations, and Settings. View denials hide navigation and render a branded restricted state; manage denials retain intentional read-only pages and server-side direct-call rejection. Full Admin can perform normal account administration but cannot demote, disable, or otherwise mutate environment or Master identities.
+- Retired the legacy per-account Commerce permission-grant endpoints with an explicit 410 response under Master-only role-policy authority. Effective permissions are resolved from Auth D1 at request time, so policy changes apply on the next request without session-cookie capability embedding or session revocation.
+- Added authorization, migration, CSRF, invalid-scope/target, forged-client, audit, request-freshness, direct API denial, registry-drift, environment-Master lock, Full Admin route-matrix, and Master/Full Settings browser coverage. Responsive route coverage includes 1920, 1440, 1024, 768, and 390 px; the required 1024 px audit also corrected the Analytics toolbar breakpoint.
+- Production rollout is migration-first: inspect/back up the `thirdrailify-accounts` Auth D1, apply only pending Auth migration `0002`, verify the new table/empty-denial default, deploy Admin, then accept Master edit/reset, Full read-only policy inspection, zero-override route/action parity, selected view/manage denial, direct 403 enforcement, audit evidence, and environment-Master locks. No remote migration, deployment, Cloudflare/DNS/provider mutation, production account mutation, or secret operation was performed locally.
+
 ## 2026-08-31 - Master Admin public-account hotfix
 
 CURRENT VER=0.1.0-alpha.0

@@ -6,8 +6,8 @@ import {
   normalizeOrigin,
   readJsonBody,
   requireCsrf,
-  requireMasterAdmin,
 } from "../../../_shared/auth-core.js";
+import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import {
   adminOverview,
   adminEngagementSettings,
@@ -37,7 +37,7 @@ export async function onRequest(context) {
   const { request, env } = context;
   try {
     requireAdminOriginWhenPresent(request, env);
-    const session = await requireMasterAdmin(env, request);
+    const session = await requireAdminCapability(env, request, request.method === "POST" ? "goats.manage" : "goats.view");
     const path = new URL(request.url).pathname.slice(ROUTE_PREFIX.length).replace(/^\/+|\/+$/g, "");
     if (request.method === "GET" || request.method === "HEAD") return await read(request, env, path, session);
     if (request.method === "POST") {

@@ -50,11 +50,11 @@ test("malformed, oversized, unsafe-link, and unsupported banner values are rejec
   for (const value of invalid) assert.throws(() => normalizeBannerConfig(value), (error) => error.status === 400);
 });
 
-test("banner mutation enforces Master auth, exact origin, CSRF, validation, persistence, revision checks, rate limit, and audit", async (t) => {
+test("banner mutation gives Full Admin default content parity and enforces origin, CSRF, validation, revisions, rate limit, and audit", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness);
   const master = await masterSession(env);
-  const initialRevision = (await readBannerSettings(env)).revision;
+  let initialRevision = (await readBannerSettings(env)).revision;
 
   assert.equal((await callPut(env, {}, VALID, initialRevision)).status, 403);
   assert.equal((await callPut(env, { origin: ADMIN_ORIGIN }, VALID, initialRevision)).status, 401);
@@ -65,7 +65,9 @@ test("banner mutation enforces Master auth, exact origin, CSRF, validation, pers
   await harness.authDb.prepare("INSERT INTO accounts (id,email_normalized,display_name,avatar_url,role,admin_level,status,email_verified_at,created_at,updated_at,last_login_at,source,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...Object.values(fullRow)).run();
   const fullSession = await createSession(env, new Request(`${ADMIN_ORIGIN}/`), fullRow, ADMIN_ORIGIN);
   const full = { origin: ADMIN_ORIGIN, cookie: cookiePair(fullSession.cookie), csrfToken: fullSession.csrfToken };
-  assert.equal((await callPut(env, full, VALID, initialRevision)).status, 403);
+  const fullSave = await callPut(env, full, VALID, initialRevision);
+  assert.equal(fullSave.status, 200);
+  initialRevision = (await fullSave.json()).revision;
 
   assert.equal((await callPut(env, master, { ...VALID, live: { ...VALID.live, animation: "flash" } }, initialRevision)).status, 400);
   const savedResponse = await callPut(env, master, VALID, initialRevision);

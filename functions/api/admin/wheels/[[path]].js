@@ -4,10 +4,9 @@ import {
   errorResponse,
   jsonResponse,
   normalizeOrigin,
-  requireAdmin,
   requireCsrf,
-  requireMasterAdmin,
 } from "../../../_shared/auth-core.js";
+import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import {
   adminWheelAccess,
   adminWheelDetail,
@@ -34,7 +33,7 @@ export async function onRequest(context) {
     const path = new URL(request.url).pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g, "");
     requireAdminOriginWhenPresent(request, env);
     if (request.method === "GET") {
-      await requireAdmin(env, request);
+      await requireAdminCapability(env, request, "wheels.view");
       if (!path) return response(await adminWheelLibrary(env), request, env);
       if (path === "stages") return response(await adminStageLibrary(env), request, env);
       if (path === "access") return response(await adminWheelAccess(env), request, env);
@@ -45,7 +44,7 @@ export async function onRequest(context) {
     }
     if (request.method !== "POST") throw new AuthFailure(405, "method_not_allowed", "This method is not allowed.", { Allow: "GET,POST,OPTIONS" });
     requireAdminOrigin(request, env);
-    const session = await requireMasterAdmin(env, request);
+    const session = await requireAdminCapability(env, request, "wheels.manage");
     await requireCsrf(request, session);
     const { body } = await readWheelJson(request, 64 * 1024);
     if (path === "grants") return response(await mutateCreatorGrant(env, session.accountId, body), request, env);

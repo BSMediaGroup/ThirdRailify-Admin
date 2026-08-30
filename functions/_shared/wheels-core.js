@@ -91,14 +91,14 @@ export async function listPublicWheels(env, input = {}) {
   const sort = new Set(["recent", "title", "participants"]).has(input.sort) ? input.sort : "recent";
   const order = sort === "title" ? "title COLLATE NOCASE ASC, id ASC" : sort === "participants" ? "participant_count DESC, title COLLATE NOCASE ASC" : "display_order ASC, updated_at DESC";
   const rows = await db.prepare(
-    `SELECT id, public_slug, title, description, config_json, participant_count, public_demo_spin_enabled,
+    `SELECT id, public_slug, title, description, owner_account_id, config_json, participant_count, public_demo_spin_enabled,
             official_spin_enabled, latest_official_spin_at, updated_at, display_order,
             EXISTS (SELECT 1 FROM wheel_entries e WHERE e.wheel_id = wheels.id AND e.state = 'active' AND e.weight != 1) AS is_weighted
      FROM wheels
      WHERE lifecycle = 'active' AND visibility = 'public' AND (? = '' OR lower(title) LIKE ? OR lower(COALESCE(description, '')) LIKE ?)
      ORDER BY ${order} LIMIT 100`,
   ).bind(search, `%${escapeLike(search)}%`, `%${escapeLike(search)}%`).all();
-  return { ok: true, items: (rows?.results || []).map(publicSummary), count: (rows?.results || []).length };
+  return { ok: true, items: await Promise.all((rows?.results || []).map(async (row) => ({ ...publicSummary(row), owner: await publicWheelOwner(env, row.owner_account_id) }))), count: (rows?.results || []).length };
 }
 
 export async function getPublicWheel(env, slug, accountId = "") {
@@ -608,4 +608,4 @@ function parseJson(value, fallback) { try { const parsed = JSON.parse(String(val
 function escapeLike(value) { return String(value).replace(/[\\%_]/g, (match) => `\\${match}`); }
 async function digestHex(bytes) { const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); return Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
-export { DEFAULT_CONFIG, MAX_ENTRIES, accountSummary, activeAccount, auditStatement, enforceWheelRateLimit, publicSummary, requireCreator, resolveWheelAccess, validateConfig, validateEntries };
+export { DEFAULT_CONFIG, MAX_ENTRIES, accountSummary, activeAccount, auditStatement, enforceWheelRateLimit, publicSummary, publicWheelOwner, requireCreator, resolveWheelAccess, validateConfig, validateEntries };

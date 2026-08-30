@@ -15,7 +15,8 @@ type PendingAction = { account: AuthAccount; action: AccountAction };
 type AccountDetailPayload = { ok: boolean; account: AuthAccount; sessions: Array<{ id: string; createdAt: string; expiresAt: string; lastSeenAt: string; revokedAt: string | null; sourceOrigin: string; userAgentRecorded: boolean }>; audit: Array<{ id: string; eventType: string; result: string; provider: string | null; createdAt: string }>; access: { isAdmin: boolean; isMasterAdmin: boolean }; checkedAt: string };
 
 export function AccountsPage() {
-  const { csrfToken, account: currentAccount, access, refresh } = useAuth();
+  const { csrfToken, account: currentAccount, hasCapability, refresh } = useAuth();
+  const canManage = hasCapability("users.manage");
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<AccountsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,7 +56,7 @@ export function AccountsPage() {
   }), [payload, provider, query, role, status]);
 
   const mutate = async () => {
-    if (!pending || !csrfToken) return;
+    if (!canManage || !pending || !csrfToken) return;
     const stopLoading = startLoading(`${actionLabel(pending.action)} in progress`);
     setBusyId(pending.account.id); setError("");
     try {
@@ -75,7 +76,7 @@ export function AccountsPage() {
       <Filter label="Role" value={role} onChange={setRole} options={["user", "admin"]} />
       <Filter label="Status" value={status} onChange={setStatus} options={["active", "pending_email", "disabled"]} />
     </section>
-    <div className="accounts-summary"><strong>{loading ? "Loading" : visible.length}</strong><span>of {payload?.accounts.length || 0} accounts</span><span>{access.isMasterAdmin ? "Master controls enabled" : "Read-only Full Admin view"}</span></div>
+    <div className="accounts-summary"><strong>{loading ? "Loading" : visible.length}</strong><span>of {payload?.accounts.length || 0} accounts</span><span>{canManage ? "Account controls enabled" : "Read-only access"}</span></div>
     <section className="accounts-table-wrap" aria-live="polite">
       {loading ? <p className="accounts-state">Loading D1 accounts...</p> : visible.length === 0 ? <p className="accounts-state">No accounts match these filters.</p> : <table className="accounts-table" data-resizable-key="accounts">
         <thead><tr><AccountHeader width={210}>Account</AccountHeader><AccountHeader width={150}>Identity</AccountHeader><AccountHeader width={125}>Access</AccountHeader><AccountHeader width={130}>State</AccountHeader><AccountHeader width={175}>Activity</AccountHeader><AccountHeader width={115}>Customer</AccountHeader><AccountHeader width={190}>Controls</AccountHeader></tr></thead>
@@ -86,12 +87,12 @@ export function AccountsPage() {
           <td data-label="State"><strong className={`state-label state-label--${account.status}`}>{label(account.status)}</strong><span>{account.email ? account.emailVerified ? "Email verified" : "Email unverified" : "No email supplied"}</span></td>
           <td data-label="Activity"><strong>Created {formatDate(account.createdAt)}</strong><span>{account.lastLoginAt ? `Last login ${formatDate(account.lastLoginAt)}` : "Never signed in"}</span></td>
           <td data-label="Customer">{account.customer ? <Link className="account-customer-link" to={`/customers?customer=${encodeURIComponent(account.customer.id)}`} onClick={(event) => event.stopPropagation()}><strong>Customer</strong><span>{account.customer.orderCount} order{account.customer.orderCount === 1 ? "" : "s"}</span></Link> : <span className="control-note">No purchases</span>}</td>
-          <td data-label="Controls"><AccountActions account={account} currentId={currentAccount?.id || ""} master={access.isMasterAdmin} busy={busyId === account.id} onAction={(action) => setPending({ account, action })} /></td>
+          <td data-label="Controls"><AccountActions account={account} currentId={currentAccount?.id || ""} master={canManage} busy={busyId === account.id} onAction={(action) => setPending({ account, action })} /></td>
         </tr>)}</tbody>
       </table>}
     </section>
     {pending && <div className="confirm-backdrop" role="presentation"><div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><p className="eyebrow">Security action</p><h2 id="confirm-title">{actionLabel(pending.action)}?</h2><p>This will apply immediately to <strong>{pending.account.displayName}</strong> through the signed Admin API.</p><div><button type="button" className="secondary-button" onClick={() => setPending(null)} disabled={Boolean(busyId)}>Cancel</button><button type="button" className="danger-button" onClick={() => void mutate()} disabled={Boolean(busyId)}>{busyId ? "Applying..." : "Confirm"}</button></div></div></div>}
-    {selectedAccountId && <DetailDrawer titleId="account-detail-title" onClose={closeDetail}><AccountDetailDrawer payload={detail} loading={detailLoading} close={closeDetail} master={access.isMasterAdmin} currentId={currentAccount?.id || ""} busyId={busyId} action={(account, value) => setPending({ account, action: value })} /></DetailDrawer>}
+    {selectedAccountId && <DetailDrawer titleId="account-detail-title" onClose={closeDetail}><AccountDetailDrawer payload={detail} loading={detailLoading} close={closeDetail} master={canManage} currentId={currentAccount?.id || ""} busyId={busyId} action={(account, value) => setPending({ account, action: value })} /></DetailDrawer>}
   </>;
 }
 
@@ -154,8 +155,8 @@ function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccoun
 function Filter({ label: text, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) { return <label><span>{text}</span><select value={value} onChange={(event) => onChange(event.target.value)}><option value="all">All</option>{options.map((option) => <option key={option} value={option}>{label(option)}</option>)}</select></label>; }
 function ProviderList({ account }: { account: AuthAccount }) { return account.providers.length ? <div className="provider-list">{account.providers.map((provider) => <span key={provider}>{label(provider)}</span>)}{account.identities?.[0] && <small>{account.identities[0].username ? `@${account.identities[0].username}` : compactSubject(account.identities[0].subject)}</small>}</div> : <div className="provider-list"><span>Email</span><small>Password credential</small></div>; }
 function AccountActions({ account, currentId, master, busy, onAction }: { account: AuthAccount; currentId: string; master: boolean; busy: boolean; onAction: (action: AccountAction) => void }) {
-  if (!master) return <span className="control-note">Master Admin required</span>;
-  if (account.locked || account.adminLevel === "master") return <span className="control-note">Environment locked</span>;
+  if (!master) return <span className="control-note">Management permission restricted</span>;
+  if (account.locked || account.adminLevel === "master") return <span className="control-note">Protected Master identity</span>;
   return <div className="account-actions">
     {account.role === "user" && account.status === "active" && (account.source !== "email" || account.emailVerified) && <button type="button" onClick={(event) => { event.stopPropagation(); onAction("promote"); }} disabled={busy || account.id === currentId}>Promote</button>}
     {account.role === "admin" && <button type="button" onClick={(event) => { event.stopPropagation(); onAction("demote"); }} disabled={busy}>Demote</button>}

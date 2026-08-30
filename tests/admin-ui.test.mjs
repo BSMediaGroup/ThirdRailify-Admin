@@ -19,7 +19,9 @@ test("Admin sidebar keeps branding outside the independently scrollable navigati
     read("src/styles/global.css"),
   ]);
   assert.match(shell, /className="sidebar-brand-panel"[\s\S]*className="brand-lockup"/);
-  assert.match(shell, /className="sidebar-scroll-region"[\s\S]*className="environment-note"[\s\S]*className="primary-nav"[\s\S]*className="sidebar-footer"/);
+  assert.match(shell, /className="sidebar-scroll-region"[\s\S]*className="primary-nav"[\s\S]*className="sidebar-footer"/);
+  assert.match(shell, /className="sidebar-footer"[\s\S]*name="shield"[\s\S]*Authenticated control plane[\s\S]*D1 account authority/);
+  assert.doesNotMatch(shell, /className="environment-note"|className="status-dot"/);
   assert.match(styles, /\.sidebar \{[\s\S]*overflow: hidden;/);
   assert.match(styles, /\.sidebar-brand-panel \{[^}]*flex: 0 0 auto;[^}]*border-bottom:/);
   assert.match(styles, /\.admin-layout--collapsed \.sidebar-brand-panel \{ justify-content: center; \}/);
@@ -88,7 +90,7 @@ test("commerce email cards stay left-aligned and email/document previews consume
 
 test("GOATS approved records expose durable content, media, and reaction reset controls", async () => {
   const [app, page, client, navigation] = await Promise.all([read("src/App.tsx"), read("src/pages/GoatsAdminPages.tsx"), read("src/goats/client.ts"), read("src/config/navigation.ts")]);
-  assert.match(app, /path="goats\/reactions" element={<Navigate to="\/goats\/approved" replace/);
+  assert.match(app, /path="goats\/reactions" element={guard\("\/goats", <Navigate to="\/goats\/approved" replace/);
   assert.match(app, /path="goats\/settings"/);
   for (const label of ["Approved listings remain editable", "Add, replace, or remove images", "Reset all reactions", "Save global defaults"]) assert.match(page, new RegExp(label));
   assert.match(page, /media\.some\(\(media\) => media\.role === "profile"\)[\s\S]*Add profile/);
@@ -99,7 +101,7 @@ test("GOATS approved records expose durable content, media, and reaction reset c
 
 test("Admin inbox is linked from navigation, shell indicators, overview, and account menu", async () => {
   const [app, navigation, shell, account, overview, inbox, styles] = await Promise.all([read("src/App.tsx"), read("src/config/navigation.ts"), read("src/components/AdminShell.tsx"), read("src/auth/AdminAccountWidget.tsx"), read("src/pages/OverviewPage.tsx"), read("src/pages/InboxPage.tsx"), read("src/styles/global.css")]);
-  assert.match(app, /path="inbox" element={<InboxPage/);
+  assert.match(app, /path="inbox" element={guard\("\/inbox", <InboxPage/);
   assert.match(navigation, /path: "\/inbox"[\s\S]{0,100}label: "Admin Inbox"/);
   assert.match(shell, /actionable\.goats\.submissions/); assert.match(shell, /nav-badge/);
   assert.match(account, /Admin Inbox/); assert.match(account, /admin-account__badge/);
@@ -130,7 +132,7 @@ test("Admin operational routes replace scaffolds and keep access visuals present
   const [app, operations, access, badge, styles] = await Promise.all([
     read("src/App.tsx"), read("src/pages/OperationsPages.tsx"), read("src/pages/AccountsPage.tsx"), read("src/components/AccountAccessBadge.tsx"), read("src/styles/global.css"),
   ]);
-  for (const [path, page] of [["media", "MediaOperationsPage"], ["membership", "MembershipOperationsPage"], ["integrations", "IntegrationsOperationsPage"], ["settings", "SettingsOperationsPage"]]) assert.match(app, new RegExp(`path="${path}" element=\\{<${page}`));
+  for (const [path, page] of [["media", "MediaOperationsPage"], ["membership", "MembershipOperationsPage"], ["integrations", "IntegrationsOperationsPage"], ["settings", "SettingsOperationsPage"]]) assert.match(app, new RegExp(`path="${path}" element=\\{guard\\("/${path}", <${page}`));
   for (const label of ["Media library", "Accounts, not subscribers", "Provider directory", "Configuration directory", "Not yet configurable"]) assert.match(operations, new RegExp(label));
   assert.match(operations, /Promise\.allSettled/);
   assert.match(operations, /no R2 object key is exposed/);
@@ -166,7 +168,7 @@ test("Watch authority failures render unknown archive state instead of false zer
 
 test("Site Content exposes separate normal and fixture-labelled Live Now configuration without a manual live-title field", async () => {
   const [app, page, client] = await Promise.all([read("src/App.tsx"), read("src/pages/SiteContentPage.tsx"), read("src/banner/client.ts")]);
-  assert.match(app, /path="content" element={<SiteContentPage/);
+  assert.match(app, /path="content" element={guard\("\/content", <SiteContentPage/);
   for (const label of ["Normal promo / info", "Homepage content rail", "Seamless marquee scroll", "Third Railify triple zap", "Divider size", "Ticker divider icon", "Ticker divider size", "Allow visitors to dismiss", "Automatic Live Now", "Presentation mode", "Animation speed", "Locked destination", "Fixture preview only", "Unsaved changes"]) assert.match(page, new RegExp(label));
   assert.match(page, /SAMPLE PREVIEW — Third Railify live broadcast title/);
   assert.match(page, /<code>\/watch\/live<\/code>/);
@@ -178,15 +180,16 @@ test("Site Content exposes separate normal and fixture-labelled Live Now configu
 test("Overview is a fail-soft operational snapshot rather than a deferred foundation page", async () => {
   const [page, styles, navigation, scripts] = await Promise.all([read("src/pages/OverviewPage.tsx"), read("src/styles/global.css"), read("src/config/navigation.ts"), read("package.json")]);
   for (const authority of ["/api/admin/status", "getAnalytics", "getCommerceOverview", "manageWatch", "getGoatsOverview", "readBannerSettings"]) assert.match(page, new RegExp(authority.replaceAll("/", "\\/")));
-  for (const label of ["Audience signal", "Page views", "Anonymous sessions", "Mapped regions", "Operational workspaces", "Runtime posture", "Operational priorities", "Recent GOATS", "Partial operational snapshot"]) assert.match(page, new RegExp(label));
+  for (const label of ["Analytics snapshot", "Audience trend", "Page views", "Anonymous sessions", "Mapped regions", "Operational workspaces", "Runtime posture", "Operational priorities", "Recent GOATS", "Partial operational snapshot"]) assert.match(page, new RegExp(label));
   assert.match(page, /Missing values remain unavailable rather than being replaced with zero/);
-  assert.match(page, /Master Admin access is required/);
+  assert.match(page, /restricted for this role/);
   assert.match(page, /overview-pulse__credential/);
   assert.match(page, /Account level \/ server verified/);
   assert.match(page, /access\.isMasterAdmin \? "Master" : "Full Admin"/);
   assert.doesNotMatch(page, /Authenticated foundation|Still intentionally deferred|Products and orders remain provider-neutral shells/);
   assert.match(styles, /\.overview-module-grid/);
-  assert.match(styles, /\.overview-analytics__grid/);
+  assert.match(styles, /\.overview-analytics__panel/);
+  assert.match(styles, /\.overview-analytics__line\.is-views/);
   assert.match(styles, /\.overview-pulse__shield::before/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.overview-hero::after/);
   assert.match(navigation, /summary: "Cross-system operational state, queues, and direct workspace routes\."/);
@@ -205,7 +208,7 @@ test("Orders is a read-only paginated management surface with isolated TEST evid
 
 test("Fulfillment & Shipping uses the dedicated read-only control plane and exposes no provider or migration action", async () => {
   const [app, navigation, page, client, route] = await Promise.all([read("src/App.tsx"), read("src/config/navigation.ts"), read("src/pages/FulfillmentShippingPage.tsx"), read("src/commerce/client.ts"), read("functions/api/admin/commerce/[[path]].js")]);
-  assert.match(app, /path="commerce\/fulfillment" element=\{<FulfillmentShippingPage/);
+  assert.match(app, /path="commerce\/fulfillment" element=\{guard\("\/commerce\/fulfillment", <FulfillmentShippingPage/);
   assert.match(navigation, /path: "\/commerce\/fulfillment"[\s\S]{0,100}label: "Fulfillment & Shipping"/);
   for (const label of ["Server-derived readiness", "Order fulfillment pipeline", "Product & variant mapping health", "Draft order preview", "Recent fulfillment evidence", "Advanced / technical"]) assert.match(page, new RegExp(label));
   for (const forbidden of ["executePermanentPrintfulMigration", "getPermanentPrintfulMigration", "CONTINUE PERMANENT PRINTFUL", "RESUME PERMANENT PRINTFUL", "Fulfill Now", "Create Printful Order"]) assert.doesNotMatch(page, new RegExp(forbidden));
@@ -218,7 +221,7 @@ test("Shop is an expandable Products, Collections, Orders group with dirty-only 
   assert.match(navigation, /path: "\/shop"[\s\S]{0,120}label: "Shop"/);
   for (const [path, label] of [["/products", "Products"], ["/collections", "Collections"], ["/orders", "Orders"]]) assert.match(navigation, new RegExp(`path: "${path.replaceAll("/", "\\/")}"[\\s\\S]{0,90}parentPath: "\\/shop"[\\s\\S]{0,100}label: "${label}"`));
   assert.equal((navigation.match(/path: "\/orders"/g) || []).length, 1);
-  assert.match(app, /path="collections" element=\{<CommerceCollectionsPage/); assert.match(app, /path="shop" element=\{<Navigate to="\/products"/);
+  assert.match(app, /path="collections" element=\{guard\("\/collections", <CommerceCollectionsPage/); assert.match(app, /path="shop" element=\{guard\("\/shop", <Navigate to="\/products"/);
   assert.match(page, /featuredDirty && <div className="featured-order-save"/); assert.match(page, /Featured order changed/); assert.match(page, />Discard<\/button>/); assert.match(page, /Select all \{payload\.totalItems\} matching/); assert.match(page, /Rows per page/);
   for (const label of ["Create collection", "Stable Public slug", "Product membership", "Current products", "Add products", "Show collection on storefront", "Archive collection", "Delete empty collection", "Rows per page", "Edit collection"]) assert.match(page, new RegExp(label));
   assert.match(page, /getCollectionList/); assert.match(page, /bulkUpdateCollections/); assert.match(page, /updateCollectionMemberships/); assert.match(page, /No standalone collection image field exists/);
@@ -230,7 +233,7 @@ test("Analytics and inbox surfaces expose truthful states, bulk controls, and ac
     read("src/App.tsx"), read("src/config/navigation.ts"), read("src/pages/AnalyticsPage.tsx"),
     read("src/pages/InboxPage.tsx"), read("src/inbox/client.ts"), read("src/styles/global.css"),
   ]);
-  assert.match(app, /path="analytics" element=\{<AnalyticsPage/);
+  assert.match(app, /path="analytics" element=\{guard\("\/analytics", <AnalyticsPage/);
   assert.match(navigation, /path: "\/analytics"[\s\S]{0,120}Audience Analytics/);
   for (const text of ["Audience activity map", "Traffic comparison matrix", "Collected, not profit", "Preceding period unavailable", "No events retained yet"]) assert.match(analytics, new RegExp(text));
   assert.match(analytics, /import \* as maplibregl from "maplibre-gl"/); assert.match(analytics, /setWorkerUrl\(maplibreWorkerUrl\)/); assert.match(analytics, /data-analytics-map-engine="maplibre"/); assert.match(analytics, /Fullscreen audience activity map/); assert.match(analytics, /role="img"[\s\S]{0,80}aria-label="World map/);

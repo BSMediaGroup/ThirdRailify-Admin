@@ -12,7 +12,7 @@ const PUBLIC_ORIGIN = "https://thirdrailify.pages.dev";
 const SHARED_SECRET = "test-only-shared-watch-secret";
 const EPISODE_ID = `ep_${"a".repeat(64)}`;
 
-test("Watch Admin requires exact origin, Master session, CSRF, and a valid action before server signing", async (t) => {
+test("Watch Admin gives Full Admin default view parity and requires exact origin, CSRF, and valid actions", async (t) => {
   const harness = await createAuthDatabase(); t.after(harness.dispose);
   const env = authEnvironment(harness.db, { THIRDRAILIFY_COMMUNITY_API_SECRET: SHARED_SECRET });
   const master = await masterSession(env);
@@ -29,8 +29,9 @@ test("Watch Admin requires exact origin, Master session, CSRF, and a valid actio
   await harness.db.prepare("INSERT INTO accounts (id,email_normalized,display_name,avatar_url,role,admin_level,status,email_verified_at,created_at,updated_at,last_login_at,source,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...Object.values(fullAccount)).run();
   const full = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { "User-Agent": "watch-test" } }), fullAccount, ADMIN_ORIGIN);
   const fullResponse = await callWatch({ action: "read" }, env, { origin: ADMIN_ORIGIN, cookie: cookiePair(full.cookie), csrfToken: full.csrfToken }, fetchImpl);
-  assert.equal(fullResponse.status, 403);
-  assert.equal((await fullResponse.json()).error, "master_admin_required");
+  assert.equal(fullResponse.status, 200);
+  assert.equal((await fullResponse.json()).ok, true);
+  assert.equal(fetches, 1);
 });
 
 test("Watch Admin signs only server-to-server, performs show/hide and bulk actions, rate-limits, and audits mutations", async (t) => {

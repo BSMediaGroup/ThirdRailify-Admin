@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { Miniflare } from "miniflare";
 
-const migrationUrl = new URL("../migrations/0001_auth_foundation.sql", import.meta.url);
+const migrationUrls = [
+  new URL("../migrations/0001_auth_foundation.sql", import.meta.url),
+  new URL("../migrations/0002_full_admin_capability_denials.sql", import.meta.url),
+];
 
 export async function createAuthDatabase() {
   const miniflare = new Miniflare({
@@ -11,9 +14,9 @@ export async function createAuthDatabase() {
     script: "export default { fetch() { return new Response('test'); } };",
   });
   const db = await miniflare.getD1Database("THIRDRAILIFY_AUTH_DB");
-  const migration = await readFile(migrationUrl, "utf8");
-  await applyMigration(db, migration);
-  return { db, migration, dispose: () => miniflare.dispose() };
+  const migrations = await Promise.all(migrationUrls.map((url) => readFile(url, "utf8")));
+  for (const migration of migrations) await applyMigration(db, migration);
+  return { db, migration: migrations[0], migrations, dispose: () => miniflare.dispose() };
 }
 
 export async function applyMigration(db, migration) {

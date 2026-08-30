@@ -7,6 +7,7 @@ import { AdminAccountWidget } from "../auth/AdminAccountWidget";
 import { useAuth } from "../auth/AuthProvider";
 import { getInboxSummary, type InboxSummary } from "../inbox/client";
 import { ResizableTables } from "./ResizableTables";
+import { adminRoutePolicy } from "../auth/capabilities";
 
 export type AdminShellOutletContext = {
   startLoading: (reason?: string) => () => void;
@@ -21,7 +22,7 @@ const groupIsActive = (parentPath: string, pathname: string) => pathname === par
 export function AdminShell() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { account } = useAuth();
+  const { account, hasCapability } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarPreference);
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(topLevelAdminAreas.filter((area) => groupIsActive(area.path, location.pathname)).map((area) => area.path)));
@@ -42,10 +43,10 @@ export function AdminShell() {
   }, []);
 
   const refreshInbox = useCallback(async () => {
-    if (!account) { setInboxSummary(null); return; }
+    if (!account || !hasCapability("inbox.view")) { setInboxSummary(null); return; }
     try { setInboxSummary(await getInboxSummary()); }
     catch { setInboxSummary(null); }
-  }, [account]);
+  }, [account, hasCapability]);
 
   useEffect(() => {
     void refreshInbox();
@@ -113,15 +114,10 @@ export function AdminShell() {
         </div>
 
         <div className="sidebar-scroll-region">
-          <div className="environment-note">
-            <span className="status-dot" aria-hidden="true" />
-            <div><strong>Authenticated control plane</strong><span>D1 account authority</span></div>
-          </div>
-
           <nav className="primary-nav">
             <p className="nav-label">Workspace</p>
-            {topLevelAdminAreas.map((area) => {
-              const children = childAdminAreas(area.path);
+            {topLevelAdminAreas.filter((area) => hasCapability(adminRoutePolicy(area.path).view)).map((area) => {
+              const children = childAdminAreas(area.path).filter((child) => hasCapability(adminRoutePolicy(child.path).view));
               if (!children.length) return <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>
                 <AdminIcon name={area.icon} />
                 <span>{area.label}</span>
@@ -156,7 +152,7 @@ export function AdminShell() {
 
           <div className="sidebar-footer">
             <AdminIcon name="shield" />
-            <p><strong>Least privilege</strong><span>Account writes require Master Admin.</span></p>
+            <p><strong>Authenticated control plane</strong><span>D1 account authority</span></p>
           </div>
         </div>
       </aside>

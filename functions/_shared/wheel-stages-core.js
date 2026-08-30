@@ -9,6 +9,7 @@ import {
   officialSpinProjection,
   participantSnapshotHash,
   publicSummary,
+  publicWheelOwner,
   requireCreator,
   requireOfficialCooldown,
   requireWheelDb,
@@ -37,7 +38,7 @@ export async function listPublicStages(env, input = {}) {
   const items = [];
   for (const row of rows?.results || []) {
     const wheels = await publicStageSummaries(env, row.id);
-    if (wheels.length) items.push(stageSummary(row, wheels));
+    if (wheels.length) items.push(stageSummary(row, wheels, await publicWheelOwner(env, row.owner_account_id)));
   }
   return { ok: true, items, count: items.length };
 }
@@ -56,27 +57,18 @@ export async function listOwnedStages(env, accountId) {
 export async function listAccessibleWheels(env, accountId, input = {}) {
   const actor = await activeAccount(env, accountId);
   if (!actor) throw new AuthFailure(401, "authentication_required", "Sign in to choose Stage wheels.");
-  const db = requireWheelDb(env); const master = accessForAccount(actor).isMasterAdmin;
+  const db = requireWheelDb(env);
   const search = clean(input.search, 80).toLowerCase();
-  const scope = new Set(["public", "mine", "accessible"]).has(input.scope) ? input.scope : "accessible";
   const rows = await db.prepare(
     `SELECT w.*,
-       EXISTS (SELECT 1 FROM wheel_entries e WHERE e.wheel_id = w.id AND e.state = 'active' AND e.weight != 1) AS is_weighted,
-       (SELECT role FROM wheel_access a WHERE a.wheel_id = w.id AND a.account_id = ? AND a.active = 1 LIMIT 1) AS assigned_role
+       EXISTS (SELECT 1 FROM wheel_entries e WHERE e.wheel_id = w.id AND e.state = 'active' AND e.weight != 1) AS is_weighted
      FROM wheels w
-     WHERE w.lifecycle = 'active'
-       AND (? = 1 OR w.visibility = 'public' OR w.owner_account_id = ? OR EXISTS (
-         SELECT 1 FROM wheel_access a WHERE a.wheel_id = w.id AND a.account_id = ? AND a.active = 1
-       ))
-       AND (? = 'accessible' OR (? = 'public' AND w.visibility = 'public') OR (? = 'mine' AND w.owner_account_id = ?))
+     WHERE w.lifecycle = 'active' AND w.owner_account_id = ?
        AND (? = '' OR lower(w.title) LIKE ? ESCAPE '\\' OR lower(COALESCE(w.description, '')) LIKE ? ESCAPE '\\')
      ORDER BY w.title COLLATE NOCASE ASC, w.id ASC LIMIT 200`,
-  ).bind(accountId, master ? 1 : 0, accountId, accountId, scope, scope, scope, accountId, search, `%${escapeLike(search)}%`, `%${escapeLike(search)}%`).all();
+  ).bind(accountId, search, `%${escapeLike(search)}%`, `%${escapeLike(search)}%`).all();
   const items = (rows?.results || []).map((row) => {
-    const role = row.owner_account_id === accountId ? "owner" : row.assigned_role || null;
-    const canEdit = master || role === "owner" || role === "editor";
-    const canSpin = master || canEdit || role === "spinner";
-    return { ...publicSummary(row), visibility: row.visibility === "public" ? "public" : "private", capability: canEdit ? "Edit" : canSpin && row.official_spin_enabled ? "Official" : "Demo", canEdit, canSpinOfficially: Boolean(canSpin && row.official_spin_enabled && !row.official_spinning_locked) };
+    return { ...publicSummary(row), visibility: row.visibility === "public" ? "public" : "private", capability: "Edit", canEdit: true, canSpinOfficially: Boolean(row.official_spin_enabled && !row.official_spinning_locked) };
   });
   return { ok: true, items, count: items.length };
 }
@@ -269,6 +261,8 @@ async function normalizeStageInput(env, accountId, input, currentStageId = "") {
       ? await db.prepare("SELECT w.* FROM wheel_stage_items i JOIN wheels w ON w.id=i.wheel_id WHERE i.stage_id=? AND i.position=? LIMIT 1").bind(currentStageId, Number(unavailable[1])).first()
       : await db.prepare("SELECT * FROM wheels WHERE id=? OR public_slug=? COLLATE NOCASE LIMIT 1").bind(identifier, identifier).first();
     if (!wheel || wheel.lifecycle !== "active") throw new AuthFailure(400, "stage_wheel_unavailable", "Every Stage wheel must be active and accessible.");
+    const retained = currentStageId ? await db.prepare("SELECT 1 AS retained FROM wheel_stage_items WHERE stage_id=? AND wheel_id=? LIMIT 1").bind(currentStageId, wheel.id).first() : null;
+    if (wheel.owner_account_id !== accountId && !retained) throw new AuthFailure(403, "stage_wheel_owner_mismatch", "A Stage may add only Wheels owned by its owner account.");
     if (visibility === "public" && wheel.visibility !== "public") throw new AuthFailure(400, "public_stage_private_wheel", "A Public Stage may contain only active Public wheels.");
     const access = await resolveWheelAccess(env, accountId, wheel);
     if (!unavailable && wheel.visibility !== "public" && !access.canViewPrivate) throw new AuthFailure(403, "stage_wheel_forbidden", "You do not have access to one of the selected wheels.");
@@ -300,7 +294,7 @@ async function publicStageSummaries(env, stageId) {
   ).bind(stageId).all();
   return (rows?.results || []).map((row) => ({ position: Number(row.position), ...publicSummary(row) }));
 }
-function stageSummary(row, wheels) { return { type: "stage", slug: row.public_slug, title: row.title, description: row.description, wheelCount: wheels.length, visibility: "public", wheels, updatedAt: row.updated_at }; }
+function stageSummary(row, wheels, owner) { return { type: "stage", slug: row.public_slug, title: row.title, description: row.description, owner, wheelCount: wheels.length, visibility: "public", wheels, updatedAt: row.updated_at }; }
 async function uniqueStageSlug(db, value) { const base = slugify(value) || `stage-${randomId().slice(0, 8)}`; for (let index = 0; index < 10; index += 1) { const candidate = index ? `${base.slice(0, 71)}-${randomId().slice(0, 6)}` : base; if (!await db.prepare("SELECT id FROM wheel_stages WHERE public_slug=? COLLATE NOCASE").bind(candidate).first()) return candidate; } throw new AuthFailure(409, "stage_slug_unavailable", "A unique Stage URL could not be created."); }
 function slugify(value) { const slug = String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80).replace(/-+$/g, ""); return SLUG.test(slug) ? slug : slug.length >= 3 ? slug : ""; }
 function clean(value, max) { return cleanText(value, max); }

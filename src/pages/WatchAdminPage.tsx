@@ -6,7 +6,9 @@ import rumbleIcon from "../../assets/icons/rumble.svg";
 import youtubeIcon from "../../assets/icons/youtube.svg";
 
 export function WatchAdminPage() {
-  const { csrfToken, access } = useAuth();
+  const { csrfToken, hasCapability } = useAuth();
+  const canView = hasCapability("watch.view");
+  const canManage = hasCapability("watch.manage");
   const [data, setData] = useState<WatchAdminPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -16,17 +18,17 @@ export function WatchAdminPage() {
   const previousFocus = useRef<HTMLElement | null>(null);
 
   const load = useCallback(async () => {
-    if (!csrfToken || !access.isMasterAdmin) return;
+    if (!csrfToken || !canView) return;
     setLoading(true); setError("");
     try { setData(await manageWatch("read", csrfToken)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The Watch archive service is unavailable."); }
     finally { setLoading(false); }
-  }, [access.isMasterAdmin, csrfToken]);
+  }, [canView, csrfToken]);
 
   useEffect(() => { void load(); }, [load]);
 
   const mutate = async (action: Exclude<WatchAction, "read">, episodeId?: string) => {
-    if (!csrfToken || busy) return;
+    if (!csrfToken || !canManage || busy) return;
     const focus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setBusy(episodeId || action); setError("");
     try { setData(await manageWatch(action, csrfToken, episodeId)); }
@@ -41,10 +43,6 @@ export function WatchAdminPage() {
   };
   const closeBulkHide = () => { confirmDialog.current?.close(); window.requestAnimationFrame(() => previousFocus.current?.focus()); };
   const confirmBulkHide = async () => { confirmDialog.current?.close(); await mutate("hide_all"); };
-
-  if (!access.isMasterAdmin) {
-    return <section className="watch-admin-page"><header className="page-heading"><div><p className="section-kicker">Broadcast authority</p><h1>Watch archive</h1><p>Visibility controls require an authenticated Master Admin session.</p></div></header><div className="notice-card"><AdminIcon name="shield" /><div><strong>Master Admin required</strong><p>This workspace does not expose archive state or mutation controls to Full Admin sessions.</p></div></div></section>;
-  }
 
   const summary = data?.summary;
   const archiveUnavailable = !loading && !data;

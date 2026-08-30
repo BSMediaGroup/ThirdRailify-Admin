@@ -1,7 +1,7 @@
 import { adminApi } from "../auth/client";
 
 export type CommerceStatus = "unavailable" | "setup_required" | "pending" | "connected" | "restricted" | "disabled" | "error" | "legacy_production" | "deferred";
-export type CommerceCapability = "commerce.view" | "commerce.business.manage" | "commerce.payments.manage" | "commerce.integrations.manage" | "commerce.templates.manage";
+export type CommerceCapability = "commerce.view" | "commerce.catalogue.manage" | "commerce.business.manage" | "commerce.payments.manage" | "commerce.integrations.manage" | "commerce.templates.manage" | "commerce.operations.manage";
 export type CommerceAccess = { isMasterAdmin: boolean; capabilities: CommerceCapability[] };
 export type ProviderStatus = {
   provider: string; label: string; status: CommerceStatus; credentialCustody: "environment_secret" | "admin_encrypted" | "no_secret";

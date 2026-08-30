@@ -8,9 +8,9 @@ import {
   readJsonBody,
   requireAdmin,
   requireCsrf,
-  requireMasterAdmin,
   writeAudit,
 } from "../../../_shared/auth-core.js";
+import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import {
   archiveCollection,
   bulkUpdateCollections,
@@ -23,13 +23,10 @@ import {
   commerceOverview,
   createCollection,
   deleteCollection,
-  grantCommerceCapability,
   merchandisingProductsPayload,
   merchandisingProductListPayload,
   merchandisingProductPayload,
-  permissionGrantsPayload,
   requireCommerceCapability,
-  revokeCommerceCapability,
   templatesPayload,
   updateBusinessProfile,
   updateCollection,
@@ -126,7 +123,7 @@ async function handleGet(request, env, path) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await productionReadinessPayload(env, session);
   } else if (path === "launch") {
-    await requireMasterAdmin(env, request);
+    await requireCommerceCapability(env, session, "commerce.view");
     payload = new URL(request.url).searchParams.get("target") === "donations" ? await paypalDonationLaunchPlan(env) : await commerceLaunchPlan(env);
   } else if (path === "launch/jobs") {
     await requireCommerceCapability(env, session, "commerce.view");
@@ -184,11 +181,11 @@ async function handleGet(request, env, path) {
     const [, orderId, , documentType] = path.split("/");
     payload = await orderDocumentPreviewPayload(env, session, decodePathPart(orderId), documentType);
   } else if (path === "printful/catalogue/migration") {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.integrations.manage");
     payload = await permanentMigrationPayload(env);
   } else if (path === "permissions") {
-    await requireMasterAdmin(env, request);
-    payload = await permissionGrantsPayload(env, session);
+    await requireAdminCapability(env, session, "role_permissions.manage");
+    throw new AuthFailure(410, "legacy_permission_api_retired", "Use the role permissions policy API.");
   } else {
     throw new AuthFailure(404, "not_found", "The commerce route was not found.");
   }
@@ -214,7 +211,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     payload = await verifyStripeAccount(env, session, fetchImpl);
     authEventType = "stripe_account_verified";
   } else if (path === "launch/catalogue-apply") {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.operations.manage");
     const body = await readJsonBody(request);
     if (!body || Object.keys(body).length !== 1 || body.confirmation !== "APPLY ELIGIBLE SELLABILITY") {
       throw new AuthFailure(400, "commerce_catalogue_confirmation_required", "Type APPLY ELIGIBLE SELLABILITY exactly to continue.");
@@ -222,25 +219,25 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     payload = await applyEligibleVariantSellability(env, session.accountId);
     authEventType = "commerce_catalogue_sellability_applied";
   } else if (path === "launch/activate") {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.operations.manage");
     payload = await activateCommerceLaunch(env, await readJsonBody(request), session.accountId);
     authEventType = "commerce_production_activated";
   } else if (path === "launch/donations-activate") {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.operations.manage");
     payload = await activatePayPalDonations(env, await readJsonBody(request), session.accountId);
     authEventType = "commerce_paypal_donations_activated";
   } else if (path === "launch/pause") {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.operations.manage");
     payload = await pauseCommerceLaunch(env, await readJsonBody(request), session.accountId);
     authEventType = "commerce_emergency_paused";
   } else if (/^launch\/jobs\/[^/]+\/retry$/.test(path)) {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.operations.manage");
     const body = await readJsonBody(request);
     if (!body || Object.keys(body).length !== 1 || body.confirmation !== "RETRY JOB") throw new AuthFailure(400, "commerce_job_retry_confirmation_required", "Type RETRY JOB exactly to continue.");
     payload = await retryCommerceJob(env, decodePathPart(path.split("/")[2]), session.accountId);
     authEventType = "commerce_job_retry_requested";
   } else if (path === "test-checkout") {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.operations.manage");
     const body = await readJsonBody(request);
     const checkoutRequestId = String(body.checkoutRequestId || "");
     const productId = String(body.productId || "");
@@ -258,7 +255,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     }, fetchImpl, { gate: "controlled_test" });
     authEventType = "stripe_test_checkout_created";
   } else if (/^orders\/[^/]+\/printful-draft$/.test(path)) {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.operations.manage");
     const body = await readJsonBody(request);
     if (!body || Object.keys(body).length !== 1 || body.confirmUnconfirmedDraft !== true) {
       throw new AuthFailure(400, "printful_draft_confirmation_required", "Explicit confirmation of an unconfirmed Printful draft is required.");
@@ -302,7 +299,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
       throw new AuthFailure(400, "printful_snapshot_phase_invalid", "The catalogue snapshot phase is invalid.");
     }
   } else if (path === "printful/catalogue/migrate") {
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, session, "commerce.integrations.manage");
     requireCommerceDatabase(env);
     const body = await readJsonBody(request);
     if (!body || Object.keys(body).length !== 1 || body.action !== "continue_permanent_printful_migration") {
@@ -350,16 +347,16 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     authEventType = "commerce_order_document_issued";
   } else if (path === "products/bulk") {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await bulkUpdateMerchandisingProducts(env, session, body);
     authEventType = "commerce_products_bulk_updated";
   } else if (path === "products/featured") {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateFeaturedProducts(env, session, body);
     authEventType = "commerce_featured_products_updated";
   } else if (/^products\/[^/]+\/media\/ingest$/.test(path)) {
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     const productId = decodePathPart(path.split("/")[1]);
     if (String(request.headers.get("content-type") || "").toLowerCase().startsWith("multipart/form-data")) {
       payload = await uploadCommerceProductMedia(env, session, productId, request);
@@ -371,72 +368,63 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     }
   } else if (path === "collections/bulk") {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await bulkUpdateCollections(env, session, body);
     authEventType = "commerce_collections_bulk_updated";
   } else if (path === "collections") {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await createCollection(env, session, body);
     authEventType = "commerce_collection_created";
   } else if (path === "collections/order") {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateCollectionOrder(env, session, body);
     authEventType = "commerce_collections_reordered";
   } else if (/^collections\/[^/]+\/products\/bulk$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateCollectionMemberships(env, session, decodePathPart(path.split("/")[1]), body);
     authEventType = "commerce_collection_memberships_updated";
   } else if (/^collections\/[^/]+\/products$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateCollectionProducts(env, session, decodePathPart(path.split("/")[1]), body);
     authEventType = "commerce_collection_products_updated";
   } else if (/^collections\/[^/]+\/archive$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await archiveCollection(env, session, decodePathPart(path.split("/")[1]), body);
     authEventType = "commerce_collection_archived";
   } else if (/^collections\/[^/]+\/delete$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await deleteCollection(env, session, decodePathPart(path.split("/")[1]), body);
     authEventType = "commerce_collection_deleted";
   } else if (/^collections\/[^/]+$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateCollection(env, session, decodePathPart(path.split("/")[1]), body);
     authEventType = "commerce_collection_updated";
   } else if (/^products\/[^/]+\/collections$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateProductCollections(env, session, decodePathPart(path.split("/")[1]), body);
     authEventType = "commerce_product_collections_updated";
   } else if (/^products\/[^/]+\/variants\/[^/]+$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     const [, productPart, , variantPart] = path.split("/");
     payload = await updateMerchandisingVariant(env, session, decodePathPart(productPart), decodePathPart(variantPart), body);
     authEventType = "commerce_variant_updated";
   } else if (/^products\/[^/]+$/.test(path)) {
     const body = await readJsonBody(request);
-    await requireCommerceCapability(env, session, "commerce.business.manage");
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateMerchandisingProduct(env, session, decodePathPart(path.slice("products/".length)), body);
     authEventType = "commerce_product_updated";
-  } else if (path === "permissions/grant") {
-    const body = await readJsonBody(request);
-    await requireMasterAdmin(env, request);
-    await grantCommerceCapability(env, session, body.accountId, body.capability, body.reason);
-    payload = await permissionGrantsPayload(env, session);
-    authEventType = "commerce_capability_granted";
-  } else if (path === "permissions/revoke") {
-    const body = await readJsonBody(request);
-    await requireMasterAdmin(env, request);
-    await revokeCommerceCapability(env, session, body.accountId, body.capability);
-    payload = await permissionGrantsPayload(env, session);
-    authEventType = "commerce_capability_revoked";
+  } else if (path === "permissions/grant" || path === "permissions/revoke") {
+    await requireAdminCapability(env, session, "role_permissions.manage");
+    throw new AuthFailure(410, "legacy_permission_api_retired", "Use the role permissions policy API.");
   } else {
     throw new AuthFailure(404, "not_found", "The commerce action was not found.");
   }

@@ -9,7 +9,10 @@ import {
   recipientFingerprint,
 } from "../functions/_shared/shipping-core.js";
 
-const authMigrationUrl = new URL("../migrations/0001_auth_foundation.sql", import.meta.url);
+const authMigrationUrls = [
+  new URL("../migrations/0001_auth_foundation.sql", import.meta.url),
+  new URL("../migrations/0002_full_admin_capability_denials.sql", import.meta.url),
+];
 const commerceMigrationUrls = [
   new URL("../commerce-migrations/0001_commerce_control_plane.sql", import.meta.url),
   new URL("../commerce-migrations/0002_stripe_webhook_events.sql", import.meta.url),
@@ -57,8 +60,10 @@ export async function createCommerceDatabases({ commerceMigrationCount = commerc
   });
   const authDb = await miniflare.getD1Database("THIRDRAILIFY_AUTH_DB");
   const commerceDb = await miniflare.getD1Database("THIRDRAILIFY_COMMERCE_DB");
-  const [authMigration, ...commerceMigrations] = await Promise.all([readFile(authMigrationUrl, "utf8"), ...commerceMigrationUrls.map((url) => readFile(url, "utf8"))]);
-  await applyMigration(authDb, authMigration);
+  const files = await Promise.all([...authMigrationUrls.map((url) => readFile(url, "utf8")), ...commerceMigrationUrls.map((url) => readFile(url, "utf8"))]);
+  const authMigrations = files.slice(0, authMigrationUrls.length);
+  const commerceMigrations = files.slice(authMigrationUrls.length);
+  for (const migration of authMigrations) await applyMigration(authDb, migration);
   for (const migration of commerceMigrations.slice(0, commerceMigrationCount)) await applyMigration(commerceDb, migration);
   return { authDb, commerceDb, commerceMigrations, dispose: () => miniflare.dispose() };
 }

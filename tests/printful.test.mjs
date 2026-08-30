@@ -172,7 +172,7 @@ test("configured, token-resolved, and persisted Printful Store IDs must agree pe
 test("Printful route requires Admin auth, exact origin, CSRF, and integrations authority", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness, { PRINTFUL_API_TOKEN: PRINTFUL_TOKEN });
-  const { created, cookie } = await masterSession(env);
+  const { master, created, cookie } = await masterSession(env);
   const url = `${ADMIN_ORIGIN}/api/admin/commerce/printful/verify`;
   const unauthenticated = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, csrfToken: created.csrfToken }), env, data: {} });
   assert.equal(unauthenticated.status, 401);
@@ -185,10 +185,11 @@ test("Printful route requires Admin auth, exact origin, CSRF, and integrations a
 
   const now = new Date().toISOString();
   await harness.authDb.prepare("INSERT INTO accounts (id, email_normalized, display_name, role, admin_level, status, email_verified_at, created_at, updated_at, source) VALUES ('printful-full', 'printful-full@example.test', 'Printful Full Admin', 'admin', 'full', 'active', ?, ?, ?, 'test')").bind(now, now, now).run();
+  await harness.authDb.prepare("INSERT INTO admin_role_capability_denials (role,capability,denied_by_account_id,created_at,updated_at) VALUES ('full','commerce.integrations.manage',?,?,?)").bind(master.id, now, now).run();
   const full = await loadAccountByEmail(env, "printful-full@example.test");
   const fullCreated = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), full, ADMIN_ORIGIN);
   const unauthorized = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie: cookiePair(fullCreated.cookie), csrfToken: fullCreated.csrfToken }), env, data: {} });
-  assert.equal(unauthorized.status, 403); assert.equal((await unauthorized.json()).error, "commerce_capability_required");
+  assert.equal(unauthorized.status, 403); assert.equal((await unauthorized.json()).error, "admin_capability_restricted");
 
   const response = await handleCommercePost(jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), env, "printful/verify", printfulFetch());
   assert.equal(response.status, 200); assert.equal((await response.json()).providers.find((provider) => provider.provider === "printful").apiConfigured, true);

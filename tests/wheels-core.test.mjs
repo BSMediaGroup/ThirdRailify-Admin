@@ -51,7 +51,7 @@ test("creator grants, per-wheel roles, hidden projection, revision saves, and of
   assert.equal(Object.hasOwn(publicOwner.wheel.owner, "id"), false); assert.equal(Object.hasOwn(publicOwner.wheel.owner, "email"), false);
   const hiddenInput = wheelInput(); hiddenInput.entries = hiddenInput.entries.map((entry, index) => ({ ...entry, id: `20000000-0000-4000-8000-00000000000${index + 1}` }));
   const hidden = await createWheel(env, "creator", { ...hiddenInput, title: "Hidden Test Wheel", visibility: "hidden" });
-  assert.equal((await listPublicWheels(env)).items.length, 1);
+  const directory = await listPublicWheels(env); assert.equal(directory.items.length, 1); assert.deepEqual(directory.items[0].owner, { displayName: "Approved Creator", avatarUrl: null }); assert.equal(Object.hasOwn(directory.items[0].owner, "email"), false);
   await assert.rejects(getPublicWheel(env, hidden.wheel.slug, "ordinary"), (error) => error.status === 404);
   await mutateWheelAssignment(env, "master", { wheelId: created.wheel.slug ? (await harness.commerceDb.prepare("SELECT id FROM wheels WHERE public_slug = ?").bind(created.wheel.slug).first()).id : "", accountId: "spinner", role: "spinner", action: "assign" });
   await assert.rejects(saveWheel(env, "spinner", created.wheel.slug, { ...wheelInput(), revision: created.wheel.revision }), (error) => error.code === "wheel_edit_forbidden");

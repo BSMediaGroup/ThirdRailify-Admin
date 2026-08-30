@@ -1,10 +1,11 @@
-import { AuthFailure, enforceRateLimit, errorResponse, jsonResponse, normalizeOrigin, readJsonBody, requireCsrf, requireMasterAdmin, writeAudit } from "../../_shared/auth-core.js";
+import { AuthFailure, enforceRateLimit, errorResponse, jsonResponse, normalizeOrigin, readJsonBody, requireCsrf, writeAudit } from "../../_shared/auth-core.js";
+import { requireAdminCapability } from "../../_shared/admin-capabilities.js";
 import { readBannerSettings, saveBannerSettings } from "../../_shared/banner-core.js";
 
 export async function onRequestGet({ request, env }) {
   try {
     requireAdminOriginWhenPresent(request, env);
-    await requireMasterAdmin(env, request);
+    await requireAdminCapability(env, request, "content.view");
     return response(await readBannerSettings(env));
   } catch (error) { return errorResponse(error, request, env); }
 }
@@ -12,7 +13,7 @@ export async function onRequestGet({ request, env }) {
 export async function onRequestPut({ request, env }) {
   try {
     requireAdminOrigin(request, env);
-    const session = await requireMasterAdmin(env, request);
+    const session = await requireAdminCapability(env, request, "content.manage");
     await requireCsrf(request, session);
     await enforceRateLimit(env, request, "site_content", session.accountId);
     const body = await readJsonBody(request);

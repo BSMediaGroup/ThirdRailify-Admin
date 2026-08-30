@@ -61,7 +61,7 @@ function controlledInput(overrides = {}) {
   };
 }
 
-test("normal checkout stays disabled while the controlled route requires Master authority and CSRF", async (t) => {
+test("normal checkout stays disabled while the controlled route requires commerce operations authority and CSRF", async (t) => {
   const { harness, env } = await configuredHarness(); t.after(harness.dispose);
   const normal = await normalCheckoutRequest({
     request: new Request(`${ADMIN_ORIGIN}/api/commerce/checkout`, { method: "POST", headers: { Origin: PUBLIC_ORIGIN, "Content-Type": "application/json" }, body: JSON.stringify(controlledInput()) }),

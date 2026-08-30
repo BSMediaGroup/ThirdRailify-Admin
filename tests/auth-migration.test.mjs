@@ -6,13 +6,14 @@ test("auth migration creates the complete schema and is repeat-safe", async (t) 
   const harness = await createAuthDatabase();
   t.after(harness.dispose);
 
-  await applyMigration(harness.db, harness.migration);
+  for (const migration of harness.migrations) await applyMigration(harness.db, migration);
   const tableResult = await harness.db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
     .all();
   const names = tableResult.results.map((row) => row.name);
   assert.deepEqual(names, [
     "accounts",
+    "admin_role_capability_denials",
     "auth_audit",
     "auth_handoffs",
     "auth_identities",

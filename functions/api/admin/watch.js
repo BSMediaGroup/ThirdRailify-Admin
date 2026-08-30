@@ -6,10 +6,10 @@ import {
   normalizeOrigin,
   readJsonBody,
   requireCsrf,
-  requireMasterAdmin,
   enforceRateLimit,
   writeAudit,
 } from "../../_shared/auth-core.js";
+import { requireAdminCapability } from "../../_shared/admin-capabilities.js";
 
 const PUBLIC_PATH = "/api/watch/manage";
 const ACTIONS = new Set(["read", "show", "hide", "show_all", "hide_all"]);
@@ -20,10 +20,10 @@ export async function onRequest(context) {
   try {
     if (request.method !== "POST") throw new AuthFailure(405, "method_not_allowed", "This method is not allowed.", { Allow: "POST" });
     requireAdminOrigin(request, env);
-    const session = await requireMasterAdmin(env, request);
-    await requireCsrf(request, session);
     const body = await readJsonBody(request);
     validateAction(body);
+    const session = await requireAdminCapability(env, request, body.action === "read" ? "watch.view" : "watch.manage");
+    await requireCsrf(request, session);
     await enforceRateLimit(env, request, "watch", session.accountId);
     const result = await callPublicWatch(env, body, context.data?.watchFetch || fetch);
     if (body.action !== "read") {

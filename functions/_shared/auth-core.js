@@ -591,14 +591,6 @@ export async function requireAdmin(env, request) {
   return session;
 }
 
-export async function requireMasterAdmin(env, request) {
-  const session = await requireAdmin(env, request);
-  if (!accessForAccount(session.account).isMasterAdmin) {
-    throw new AuthFailure(403, "master_admin_required", "Master Admin access is required.");
-  }
-  return session;
-}
-
 export async function requireCsrf(request, session) {
   const token = String(request.headers.get("x-csrf-token") || "");
   if (!token || token.length > 512) throw new AuthFailure(403, "csrf_required", "The request could not be verified.");
@@ -609,13 +601,14 @@ export async function requireCsrf(request, session) {
 }
 
 export async function sessionEnvelope(env, session, csrfToken = null) {
-  if (!session) return { ok: true, authenticated: false, account: null, access: { isAdmin: false, isMasterAdmin: false } };
+  if (!session) return { ok: true, authenticated: false, account: null, access: { isAdmin: false, isMasterAdmin: false, capabilities: [] } };
   const account = session.account || (await serializeAccount(env, await loadAccountById(env, session.accountId)));
+  const { effectiveAdminAccess } = await import("./admin-capabilities.js");
   return {
     ok: true,
     authenticated: true,
     account,
-    access: accessForAccount(account),
+    access: await effectiveAdminAccess(env, account),
     csrfToken: csrfToken || session.csrfToken || undefined,
   };
 }

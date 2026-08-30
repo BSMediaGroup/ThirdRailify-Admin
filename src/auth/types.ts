@@ -17,7 +17,7 @@ export type AuthConfig = {
 };
 export type SessionPayload = {
   ok: boolean; authenticated: boolean; account: AuthAccount | null;
-  access: { isAdmin: boolean; isMasterAdmin: boolean }; csrfToken?: string; handoffCode?: string;
+  access: { isAdmin: boolean; isMasterAdmin: boolean; capabilities?: string[] }; csrfToken?: string; handoffCode?: string;
   returnTo?: string; verificationPending?: boolean; message?: string;
 };
 export type AuthMode = "signin" | "signup" | "forgot" | "reset";

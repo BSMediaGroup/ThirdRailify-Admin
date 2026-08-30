@@ -473,7 +473,7 @@ async function handleLogout(request, env) {
     await safeAudit(env, { eventType: "logout", result: "success", actorAccountId: session.accountId });
   }
   return jsonResponse(
-    { ok: true, authenticated: false, account: null, access: { isAdmin: false, isMasterAdmin: false } },
+    { ok: true, authenticated: false, account: null, access: { isAdmin: false, isMasterAdmin: false, capabilities: [] } },
     { headers: { ...corsHeaders(request, env), "Set-Cookie": clearSessionCookie(request, env) } },
   );
 }

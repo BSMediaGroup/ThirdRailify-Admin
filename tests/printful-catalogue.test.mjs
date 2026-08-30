@@ -307,10 +307,11 @@ test("protected source verification enforces auth, exact origin, CSRF, capabilit
   assert.equal((await response.json()).store.id, SOURCE_ID);
 
   await harness.authDb.prepare("INSERT INTO accounts (id, email_normalized, display_name, role, admin_level, status, email_verified_at, created_at, updated_at, source) VALUES ('full-no-capability', 'full-no-capability@example.test', 'Full Admin', 'admin', 'full', 'active', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', 'test')").run();
+  await harness.authDb.prepare("INSERT INTO admin_role_capability_denials (role,capability,denied_by_account_id,created_at,updated_at) VALUES ('full','commerce.integrations.manage',?,'2026-08-28T00:00:00.000Z','2026-08-28T00:00:00.000Z')").bind(master.id).run();
   const fullAdmin = await loadAccountByEmail(runtime, "full-no-capability@example.test");
   const fullSession = await createSession(runtime, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), fullAdmin, ADMIN_ORIGIN);
   const snapshotRequest = jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/printful/catalogue/snapshot`, { origin: ADMIN_ORIGIN, cookie: cookiePair(fullSession.cookie), csrfToken: fullSession.csrfToken, body: { phase: "begin" } });
-  await assert.rejects(handleCommercePost(snapshotRequest, runtime, "printful/catalogue/snapshot", providerFetch()), (error) => error.code === "commerce_capability_required");
+  await assert.rejects(handleCommercePost(snapshotRequest, runtime, "printful/catalogue/snapshot", providerFetch()), (error) => error.code === "admin_capability_restricted");
 });
 
 test("verified Store-ID configuration exposes the operator capability without prior snapshot or commerce activation", async (t) => {
@@ -330,13 +331,12 @@ test("verified Store-ID configuration exposes the operator capability without pr
   assert.equal(master.posture.checkout, "disabled");
   assert.equal(master.posture.fulfillmentSubmission, "disabled");
 
-  const delegatedId = "delegated-admin";
-  await harness.commerceDb.prepare("INSERT INTO commerce_permission_grants (id, account_id, capability, granted_by_account_id, granted_at, reason) VALUES ('grant-integrations', ?, 'commerce.integrations.manage', 'master', '2026-08-28T00:00:00.000Z', 'test')").bind(delegatedId).run();
-  const delegated = await commerceOverview(runtime, { accountId: delegatedId, account: { adminLevel: "admin" } });
+  const delegatedId = "full-admin";
+  const delegated = await commerceOverview(runtime, { accountId: delegatedId, account: { role: "admin", adminLevel: "full", status: "active" } });
   assert.equal(delegated.printfulCatalogueSnapshot.available, true);
   assert.ok(delegated.access.capabilities.includes("commerce.integrations.manage"));
 
-  const unauthorized = await commerceOverview(runtime, { accountId: "unauthorized-admin", account: { adminLevel: "admin" } });
+  const unauthorized = await commerceOverview(runtime, { accountId: "regular-user", account: { role: "user", adminLevel: "none", status: "active" } });
   assert.equal(unauthorized.access.capabilities.includes("commerce.integrations.manage"), false);
   assert.equal(unauthorized.printfulCatalogueSnapshot.available, true);
 

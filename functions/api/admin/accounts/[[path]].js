@@ -9,14 +9,13 @@ import {
   loadAccountById,
   normalizeOrigin,
   nowIso,
-  requireAdmin,
   requireAuthDb,
   requireCsrf,
-  requireMasterAdmin,
   revokeAccountSessions,
   serializeAccount,
   writeAudit,
 } from "../../../_shared/auth-core.js";
+import { accessForSession, requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import { customerSummaryByAccountIds } from "../../../_shared/commerce-customers.js";
 
 const ROUTE_PREFIX = "/api/admin/accounts";
@@ -29,12 +28,12 @@ export async function onRequest(context) {
     const path = new URL(request.url).pathname.slice(ROUTE_PREFIX.length).replace(/^\/+|\/+$/g, "");
     if (request.method === "GET" && !path) {
       requireAdminOriginWhenPresent(request, env);
-      const session = await requireAdmin(env, request);
+      const session = await requireAdminCapability(env, request, "users.view");
       return jsonResponse(await accountsPayload(env, session), { headers: corsHeaders(request, env) });
     }
     if (request.method === "GET" && path && !path.includes("/")) {
       requireAdminOriginWhenPresent(request, env);
-      const session = await requireAdmin(env, request);
+      const session = await requireAdminCapability(env, request, "users.view");
       return jsonResponse(await accountDetailPayload(env, session, decodeAccountId(path)), { headers: corsHeaders(request, env) });
     }
     if (request.method !== "POST") {
@@ -42,14 +41,14 @@ export async function onRequest(context) {
     }
     if (path === "maintenance/cleanup-expired-auth") {
       requireAdminOrigin(request, env);
-      const session = await requireMasterAdmin(env, request);
+      const session = await requireAdminCapability(env, request, "users.manage");
       await requireCsrf(request, session);
       return jsonResponse(await cleanupExpiredAuthState(env, session.accountId), { headers: corsHeaders(request, env) });
     }
     const match = path.match(/^([^/]+)\/(promote|demote|disable|enable|revoke-sessions)$/);
     if (!match || !MUTATIONS.has(match[2])) throw new AuthFailure(404, "not_found", "The account action was not found.");
     requireAdminOrigin(request, env);
-    const session = await requireMasterAdmin(env, request);
+    const session = await requireAdminCapability(env, request, "users.manage");
     await requireCsrf(request, session);
     const accountId = decodeAccountId(match[1]);
     await mutateAccount(env, session, accountId, match[2]);
@@ -84,10 +83,7 @@ async function accountsPayload(env, session) {
   return {
     ok: true,
     accounts: accounts.map((account) => ({ ...account, customer: customers.get(account.id) || null })),
-    access: {
-      isAdmin: true,
-      isMasterAdmin: session.account.adminLevel === "master",
-    },
+    access: await accessForSession(env, session),
     checkedAt: nowIso(),
   };
 }
@@ -116,7 +112,7 @@ async function accountDetailPayload(env, session, accountId) {
       sourceOrigin: cleanValue(item.source_origin, 240), userAgentRecorded: Boolean(item.user_agent_hash),
     })),
     audit: (audit?.results || []).map((item) => ({ id: cleanValue(item.id, 160), eventType: cleanValue(item.event_type, 100), result: cleanValue(item.result, 40), provider: cleanValue(item.provider, 40) || null, createdAt: item.created_at })),
-    access: { isAdmin: true, isMasterAdmin: session.account.adminLevel === "master" },
+    access: await accessForSession(env, session),
     checkedAt: nowIso(),
   };
 }
@@ -127,6 +123,9 @@ async function mutateAccount(env, session, accountId, action) {
   }
   const account = await loadAccountById(env, accountId);
   if (!account) throw new AuthFailure(404, "account_not_found", "The account was not found.");
+  if (account.source === "env_master" || account.admin_level === "master") {
+    throw new AuthFailure(409, "master_admin_locked", "Master Admin identities cannot be changed through normal account administration.");
+  }
   const db = requireAuthDb(env);
   const timestamp = nowIso();
 

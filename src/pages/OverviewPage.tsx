@@ -3,6 +3,7 @@ import { Link, useOutletContext } from "react-router-dom";
 import { adminApi } from "../auth/client";
 import { getAnalytics, type AnalyticsReport } from "../analytics/client";
 import { useAuth } from "../auth/AuthProvider";
+import { adminCapabilityIds } from "../auth/capabilities";
 import { readBannerSettings, type BannerSettings } from "../banner/client";
 import { getCommerceOverview, type CommerceOverviewPayload } from "../commerce/client";
 import { AdminIcon } from "../components/AdminIcon";
@@ -29,13 +30,17 @@ const EMPTY_SNAPSHOT: Snapshot = { status: null, analytics: null, watch: null, c
 
 export function OverviewPage() {
   const { startLoading, inboxSummary } = useOutletContext<AdminShellOutletContext>();
-  const { access, csrfToken } = useAuth();
+  const { access, csrfToken, hasCapability } = useAuth();
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [errors, setErrors] = useState<SourceErrors>({});
   const [loading, setLoading] = useState(true);
   const [refreshedAt, setRefreshedAt] = useState("");
   const requestSequence = useRef(0);
-  const masterRead = access.isMasterAdmin && Boolean(csrfToken);
+  const analyticsRead = hasCapability("analytics.view");
+  const commerceRead = hasCapability("commerce.view");
+  const watchRead = hasCapability("watch.view") && Boolean(csrfToken);
+  const goatsRead = hasCapability("goats.view");
+  const bannerRead = hasCapability("content.view");
 
   const load = useCallback(async () => {
     const sequence = ++requestSequence.current;
@@ -43,11 +48,11 @@ export function OverviewPage() {
     setLoading(true); setErrors({});
     const [status, analytics, commerce, watch, goats, banner] = await Promise.all([
       capture(adminApi<StatusPayload>("/api/admin/status")),
-      capture(getAnalytics("24h")),
-      capture(getCommerceOverview()),
-      masterRead ? capture(manageWatch("read", csrfToken)) : restricted<WatchAdminPayload>(),
-      masterRead ? capture(getGoatsOverview()) : restricted<GoatsOverviewPayload>(),
-      masterRead ? capture(readBannerSettings()) : restricted<BannerSettings>(),
+      analyticsRead ? capture(getAnalytics("24h")) : restricted<AnalyticsReport>(),
+      commerceRead ? capture(getCommerceOverview()) : restricted<CommerceOverviewPayload>(),
+      watchRead ? capture(manageWatch("read", csrfToken)) : restricted<WatchAdminPayload>(),
+      goatsRead ? capture(getGoatsOverview()) : restricted<GoatsOverviewPayload>(),
+      bannerRead ? capture(readBannerSettings()) : restricted<BannerSettings>(),
     ]);
     if (requestSequence.current === sequence) {
       setSnapshot({ status: status.value, analytics: analytics.value, commerce: commerce.value, watch: watch.value, goats: goats.value, banner: banner.value });
@@ -56,11 +61,11 @@ export function OverviewPage() {
       setLoading(false);
     }
     stopLoading();
-  }, [csrfToken, masterRead, startLoading]);
+  }, [analyticsRead, bannerRead, commerceRead, csrfToken, goatsRead, startLoading, watchRead]);
 
   useEffect(() => { void load(); return () => { requestSequence.current += 1; }; }, [load]);
 
-  const expectedSources = masterRead ? 6 : 3;
+  const expectedSources = 1 + [analyticsRead, commerceRead, watchRead, goatsRead, bannerRead].filter(Boolean).length;
   const reportingSources = Object.values(snapshot).filter(Boolean).length;
   const priorities = operationalPriorities(snapshot, errors);
   const hasSnapshot = reportingSources > 0;
@@ -84,7 +89,7 @@ export function OverviewPage() {
           </div>
           <div className="overview-pulse__readout"><strong>{loading && !hasSnapshot ? "—" : `${reportingSources}/${expectedSources}`}</strong><span>sources reporting</span></div>
         </div>
-        <dl><div><dt>Access</dt><dd>{access.isMasterAdmin ? "All workspaces" : "Core workspaces"}</dd></div><div><dt>Attention</dt><dd>{hasSnapshot ? priorities.length : "—"}</dd></div><div><dt>Authority</dt><dd>Server</dd></div></dl>
+        <dl><div><dt>Access</dt><dd>{access.isMasterAdmin ? "All workspaces" : access.capabilities.length === adminCapabilityIds.length - 1 ? "Default parity" : "Restricted policy"}</dd></div><div><dt>Attention</dt><dd>{hasSnapshot ? priorities.length : "—"}</dd></div><div><dt>Authority</dt><dd>Server</dd></div></dl>
       </aside>
     </section>
 
@@ -95,10 +100,10 @@ export function OverviewPage() {
     <section className="overview-section" aria-labelledby="operations-title">
       <OverviewHeading eyebrow="Current authority" title="Operational workspaces" id="operations-title" detail={refreshedAt ? `Refreshed ${formatTime(refreshedAt)}` : "Reading current state"} />
       <div className="overview-module-grid">
-        <WatchModule data={snapshot.watch} error={errors.watch} loading={loading} restricted={!masterRead} />
+        <WatchModule data={snapshot.watch} error={errors.watch} loading={loading} restricted={!watchRead} />
         <CommerceModule data={snapshot.commerce} error={errors.commerce} loading={loading} />
-        <GoatsModule data={snapshot.goats} error={errors.goats} loading={loading} restricted={!masterRead} />
-        <BannerModule data={snapshot.banner} error={errors.banner} loading={loading} restricted={!masterRead} />
+        <GoatsModule data={snapshot.goats} error={errors.goats} loading={loading} restricted={!goatsRead} />
+        <BannerModule data={snapshot.banner} error={errors.banner} loading={loading} restricted={!bannerRead} />
         <AccountsModule data={snapshot.status} error={errors.status} loading={loading} />
       </div>
     </section>
@@ -128,7 +133,7 @@ export function OverviewPage() {
 
       <section className="overview-section overview-activity" aria-labelledby="activity-title">
         <OverviewHeading eyebrow="Community activity" title="Recent GOATS" id="activity-title" detail={snapshot.goats ? `${snapshot.goats.recent.length} returned` : "Latest records"} />
-        {snapshot.goats?.recent.length ? <div className="overview-activity-list">{snapshot.goats.recent.slice(0, 4).map((item) => <RecentGoat key={item.id} item={item} />)}</div> : snapshot.goats ? <ModuleState text="No recent GOATS submissions are available." /> : <ModuleState text={!masterRead ? "Master Admin access is required." : errors.goats || (loading ? "Loading recent activity…" : "Recent activity is unavailable.")} />}
+        {snapshot.goats?.recent.length ? <div className="overview-activity-list">{snapshot.goats.recent.slice(0, 4).map((item) => <RecentGoat key={item.id} item={item} />)}</div> : snapshot.goats ? <ModuleState text="No recent GOATS submissions are available." /> : <ModuleState text={!goatsRead ? "GOATS viewing is restricted for this role." : errors.goats || (loading ? "Loading recent activity…" : "Recent activity is unavailable.")} />}
         <Link className="overview-section__link" to="/goats">Open GOATS workspace <AdminIcon name="arrow" size={15} /></Link>
       </section>
     </div>
@@ -139,7 +144,7 @@ function WatchModule({ data, error, loading, restricted }: { data: WatchAdminPay
   const primary = data?.current?.primary;
   const state = restricted ? "Restricted" : error ? "Unavailable" : primary ? presentationLabel(primary.presentationState) : data ? "No current signal" : loading ? "Checking" : "Unavailable";
   return <ModuleCard icon="watch" eyebrow="Broadcast" title="Watch / signal" status={state} tone={primary?.presentationState === "live" ? "live" : error ? "danger" : data ? "safe" : "muted"} to="/watch" linkLabel="Open broadcast control">
-    {data ? <><div className="overview-module__metric"><strong>{data.summary.retained}<small>/ 24</small></strong><span>retained episodes</span></div><dl><Fact label="Visible" value={data.summary.visible} /><Fact label="Hidden" value={data.summary.hidden} /><Fact label="Open slots" value={data.summary.remaining} /></dl><p className="overview-module__note">{primary?.title || "No live, upcoming, or latest candidate is selected."}</p></> : <ModuleState text={restricted ? "Master Admin access is required for Watch authority." : error || (loading ? "Reading Watch authority…" : "Watch authority is unavailable.")} />}
+    {data ? <><div className="overview-module__metric"><strong>{data.summary.retained}<small>/ 24</small></strong><span>retained episodes</span></div><dl><Fact label="Visible" value={data.summary.visible} /><Fact label="Hidden" value={data.summary.hidden} /><Fact label="Open slots" value={data.summary.remaining} /></dl><p className="overview-module__note">{primary?.title || "No live, upcoming, or latest candidate is selected."}</p></> : <ModuleState text={restricted ? "Watch viewing is restricted for this role." : error || (loading ? "Reading Watch authority…" : "Watch authority is unavailable.")} />}
   </ModuleCard>;
 }
 
@@ -153,14 +158,14 @@ function CommerceModule({ data, error, loading }: { data: CommerceOverviewPayloa
 function GoatsModule({ data, error, loading, restricted }: { data: GoatsOverviewPayload | null; error?: string; loading: boolean; restricted: boolean }) {
   const failed = data ? numberOrNull(data.email.failed) : null;
   return <ModuleCard icon="goats" eyebrow="Community moderation" title="GOATS in the Wild" status={restricted ? "Restricted" : error ? "Unavailable" : data?.counts.pending ? `${data.counts.pending} pending` : data ? "Queue clear" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : data?.counts.pending || failed ? "attention" : data ? "safe" : "muted"} to={data?.counts.pending ? "/goats/pending" : "/goats"} linkLabel={data?.counts.pending ? "Review pending GOATS" : "Open GOATS workspace"}>
-    {data ? <><div className="overview-module__metric"><strong>{data.counts.pending}</strong><span>awaiting moderation</span></div><dl><Fact label="Approved" value={data.counts.approved} /><Fact label="Hidden" value={data.counts.hidden} /><Fact label="Email failed" value={failed ?? "—"} /></dl><p className="overview-module__note">{data.recent[0] ? `Latest: ${data.recent[0].displayName}` : "No recent submissions."}</p></> : <ModuleState text={restricted ? "Master Admin access is required for community authority." : error || (loading ? "Reading moderation authority…" : "GOATS authority is unavailable.")} />}
+    {data ? <><div className="overview-module__metric"><strong>{data.counts.pending}</strong><span>awaiting moderation</span></div><dl><Fact label="Approved" value={data.counts.approved} /><Fact label="Hidden" value={data.counts.hidden} /><Fact label="Email failed" value={failed ?? "—"} /></dl><p className="overview-module__note">{data.recent[0] ? `Latest: ${data.recent[0].displayName}` : "No recent submissions."}</p></> : <ModuleState text={restricted ? "GOATS viewing is restricted for this role." : error || (loading ? "Reading moderation authority…" : "GOATS authority is unavailable.")} />}
   </ModuleCard>;
 }
 
 function BannerModule({ data, error, loading, restricted }: { data: BannerSettings | null; error?: string; loading: boolean; restricted: boolean }) {
   const active = Boolean(data?.config.normal.enabled || data?.config.live.enabled);
   return <ModuleCard icon="content" eyebrow="Public presentation" title="Site content" status={restricted ? "Restricted" : error ? "Unavailable" : data ? active ? "Configured active" : "Standing by" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : active ? "attention" : data ? "safe" : "muted"} to="/content" linkLabel="Open banner controls">
-    {data ? <><div className="overview-module__metric"><strong>{data.config.normal.messages.length}</strong><span>announcement messages</span></div><dl><Fact label="Normal rail" value={enabledLabel(data.config.normal.enabled)} /><Fact label="Live takeover" value={enabledLabel(data.config.live.enabled)} /><Fact label="Revision" value={data.revision} /></dl><p className="overview-module__note">Updated {formatTime(data.updatedAt)}</p></> : <ModuleState text={restricted ? "Master Admin access is required for content authority." : error || (loading ? "Reading banner configuration…" : "Site-content authority is unavailable.")} />}
+    {data ? <><div className="overview-module__metric"><strong>{data.config.normal.messages.length}</strong><span>announcement messages</span></div><dl><Fact label="Normal rail" value={enabledLabel(data.config.normal.enabled)} /><Fact label="Live takeover" value={enabledLabel(data.config.live.enabled)} /><Fact label="Revision" value={data.revision} /></dl><p className="overview-module__note">Updated {formatTime(data.updatedAt)}</p></> : <ModuleState text={restricted ? "Site-content viewing is restricted for this role." : error || (loading ? "Reading banner configuration…" : "Site-content authority is unavailable.")} />}
   </ModuleCard>;
 }
 
@@ -182,13 +187,58 @@ function AnalyticsOverview({ data, error, loading }: { data: AnalyticsReport | n
     { label: "Pages / session", value: data.selected.pagesPerSession === null ? "—" : data.selected.pagesPerSession.toFixed(2), note: "Current 24-hour window" },
     { label: "Mapped regions", value: String(data.geography.length), note: "Coarse locations only" },
   ] : null;
+  const max = Math.max(1, ...(data?.series.flatMap((row) => [row.views, row.sessions]) || []));
+  const views = overviewTrendPoints(data?.series.map((row) => row.views) || [], max);
+  const sessions = overviewTrendPoints(data?.series.map((row) => row.sessions) || [], max);
+  const viewsPath = smoothOverviewTrendPath(views);
+  const sessionsPath = smoothOverviewTrendPath(sessions);
+  const areaPath = views.length ? `${viewsPath} L ${views.at(-1)!.x} 164 L ${views[0].x} 164 Z` : "";
+  const chartKey = data?.series.map((row) => `${row.views}:${row.sessions}`).join("|") || "empty";
 
   return <section className="overview-section overview-analytics" aria-labelledby="overview-analytics-title">
-    <OverviewHeading eyebrow="Audience analytics / last 24 hours" title="Audience signal" id="overview-analytics-title" detail={detail} />
-    {metrics ? <div className="overview-analytics__grid">{metrics.map((metric, index) => <article key={metric.label} className="overview-analytics__stat"><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small><i aria-hidden="true">0{index + 1}</i></article>)}</div> : <div className={`overview-analytics__state${error ? " is-error" : ""}`}><AdminIcon name="signal" size={22} /><div><strong>{error ? "Analytics unavailable" : data ? "Analytics collection is not configured" : loading ? "Reading audience authority" : "Analytics unavailable"}</strong><p>{error || (data ? "Configure the analytics database before collection and reporting can begin." : loading ? "The current 24-hour window is being requested." : "No analytics report is available.")}</p></div></div>}
+    <OverviewHeading eyebrow="Audience analytics / last 24 hours" title="Analytics snapshot" id="overview-analytics-title" detail={detail} />
+    {metrics ? <article className="overview-analytics__panel">
+      <div className="overview-analytics__trend">
+        <header>
+          <div><h3>Audience trend</h3><span>Hourly buckets · UTC</span></div>
+          <div className="overview-analytics__legend" aria-label="Chart legend"><span className="is-views"><i />Views</span><span className="is-sessions"><i />Sessions</span></div>
+        </header>
+        <div className="overview-analytics__plot">
+          {views.length ? <svg key={chartKey} viewBox="0 0 1000 180" role="img" aria-label={`Views and sessions across ${data?.series.length || 0} hourly buckets in the last 24 hours`}>
+            <title>24-hour audience activity trend</title>
+            <desc>Page-view and anonymous-session lines over a page-view area gradient.</desc>
+            <defs>
+              <linearGradient id="overview-trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffd83d" stopOpacity=".42" /><stop offset=".5" stopColor="#d7a900" stopOpacity=".14" /><stop offset="1" stopColor="#f3c928" stopOpacity="0" /></linearGradient>
+              <linearGradient id="overview-trend-line" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#be8b00" /><stop offset=".45" stopColor="#ffe56f" /><stop offset="1" stopColor="#f3c928" /></linearGradient>
+              <filter id="overview-trend-glow" x="-20%" y="-100%" width="140%" height="300%"><feGaussianBlur stdDeviation="4" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+            </defs>
+            <g className="overview-analytics__grid" aria-hidden="true">{[28, 62, 96, 130, 164].map((y) => <line key={y} x1="28" x2="972" y1={y} y2={y} />)}</g>
+            <path className="overview-analytics__area" d={areaPath} fill="url(#overview-trend-fill)" />
+            <path className="overview-analytics__glow" d={viewsPath} pathLength="1" />
+            <path className="overview-analytics__line is-views" d={viewsPath} pathLength="1" />
+            <path className="overview-analytics__line is-sessions" d={sessionsPath} pathLength="1" />
+            <g className="overview-analytics__points" aria-hidden="true">{views.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r="4" />)}</g>
+          </svg> : <div className="overview-analytics__empty"><AdminIcon name="signal" size={20} /><span>No audience events in this 24-hour window.</span></div>}
+          <div className="overview-analytics__axis"><span>{data?.series[0] ? formatTrendTime(data.series[0].bucket) : "24 hours ago"}</span><span>{data?.series.at(-1) ? formatTrendTime(data.series.at(-1)!.bucket) : "Now"}</span></div>
+        </div>
+      </div>
+      <dl className="overview-analytics__metrics">{metrics.map((metric, index) => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd><small>{metric.note}</small><i aria-hidden="true">0{index + 1}</i></div>)}</dl>
+    </article> : <div className={`overview-analytics__state${error ? " is-error" : ""}`}><AdminIcon name="signal" size={22} /><div><strong>{error ? "Analytics unavailable" : data ? "Analytics collection is not configured" : loading ? "Reading audience authority" : "Analytics unavailable"}</strong><p>{error || (data ? "Configure the analytics database before collection and reporting can begin." : loading ? "The current 24-hour window is being requested." : "No analytics report is available.")}</p></div></div>}
     <Link className="overview-section__link" to="/analytics">Open Audience Analytics <AdminIcon name="arrow" size={15} /></Link>
   </section>;
 }
+
+type OverviewTrendPoint = { x: number; y: number };
+function overviewTrendPoints(values: number[], max: number): OverviewTrendPoint[] {
+  if (!values.length) return [];
+  if (values.length === 1) { const y = 154 - (values[0] / max) * 126; return [{ x: 28, y }, { x: 972, y }]; }
+  return values.map((value, index) => ({ x: 28 + (index / (values.length - 1)) * 944, y: 154 - (value / max) * 126 }));
+}
+function smoothOverviewTrendPath(points: OverviewTrendPoint[]) {
+  if (!points.length) return "";
+  return points.slice(1).reduce((path, point, index) => { const previous = points[index]; const middle = (previous.x + point.x) / 2; return `${path} C ${middle} ${previous.y}, ${middle} ${point.y}, ${point.x} ${point.y}`; }, `M ${points[0].x} ${points[0].y}`);
+}
+function formatTrendTime(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", hour: "numeric", timeZone: "UTC" }).format(date); }
 
 function OverviewHeading({ eyebrow, title, id, detail }: { eyebrow: string; title: string; id: string; detail: string }) { return <header className="overview-heading"><div><p>{eyebrow}</p><h2 id={id}>{title}</h2></div><span>{detail}</span></header>; }
 function Fact({ label, value }: { label: string; value: string | number }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }

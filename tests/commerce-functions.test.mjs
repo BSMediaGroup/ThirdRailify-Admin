@@ -81,7 +81,7 @@ test("tax, template preview, and test-email routes enforce auth, exact origin, C
 test("Stripe verification route enforces auth, payments authority, CSRF, configuration, and a read-only provider request", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "rk_test_notARealRestrictedKey123" });
-  const { created, cookie } = await masterSession(env);
+  const { master, created, cookie } = await masterSession(env);
   const url = `${ADMIN_ORIGIN}/api/admin/commerce/stripe/verify`;
   let providerCalls = 0;
   const commerceFetch = async (input, init) => {
@@ -100,10 +100,11 @@ test("Stripe verification route enforces auth, payments authority, CSRF, configu
 
   const now = new Date().toISOString();
   await harness.authDb.prepare("INSERT INTO accounts (id, email_normalized, display_name, role, admin_level, status, email_verified_at, created_at, updated_at, source) VALUES ('stripe-full-admin', 'stripe-full@example.test', 'Stripe Full Admin', 'admin', 'full', 'active', ?, ?, ?, 'test')").bind(now, now, now).run();
+  await harness.authDb.prepare("INSERT INTO admin_role_capability_denials (role, capability, denied_by_account_id, created_at, updated_at) VALUES ('full', 'commerce.payments.manage', ?, ?, ?)").bind(master.id, now, now).run();
   const full = await loadAccountByEmail(env, "stripe-full@example.test");
   const fullCreated = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), full, ADMIN_ORIGIN);
   const unauthorized = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie: cookiePair(fullCreated.cookie), csrfToken: fullCreated.csrfToken }), env, data: { commerceFetch } });
-  assert.equal(unauthorized.status, 403); assert.equal((await unauthorized.json()).error, "commerce_capability_required");
+  assert.equal(unauthorized.status, 403); assert.equal((await unauthorized.json()).error, "admin_capability_restricted");
 
   const missingDb = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken }), env: { ...env, THIRDRAILIFY_COMMERCE_DB: undefined }, data: { commerceFetch } });
   assert.equal(missingDb.status, 503); assert.equal((await missingDb.json()).error, "commerce_database_unavailable");
@@ -122,12 +123,12 @@ test("Stripe verification route enforces auth, payments authority, CSRF, configu
   assert.equal((await harness.commerceDb.prepare("SELECT value_json FROM commerce_settings WHERE setting_key = 'stripe_api_configured'").first()).value_json, "true");
 });
 
-test("only Master can grant commerce authority and ordinary users are rejected", async (t) => {
+test("Full Admin inherits normal commerce capabilities and the legacy per-account grant API is retired", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness); const { master, created, cookie } = await masterSession(env); const now = new Date().toISOString();
   await harness.authDb.prepare("INSERT INTO accounts (id, email_normalized, display_name, role, admin_level, status, email_verified_at, created_at, updated_at, source) VALUES ('full-admin', 'full@example.test', 'Full Admin', 'admin', 'full', 'active', ?, ?, ?, 'test'), ('ordinary-user', 'user@example.test', 'User', 'user', 'none', 'active', ?, ?, ?, 'test')").bind(now, now, now, now, now, now).run();
   const grantResponse = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/permissions/grant`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { accountId: "full-admin", capability: "commerce.business.manage", reason: "Business owner support" } }), env, data: {} });
-  assert.equal(grantResponse.status, 200);
+  assert.equal(grantResponse.status, 410);
   const access = await commerceAccessForSession(env, { accountId: "full-admin", account: { adminLevel: "full" } });
   assert.ok(access.capabilities.includes("commerce.view")); assert.ok(access.capabilities.includes("commerce.business.manage"));
   const full = await loadAccountByEmail(env, "full@example.test");
@@ -135,7 +136,7 @@ test("only Master can grant commerce authority and ordinary users are rejected",
   const fullGrantResponse = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/permissions/grant`, { origin: ADMIN_ORIGIN, cookie: cookiePair(fullCreated.cookie), csrfToken: fullCreated.csrfToken, body: { accountId: "full-admin", capability: "commerce.templates.manage" } }), env, data: {} });
   assert.equal(fullGrantResponse.status, 403);
   const ordinaryGrantResponse = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/permissions/grant`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { accountId: "ordinary-user", capability: "commerce.view" } }), env, data: {} });
-  assert.equal(ordinaryGrantResponse.status, 409);
+  assert.equal(ordinaryGrantResponse.status, 410);
 });
 
 test("commerce mutations use the bounded D1 rate limit", async (t) => {
@@ -162,7 +163,7 @@ test("business helper rejects a missing commerce DB before any plaintext fallbac
   await assert.rejects(updateBusinessProfile({ THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY: "unused" }, { accountId: "master" }, {}), /not configured/i);
 });
 
-test("featured merchandising is Master-only, ordered, persisted, audited, and publicly projected", async (t) => {
+test("featured merchandising is catalogue-capability protected, ordered, persisted, audited, and publicly projected", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
   await insertTestProduct(harness.commerceDb, { id: "merch-one", slug: "merch-one", title: "Merch One" });

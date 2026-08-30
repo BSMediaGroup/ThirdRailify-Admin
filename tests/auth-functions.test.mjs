@@ -562,19 +562,19 @@ test("auth API covers masters, signup, verification, reset, OAuth, handoff, and 
   const oauthAdminCookie = cookiePair(oauthAdminSession.cookie);
   const fullAdminList = await callAccounts("", { method: "GET", cookie: oauthAdminCookie }, env);
   assert.equal(fullAdminList.status, 200);
-  const forbiddenMutation = await callAccounts(
+  const fullAdminMutation = await callAccounts(
     `${encodeURIComponent(verifiedAccount.id)}/disable`,
     { method: "POST", origin: ADMIN_ORIGIN, cookie: oauthAdminCookie, csrfToken: oauthAdminSession.csrfToken },
     env,
   );
-  assert.equal(forbiddenMutation.status, 403);
+  assert.equal(fullAdminMutation.status, 200, "Full Admin has default users.manage parity");
 
   const lockedMaster = await callAccounts(
     "env-master-1/demote",
-    { method: "POST", origin: ADMIN_ORIGIN, cookie: masterCookie, csrfToken: masterPayload.csrfToken },
+    { method: "POST", origin: ADMIN_ORIGIN, cookie: oauthAdminCookie, csrfToken: oauthAdminSession.csrfToken },
     env,
   );
-  assert.equal(lockedMaster.status, 409);
+  assert.equal(lockedMaster.status, 409, "Full Admin cannot mutate an environment Master identity");
 
   const demoteOauth = await callAccounts(
     `${encodeURIComponent(oauthAccount.id)}/demote`,

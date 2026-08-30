@@ -71,7 +71,8 @@ const COMMERCE_WORKSPACES = [
 ] as const;
 
 export function CommerceOverviewPage() {
-  const { csrfToken } = useAuth();
+  const { csrfToken, hasCapability } = useAuth();
+  const canManage = hasCapability("commerce.operations.manage");
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
   const [launch, setLaunch] = useState<CommerceLaunchPlan | null>(null);
@@ -86,7 +87,7 @@ export function CommerceOverviewPage() {
   }, [startLoading]);
   useEffect(() => { void load(); }, [load]);
   const mutateLaunch = async (action: "catalogue" | "activate" | "pause") => {
-    if (!csrfToken || !launch) return;
+    if (!csrfToken || !launch || !canManage) return;
     const stop = startLoading(action === "activate" ? "Activating production commerce" : action === "pause" ? "Pausing production commerce" : "Applying catalogue sellability");
     setBusy(action); setError("");
     try {
@@ -105,7 +106,7 @@ export function CommerceOverviewPage() {
       <SectionTitle id="launch-authority-title" eyebrow="Atomic production authority" title="Launch, pause &amp; eligibility" />
       <div className={`commerce-callout ${launch.ready ? "is-connected" : "is-pending"}`}><AdminIcon name="shield" /><div><strong>{launch.state.toUpperCase()} · revision {launch.revision} · {launch.ready ? "all hard gates ready" : "activation blocked"}</strong><p>{launch.catalogue.eligibleSellableVariants}/{launch.catalogue.eligibleVariants} eligible variants are sellable; {launch.catalogue.ineligibleSellableVariants} ineligible variants are exposed. Shipping markets: {launch.shippingMarkets.filter((market) => market.status === "active").map((market) => market.countryCode).join(", ") || "none"}.</p></div></div>
       <div className="payments-gate-grid">{launch.hardGates.map((gate) => <article className={`payment-gate is-${gate.ready ? "ready" : "action_required"}`} key={gate.id}><div><PaymentStateChip state={gate.ready ? "verified" : "unverified"} /><strong>{humanize(gate.id)}</strong></div><p>{gate.detail}</p></article>)}</div>
-      <div className="commerce-form__actions"><button className="secondary-button" type="button" disabled={!csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("catalogue")}>{busy === "catalogue" ? "Applying…" : "Apply eligible sellability"}</button>{launch.state !== "active" ? <><input aria-label="Production activation confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="ACTIVATE LIVE COMMERCE" /><button className="primary-button" type="button" disabled={!csrfToken || !launch.ready || confirmation !== "ACTIVATE LIVE COMMERCE" || Boolean(busy)} onClick={() => void mutateLaunch("activate")}>{busy === "activate" ? "Activating…" : "Activate LIVE commerce"}</button></> : <button className="secondary-button" type="button" disabled={!csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("pause")}>{busy === "pause" ? "Pausing…" : "Emergency pause"}</button>}</div>
+      <div className="commerce-form__actions"><button className="secondary-button" type="button" disabled={!canManage || !csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("catalogue")}>{busy === "catalogue" ? "Applying…" : "Apply eligible sellability"}</button>{launch.state !== "active" ? <><input aria-label="Production activation confirmation" disabled={!canManage} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="ACTIVATE LIVE COMMERCE" /><button className="primary-button" type="button" disabled={!canManage || !csrfToken || !launch.ready || confirmation !== "ACTIVATE LIVE COMMERCE" || Boolean(busy)} onClick={() => void mutateLaunch("activate")}>{busy === "activate" ? "Activating…" : "Activate LIVE commerce"}</button></> : <button className="secondary-button" type="button" disabled={!canManage || !csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("pause")}>{busy === "pause" ? "Pausing…" : "Emergency pause"}</button>}</div>
     </section>}
     <section className="commerce-section commerce-workspace-section" aria-labelledby="workspace-title">
       <SectionTitle id="workspace-title" eyebrow="Governed workspaces" title="Commerce control rooms" />
@@ -354,7 +355,7 @@ export function CommerceProductsPage() {
   }, [payload?.featured]);
   useEffect(() => { setSelectedIds([]); setAllMatching(false); }, [category, migration, pageSize, query, sort, status, visibility]);
 
-  const canManage = Boolean(payload?.access?.capabilities.includes("commerce.business.manage"));
+  const canManage = Boolean(payload?.access?.capabilities.includes("commerce.catalogue.manage"));
   const authoritativeFeaturedIds = payload?.featured.map((product) => product.id) || [];
   const orderedFeatured = featuredIds.map((id) => payload?.featured.find((product) => product.id === id) || featuredBrowser?.featured.find((product) => product.id === id)).filter((product): product is MerchandisingProduct => Boolean(product));
   const featuredDirty = featuredIds.join("\u0000") !== authoritativeFeaturedIds.join("\u0000");
@@ -526,7 +527,7 @@ export function CommerceCollectionsPage() {
   useEffect(() => { void loadOrder(); }, [loadOrder, refreshKey]);
   useEffect(() => { setSelectedIds([]); setAllMatching(false); setPage(1); }, [query, visibility, contents, sort, pageSize]);
 
-  const canManage = Boolean(payload?.access?.capabilities.includes("commerce.business.manage"));
+  const canManage = Boolean(payload?.access?.capabilities.includes("commerce.catalogue.manage"));
   const matchingFilters = { query, visibility, contents, sort };
   const selectedCount = allMatching ? payload?.totalItems || 0 : selectedIds.length;
   const authoritativeOrder = orderCollections.map((collection) => collection.id);

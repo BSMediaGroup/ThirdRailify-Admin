@@ -5,9 +5,9 @@ import {
   jsonResponse,
   normalizeOrigin,
   readJsonBody,
-  requireAdmin,
   requireCsrf,
 } from "../../../_shared/auth-core.js";
+import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import {
   adminInboxMessages,
   adminInboxSummary,
@@ -21,7 +21,7 @@ const ROUTE_PREFIX = "/api/admin/inbox";
 export async function onRequest({ request, env }) {
   try {
     requireAdminOriginWhenPresent(request, env);
-    const session = await requireAdmin(env, request);
+    const session = await requireAdminCapability(env, request, request.method === "POST" ? "inbox.manage" : "inbox.view");
     const url = new URL(request.url);
     const path = url.pathname.slice(ROUTE_PREFIX.length).replace(/^\/+|\/+$/g, "");
     if (request.method === "GET" || request.method === "HEAD") {

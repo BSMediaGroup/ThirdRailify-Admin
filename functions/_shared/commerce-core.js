@@ -1,11 +1,11 @@
 import {
   AuthFailure,
   cleanText,
-  loadAccountById,
   nowIso,
   randomId,
   requireAuthDb,
 } from "./auth-core.js";
+import { accessForSession, requireAdminCapability } from "./admin-capabilities.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -28,10 +28,12 @@ const COLLECTION_BULK_OPERATIONS = Object.freeze(["show", "hide"]);
 
 export const COMMERCE_CAPABILITIES = Object.freeze([
   "commerce.view",
+  "commerce.catalogue.manage",
   "commerce.business.manage",
   "commerce.payments.manage",
   "commerce.integrations.manage",
   "commerce.templates.manage",
+  "commerce.operations.manage",
 ]);
 
 export const COMMERCE_STATUS_VALUES = Object.freeze([
@@ -162,28 +164,14 @@ export function printfulCatalogueSnapshotAvailability(env) {
 }
 
 export async function commerceAccessForSession(env, session) {
-  const isMasterAdmin = session?.account?.adminLevel === "master";
-  if (isMasterAdmin) return { isMasterAdmin: true, capabilities: [...COMMERCE_CAPABILITIES] };
-  const capabilities = new Set(["commerce.view"]);
-  if (isCommerceDbConfigured(env) && session?.accountId) {
-    const result = await env.THIRDRAILIFY_COMMERCE_DB
-      .prepare("SELECT capability FROM commerce_permission_grants WHERE account_id = ? AND revoked_at IS NULL")
-      .bind(session.accountId)
-      .all();
-    for (const row of result?.results || []) {
-      if (COMMERCE_CAPABILITIES.includes(row.capability)) capabilities.add(row.capability);
-    }
-  }
-  return { isMasterAdmin: false, capabilities: [...capabilities] };
+  const adminAccess = await accessForSession(env, session);
+  return { isMasterAdmin: adminAccess.isMasterAdmin, capabilities: adminAccess.capabilities.filter((capability) => COMMERCE_CAPABILITIES.includes(capability)) };
 }
 
 export async function requireCommerceCapability(env, session, capability) {
-  if (!COMMERCE_CAPABILITIES.includes(capability)) throw new Error("Unsupported commerce capability.");
-  const access = await commerceAccessForSession(env, session);
-  if (!access.capabilities.includes(capability)) {
-    throw new AuthFailure(403, "commerce_capability_required", `The ${capability} capability is required.`);
-  }
-  return access;
+  if (!COMMERCE_CAPABILITIES.includes(capability)) throw new AuthFailure(403, "unknown_admin_capability", "The requested Admin capability is not registered.");
+  await requireAdminCapability(env, session, capability);
+  return commerceAccessForSession(env, session);
 }
 
 export async function commerceOverview(env, session) {
@@ -1372,57 +1360,6 @@ export async function updateTemplate(env, session, templateKey, input) {
     metadata: { templateKind: template.templateKind, status: template.status, enabled: template.enabled, revision: revision + 1, revisionSource: "admin" },
   });
   return templatesPayload(env, session);
-}
-
-export async function permissionGrantsPayload(env, session) {
-  const access = await commerceAccessForSession(env, session);
-  const result = await requireCommerceDb(env)
-    .prepare("SELECT id, account_id, capability, granted_by_account_id, granted_at, revoked_by_account_id, revoked_at, reason FROM commerce_permission_grants ORDER BY granted_at DESC")
-    .all();
-  return { ok: true, access, grants: result?.results || [], capabilities: COMMERCE_CAPABILITIES };
-}
-
-export async function grantCommerceCapability(env, session, accountId, capability, reason = "") {
-  if (session?.account?.adminLevel !== "master") throw new AuthFailure(403, "master_admin_required", "Master Admin access is required.");
-  if (!COMMERCE_CAPABILITIES.includes(capability)) throw new AuthFailure(400, "invalid_capability", "The commerce capability is invalid.");
-  const target = await loadAccountById(env, cleanText(accountId, 160));
-  if (!target) throw new AuthFailure(404, "account_not_found", "The account was not found.");
-  if (target.role !== "admin" || target.admin_level === "none" || target.status !== "active") {
-    throw new AuthFailure(409, "admin_account_required", "Only an active Admin account can receive commerce authority.");
-  }
-  const db = requireCommerceDb(env);
-  const timestamp = nowIso();
-  await db
-    .prepare("INSERT INTO commerce_permission_grants (id, account_id, capability, granted_by_account_id, granted_at, reason) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(randomId(), target.id, capability, session.accountId, timestamp, cleanText(reason, 300) || null)
-    .run();
-  await writeCommerceAudit(env, {
-    actorAccountId: session.accountId,
-    action: "commerce_capability_granted",
-    targetType: "account",
-    targetId: target.id,
-    result: "success",
-    metadata: { capability },
-  });
-}
-
-export async function revokeCommerceCapability(env, session, accountId, capability) {
-  if (session?.account?.adminLevel !== "master") throw new AuthFailure(403, "master_admin_required", "Master Admin access is required.");
-  if (!COMMERCE_CAPABILITIES.includes(capability)) throw new AuthFailure(400, "invalid_capability", "The commerce capability is invalid.");
-  const timestamp = nowIso();
-  const result = await requireCommerceDb(env)
-    .prepare("UPDATE commerce_permission_grants SET revoked_by_account_id = ?, revoked_at = ? WHERE account_id = ? AND capability = ? AND revoked_at IS NULL")
-    .bind(session.accountId, timestamp, cleanText(accountId, 160), capability)
-    .run();
-  if (Number(result?.meta?.changes || 0) !== 1) throw new AuthFailure(404, "grant_not_found", "The active commerce grant was not found.");
-  await writeCommerceAudit(env, {
-    actorAccountId: session.accountId,
-    action: "commerce_capability_revoked",
-    targetType: "account",
-    targetId: cleanText(accountId, 160),
-    result: "success",
-    metadata: { capability },
-  });
 }
 
 export async function encryptCommerceSecret(env, plaintext, purpose = "secret") {

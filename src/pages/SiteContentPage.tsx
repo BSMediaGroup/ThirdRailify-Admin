@@ -9,7 +9,8 @@ const FIXTURE_TITLE = "SAMPLE PREVIEW — Third Railify live broadcast title";
 const tripleZapMask = { "--triple-zap-mask": `url("${tripleZapMark}")` } as CSSProperties;
 
 export function SiteContentPage() {
-  const { access, csrfToken } = useAuth();
+  const { csrfToken, hasCapability } = useAuth();
+  const canManage = hasCapability("content.manage");
   const [config, setConfig] = useState<BannerConfig | null>(null);
   const [revision, setRevision] = useState(0);
   const [savedSnapshot, setSavedSnapshot] = useState("");
@@ -20,12 +21,11 @@ export function SiteContentPage() {
   const dirty = useMemo(() => Boolean(config && savedSnapshot && JSON.stringify(config) !== savedSnapshot), [config, savedSnapshot]);
 
   const load = useCallback(async () => {
-    if (!access.isMasterAdmin) return;
     setLoading(true); setError(""); setSaved("");
     try { const result = await readBannerSettings(); setConfig(result.config); setRevision(result.revision); setSavedSnapshot(JSON.stringify(result.config)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Banner configuration is unavailable."); }
     finally { setLoading(false); }
-  }, [access.isMasterAdmin]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -36,14 +36,12 @@ export function SiteContentPage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!config || !csrfToken || saving || !dirty) return;
+    if (!canManage || !config || !csrfToken || saving || !dirty) return;
     setSaving(true); setError(""); setSaved("");
     try { const result = await saveBannerSettings(config, revision, csrfToken); setConfig(result.config); setRevision(result.revision); setSavedSnapshot(JSON.stringify(result.config)); setSaved(`Saved revision ${result.revision}.`); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The banner configuration could not be saved."); }
     finally { setSaving(false); }
   };
-
-  if (!access.isMasterAdmin) return <section className="site-content-page"><header className="page-heading"><div><p className="section-kicker">Site content / announcements</p><h1>Public banner</h1><p>Banner configuration requires an authenticated Master Admin session.</p></div></header><div className="notice-card"><AdminIcon name="shield" /><div><strong>Master Admin required</strong><p>Promotional and Live Now presentation settings are protected server-side.</p></div></div></section>;
 
   return (
     <section className="site-content-page" aria-labelledby="site-content-title">

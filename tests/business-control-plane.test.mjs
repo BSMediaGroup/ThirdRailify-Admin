@@ -38,9 +38,11 @@ test("commerce.view can read business state while mutations require commerce.bus
   const account = await loadAccountByEmail(env, "business-viewer@example.test"); const created = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), account, ADMIN_ORIGIN); const cookie = cookiePair(created.cookie);
   const read = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { method: "GET", origin: ADMIN_ORIGIN, cookie }), env, data: {} });
   assert.equal(read.status, 200); assert.equal((await read.json()).access.capabilities.includes("commerce.view"), true);
+  const policyMaster = await harness.authDb.prepare("SELECT id FROM accounts WHERE source='env_master' ORDER BY created_at LIMIT 1").first();
+  await harness.authDb.prepare("INSERT INTO admin_role_capability_denials (role,capability,denied_by_account_id,created_at,updated_at) VALUES ('full','commerce.business.manage',?,?,?)").bind(policyMaster.id, now, now).run();
   const body = { revision: 1, tradingName: "Third Railify Official", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicContactEmail: "info@thirdrailify.com", supportEmail: "", publicPhone: "", websiteUrl: "", publicAddress: {} };
   const forbidden = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body }), env, data: {} });
-  assert.equal(forbidden.status, 403); assert.equal((await forbidden.json()).error, "commerce_capability_required");
+  assert.equal(forbidden.status, 403); assert.equal((await forbidden.json()).error, "admin_capability_restricted");
   const unauthenticated = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { method: "GET", origin: ADMIN_ORIGIN }), env, data: {} }); assert.equal(unauthenticated.status, 401);
 });
 

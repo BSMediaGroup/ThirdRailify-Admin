@@ -45,6 +45,8 @@
     "test:browser:admin-shell-width": "node --test --test-concurrency=1 tests/admin-shell-width-browser.test.mjs",
     "test:browser:admin-routes": "node --test --test-concurrency=1 tests/admin-routes-browser.test.mjs",
     "test:admin-ui": "node --test tests/admin-ui.test.mjs",
+    "test:authorization": "node --test --test-concurrency=1 tests/admin-capabilities.test.mjs tests/auth-migration.test.mjs tests/auth-functions.test.mjs",
+    "test:browser:role-policy": "node --test --test-concurrency=1 tests/role-policy-browser.test.mjs",
     "typecheck": "tsc -b --pretty false",
     "commerce:migration:build": "node scripts/build-commerce-migration-artifacts.mjs",
     "commerce:catalogue:validate": "node scripts/validate-permanent-catalogue.mjs",

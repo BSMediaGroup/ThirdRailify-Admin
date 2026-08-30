@@ -10,17 +10,17 @@ const ROUTES = [
   "/", "/analytics", "/inbox", "/watch", "/content", "/shop", "/products", "/collections", "/orders", "/customers",
   "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment",
   "/media", "/goats", "/goats/pending", "/goats/approved", "/goats/rejected", "/goats/comments", "/goats/settings", "/goats/emails",
-  "/wheels", "/wheels/access", "/wheels/results", "/membership", "/access", "/integrations", "/settings",
+  "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results", "/membership", "/access", "/integrations", "/settings",
 ];
 
-test("every configured Admin route rejects browser-default controls at desktop and phone widths", async (t) => {
+test("every configured Admin route renders for default Full Admin at desktop, laptop, and phone widths", async (t) => {
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "44208"], { stdio: "ignore" });
   t.after(() => server.kill());
   await waitForServer();
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   t.after(() => browser.close());
 
-  for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
     const pageErrors = [];
@@ -44,7 +44,13 @@ test("every configured Admin route rejects browser-default controls at desktop a
         return { label: control.getAttribute("aria-label") || control.textContent?.trim().slice(0, 60) || control.className, reasons };
       }).filter((item) => item.reasons.length));
       assert.deepEqual(audit, [], `${route} uses the Admin control system at ${viewport.width}px`);
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${route} has no horizontal overflow at ${viewport.width}px`);
+      const overflow = await page.evaluate(() => ({
+        fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+        elements: [...document.querySelectorAll("body *")].filter((node) => node.getBoundingClientRect().right > document.documentElement.clientWidth + 0.5).slice(0, 8).map((node) => ({ tag: node.tagName, className: node.className, right: Math.round(node.getBoundingClientRect().right), width: Math.round(node.getBoundingClientRect().width) })),
+      }));
+      assert.equal(overflow.fits, true, `${route} has no horizontal overflow at ${viewport.width}px: ${JSON.stringify(overflow)}`);
       if (["/media", "/membership", "/integrations", "/settings"].includes(route)) {
         assert.equal(await page.locator(".placeholder-panel").count(), 0, `${route} no longer renders the generic scaffold`);
         assert.equal(await page.locator(".operations-panel").count() > 0, true, `${route} has purpose-built operational content`);
@@ -59,7 +65,7 @@ test("every configured Admin route rejects browser-default controls at desktop a
 async function respond(route) {
   const pathname = new URL(route.request().url()).pathname;
   if (pathname === "/api/auth/config") return json(route, { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: ORIGIN, environment: "test", cookieMode: "host-only" });
-  if (pathname === "/api/auth/session") return json(route, { ok: true, authenticated: true, csrfToken: "route-audit-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-29T00:00:00.000Z", lastLoginAt: null, source: "test", locked: true } });
+  if (pathname === "/api/auth/session") return json(route, { ok: true, authenticated: true, csrfToken: "route-audit-csrf", access: { isAdmin: true, isMasterAdmin: false }, account: { id: "full", email: "full@example.test", displayName: "Full Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "full", status: "active", emailVerified: true, createdAt: "2026-08-29T00:00:00.000Z", lastLoginAt: null, source: "test", locked: false } });
   if (pathname === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
   if (pathname === "/api/admin/analytics") return json(route, { ok: true, range: "7d", generatedAt: "2026-08-31T00:00:00.000Z", timezone: "UTC", configured: true, coverage: { start: null, end: null, totalEvents: 0, lastIngestedAt: null }, windows: {}, selected: { views: 0, sessions: 0, pagesPerSession: null, comparisonComplete: false, previous: { views: 0, sessions: 0, pagesPerSession: null }, deltas: { views: { available: false, value: null, direction: "unavailable" }, sessions: { available: false, value: null, direction: "unavailable" } } }, bucket: "day", series: [], pages: [], sources: [], devices: [], geography: [], revenue: { available: true, profitAvailable: false, profitUnavailableReason: "Cost data unavailable.", currencies: [] } });
   return json(route, { ok: false, error: "route_audit_unavailable", message: "Authority intentionally unavailable in the visual route audit." }, 503);
