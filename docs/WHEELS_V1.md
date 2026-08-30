@@ -1,4 +1,14 @@
-# Wheels V1.1 Admin Authority
+# Wheels V1.8 Admin Authority
+
+## V1.8 style and segment-media authority
+
+Migration `0022_wheels_segment_styles.sql` adds nullable bounded `wheel_entries.segment_style_json` and rebuilds `wheel_media_assets` to add `segment_fill`, `image/gif`, and safe original filenames. It preserves every legacy row and does not touch `wheel_official_spins`, result selection, entry identity, or access. Background/centre retain one-active-per-purpose semantics; segment fills instead have a wheel/purpose/SHA active uniqueness constraint for byte reuse.
+
+Admin strictly allowlists `solid|pattern|image`, nine built-in pattern IDs, strict `#RRGGBB` base/alternate colours, six spin sound IDs, and seven winner sound IDs. Image references must be active `segment_fill` assets belonging to the same wheel. Segment bounds are SVG 512 KiB, static raster 1.5 MiB, GIF 2 MiB, 2048×2048 / 4,194,304 pixels, 20 active unique assets, and 12 MiB combined. Uploads reuse an existing wheel/SHA asset, preserve GIF bytes, validate magic/MIME/dimensions, screen SVG executable/external constructs, revalidate owner/editor authority, rate limit, audit, and expose no R2 key. Removed references retire only assets that were part of the prior persisted wheel state, preserving concurrent uploads and shared references.
+
+## V1.8 staging acceptance — 30 August 2026
+
+A 3,076,029-byte export was captured before applying only `0022_wheels_segment_styles.sql`. Before/after counts remained 3 wheels, 24 entries, 0 official spins, 4 wheel media assets, 50 commerce products, 1,323 variants, 1 customer, and 2 orders. The new style/filename columns and segment hash index exist, `PRAGMA foreign_key_check` is empty, migration 22 is recorded, and no migrations remain pending. Admin deployment `0bcab315` serves the shell, `/wheels`, and public Wheels JSON from immutable and stable origins; the protected Admin API remains 401 without a session.
 
 ## V1.7 portable appearance config
 

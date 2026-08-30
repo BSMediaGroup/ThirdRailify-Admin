@@ -9,25 +9,31 @@ import {
   serializeAccount,
   timingSafeEqual,
 } from "./auth-core.js";
-import { mediaForWheel } from "./wheel-media.js";
+import { mediaForWheel, retireSegmentMediaAssets, validateSegmentMediaReferences } from "./wheel-media.js";
 
 const MAX_ENTRIES = 1000;
 const MAX_BODY_BYTES = 384 * 1024;
 const HEX = /^#[0-9a-f]{6}$/i;
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,78}[a-z0-9])$/;
 const ROLES = new Set(["owner", "editor", "spinner"]);
-const PRESETS = new Set(["third-rail-gold", "live-wire-red", "gina-violet", "high-voltage-mono", "signal-teal", "after-hours", "custom"]);
+const PRESETS = new Set(["third-rail-gold", "live-wire-red", "gina-violet", "high-voltage-mono", "signal-teal", "after-hours", "high-voltage-hazard", "rail-strike", "goated-circuit", "night-signal", "custom"]);
 const CELEBRATIONS = new Set(["subtle", "normal", "strong"]);
+const PATTERNS = new Set(["diagonal-stripes", "reverse-stripes", "zigzag", "dots", "checkers", "triangles", "chevrons", "waves", "third-rail-bolts"]);
+const SPIN_SOUNDS = new Set(["classic-tick", "relay-click", "arc-pulse", "mechanical-ratchet", "soft-tick", "silent"]);
+const WINNER_SOUNDS = new Set(["gold-rise", "broadcast-hit", "voltage-chime", "crimson-impact", "synth-fanfare", "short-burst", "silent"]);
 const DEFAULT_CONFIG = Object.freeze({
   themePreset: "third-rail-gold",
   palette: ["#f3c928", "#b8182f", "#f3f0e5", "#5b2c83"],
+  paletteStyles: ["#f3c928", "#b8182f", "#f3f0e5", "#5b2c83"].map((color) => ({ mode: "solid", color })),
   pointerAccent: "#f3c928",
   centreTreatment: "bolt",
   backgroundIntensity: "high",
   labelContrast: "light",
   spinDurationMs: 6500,
   tickingSoundEnabled: true,
+  spinSoundPreset: "classic-tick",
   winnerSoundEnabled: true,
+  winnerSoundPreset: "gold-rise",
   celebrationEnabled: true,
   confettiEnabled: true,
   fireworksEnabled: true,
@@ -136,6 +142,7 @@ export async function createWheel(env, accountId, input) {
   const lifecycle = input.lifecycle === "draft" ? "draft" : "active";
   const config = validateConfig(input.config || {});
   const entries = validateEntries(input.entries || [], { newIds: true });
+  if (segmentAssetIds(config, entries).length) throw new AuthFailure(400, "wheel_segment_media_invalid", "Create the wheel before assigning wheel-owned segment images.");
   const id = randomId(); const timestamp = nowIso();
   await db.batch([
     db.prepare(`INSERT INTO wheels (
@@ -166,6 +173,9 @@ export async function saveWheel(env, accountId, slug, input) {
   const description = optionalText(input.description, 280);
   const config = validateConfig(input.config || {});
   const requestedEntries = validateEntries(input.entries || []);
+  const referencedSegmentAssets = segmentAssetIds(config, requestedEntries);
+  await validateSegmentMediaReferences(env, wheel.id, referencedSegmentAssets);
+  const previousEntries = await entriesForWheel(env, wheel.id, true); const previousSegmentAssets = segmentAssetIds(validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)), previousEntries);
   const currentEntryRows = await db.prepare("SELECT id FROM wheel_entries WHERE wheel_id = ?").bind(wheel.id).all();
   const currentEntryIds = new Set((currentEntryRows?.results || []).map((row) => row.id));
   const usedEntryIds = new Set();
@@ -189,6 +199,7 @@ export async function saveWheel(env, accountId, slug, input) {
     ),
   ]);
   if (Number(result?.[0]?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "wheel_revision_conflict", "The wheel changed. Reload it before saving.");
+  await retireSegmentMediaAssets(env, wheel, previousSegmentAssets.filter((id) => !referencedSegmentAssets.includes(id)), accountId);
   return getPublicWheel(env, slug, accountId);
 }
 
@@ -451,7 +462,8 @@ function validateEntries(input, options = {}) {
     if (!value || typeof value !== "object") throw new AuthFailure(400, "participant_invalid", "A participant entry is invalid.");
     const colour = value.colour == null || value.colour === "" ? null : clean(value.colour, 7);
     if (colour && !HEX.test(colour)) throw new AuthFailure(400, "participant_colour_invalid", "Participant colours must be six-digit hex values.");
-    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", 100000), colour: colour?.toUpperCase() || null, state: value.state === "hidden" ? "hidden" : "active" };
+    const style = value.style == null ? null : validateSegmentStyle(value.style, colour || DEFAULT_CONFIG.palette[index % DEFAULT_CONFIG.palette.length]);
+    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", 100000), colour: style?.color || colour?.toUpperCase() || null, style, state: value.state === "hidden" ? "hidden" : "active" };
   });
 }
 
@@ -466,16 +478,20 @@ function validateConfig(input) {
   const duration = positiveInteger(input.spinDurationMs || DEFAULT_CONFIG.spinDurationMs, "spin_duration_invalid", 20000);
   if (duration < 2000) throw new AuthFailure(400, "spin_duration_invalid", "Spin duration must be between 2 and 20 seconds.");
   const template = requiredText(input.winnerMessageTemplate || DEFAULT_CONFIG.winnerMessageTemplate, 1, 160, "winner_message_invalid");
+  const paletteStyles = input.paletteStyles == null ? palette.map((color) => ({ mode: "solid", color })) : validatePaletteStyles(input.paletteStyles, palette, custom);
   return {
     themePreset: PRESETS.has(input.themePreset) ? input.themePreset : DEFAULT_CONFIG.themePreset,
     palette,
+    paletteStyles,
     pointerAccent: pointer.toUpperCase(),
     centreTreatment: input.centreTreatment === "signal" ? "signal" : input.centreTreatment === "ring" ? "ring" : "bolt",
     backgroundIntensity: input.backgroundIntensity === "low" ? "low" : input.backgroundIntensity === "medium" ? "medium" : "high",
     labelContrast: input.labelContrast === "dark" ? "dark" : "light",
     spinDurationMs: duration,
     tickingSoundEnabled: input.tickingSoundEnabled !== false,
+    spinSoundPreset: validatePreset(input.spinSoundPreset, SPIN_SOUNDS, "classic-tick", "spin_sound_preset_invalid"),
     winnerSoundEnabled: input.winnerSoundEnabled !== false,
+    winnerSoundPreset: validatePreset(input.winnerSoundPreset, WINNER_SOUNDS, "gold-rise", "winner_sound_preset_invalid"),
     celebrationEnabled: input.celebrationEnabled !== false && input.celebrationIntensity !== "off",
     confettiEnabled: input.confettiEnabled !== false,
     fireworksEnabled: input.fireworksEnabled !== false,
@@ -513,7 +529,7 @@ async function activeAccount(env, accountId) { const row = await loadAccountById
 async function accountSummary(env, accountId) { const account = await activeAccount(env, accountId); return account ? { id: account.id, displayName: account.displayName, email: account.email, role: account.role, adminLevel: account.adminLevel } : { id: accountId, displayName: "Unavailable account", email: null, role: "user", adminLevel: "none" }; }
 
 async function wheelBySlug(env, slug) { return requireWheelDb(env).prepare("SELECT * FROM wheels WHERE public_slug = ? COLLATE NOCASE LIMIT 1").bind(clean(slug, 80)).first(); }
-async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT id, display_label, display_order, weight, segment_colour, state FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, state: row.state })); }
+async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT id, display_label, display_order, weight, segment_colour, segment_style_json, state FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, state: row.state })); }
 async function publicHistory(env, wheel, limit) { const config = parseJson(wheel.config_json, DEFAULT_CONFIG); if (!config.publicHistoryVisible) return []; return (await resultRows(env, wheel.id, limit)).map(officialProjection); }
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
@@ -524,10 +540,26 @@ function adminResultProjection(row) { return { ...officialProjection(row), wheel
 async function adminWheelSummary(env, row) { return { id: row.id, reference: row.reference_code, slug: row.public_slug, title: row.title, description: row.description, lifecycle: row.lifecycle, visibility: row.visibility, owner: await accountSummary(env, row.owner_account_id), participantCount: Number(row.participant_count), revision: Number(row.revision), officialEnabled: Boolean(row.official_spin_enabled), demoEnabled: Boolean(row.public_demo_spin_enabled), editingLocked: Boolean(row.editing_locked), spinLocked: Boolean(row.official_spinning_locked), latestWinner: row.latest_winner || null, latestResultAt: row.latest_result_at || row.latest_official_spin_at || null, updatedAt: row.updated_at }; }
 async function wheelAccessRows(env, wheelId) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_access WHERE wheel_id = ? ORDER BY active DESC, role, created_at").bind(wheelId).all(); return Promise.all((rows?.results || []).map(async (row) => ({ account: await accountSummary(env, row.account_id), role: row.role, active: Boolean(row.active), updatedAt: row.updated_at }))); }
 
-function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare("INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.state, timestamp, timestamp); }
-function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, state, created_at, updated_at)
-  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
-).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.state, timestamp, timestamp, wheelId, revision, timestamp); }
+function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare("INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.state, timestamp, timestamp); }
+function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, state, created_at, updated_at)
+  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
+).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.state, timestamp, timestamp, wheelId, revision, timestamp); }
+
+function validatePaletteStyles(value, palette, custom) {
+  if (!Array.isArray(value) || value.length !== palette.length || value.length > (custom ? 5 : 12)) throw new AuthFailure(400, "wheel_palette_styles_invalid", "Palette styles must align exactly with the palette.");
+  return value.map((style, index) => validateSegmentStyle(style, palette[index]));
+}
+function validateSegmentStyle(value, fallbackColor) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new AuthFailure(400, "segment_style_invalid", "A segment style is invalid.");
+  const mode = clean(value.mode || "solid", 12); const color = clean(value.color || fallbackColor, 7).toUpperCase();
+  if (!HEX.test(color)) throw new AuthFailure(400, "segment_style_colour_invalid", "Segment colours must be six-digit hex values.");
+  if (mode === "solid") return { mode, color };
+  if (mode === "pattern") { const pattern = clean(value.pattern, 40); const patternColor = clean(value.patternColor, 7).toUpperCase(); if (!PATTERNS.has(pattern) || !HEX.test(patternColor)) throw new AuthFailure(400, "segment_pattern_invalid", "Choose a supported pattern and six-digit pattern colour."); return { mode, color, pattern, patternColor }; }
+  if (mode === "image") { const imageAssetId = clean(value.imageAssetId, 80); if (!/^[a-f0-9-]{16,80}$/i.test(imageAssetId)) throw new AuthFailure(400, "segment_image_invalid", "Choose a valid wheel-owned segment image."); return { mode, color, imageAssetId }; }
+  throw new AuthFailure(400, "segment_fill_mode_invalid", "Segment fill mode must be solid, pattern, or image.");
+}
+function segmentAssetIds(config, entries) { const ids = new Set(); for (const style of [...(config.paletteStyles || []), ...(entries || []).map((entry) => entry.style).filter(Boolean)]) if (style.mode === "image") ids.add(style.imageAssetId); return [...ids]; }
+function validatePreset(value, allowed, fallback, code) { if (value == null || value === "") return fallback; const preset = clean(value, 40); if (!allowed.has(preset)) throw new AuthFailure(400, code, "Choose a supported generated sound preset."); return preset; }
 function assignmentUpsert(db, wheelId, accountId, role, active, actorId, timestamp) { return db.prepare(`INSERT INTO wheel_access (wheel_id, account_id, role, active, granted_by_account_id, created_at, updated_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(wheel_id, account_id) DO UPDATE SET role = excluded.role, active = excluded.active, granted_by_account_id = excluded.granted_by_account_id, updated_at = excluded.updated_at, revoked_at = excluded.revoked_at`).bind(wheelId, accountId, role, active, actorId, timestamp, timestamp, active ? null : timestamp); }
 function auditStatement(db, wheelId, actorId, targetId, type, metadata, timestamp) { return db.prepare("INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, target_account_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(randomId(), wheelId, actorId || null, targetId || null, type, metadata ? JSON.stringify(metadata) : null, timestamp); }

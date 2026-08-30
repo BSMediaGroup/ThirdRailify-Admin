@@ -24,7 +24,7 @@ export async function onRequest(context) {
     if (request.method === "GET" || request.method === "HEAD") return await handlePublicRead(request, env, path);
     if (!path.startsWith("internal/")) throw new AuthFailure(404, "wheel_route_not_found", "The wheel route was not found.");
     const internalPath = path.slice("internal/".length);
-    const mediaUpload = internalPath.match(/^([^/]+)\/media\/(background|centre)$/);
+    const mediaUpload = internalPath.match(/^([^/]+)\/media\/(background|centre|segment-fill)$/);
     if (request.method === "POST" && mediaUpload) return noStore(await handleMediaUpload(request, env, mediaUpload));
     const { body, raw } = await readWheelJson(request);
     await verifyWheelInternalRequest(request, env, raw);
@@ -76,7 +76,7 @@ async function handleMediaUpload(request, env, match) {
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.byteLength > 8 * 1024 * 1024) throw new AuthFailure(413, "wheel_media_too_large", "The wheel image is too large.");
   await verifyWheelInternalRequest(request, env, bytes);
-  return uploadWheelMedia(env, decode(match[1]), match[2], request.headers.get("x-thirdrailify-account-id"), bytes, request.headers.get("content-type"));
+  return uploadWheelMedia(env, decode(match[1]), match[2], request.headers.get("x-thirdrailify-account-id"), bytes, request.headers.get("content-type"), request.headers.get("x-thirdrailify-filename"));
 }
 
 function cached(payload) { return jsonResponse(payload, { headers: { "Cache-Control": PUBLIC_CACHE, ETag: `W/\"${simpleHash(JSON.stringify(payload))}\"`, "X-Content-Type-Options": "nosniff" } }); }

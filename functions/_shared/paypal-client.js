@@ -266,7 +266,7 @@ function boundedRequestId(value) {
 }
 function requireProviderId(value, code) { const id = safeIdentifier(value, 80); if (!id) throw new AuthFailure(400, code, "The PayPal identifier is invalid."); return id; }
 function requireWebhookUrl(value) { let url; try { url = new URL(String(value || "")); } catch { throw new AuthFailure(400, "paypal_webhook_url_invalid", "The PayPal webhook URL is invalid."); } if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new AuthFailure(400, "paypal_webhook_url_invalid", "The PayPal webhook URL is invalid."); return url.toString(); }
-function exactWebhook(value, url) { const names = Array.isArray(value?.event_types) ? value.event_types.map((event) => String(event?.name || "")) : []; const actual = [...new Set(names)].sort(); const expected = [...PAYPAL_WEBHOOK_EVENTS].sort(); return value?.url === url && actual.length === expected.length && actual.every((name, index) => name === expected[index]); }
+function exactWebhook(value, url) { const names = Array.isArray(value?.event_types) ? value.event_types.map((event) => String(event?.name || "")) : []; const actual = [...new Set(names)].sort(); const expected = [...PAYPAL_WEBHOOK_EVENTS].sort(); return value?.url === url && names.length === expected.length && actual.length === expected.length && actual.every((name, index) => name === expected[index]); }
 function safeIdentifier(value, max) { const text = cleanText(value, max); return /^[A-Za-z0-9_-]+$/.test(text) ? text : null; }
 function safeCode(value) { const text = cleanText(value, 100); return /^[A-Za-z0-9_.-]+$/.test(text) ? text : null; }
 function parseJson(value) { try { return JSON.parse(String(value || "")); } catch { return null; } }

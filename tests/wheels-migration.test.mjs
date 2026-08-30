@@ -18,7 +18,15 @@ test("0016 adds empty purpose-scoped wheel media metadata without changing wheel
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM wheel_media_assets").first()).count), 0);
   const indexes = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'wheel_media_assets' ORDER BY name").all();
-  assert.deepEqual(indexes.results.map((row) => row.name), ["sqlite_autoindex_wheel_media_assets_1", "sqlite_autoindex_wheel_media_assets_2", "wheel_media_active_purpose_idx", "wheel_media_delivery_idx", "wheel_media_wheel_history_idx"]);
+  assert.deepEqual(indexes.results.map((row) => row.name), ["sqlite_autoindex_wheel_media_assets_1", "sqlite_autoindex_wheel_media_assets_2", "wheel_media_active_purpose_idx", "wheel_media_delivery_idx", "wheel_media_wheel_history_idx", "wheel_segment_media_active_hash_idx"]);
+});
+
+test("0022 adds bounded participant styles and multi-asset segment media without touching results", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const db = harness.commerceDb;
+  const columns = await db.prepare("PRAGMA table_info(wheel_entries)").all(); assert.ok(columns.results.some((row) => row.name === "segment_style_json"));
+  const sql = (await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'wheel_media_assets'").first()).sql;
+  assert.match(sql, /segment_fill/); assert.match(sql, /image\/gif/); assert.match(sql, /original_filename/);
+  assert.equal(Number((await db.prepare("SELECT COUNT(*) AS count FROM wheel_official_spins").first()).count), 0);
 });
 
 test("staging wheel seed is explicit, idempotent, synthetic, and exactly removable", async (t) => {

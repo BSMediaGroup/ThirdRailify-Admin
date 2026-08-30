@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createCommerceDatabases, commerceEnvironment } from "./commerce-test-helpers.mjs";
 import {
-  createWheel,getPublicWheel,listPublicWheels,mutateCreatorGrant,mutateWheelAssignment,participantSnapshotHash,performOfficialSpin,saveWheel,secureBoundedInteger,validateConfig,voidOfficialResult,
+  createWheel,getPublicWheel,listPublicWheels,mutateCreatorGrant,mutateWheelAssignment,participantSnapshotHash,performOfficialSpin,saveWheel,secureBoundedInteger,validateConfig,validateEntries,voidOfficialResult,
 } from "../functions/_shared/wheels-core.js";
 
 test("V1.7 custom palette and fireworks config normalize without schema changes", () => {
@@ -15,6 +15,16 @@ test("V1.7 custom palette and fireworks config normalize without schema changes"
   assert.throws(() => validateConfig({ ...single, palette: ["#112233", "var(--gold)"] }), (error) => error.code === "wheel_palette_invalid");
   assert.throws(() => validateConfig({ ...single, pointerAccent: "transparent" }), (error) => error.code === "wheel_pointer_invalid");
   const legacy = validateConfig({ themePreset: "third-rail-gold", palette: ["#F3C928", "#B8182F"], pointerAccent: "#F3C928", spinDurationMs: 6500, winnerMessageTemplate: "Signal locked: {winner}" }); assert.equal(legacy.fireworksEnabled, true); assert.equal(legacy.themePreset, "third-rail-gold");
+});
+
+test("V1.8 segment styles and generated sound presets are strictly bounded", () => {
+  const pattern = { mode: "pattern", color: "#112233", pattern: "third-rail-bolts", patternColor: "#F3C928" };
+  const config = validateConfig({ themePreset: "custom", palette: ["#112233"], paletteStyles: [pattern], pointerAccent: "#B8182F", spinDurationMs: 6500, spinSoundPreset: "arc-pulse", winnerSoundPreset: "broadcast-hit", winnerMessageTemplate: "Signal locked: {winner}" });
+  assert.deepEqual(config.paletteStyles, [pattern]); assert.equal(config.spinSoundPreset, "arc-pulse"); assert.equal(config.winnerSoundPreset, "broadcast-hit");
+  assert.throws(() => validateConfig({ ...config, paletteStyles: [{ ...pattern, pattern: "url(https://bad.test)" }] }), (error) => error.code === "segment_pattern_invalid");
+  assert.throws(() => validateConfig({ ...config, spinSoundPreset: "remote-mp3" }), (error) => error.code === "spin_sound_preset_invalid");
+  assert.throws(() => validateConfig({ ...config, winnerSoundPreset: "remote-mp3" }), (error) => error.code === "winner_sound_preset_invalid");
+  const entries = validateEntries([{ label: "Styled", weight: 1, colour: "#000000", style: pattern }]); assert.equal(entries[0].colour, "#112233"); assert.deepEqual(entries[0].style, pattern);
 });
 
 test("secure bounded integers use rejection sampling and weighted snapshot hashes are stable", async () => {

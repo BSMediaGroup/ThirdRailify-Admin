@@ -32,6 +32,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0019_account_address_book.sql", import.meta.url),
   new URL("../commerce-migrations/0020_commerce_launch_operations.sql", import.meta.url),
   new URL("../commerce-migrations/0021_paypal_direct_merchant.sql", import.meta.url),
+  new URL("../commerce-migrations/0022_wheels_segment_styles.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

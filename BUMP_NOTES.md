@@ -1,5 +1,23 @@
 # Bump notes
 
+## 2026-08-30 - Wheels V1.8 segment-style media authority
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added migration `0022_wheels_segment_styles.sql`, bounded per-entry style JSON, `segment_fill` media purpose, GIF preservation, safe filenames, and background/centre-compatible table reconstruction.
+- Enforced exact fill/pattern/sound allowlists, same-wheel active asset references, 512 KiB SVG / 1.5 MiB static / 2 MiB GIF limits, 2048×2048 dimensions, 20 unique active assets, and 12 MiB combined.
+- Reused the existing Admin R2 binding and signed Public boundary; no new Cloudflare resource, secret, official-result logic, payment, provider, Wix, DNS, domain, or cutover state was introduced.
+- Exported the authoritative D1 to a 3,076,029-byte local SQL backup, applied only ledger migration `0022`, verified unchanged wheel/entry/result/media/product/variant/customer/order counts plus an empty foreign-key check, then deployed Admin `0bcab315` (`https://0bcab315.thirdrailify-admin.pages.dev`) before Public `d5920f63`.
+
+## 2026-08-30 - PayPal owner handoff and operator setup
+
+- Added standalone owner and technical operator runbooks for secure Sandbox/Live REST-app setup, masked credential entry, webhook reconciliation, bounded Sandbox acceptance, independent donation activation, canonical store activation, and temporary secondary-user cleanup.
+- Hardened the existing PayPal setup CLI's exact webhook-event comparison and verified list-before-create, reuse/reconcile, duplicate prevention, Sandbox/Live isolation, encrypted binding/readiness readback, zero-order Live configuration, and secret-safe output with focused tests.
+- Re-read deployed Admin/Public revisions, the remote `0021_paypal_direct_merchant.sql` ledger row, clean foreign keys, named PayPal binding presence, and current fail-closed gates. No PayPal, Stripe, or Printful provider mutation was performed without credentials.
+- Deployed Admin Functions as `5958af80-21dc-4dee-9730-677516008466` (`https://5958af80.thirdrailify-admin.pages.dev`). The immutable Admin URL, stable Admin alias, and stable Public proxy all return the same browser-safe unavailable configuration while credentials remain absent; Public and the Commerce Worker were not deployed.
+
 ## 2026-08-30 - PayPal direct-merchant payment authority
 
 - Added migration `0021_paypal_direct_merchant.sql`, provider-neutral payment attempts, donation authority, normalized PayPal webhook evidence, diagnostics, and recovery jobs.

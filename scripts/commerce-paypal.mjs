@@ -54,7 +54,9 @@ export async function runCommercePayPal(argv = process.argv.slice(2), dependenci
   const oauth = await validatePayPalOAuth(env, environment, budget.fetch);
   if (command === "verify") {
     const verification = await verifyExistingWebhook(env, environment, webhookUrl, budget.fetch);
-    const result = { ok: true, command, environment, oauth: sanitizeOAuth(oauth), webhook: verification, providerCalls: budget.counts() };
+    const status = await loadStatus(runtime, webhookUrl);
+    requireStoredConfiguration(status, environment);
+    const result = { ok: true, command, environment, oauth: sanitizeOAuth(oauth), webhook: verification, configuration: status[environment], providerCalls: budget.counts() };
     io.write(result);
     return result;
   }
@@ -69,6 +71,7 @@ export async function runCommercePayPal(argv = process.argv.slice(2), dependenci
   const evidence = safePayPalConfigurationEvidence({ environment, oauth, webhookUrl, checkedAt });
   await persistEvidence(runtime.wrangler, environment, evidence, checkedAt);
   const status = await loadStatus(runtime, webhookUrl);
+  requireStoredConfiguration(status, environment);
   const result = {
     ok: true,
     command,
@@ -107,9 +110,10 @@ async function loadStatus(runtime, webhookUrl) {
   ];
   const inventory = await runtime.wrangler(["pages", "secret", "list", "--project-name", PROJECT]);
   const row = await remoteStatusRow(runtime.wrangler);
+  const inventoryNames = namedSecretInventory(inventory.stdout);
   const binding = Object.fromEntries(names.map((name) => [name, {
     operatorEnvironment: String(runtime.env[name] || "").trim() ? "configured" : "absent",
-    adminPages: inventory.stdout.includes(name) ? "configured" : "absent",
+    adminPages: inventoryNames.has(name) ? "configured" : "absent",
   }]));
   const metadata = parseJson(row.safe_metadata_json, {});
   return {
@@ -128,6 +132,17 @@ async function loadStatus(runtime, webhookUrl) {
     emergencyPaused: parseJson(row.commerce_emergency_paused, false),
     providerCalls: { oauth: 0, webhookListRead: 0, webhookCreate: 0, webhookPatch: 0, orders: 0, captures: 0 },
   };
+}
+
+function requireStoredConfiguration(status, environment) {
+  const current = status?.[environment];
+  if (current?.clientId !== "configured" || current?.clientSecret !== "configured" || current?.oauth !== "verified" || current?.webhook !== "configured") {
+    throw new Error(`paypal_${environment}_stored_configuration_unverified`);
+  }
+}
+
+function namedSecretInventory(value) {
+  return new Set(String(value || "").match(/[A-Z][A-Z0-9_]{2,}/g) || []);
 }
 
 function environmentStatus(environment, binding, metadata = {}, row = {}) {

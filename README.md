@@ -1,6 +1,6 @@
 # Third Railify Admin
 
-Commerce payments use PayPal Orders API v2 as the preferred direct-merchant rail for store purchases and one-time donations. Stripe is retained as a configured but disabled future option. See [PayPal commerce operations](docs/PAYPAL_COMMERCE.md) for secrets, webhook events, gates, launch, and rollback.
+Commerce payments use PayPal Orders API v2 as the preferred direct-merchant rail for store purchases and one-time donations. Stripe is retained as a configured but disabled future option. PayPal documentation: [commerce operations](docs/PAYPAL_COMMERCE.md), [owner setup for Shawn](docs/PAYPAL_SETUP_FOR_SHAWN.md), and [operator setup for Daniel](docs/PAYPAL_OPERATOR_SETUP_FOR_DANIEL.md).
 
 ## Replacement commerce catalogue authority
 
@@ -19,6 +19,7 @@ Independent authenticated control room for Third Railify operations. The shared 
 ## Current state
 
 - Vite 5, React 18, TypeScript, and React Router.
+- Wheels V1.8 authority uses additive migration `0022_wheels_segment_styles.sql`, bounded participant style JSON, strict pattern/sound allowlists, and Admin-owned R2 segment-fill validation/delivery with GIF preservation, SHA reuse, ownership checks, and 20-asset/12 MiB wheel budgets.
 - Branded responsive sidebar with a discreet topbar-triggered desktop icon-only collapse, a full mobile drawer, a header-aligned authenticated account menu, a fail-soft cross-authority operational overview, future-area route shells, and a branded 404.
 - American Captain display typography rendered at its real weight with lightly relaxed heading tracking and line-height.
 - Routes for Overview, Watch / Broadcast, Site Content, expandable Shop (Products, Collections, Orders), Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.
