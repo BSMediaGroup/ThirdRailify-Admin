@@ -118,7 +118,9 @@ function NormalPreview({ config }: { config: BannerConfig }) {
   return <PreviewShell label="Normal banner preview">
     {dismissed ? <div className="admin-banner-preview admin-banner-preview--dismissed"><span>Dismissed for this preview</span><button type="button" onClick={() => setDismissed(false)}>Restore preview</button></div>
       : <div className={`admin-banner-preview admin-banner-preview--normal is-${config.normal.mode} is-${config.normal.speed}${config.normal.dismissible ? " is-dismissible" : ""}`}>
-        {config.normal.mode === "ticker" ? <div className="admin-banner-preview__ticker"><div>{[...messages, ...messages].map((message, index) => <span key={`${message.text}-${index}`} aria-hidden={index >= messages.length || undefined}>{message.text}{message.ctaLabel && <b>{message.ctaLabel}<PreviewArrowIcon /></b>}<i aria-hidden="true" /></span>)}</div></div> : <div className="admin-banner-preview__inner">{content(messages[config.normal.mode === "crossfade" ? active : 0] || messages[0])}</div>}
+        {config.normal.mode === "ticker" ? <div className="admin-banner-preview__ticker"><div>{[...messages, ...messages].map((message, index) => <span key={`${message.text}-${index}`} aria-hidden={index >= messages.length || undefined}>{message.text}{message.ctaLabel && <b>{message.ctaLabel}<PreviewArrowIcon /></b>}<i aria-hidden="true" /></span>)}</div></div>
+          : config.normal.mode === "crossfade" ? <div className="admin-banner-preview__crossfade">{messages.map((message, index) => <span className={index === active ? "is-active" : ""} key={`${index}-${message.text}`}>{message.text}{message.ctaLabel && <b>{message.ctaLabel}<PreviewArrowIcon /></b>}<i aria-hidden="true" /></span>)}</div>
+          : <div className="admin-banner-preview__inner">{content(messages[0])}</div>}
         {config.normal.dismissible && <button className="admin-banner-preview__dismiss" type="button" onClick={() => setDismissed(true)} aria-label="Dismiss announcement preview"><AdminIcon name="close" size={14} /></button>}
       </div>}
   </PreviewShell>;

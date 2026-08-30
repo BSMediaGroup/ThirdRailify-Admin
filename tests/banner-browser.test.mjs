@@ -46,8 +46,9 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     assert.equal(Math.round((await normalPreview.boundingBox()).height), 31);
     const normalMotion = await page.locator(".admin-banner-preview__ticker > div").evaluate((element) => ({ name: getComputedStyle(element).animationName, duration: element.getAnimations()[0]?.effect?.getTiming().duration }));
     assert.deepEqual(normalMotion, { name: "admin-banner-ticker", duration: 30000 });
+    assert.deepEqual(await page.locator(".admin-banner-preview--normal b").first().evaluate((element) => ({ border: getComputedStyle(element).borderStyle, height: Math.round(element.getBoundingClientRect().height), fontSize: getComputedStyle(element).fontSize })), { border: "solid", height: 22, fontSize: "8px" });
     await page.getByLabel("Presentation mode").selectOption("crossfade");
-    assert.equal(await page.locator(".admin-banner-preview--normal.is-crossfade .admin-banner-preview__inner span").evaluate((element) => getComputedStyle(element).animationName), "admin-banner-crossfade");
+    assert.deepEqual(await page.locator(".admin-banner-preview--normal.is-crossfade .admin-banner-preview__crossfade > .is-active").evaluate((element) => ({ duration: getComputedStyle(element).transitionDuration, easing: getComputedStyle(element).transitionTimingFunction })), { duration: "1.25s, 0s", easing: "cubic-bezier(0.4, 0, 0.2, 1), linear" });
     await page.getByLabel("Presentation mode").selectOption("ticker");
     await page.getByRole("button", { name: "Dismiss announcement preview" }).click();
     await page.getByText("Dismissed for this preview").waitFor();
@@ -55,6 +56,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     await normalPreview.waitFor();
     const liveMotion = await page.locator(".admin-banner-preview--live").evaluate((element) => ({ sweep: getComputedStyle(element, "::after").animationName, energy: getComputedStyle(element.querySelector(".admin-banner-preview__energy")).animationName, pulse: getComputedStyle(element.querySelector(".admin-live-label i")).animationName }));
     assert.deepEqual(liveMotion, { sweep: "admin-live-banner-sweep", energy: "admin-live-banner-energy", pulse: "admin-live-banner-pulse" });
+    assert.deepEqual(await page.locator(".admin-banner-preview--live").evaluate((element) => { const mark = element.querySelector(".admin-live-label"); const signal = mark.querySelector("svg"); const cta = element.querySelector(".admin-banner-preview__live-inner > b"); return { markWrap: getComputedStyle(mark).whiteSpace, markFits: mark.scrollWidth <= mark.clientWidth, signalWidth: Math.round(signal.getBoundingClientRect().width), ctaFont: getComputedStyle(cta).fontSize }; }), { markWrap: "nowrap", markFits: true, signalWidth: 12, ctaFont: width <= 760 ? "7.5px" : "9px" });
     await page.getByLabel("Animation treatment").selectOption("sweep");
     assert.deepEqual(await page.locator(".admin-banner-preview--live").evaluate((element) => ({ sweep: getComputedStyle(element, "::after").animationName, pulse: getComputedStyle(element.querySelector(".admin-live-label i")).animationName })), { sweep: "admin-live-banner-sweep", pulse: "none" });
     await page.getByLabel("Animation treatment").selectOption("pulse");
