@@ -180,6 +180,7 @@ function ModuleCard({ icon, eyebrow, title, status, tone, to, linkLabel, childre
 }
 
 function AnalyticsOverview({ data, error, loading }: { data: AnalyticsReport | null; error?: string; loading: boolean }) {
+  const [activePoint, setActivePoint] = useState<number | null>(null);
   const detail = error ? "Analytics authority unavailable" : data ? data.configured ? data.coverage.lastIngestedAt ? `Latest signal ${formatTime(data.coverage.lastIngestedAt)}` : "No retained events in this window" : "Collection not configured" : loading ? "Reading analytics authority" : "Analytics authority unavailable";
   const metrics = data?.configured ? [
     { label: "Page views", value: String(data.selected.views), note: "Exact first-party views" },
@@ -187,13 +188,20 @@ function AnalyticsOverview({ data, error, loading }: { data: AnalyticsReport | n
     { label: "Pages / session", value: data.selected.pagesPerSession === null ? "—" : data.selected.pagesPerSession.toFixed(2), note: "Current 24-hour window" },
     { label: "Mapped regions", value: String(data.geography.length), note: "Coarse locations only" },
   ] : null;
-  const max = Math.max(1, ...(data?.series.flatMap((row) => [row.views, row.sessions]) || []));
+  const rawMax = Math.max(1, ...(data?.series.flatMap((row) => [row.views, row.sessions]) || []));
+  const max = overviewTrendAxisMax(rawMax);
   const views = overviewTrendPoints(data?.series.map((row) => row.views) || [], max);
   const sessions = overviewTrendPoints(data?.series.map((row) => row.sessions) || [], max);
   const viewsPath = smoothOverviewTrendPath(views);
   const sessionsPath = smoothOverviewTrendPath(sessions);
-  const areaPath = views.length ? `${viewsPath} L ${views.at(-1)!.x} 164 L ${views[0].x} 164 Z` : "";
+  const areaPath = views.length ? `${viewsPath} L ${views.at(-1)!.x} 158 L ${views[0].x} 158 Z` : "";
   const chartKey = data?.series.map((row) => `${row.views}:${row.sessions}`).join("|") || "empty";
+  const yTicks = [0, 1, 2, 3, 4].map((index) => ({ y: 26 + index * 33, value: Math.round(max * (1 - index / 4)) }));
+  const xTicks = overviewTrendTimeTicks(data?.series || []);
+  const activeRow = activePoint === null ? null : data?.series[activePoint] || null;
+  const activeViewPoint = activePoint === null ? null : views[activePoint] || null;
+  const activeSessionPoint = activePoint === null ? null : sessions[activePoint] || null;
+  const activePrevious = activePoint === null || activePoint === 0 ? null : data?.series[activePoint - 1] || null;
 
   return <section className="overview-section overview-analytics" aria-labelledby="overview-analytics-title">
     <OverviewHeading eyebrow="Audience analytics / last 24 hours" title="Analytics snapshot" id="overview-analytics-title" detail={detail} />
@@ -204,22 +212,44 @@ function AnalyticsOverview({ data, error, loading }: { data: AnalyticsReport | n
           <div className="overview-analytics__legend" aria-label="Chart legend"><span className="is-views"><i />Views</span><span className="is-sessions"><i />Sessions</span></div>
         </header>
         <div className="overview-analytics__plot">
-          {views.length ? <svg key={chartKey} viewBox="0 0 1000 180" role="img" aria-label={`Views and sessions across ${data?.series.length || 0} hourly buckets in the last 24 hours`}>
+          {views.length ? <svg key={chartKey} viewBox="0 0 1000 205" role="img" aria-label={`Views and sessions across ${data?.series.length || 0} hourly buckets in the last 24 hours`} onMouseLeave={() => setActivePoint(null)}>
             <title>24-hour audience activity trend</title>
-            <desc>Page-view and anonymous-session lines over a page-view area gradient.</desc>
+            <desc>Interactive page-view and anonymous-session lines. Focus or hover a bucket for its timestamp and exact values.</desc>
             <defs>
               <linearGradient id="overview-trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffd83d" stopOpacity=".42" /><stop offset=".5" stopColor="#d7a900" stopOpacity=".14" /><stop offset="1" stopColor="#f3c928" stopOpacity="0" /></linearGradient>
               <linearGradient id="overview-trend-line" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#be8b00" /><stop offset=".45" stopColor="#ffe56f" /><stop offset="1" stopColor="#f3c928" /></linearGradient>
               <filter id="overview-trend-glow" x="-20%" y="-100%" width="140%" height="300%"><feGaussianBlur stdDeviation="4" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
             </defs>
-            <g className="overview-analytics__grid" aria-hidden="true">{[28, 62, 96, 130, 164].map((y) => <line key={y} x1="28" x2="972" y1={y} y2={y} />)}</g>
+            <g className="overview-analytics__grid" aria-hidden="true">{yTicks.map((tick) => <line key={tick.y} x1="68" x2="976" y1={tick.y} y2={tick.y} />)}</g>
+            <g className="overview-analytics__y-axis" aria-hidden="true">
+              <text className="overview-analytics__axis-title" x="11" y="92" transform="rotate(-90 11 92)">Events / bucket</text>
+              {yTicks.map((tick) => <text key={tick.y} x="58" y={tick.y + 3}>{tick.value}</text>)}
+            </g>
             <path className="overview-analytics__area" d={areaPath} fill="url(#overview-trend-fill)" />
             <path className="overview-analytics__glow" d={viewsPath} pathLength="1" />
             <path className="overview-analytics__line is-views" d={viewsPath} pathLength="1" />
             <path className="overview-analytics__line is-sessions" d={sessionsPath} pathLength="1" />
-            <g className="overview-analytics__points" aria-hidden="true">{views.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r="4" />)}</g>
+            {activeViewPoint ? <g className="overview-analytics__crosshair" aria-hidden="true"><line x1={activeViewPoint.x} x2={activeViewPoint.x} y1="26" y2="158" /><line x1="68" x2="976" y1={activeViewPoint.y} y2={activeViewPoint.y} /></g> : null}
+            <g className="overview-analytics__points">
+              {views.map((point, index) => {
+                const row = data!.series[index]; const sessionPoint = sessions[index]; const selected = activePoint === index;
+                return <g key={row.bucket} className={`overview-analytics__bucket${selected ? " is-active" : ""}`} role="button" tabIndex={0} aria-label={overviewTrendPointLabel(row)} aria-describedby={selected ? "overview-trend-tooltip" : undefined} onMouseEnter={() => setActivePoint(index)} onFocus={() => setActivePoint(index)} onBlur={() => setActivePoint(null)} onClick={() => setActivePoint(index)} onKeyDown={(event) => { if (event.key === "Escape") { setActivePoint(null); event.currentTarget.blur(); } else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActivePoint(index); } }}>
+                  <rect className="overview-analytics__hit" x={point.x - 15} y="20" width="30" height="144" rx="8" />
+                  <circle className="is-views" cx={point.x} cy={point.y} r={selected ? 5.5 : 4} />
+                  <circle className="is-sessions" cx={sessionPoint.x} cy={sessionPoint.y} r={selected ? 4.5 : 3.2} />
+                </g>;
+              })}
+            </g>
+            <g className="overview-analytics__x-axis" aria-hidden="true">
+              {xTicks.map((tick) => <text key={tick.index} className={tick.position} x={views[tick.index].x} y="190">{formatTrendAxisTime(tick.bucket)}</text>)}
+              <text className="overview-analytics__axis-title" x="976" y="202">UTC · hourly</text>
+            </g>
           </svg> : <div className="overview-analytics__empty"><AdminIcon name="signal" size={20} /><span>No audience events in this 24-hour window.</span></div>}
-          <div className="overview-analytics__axis"><span>{data?.series[0] ? formatTrendTime(data.series[0].bucket) : "24 hours ago"}</span><span>{data?.series.at(-1) ? formatTrendTime(data.series.at(-1)!.bucket) : "Now"}</span></div>
+          {activeRow && activeViewPoint && activeSessionPoint ? <div id="overview-trend-tooltip" role="tooltip" className={`overview-analytics__tooltip${activeViewPoint.x < 220 ? " is-start" : activeViewPoint.x > 780 ? " is-end" : ""}${activeViewPoint.y < 76 ? " is-below" : ""}`} style={{ left: `${activeViewPoint.x / 10}%`, top: `${activeViewPoint.y / 2.05}%` }}>
+            <strong>{formatTrendTooltipTime(activeRow.bucket)}</strong>
+            <dl><div><dt>Views</dt><dd>{activeRow.views}</dd></div><div><dt>Sessions</dt><dd>{activeRow.sessions}</dd></div><div><dt>Pages / session</dt><dd>{activeRow.sessions ? (activeRow.views / activeRow.sessions).toFixed(2) : "—"}</dd></div></dl>
+            <small>{activePrevious ? overviewTrendDelta(activeRow.views, activePrevious.views, "view") : "First retained bucket in this window"}</small>
+          </div> : null}
         </div>
       </div>
       <dl className="overview-analytics__metrics">{metrics.map((metric, index) => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd><small>{metric.note}</small><i aria-hidden="true">0{index + 1}</i></div>)}</dl>
@@ -231,14 +261,19 @@ function AnalyticsOverview({ data, error, loading }: { data: AnalyticsReport | n
 type OverviewTrendPoint = { x: number; y: number };
 function overviewTrendPoints(values: number[], max: number): OverviewTrendPoint[] {
   if (!values.length) return [];
-  if (values.length === 1) { const y = 154 - (values[0] / max) * 126; return [{ x: 28, y }, { x: 972, y }]; }
-  return values.map((value, index) => ({ x: 28 + (index / (values.length - 1)) * 944, y: 154 - (value / max) * 126 }));
+  if (values.length === 1) return [{ x: 522, y: 158 - (values[0] / max) * 132 }];
+  return values.map((value, index) => ({ x: 68 + (index / (values.length - 1)) * 908, y: 158 - (value / max) * 132 }));
 }
 function smoothOverviewTrendPath(points: OverviewTrendPoint[]) {
   if (!points.length) return "";
   return points.slice(1).reduce((path, point, index) => { const previous = points[index]; const middle = (previous.x + point.x) / 2; return `${path} C ${middle} ${previous.y}, ${middle} ${point.y}, ${point.x} ${point.y}`; }, `M ${points[0].x} ${points[0].y}`);
 }
-function formatTrendTime(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", hour: "numeric", timeZone: "UTC" }).format(date); }
+function overviewTrendAxisMax(value: number) { const roughStep = Math.max(value, 1) / 4; const magnitude = 10 ** Math.floor(Math.log10(roughStep)); const normalized = roughStep / magnitude; const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10; return step * magnitude * 4; }
+function overviewTrendTimeTicks(series: AnalyticsReport["series"]) { if (!series.length) return []; const count = Math.min(5, series.length); const indices = Array.from({ length: count }, (_, index) => Math.round(index * (series.length - 1) / Math.max(count - 1, 1))); return [...new Set(indices)].map((index) => ({ index, bucket: series[index].bucket, position: index === 0 ? "is-start" : index === series.length - 1 ? "is-end" : "is-secondary" })); }
+function formatTrendAxisTime(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : new Intl.DateTimeFormat("en-AU", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }).format(date); }
+function formatTrendTooltipTime(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown bucket" : new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(date); }
+function overviewTrendPointLabel(row: AnalyticsReport["series"][number]) { return `${formatTrendTooltipTime(row.bucket)}: ${row.views} views, ${row.sessions} sessions, ${row.sessions ? (row.views / row.sessions).toFixed(2) : "no"} pages per session`; }
+function overviewTrendDelta(value: number, previous: number, noun: string) { const delta = value - previous; return delta === 0 ? `No change in ${noun}s from the previous bucket` : `${delta > 0 ? "+" : ""}${delta} ${noun}${Math.abs(delta) === 1 ? "" : "s"} from the previous bucket`; }
 
 function OverviewHeading({ eyebrow, title, id, detail }: { eyebrow: string; title: string; id: string; detail: string }) { return <header className="overview-heading"><div><p>{eyebrow}</p><h2 id={id}>{title}</h2></div><span>{detail}</span></header>; }
 function Fact({ label, value }: { label: string; value: string | number }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
