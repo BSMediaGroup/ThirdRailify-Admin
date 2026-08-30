@@ -18,6 +18,18 @@ export async function endSession(csrfToken: string) {
     method: "POST", credentials: "include", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: "{}",
   });
 }
+export async function createSiteTransfer(csrfToken: string, returnTo = "/") {
+  return adminApi<{ ok: true; handoffUrl: string; returnTo: string }>("/api/auth/transfer", {
+    method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ returnTo }),
+  });
+}
+export function validatedSiteTransferUrl(value: string, expectedOrigin: string) {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.origin !== new URL(expectedOrigin).origin || !url.searchParams.get("handoff")) {
+    throw new AuthClientError(502, "handoff_url_invalid", "The account service returned an invalid site handoff.");
+  }
+  return url.toString();
+}
 export async function updateDisplayName(csrfToken: string, displayName: string) {
   return adminApi<SessionPayload>("/api/auth/profile", {
     method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ displayName }),

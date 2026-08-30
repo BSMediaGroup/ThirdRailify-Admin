@@ -7,7 +7,7 @@ import { createCommerceDatabases } from "./commerce-test-helpers.mjs";
 test("0014 creates an empty normalized Wheels authority with immutable result constraints", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const tables = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'wheel_%' ORDER BY name").all();
-  assert.deepEqual(tables.results.map((row) => row.name), ["wheel_access", "wheel_audit_events", "wheel_creator_grants", "wheel_entries", "wheel_media_assets", "wheel_official_spins", "wheel_rate_limits", "wheel_settings", "wheels"]);
+  assert.deepEqual(tables.results.map((row) => row.name), ["wheel_access", "wheel_audit_events", "wheel_creator_grants", "wheel_entries", "wheel_media_assets", "wheel_official_spins", "wheel_rate_limits", "wheel_settings", "wheel_stage_items", "wheel_stages", "wheels"]);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM wheels").first()).count), 0);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM wheel_official_spins").first()).count), 0);
   const setting = await harness.commerceDb.prepare("SELECT value_json FROM wheel_settings WHERE setting_key = 'global'").first();
@@ -27,6 +27,19 @@ test("0022 adds bounded participant styles and multi-asset segment media without
   const sql = (await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'wheel_media_assets'").first()).sql;
   assert.match(sql, /segment_fill/); assert.match(sql, /image\/gif/); assert.match(sql, /original_filename/);
   assert.equal(Number((await db.prepare("SELECT COUNT(*) AS count FROM wheel_official_spins").first()).count), 0);
+});
+
+test("0023 adds an empty normalized six-Wheel Stage authority", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const db = harness.commerceDb;
+  assert.equal(Number((await db.prepare("SELECT COUNT(*) AS count FROM wheel_stages").first()).count), 0);
+  assert.equal(Number((await db.prepare("SELECT COUNT(*) AS count FROM wheel_stage_items").first()).count), 0);
+  const stageSql = (await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'wheel_stages'").first()).sql;
+  const itemSql = (await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'wheel_stage_items'").first()).sql;
+  assert.match(stageSql, /visibility IN \('public', 'private'\)/);
+  assert.match(stageSql, /lifecycle IN \('active', 'archived'\)/);
+  assert.match(itemSql, /position BETWEEN 0 AND 5/);
+  assert.match(itemSql, /UNIQUE \(stage_id, position\)/);
+  assert.equal(Number((await db.prepare("PRAGMA foreign_key_check").all()).results.length), 0);
 });
 
 test("staging wheel seed is explicit, idempotent, synthetic, and exactly removable", async (t) => {

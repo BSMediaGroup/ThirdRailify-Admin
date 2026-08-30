@@ -92,7 +92,7 @@ export async function listPublicWheels(env, input = {}) {
   const order = sort === "title" ? "title COLLATE NOCASE ASC, id ASC" : sort === "participants" ? "participant_count DESC, title COLLATE NOCASE ASC" : "display_order ASC, updated_at DESC";
   const rows = await db.prepare(
     `SELECT id, public_slug, title, description, config_json, participant_count, public_demo_spin_enabled,
-            official_spin_enabled, latest_official_spin_at,
+            official_spin_enabled, latest_official_spin_at, updated_at, display_order,
             EXISTS (SELECT 1 FROM wheel_entries e WHERE e.wheel_id = wheels.id AND e.state = 'active' AND e.weight != 1) AS is_weighted
      FROM wheels
      WHERE lifecycle = 'active' AND visibility = 'public' AND (? = '' OR lower(title) LIKE ? OR lower(COALESCE(description, '')) LIKE ?)
@@ -117,8 +117,13 @@ export async function getCreatorAccess(env, accountId) {
   const account = await activeAccount(env, accountId);
   if (!account) return { ok: true, authenticated: false, canCreate: false, isMasterAdmin: false };
   const master = accessForAccount(account).isMasterAdmin;
-  const grant = await requireWheelDb(env).prepare("SELECT active, may_create_wheels, maximum_owned_wheels FROM wheel_creator_grants WHERE account_id = ?").bind(accountId).first();
-  return { ok: true, authenticated: true, canCreate: master || Boolean(grant?.active && grant?.may_create_wheels), isMasterAdmin: master, maximumOwnedWheels: master ? 100 : Number(grant?.maximum_owned_wheels || 20) };
+  const db = requireWheelDb(env);
+  const [grant, wheelCount, stageCount] = await Promise.all([
+    db.prepare("SELECT active, may_create_wheels, maximum_owned_wheels FROM wheel_creator_grants WHERE account_id = ?").bind(accountId).first(),
+    db.prepare("SELECT COUNT(*) AS count FROM wheels WHERE owner_account_id = ? AND lifecycle != 'archived'").bind(accountId).first(),
+    db.prepare("SELECT COUNT(*) AS count FROM wheel_stages WHERE owner_account_id = ? AND lifecycle != 'archived'").bind(accountId).first(),
+  ]);
+  return { ok: true, authenticated: true, canCreate: master || Boolean(grant?.active && grant?.may_create_wheels), isMasterAdmin: master, maximumOwnedWheels: master ? 100 : Number(grant?.maximum_owned_wheels || 20), ownedWheelCount: Number(wheelCount?.count || 0), maximumOwnedStages: master ? 100 : 20, ownedStageCount: Number(stageCount?.count || 0) };
 }
 
 export async function getWheelAccess(env, accountId, slug) {
@@ -533,7 +538,7 @@ async function entriesForWheel(env, wheelId, includeHidden) { const rows = await
 async function publicHistory(env, wheel, limit) { const config = parseJson(wheel.config_json, DEFAULT_CONFIG); if (!config.publicHistoryVisible) return []; return (await resultRows(env, wheel.id, limit)).map(officialProjection); }
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
-function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null }; }
+function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null, updatedAt: row.updated_at || null, directoryOrder: Number(row.display_order || 0) }; }
 function publicDetail(wheel, entries, history, access, media) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, media, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
 function officialProjection(row) { return { id: row.id, type: "official", winningEntryId: row.winning_entry_id, winningLabel: row.winning_label_snapshot, winningWeight: Number(row.winning_weight_snapshot), wheelRevision: Number(row.wheel_revision), snapshotHash: row.participant_snapshot_hash, createdAt: row.created_at, voided: Boolean(row.voided_at) }; }
 function adminResultProjection(row) { return { ...officialProjection(row), wheelId: row.wheel_id, performedByAccountId: row.performed_by_account_id, idempotencyKey: row.idempotency_key, voidedAt: row.voided_at || null, voidReason: row.void_reason || null, voidedByAccountId: row.voided_by_account_id || null }; }
@@ -585,4 +590,4 @@ function parseJson(value, fallback) { try { const parsed = JSON.parse(String(val
 function escapeLike(value) { return String(value).replace(/[\\%_]/g, (match) => `\\${match}`); }
 async function digestHex(bytes) { const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); return Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
-export { DEFAULT_CONFIG, MAX_ENTRIES, validateConfig, validateEntries };
+export { DEFAULT_CONFIG, MAX_ENTRIES, accountSummary, activeAccount, auditStatement, enforceWheelRateLimit, publicSummary, requireCreator, resolveWheelAccess, validateConfig, validateEntries };

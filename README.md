@@ -18,10 +18,13 @@ Independent authenticated control room for Third Railify operations. The shared 
 
 The canonical Admin origin is `https://admin.thirdrailify.com`; Public links use `https://thirdrailify.com`. The old Admin Pages hostname retains `/api/*` and webhook compatibility while browser navigation becomes non-canonical. Sessions remain host-only; no cookie is broadened to all subdomains.
 
+Production Google OAuth is enabled through the existing centralized Admin callback after operator confirmation of Google Branding/Audience, Search Console ownership, and exact custom plus transitional redirect URIs. Discord, GitHub, Google, and X all use the custom Admin callbacks for normal production starts; the old Pages callbacks remain only for bounded rollback compatibility until legitimate custom-domain sign-ins pass. Preview Google OAuth remains intentionally disabled. Provider secrets remain encrypted Admin-only bindings and normal OAuth accounts never inherit an Admin role.
+
 ## Current state
 
 - Vite 5, React 18, TypeScript, and React Router.
 - Wheels V1.8 authority uses additive migration `0022_wheels_segment_styles.sql`, bounded participant style JSON, strict pattern/sound allowlists, and Admin-owned R2 segment-fill validation/delivery with GIF preservation, SHA reuse, ownership checks, and 20-asset/12 MiB wheel budgets.
+- Wheels Stage V1 authority uses additive migration `0023_wheels_stages_v1.sql`, normalized Stage membership, six-Wheel bounds, independent Wheel reauthorization, revision conflicts, audit/rate limiting, and a dedicated Admin management route. See `docs/WHEELS_STAGE_V1.md`.
 - Branded responsive sidebar with a discreet topbar-triggered desktop icon-only collapse, a full mobile drawer, a header-aligned authenticated account menu, a fail-soft cross-authority operational overview, future-area route shells, and a branded 404.
 - American Captain display typography rendered at its real weight with lightly relaxed heading tracking and line-height.
 - Routes for Overview, Watch / Broadcast, Site Content, expandable Shop (Products, Collections, Orders), Commerce Overview, Payments & Payouts, Business Information, Tax & Documents, Customer Emails, Fulfillment Integrations, Media, VIP / Membership, Users / Access, Integrations, and Settings.

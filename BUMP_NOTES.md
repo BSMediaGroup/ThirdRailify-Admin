@@ -1,5 +1,18 @@
 # Bump notes
 
+## 2026-08-30 - Wheels Stage V1 authority
+
+- Added normalized `wheel_stages` and `wheel_stage_items` authority with public/private lifecycle, maximum-six membership, revision checks, creator bounds, independent member access, signed internal/Public projections, audit events, and Stage-only delete semantics that preserve Wheels and official results.
+- Added `/wheels/stages` Admin visibility with hide, archive, restore, and delete actions plus migration/core/API regression coverage.
+- Applied only migration `0023_wheels_stages_v1.sql` after a 3,084,701-byte D1 export, then deployed the fresh Node 22.16.0 build to production as `2db0e08b-7ab8-4a68-b1c9-53a00fb14c3e` (`https://2db0e08b.thirdrailify-admin.pages.dev`, source `074bcff`, root JS SHA-256 `f389da7218ef9c4fa8bc69592786a97f14285dd03bf9c268477bb44677e08deb`). Stable/custom Stage reads return the legitimate empty authority; protected Admin access still rejects unauthenticated requests.
+
+## 2026-08-30 - Post-cutover auth provider activation and DNSSEC closure
+
+- Enabled production Google OAuth only after operator confirmation of the existing Google client Branding/Audience/Search Console authority and exact Google, Discord, GitHub, and X custom plus transitional callbacks. Preview Google remains disabled; OAuth secrets stay encrypted and Admin roles remain server-resolved.
+- Deployed the isolated Admin auth release as `4b976fad-8cab-4374-b259-e743e2a593d2`. Live custom-host configuration and Public/Admin browser surfaces expose all four providers as enabled; every custom and legacy callback reaches the one-time state validator. Interactive provider completion remains a legitimate-user action because headless Turnstile correctly blocked automation.
+- Verified the GoDaddy parent DS from Cloudflare and Google with the exact key/digest and an authenticated `AD=true` lookup. Rechecked all 153 catalogue images: canonical CDN paths return `200`, old Admin paths redirect, and no purge is required.
+- Used the single authorized Printful V2 POST budget. Printful returned no usable signing material and persisted no URL/events; GET readback remains empty, no second POST was issued, and signed delivery remains unverified. Commerce row fingerprints and all payment/capture/donation/fulfillment gates remained unchanged.
+
 ## 2026-08-30 - Post-cutover media CDN and bot ingress
 
 - Added the read-only `thirdrailify-media` Worker and `cdn.thirdrailify.com` custom domain over the existing R2 bucket. Immutable products/avatars use canonical content-addressed paths; GOATS/Wheels are D1 lifecycle-gated; private keys, listings, query variants, and mutation methods fail closed.

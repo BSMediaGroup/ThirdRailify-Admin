@@ -58,6 +58,15 @@ export const adminAreas: AdminArea[] = [
     futureScope: ["Admin D1 authority", "Approved creators", "Immutable official draws"],
   },
   {
+    path: "/wheels/stages",
+    parentPath: "/wheels",
+    label: "Wheel Stages",
+    shortLabel: "Stages",
+    icon: "wheels",
+    summary: "Multi-Wheel Stage ownership, visibility, lifecycle, and membership.",
+    futureScope: ["Stage moderation", "Ordered Wheel membership", "Safe deletion"],
+  },
+  {
     path: "/wheels/access",
     parentPath: "/wheels",
     label: "Wheel Access",

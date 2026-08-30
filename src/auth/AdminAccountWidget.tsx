@@ -5,7 +5,7 @@ import { useAuth } from "./AuthProvider";
 import type { AuthAccount } from "./types";
 
 export function AdminAccountWidget({ unreadCount = 0 }: { unreadCount?: number }) {
-  const { account, signOut } = useAuth(); const [open, setOpen] = useState(false); const root = useRef<HTMLDivElement>(null);
+  const { account, signOut, openPublicSite } = useAuth(); const [open, setOpen] = useState(false); const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
@@ -45,7 +45,7 @@ export function AdminAccountWidget({ unreadCount = 0 }: { unreadCount?: number }
         <Link to="/access" role="menuitem" onClick={() => setOpen(false)}><AdminIcon name="profile" size={17} /><span>Account / Access</span></Link>
         <Link to="/settings" role="menuitem" onClick={() => setOpen(false)}><AdminIcon name="settings" size={17} /><span>Settings</span></Link>
         <span className="admin-account__divider" role="separator" />
-        <a href="https://thirdrailify.com" role="menuitem"><AdminIcon name="external" size={17} /><span>Open public site</span></a>
+        <a href="https://thirdrailify.com" target="_blank" rel="noopener noreferrer" role="menuitem" onClick={(event) => { event.preventDefault(); setOpen(false); void openPublicSite("/", true); }}><AdminIcon name="external" size={17} /><span>Open public site</span></a>
         <button className="admin-account__logout" type="button" role="menuitem" onClick={() => { setOpen(false); void signOut(); }}><AdminIcon name="logout" size={17} /><span>Sign out</span></button>
       </div>
     </div>}

@@ -23,6 +23,7 @@ import {
   voidOfficialResult,
 } from "../../../_shared/wheels-core.js";
 import { adminRemoveWheelMedia } from "../../../_shared/wheel-media.js";
+import { adminMutateStage, adminStageLibrary } from "../../../_shared/wheel-stages-core.js";
 
 const PREFIX = "/api/admin/wheels";
 
@@ -35,6 +36,7 @@ export async function onRequest(context) {
     if (request.method === "GET") {
       await requireAdmin(env, request);
       if (!path) return response(await adminWheelLibrary(env), request, env);
+      if (path === "stages") return response(await adminStageLibrary(env), request, env);
       if (path === "access") return response(await adminWheelAccess(env), request, env);
       if (path === "results") return response(await adminWheelResults(env, { search: new URL(request.url).searchParams.get("search") }), request, env);
       if (path === "accounts") return response(await searchWheelAccounts(env, new URL(request.url).searchParams.get("q")), request, env);
@@ -51,6 +53,7 @@ export async function onRequest(context) {
     if (path === "controls") return response(await mutateWheelControl(env, session.accountId, body), request, env);
     if (path === "results/void") return response(await voidOfficialResult(env, session.accountId, body), request, env);
     if (path === "settings") return response(await saveWheelSettings(env, session.accountId, body), request, env);
+    if (path === "stages") return response(await adminMutateStage(env, session.accountId, body), request, env);
     const mediaRemoval = path.match(/^([^/]+)\/media\/([^/]+)\/remove$/);
     if (mediaRemoval) return response(await adminRemoveWheelMedia(env, decode(mediaRemoval[1]), decode(mediaRemoval[2]), session.accountId), request, env);
     throw new AuthFailure(404, "wheel_route_not_found", "The Admin wheel action was not found.");

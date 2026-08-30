@@ -84,6 +84,7 @@ export async function onRequest(context) {
     if (path === "signup") return await handleSignup(request, env, fetchImpl);
     if (path === "logout") return await handleLogout(request, env);
     if (path === "handoff") return await handleHandoff(request, env);
+    if (path === "transfer") return await handleTransfer(request, env);
     if (path === "profile") return await handleProfileUpdate(request, env);
     if (path === "avatar") {
       requireAllowedOrigin(request, env);
@@ -432,6 +433,29 @@ async function handleHandoff(request, env) {
   );
 }
 
+async function handleTransfer(request, env) {
+  const origin = requireAllowedOrigin(request, env);
+  const session = await requireSession(env, request);
+  await requireCsrf(request, session);
+  const body = await readJsonBody(request);
+  const publicOrigin = normalizeOrigin(env?.THIRDRAILIFY_PUBLIC_ORIGIN);
+  const adminOrigin = normalizeOrigin(env?.THIRDRAILIFY_ADMIN_ORIGIN);
+  const targetOrigin = origin === adminOrigin ? publicOrigin : origin === publicOrigin ? adminOrigin : "";
+  if (!targetOrigin) throw new AuthFailure(403, "origin_not_allowed", "This account destination is not allowed.");
+  const handoff = await createHandoff(env, session.accountId, targetOrigin, safeReturnPath(body.returnTo, "/"));
+  await writeAudit(env, {
+    actorAccountId: session.accountId,
+    targetAccountId: session.accountId,
+    eventType: "session_site_transfer",
+    result: "success",
+    metadata: { targetOrigin },
+  });
+  return jsonResponse(
+    { ok: true, handoffUrl: handoffLocation(env, handoff, "/"), returnTo: handoff.returnTo },
+    { headers: corsHeaders(request, env) },
+  );
+}
+
 async function handleLogout(request, env) {
   requireAllowedOrigin(request, env);
   const session = await resolveSession(env, request);
@@ -516,10 +540,14 @@ async function sendResetEmail(env, account, fetchImpl) {
 function handoffRedirect(env, handoff) {
   const adminOrigin = normalizeOrigin(env?.THIRDRAILIFY_ADMIN_ORIGIN);
   const path = handoff.targetOrigin === adminOrigin ? "/" : "/account/login";
+  return redirectResponse(handoffLocation(env, handoff, path));
+}
+
+function handoffLocation(_env, handoff, path) {
   const url = new URL(path, handoff.targetOrigin);
   url.searchParams.set("handoff", handoff.code);
   url.searchParams.set("return_to", handoff.returnTo);
-  return redirectResponse(url.toString());
+  return url.toString();
 }
 
 function redirectResponse(location, extraHeaders = {}) {

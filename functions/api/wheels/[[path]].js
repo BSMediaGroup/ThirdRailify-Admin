@@ -13,6 +13,15 @@ import {
   verifyWheelInternalRequest,
 } from "../../_shared/wheels-core.js";
 import { removeWheelMedia, uploadWheelMedia, wheelMediaResponse } from "../../_shared/wheel-media.js";
+import {
+  archiveStage,
+  createStage,
+  getStage,
+  listAccessibleWheels,
+  listOwnedStages,
+  listPublicStages,
+  saveStage,
+} from "../../_shared/wheel-stages-core.js";
 
 const PREFIX = "/api/wheels";
 const PUBLIC_CACHE = "public, max-age=30, s-maxage=120, stale-while-revalidate=300";
@@ -43,6 +52,9 @@ async function handlePublicRead(request, env, path) {
     return wheelMediaResponse(env, decode(media[1]), request, accountId);
   }
   if (!path) return cached(await listPublicWheels(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort") }));
+  if (path === "stages") return cached(await listPublicStages(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort") }));
+  const stage = path.match(/^stages\/([^/]+)$/);
+  if (stage) return cached(await getStage(env, decode(stage[1])));
   if (path === "access" || path.endsWith("/access")) throw new AuthFailure(401, "authentication_required", "Sign in to view wheel access.");
   if (!/^[a-z0-9][a-z0-9-]{1,78}[a-z0-9]$/i.test(path)) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   return cached(await getPublicWheel(env, path));
@@ -52,7 +64,16 @@ async function handleInternal(method, env, path, body) {
   const accountId = String(body.accountId || "").slice(0, 160);
   if (method === "POST" && path === "access") return getCreatorAccess(env, accountId);
   if (method === "POST" && path === "read") return listPublicWheels(env, body);
+  if (method === "POST" && path === "stages/read") return listOwnedStages(env, accountId);
+  if (method === "POST" && path === "stages/lookup") return listAccessibleWheels(env, accountId, body.input || body);
+  if (method === "POST" && path === "stages/create") return createStage(env, accountId, body.input || {});
   if (method === "POST" && path === "create") return createWheel(env, accountId, body.input || {});
+  const stageRead = path.match(/^stages\/([^/]+)\/read$/);
+  if (method === "POST" && stageRead) return getStage(env, decode(stageRead[1]), accountId);
+  const stageSave = path.match(/^stages\/([^/]+)\/save$/);
+  if (method === "PUT" && stageSave) return saveStage(env, accountId, decode(stageSave[1]), body.input || {});
+  const stageLifecycle = path.match(/^stages\/([^/]+)\/lifecycle$/);
+  if (method === "POST" && stageLifecycle) return archiveStage(env, accountId, decode(stageLifecycle[1]));
   const read = path.match(/^([^/]+)\/read$/);
   if (method === "POST" && read) return getPublicWheel(env, decode(read[1]), accountId);
   const access = path.match(/^([^/]+)\/access$/);

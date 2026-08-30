@@ -108,6 +108,24 @@ test("Admin inbox is linked from navigation, shell indicators, overview, and acc
   assert.match(inbox, /Mark all read/); assert.match(inbox, /Unread only/);
 });
 
+test("Admin account exits preserve identity and the refusal screen links to Public", async () => {
+  const [account, boundary, provider] = await Promise.all([
+    read("src/auth/AdminAccountWidget.tsx"),
+    read("src/auth/AdminAccessBoundary.tsx"),
+    read("src/auth/AuthProvider.tsx"),
+  ]);
+  assert.match(account, /Open public site/);
+  assert.match(account, /openPublicSite/);
+  assert.match(account, /target="_blank"/);
+  assert.match(account, /rel="noopener noreferrer"/);
+  assert.match(account, /openPublicSite\("\/", true\)/);
+  assert.match(boundary, /Go to Third Railify/);
+  assert.match(boundary, /Admin access required/);
+  assert.match(boundary, /openPublicSite/);
+  assert.match(provider, /createSiteTransfer/);
+  assert.match(provider, /window\.open\("about:blank", "_blank"\)/);
+});
+
 test("Watch authority failures render unknown archive state instead of false zero counts", async () => {
   const page = await read("src/pages/WatchAdminPage.tsx");
   assert.match(page, /summary \? `\$\{summary\.retained\} \/ 24` : "— \/ 24"/);

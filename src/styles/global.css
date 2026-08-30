@@ -376,7 +376,11 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .access-gate__panel > p:not(.eyebrow) { max-width: 530px; color: var(--muted); font-size: 1rem; line-height: 1.6; }
 .access-gate__identity { margin: 20px 0; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); overflow-wrap: anywhere; }
 .access-gate__identity strong { color: var(--ink); }
-.access-gate__panel > button { min-height: 44px; margin-top: 12px; padding: 0 20px; border: 0; border-radius: 6px; background: var(--gold); color: #080806; cursor: pointer; font-weight: 700; }
+.access-gate__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.access-gate__actions a,
+.access-gate__actions button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; padding: 0 20px; border: 1px solid var(--gold); border-radius: 6px; cursor: pointer; font-weight: 700; }
+.access-gate__actions a { background: var(--gold); color: #080806; }
+.access-gate__actions button { background: transparent; color: var(--ink); }
 .access-gate__progress { display: flex; align-items: center; gap: 10px; color: var(--muted); font: .68rem "Geist Mono", monospace; text-transform: uppercase; }
 .access-gate__progress span { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: access-pulse 1.1s ease-in-out infinite; }
 @keyframes access-pulse { 50% { opacity: .25; } }

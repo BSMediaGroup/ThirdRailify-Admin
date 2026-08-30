@@ -161,6 +161,68 @@ test("existing Master secrets are verified without applying the new-password len
   assert.equal((await login.json()).account.id, "env-master-1");
 });
 
+test("site transfer establishes one-time host sessions in both directions", async (t) => {
+  const harness = await createAuthDatabase();
+  t.after(harness.dispose);
+  const env = authEnvironment(harness.db);
+  const authFetch = makeAuthFetch();
+  const login = await callAuth(
+    "login",
+    { origin: ADMIN_ORIGIN, body: { email: env.ADMIN_EMAIL_1, password: env.ADMIN_SECRET_1, turnstileToken: "valid-login" } },
+    env,
+    authFetch,
+  );
+  assert.equal(login.status, 200);
+  const adminPayload = await login.json();
+  const adminCookie = cookiePair(login.headers.get("set-cookie"));
+
+  const noCsrf = await callAuth("transfer", { origin: ADMIN_ORIGIN, body: { returnTo: "/" }, cookie: adminCookie }, env, authFetch);
+  assert.equal(noCsrf.status, 403);
+
+  const toPublic = await callAuth(
+    "transfer",
+    { origin: ADMIN_ORIGIN, body: { returnTo: "/watch" }, cookie: adminCookie, csrfToken: adminPayload.csrfToken },
+    env,
+    authFetch,
+  );
+  assert.equal(toPublic.status, 200);
+  const publicTransfer = await toPublic.json();
+  const publicUrl = new URL(publicTransfer.handoffUrl);
+  assert.equal(publicUrl.origin, PUBLIC_ORIGIN);
+  assert.equal(publicUrl.pathname, "/");
+  assert.equal(publicUrl.searchParams.get("return_to"), "/watch");
+  const publicCreated = await consumeHandoff(
+    env,
+    jsonRequest(`${PUBLIC_ORIGIN}/api/auth/handoff`, { origin: PUBLIC_ORIGIN, body: { code: publicUrl.searchParams.get("handoff") } }),
+    publicUrl.searchParams.get("handoff"),
+    PUBLIC_ORIGIN,
+  );
+
+  const toAdmin = await callAuth(
+    "transfer",
+    { origin: PUBLIC_ORIGIN, body: { returnTo: "/access" }, cookie: cookiePair(publicCreated.cookie), csrfToken: publicCreated.csrfToken },
+    env,
+    authFetch,
+  );
+  assert.equal(toAdmin.status, 200);
+  const adminTransfer = await toAdmin.json();
+  const adminUrl = new URL(adminTransfer.handoffUrl);
+  assert.equal(adminUrl.origin, ADMIN_ORIGIN);
+  assert.equal(adminUrl.searchParams.get("return_to"), "/access");
+  const adminCreated = await consumeHandoff(
+    env,
+    jsonRequest(`${ADMIN_ORIGIN}/api/auth/handoff`, { origin: ADMIN_ORIGIN, body: { code: adminUrl.searchParams.get("handoff") } }),
+    adminUrl.searchParams.get("handoff"),
+    ADMIN_ORIGIN,
+  );
+  assert.equal(adminCreated.account.id, adminPayload.account.id);
+  assert.doesNotMatch(publicCreated.cookie, /Domain=/);
+  assert.doesNotMatch(adminCreated.cookie, /Domain=/);
+  const audit = await harness.db.prepare("SELECT event_type, result FROM auth_audit WHERE event_type = 'session_site_transfer' ORDER BY created_at").all();
+  assert.equal(audit.results.length, 2);
+  assert.ok(audit.results.every((row) => row.result === "success"));
+});
+
 test("auth API covers masters, signup, verification, reset, OAuth, handoff, and Admin account controls", async (t) => {
   const harness = await createAuthDatabase();
   t.after(harness.dispose);

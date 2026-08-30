@@ -14,7 +14,7 @@
     "THIRDRAILIFY_TURNSTILE_SITE_KEY": "0x4AAAAAAEctN9Bb4evywXmW",
     "DISCORD_CLIENT_ID": "1283057181578625034",
     "GOOGLE_CLIENT_ID": "251695505982-1tcah0go61p82620kcfs8dnlhf79m1ik.apps.googleusercontent.com",
-    "GOOGLE_OAUTH_ENABLED": "false",
+    "GOOGLE_OAUTH_ENABLED": "true",
     "GITHUB_CLIENT_ID": "Ov23liRIUUOXfTcmIPhG",
     "X_OAUTH_CLIENT_ID": "ZmVnV2s3emMwcXNVZ2g4T29ySms6MTpjaQ",
     "ADMIN_EMAIL_1": "mail@danielclancy.net",
