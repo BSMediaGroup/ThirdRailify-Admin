@@ -14,7 +14,7 @@ test("Admin messages open full details and support individual and bulk controls"
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   t.after(() => browser.close());
 
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const page = await context.newPage();
     const actions = [];
@@ -37,6 +37,24 @@ test("Admin messages open full details and support individual and bulk controls"
 
     await page.goto(`${ORIGIN}/inbox`);
     await page.getByRole("heading", { level: 1, name: "Inbox" }).waitFor();
+    const geometry = await page.locator(".inbox-message").evaluate((row) => {
+      const box = (selector) => {
+        const element = selector ? row.querySelector(selector) : row;
+        if (!element) throw new Error(`Missing ${selector}`);
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+      };
+      return { row: box(""), select: box(".inbox-message__select"), state: box(".inbox-message__state"), content: box(".inbox-message__content"), actions: box(".inbox-message__actions") };
+    });
+    assert.ok(geometry.select.x < geometry.state.x && geometry.state.x < geometry.content.x, `leading Inbox controls must precede content at ${viewport.width}px`);
+    assert.ok(geometry.content.width >= Math.min(420, geometry.row.width * .42), `Inbox content must retain readable width at ${viewport.width}px`);
+    if (viewport.width > 760) {
+      assert.ok(geometry.content.right < geometry.actions.x, "desktop actions must remain to the right of message content");
+      assert.ok(geometry.actions.width >= 240, "desktop actions must not collapse into vertical words");
+    } else {
+      assert.ok(geometry.actions.x >= geometry.content.x - 1, "mobile actions must align with message content");
+      assert.ok(geometry.actions.y >= geometry.content.bottom, "mobile actions must follow message content without overlap");
+    }
     await page.getByRole("button", { name: "Open Production review required" }).click();
     const dialog = page.getByRole("dialog", { name: "Production review required" });
     await dialog.waitFor();

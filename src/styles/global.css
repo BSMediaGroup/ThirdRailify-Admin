@@ -2184,7 +2184,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .inbox-list { display: grid; gap: 10px; }
 .inbox-message {
   display: grid;
-  grid-template-columns: 10px minmax(0,1fr) auto;
+  grid-template-columns: auto 10px minmax(0,1fr) auto;
   gap: 18px;
   align-items: center;
   padding: 22px;
@@ -2195,7 +2195,8 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .inbox-message.is-unread { border-color: rgba(243,201,40,.48); background: linear-gradient(100deg, rgba(243,201,40,.075), #10100d 34%); }
 .inbox-message__state { width: 8px; height: 8px; border: 1px solid #6f6a58; border-radius: 50%; }
 .inbox-message.is-unread .inbox-message__state { border-color: #f3c928; background: #f3c928; box-shadow: 0 0 12px rgba(243,201,40,.36); }
-.inbox-message > div { display: grid; gap: 6px; min-width: 0; }
+.inbox-message__content { display: grid; gap: 6px; min-width: 0; }
+.inbox-message__actions { display: flex; min-width: max-content; justify-content: flex-end; }
 .inbox-message p { margin: 0; color: #c9a916; font: 700 10px/1 var(--font-mono, monospace); letter-spacing: .1em; text-transform: uppercase; }
 .inbox-message h2 { margin: 0; color: #f5f1e5; font-size: 20px; }
 .inbox-message strong { color: #d9d3bf; font-size: 14px; }
@@ -2217,8 +2218,8 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 
 @media (max-width: 760px) {
   .inbox-heading { align-items: stretch; }
-  .inbox-message { grid-template-columns: 9px minmax(0,1fr); }
-  .inbox-message > button { grid-column: 2; justify-self: start; }
+  .inbox-message { grid-template-columns: auto 9px minmax(0,1fr); gap: 12px; padding: 18px; }
+  .inbox-message__actions { grid-column: 3; min-width: 0; justify-content: flex-start; }
   .overview-inbox__list > a { grid-template-columns: 8px minmax(0,1fr) auto; }
   .overview-inbox__list time { display: none; }
 }
