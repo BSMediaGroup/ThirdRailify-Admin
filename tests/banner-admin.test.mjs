@@ -11,9 +11,9 @@ import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-he
 
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const VALID = {
-  normal: { enabled: true, messages: [{ text: "A concise announcement", ctaLabel: "Learn more", href: "/watch", newTab: false }], mode: "ticker", speed: "slow" },
+  normal: { enabled: true, dismissible: true, messages: [{ text: "A concise announcement", ctaLabel: "Learn more", href: "/watch", newTab: false }], mode: "ticker", speed: "slow" },
   live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "The rail is active", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" },
-  homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap" },
+  homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap", glyphSize: "large" },
 };
 
 test("banner defaults and valid normal/live modes normalize to a bounded safe model", () => {
@@ -21,7 +21,11 @@ test("banner defaults and valid normal/live modes normalize to a bounded safe mo
   for (const mode of ["static", "ticker", "crossfade"]) assert.equal(normalizeBannerConfig({ ...VALID, normal: { ...VALID.normal, mode } }).normal.mode, mode);
   for (const mode of ["marquee", "crossfade", "static"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, mode } }).homeRail.mode, mode);
   for (const glyph of ["zap", "arrow", "diamond", "dot"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, glyph } }).homeRail.glyph, glyph);
+  for (const glyphSize of ["small", "medium", "large"]) assert.equal(normalizeBannerConfig({ ...VALID, homeRail: { ...VALID.homeRail, glyphSize } }).homeRail.glyphSize, glyphSize);
   assert.equal(normalizeBannerConfig(VALID).normal.messages[0].href, "/watch");
+  const legacy = normalizeBannerConfig({ ...VALID, normal: { enabled: true, messages: VALID.normal.messages, mode: "ticker", speed: "slow" }, homeRail: { enabled: true, items: VALID.homeRail.items, mode: "marquee", speed: "normal", easing: "linear", glyph: "zap" } });
+  assert.equal(legacy.normal.dismissible, false);
+  assert.equal(legacy.homeRail.glyphSize, "medium");
 });
 
 test("malformed, oversized, unsafe-link, and unsupported banner values are rejected", () => {
@@ -34,6 +38,7 @@ test("malformed, oversized, unsafe-link, and unsupported banner values are rejec
     { ...VALID, live: { ...VALID.live, animation: "flash" } },
     { ...VALID, live: { ...VALID.live, intensity: "extreme" } },
     { ...VALID, homeRail: { ...VALID.homeRail, glyph: "emoji" } },
+    { ...VALID, homeRail: { ...VALID.homeRail, glyphSize: "huge" } },
     { ...VALID, homeRail: { ...VALID.homeRail, items: ["x".repeat(81)] } },
   ];
   for (const value of invalid) assert.throws(() => normalizeBannerConfig(value), (error) => error.status === 400);

@@ -7,7 +7,8 @@
     "AUTH_ENVIRONMENT": "staging",
     "THIRDRAILIFY_PUBLIC_ORIGIN": "https://thirdrailify.com",
     "THIRDRAILIFY_ADMIN_ORIGIN": "https://admin.thirdrailify.com",
-    "THIRDRAILIFY_PROFILE_MEDIA_ORIGIN": "https://admin.thirdrailify.com",
+    "THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN": "https://cdn.thirdrailify.com",
+    "THIRDRAILIFY_PROFILE_MEDIA_ORIGIN": "https://cdn.thirdrailify.com",
     "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": "",
     "THIRDRAILIFY_DOMAIN_CUTOVER_ACTIVE": "true",
     "THIRDRAILIFY_TURNSTILE_SITE_KEY": "0x4AAAAAAEctN9Bb4evywXmW",
@@ -25,6 +26,62 @@
     "PRINTFUL_STORE_ID": "18668025",
     "PRINTFUL_WIX_SOURCE_STORE_ID": "16847493"
   },
+  "env": {
+    "preview": {
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "THIRDRAILIFY_PUBLIC_STATE",
+            "class_name": "ThirdRailifyPublicState",
+            "script_name": "thirdrailify-public-state"
+          }
+        ]
+      },
+      "d1_databases": [
+        {
+          "binding": "THIRDRAILIFY_AUTH_DB",
+          "database_name": "thirdrailify-accounts",
+          "database_id": "b8be3879-7aa1-4d70-af3f-617abce7a929",
+          "migrations_dir": "migrations"
+        },
+        {
+          "binding": "THIRDRAILIFY_COMMERCE_DB",
+          "database_name": "thirdrailify-commerce",
+          "database_id": "3dd23a7e-7c64-49cb-a52c-c1540b41db1c",
+          "migrations_dir": "commerce-migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "THIRDRAILIFY_PROFILE_MEDIA",
+          "bucket_name": "thirdrailify-profile-media"
+        }
+      ],
+      "vars": {
+        "AUTH_ENVIRONMENT": "staging",
+        "THIRDRAILIFY_PUBLIC_ORIGIN": "https://thirdrailify.pages.dev",
+        "THIRDRAILIFY_ADMIN_ORIGIN": "https://thirdrailify-admin.pages.dev",
+        "THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN": "https://cdn.thirdrailify.com",
+        "THIRDRAILIFY_PROFILE_MEDIA_ORIGIN": "https://cdn.thirdrailify.com",
+        "THIRDRAILIFY_AUTH_COOKIE_DOMAIN": "",
+        "THIRDRAILIFY_DOMAIN_CUTOVER_ACTIVE": "false",
+        "THIRDRAILIFY_TURNSTILE_SITE_KEY": "0x4AAAAAAEctN9Bb4evywXmW",
+        "DISCORD_CLIENT_ID": "1283057181578625034",
+        "GOOGLE_CLIENT_ID": "251695505982-1tcah0go61p82620kcfs8dnlhf79m1ik.apps.googleusercontent.com",
+        "GOOGLE_OAUTH_ENABLED": "false",
+        "GITHUB_CLIENT_ID": "Ov23liRIUUOXfTcmIPhG",
+        "X_OAUTH_CLIENT_ID": "ZmVnV2s3emMwcXNVZ2g4T29ySms6MTpjaQ",
+        "ADMIN_EMAIL_1": "mail@danielclancy.net",
+        "ADMIN_EMAIL_2": "thirdmailify@gmail.com",
+        "MAIL_FROM": "Third Railify Official <alerts@notify.thirdrailify.com>",
+        "MAIL_REPLY_TO": "info@thirdrailify.com",
+        "CONTACT_TO_EMAIL": "info@thirdrailify.com",
+        "CONTACT_CC_EMAIL": "thirdmailify@gmail.com",
+        "PRINTFUL_STORE_ID": "18668025",
+        "PRINTFUL_WIX_SOURCE_STORE_ID": "16847493"
+      }
+    }
+  },
   "d1_databases": [
     {
       "binding": "THIRDRAILIFY_AUTH_DB",
@@ -39,6 +96,15 @@
       "migrations_dir": "commerce-migrations"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "THIRDRAILIFY_PUBLIC_STATE",
+        "class_name": "ThirdRailifyPublicState",
+        "script_name": "thirdrailify-public-state"
+      }
+    ]
+  },
   "r2_buckets": [
     {
       "binding": "THIRDRAILIFY_PROFILE_MEDIA",

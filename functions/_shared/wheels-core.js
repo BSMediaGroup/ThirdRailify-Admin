@@ -109,7 +109,7 @@ export async function getPublicWheel(env, slug, accountId = "") {
   if (!publicVisible && !access.canViewPrivate) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   const entries = await entriesForWheel(env, wheel.id, access.canEdit);
   const history = await publicHistory(env, wheel, 10);
-  const media = await mediaForWheel(env, wheel.id);
+  const media = await mediaForWheel(env, wheel.id, { public: publicVisible });
   return { ok: true, wheel: publicDetail(wheel, entries, history, access, media), access: accessProjection(access, wheel) };
 }
 

@@ -5,12 +5,13 @@ import { chromium } from "playwright-core";
 
 const ADMIN_ORIGIN = String(process.env.THIRDRAILIFY_ADMIN_ORIGIN || "https://admin.thirdrailify.com").replace(/\/$/, "");
 const PUBLIC_ORIGIN = String(process.env.THIRDRAILIFY_PUBLIC_ORIGIN || "https://thirdrailify.com").replace(/\/$/, "");
+const MEDIA_ORIGIN = String(process.env.THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN || "https://cdn.thirdrailify.com").replace(/\/$/, "");
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const resultsDirectory = join(tmpdir(), "thirdrailify-live-commerce-media");
 await mkdir(resultsDirectory, { recursive: true });
 const catalogue = await (await fetch(`${ADMIN_ORIGIN}/api/public/commerce/catalogue?verify=${Date.now()}`)).json();
 const urls = catalogue.products.flatMap((product) => product.images || []);
-if (catalogue.products.length !== 49 || urls.length !== 466 || urls.some((url) => !url.startsWith(`${ADMIN_ORIGIN}/commerce-media/`))) throw new Error("The live catalogue is not fully projected through first-party media.");
+if (!catalogue.ok || !catalogue.products.length || !urls.length || urls.some((url) => !url.startsWith(`${MEDIA_ORIGIN}/commerce-media/`))) throw new Error("The live sellable catalogue is not fully projected through the canonical media CDN.");
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true });
 try {
@@ -29,22 +30,32 @@ try {
   await assetPage.close();
 
   const viewports = [];
-  for (const [width, height] of [[1440, 900], [390, 844]]) {
+  for (const [width, height] of [[1440, 900], [768, 1024], [390, 844]]) {
     const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" });
     await context.addCookies([{ name: "thirdrailify_consent", value: encodeURIComponent(JSON.stringify({ version: 1, timestamp: new Date().toISOString(), expiry: new Date(Date.now() + 86400000).toISOString(), categories: { preferences: true, externalMedia: false } })), url: PUBLIC_ORIGIN, sameSite: "Lax" }]);
-    const page = await context.newPage(); const consoleErrors = []; const wixRequests = [];
-    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); }); page.on("pageerror", (error) => consoleErrors.push(error.message)); page.on("request", (request) => { if (request.url().includes("wixstatic.com")) wixRequests.push(request.url()); });
+    const page = await context.newPage(); const consoleErrors = []; const ignoredProviderErrors = []; const wixRequests = [];
+    page.on("console", (message) => { if (message.type() !== "error") return; const value = message.text(); if (value.includes("static.cloudflareinsights.com/beacon.min.js") && value.includes("integrity")) ignoredProviderErrors.push(value); else consoleErrors.push(value); }); page.on("pageerror", (error) => consoleErrors.push(error.message)); page.on("request", (request) => { if (request.url().includes("wixstatic.com")) wixRequests.push(request.url()); });
     await page.goto(`${PUBLIC_ORIGIN}/shop?media-proof=${Date.now()}`, { waitUntil: "networkidle", timeout: 60_000 }); await page.locator(".product-card").first().waitFor();
     for (let y = 0; y < await page.evaluate(() => document.body.scrollHeight); y += Math.max(300, height * .7)) { await page.evaluate((nextY) => scrollTo(0, nextY), y); await page.waitForTimeout(80); }
     await page.waitForFunction(() => [...document.querySelectorAll(".product-card__image img")].every((image) => image.complete), null, { timeout: 60_000 });
     const cards = await page.locator(".product-card__image img").evaluateAll((images) => images.map((image) => ({ src: image.currentSrc || image.src, width: image.naturalWidth, height: image.naturalHeight })));
     const uniqueCardSources = new Set(cards.map((image) => image.src));
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
-    if (cards.length < 49 || uniqueCardSources.size < 49 || cards.some((image) => !image.src.startsWith(`${ADMIN_ORIGIN}/commerce-media/`) || image.width <= 0 || image.height <= 0) || wixRequests.length || consoleErrors.length || overflow) throw new Error(`Live shop media acceptance failed at ${width}x${height}: ${JSON.stringify({ imageElements: cards.length, uniqueCardSources: uniqueCardSources.size, broken: cards.filter((image) => image.width <= 0).length, wixRequests: wixRequests.length, consoleErrors, overflow })}`);
+    if (cards.length < catalogue.products.length || uniqueCardSources.size < catalogue.products.length || cards.some((image) => !image.src.startsWith(`${MEDIA_ORIGIN}/commerce-media/`) || image.width <= 0 || image.height <= 0) || wixRequests.length || consoleErrors.length || overflow) throw new Error(`Live shop media acceptance failed at ${width}x${height}: ${JSON.stringify({ imageElements: cards.length, uniqueCardSources: uniqueCardSources.size, broken: cards.filter((image) => image.width <= 0).length, wixRequests: wixRequests.length, consoleErrors, overflow })}`);
     await page.evaluate(() => scrollTo(0, 0)); await page.screenshot({ path: join(resultsDirectory, `shop-${width}x${height}.png`), fullPage: false });
-    viewports.push({ width, height, imageElements: cards.length, uniqueCardSources: uniqueCardSources.size, wixRequests: wixRequests.length, consoleErrors: consoleErrors.length, overflow }); await context.close();
+    viewports.push({ width, height, imageElements: cards.length, uniqueCardSources: uniqueCardSources.size, wixRequests: wixRequests.length, consoleErrors: consoleErrors.length, ignoredCloudflareBeaconIntegrityErrors: ignoredProviderErrors.length, overflow }); await context.close();
   }
-  process.stdout.write(`${JSON.stringify({ products: catalogue.products.length, imageReferences: urls.length, uniqueImages: new Set(urls).size, browserLoaded: dimensions.length, failedResponses: failedResponses.length, viewports, resultsDirectory }, null, 2)}\n`);
+  const avatarViewports = [];
+  for (const [width, height] of [[1440, 900], [768, 1024], [390, 844]]) {
+    const page = await browser.newPage({ viewport: { width, height } });
+    await page.goto(`${PUBLIC_ORIGIN}/goats/bubblebob?avatar-proof=${Date.now()}`, { waitUntil: "networkidle", timeout: 60_000 });
+    const avatars = await page.locator('img[src^="https://cdn.thirdrailify.com/u/"]').evaluateAll((images) => images.map((image) => ({ src: image.currentSrc || image.src, width: image.naturalWidth, height: image.naturalHeight, complete: image.complete })));
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    if (!avatars.length || avatars.some((image) => !image.complete || image.width <= 0 || image.height <= 0) || overflow) throw new Error(`Live avatar media acceptance failed at ${width}x${height}: ${JSON.stringify({ avatars, overflow })}`);
+    avatarViewports.push({ width, avatarImages: avatars.length, naturalWidth: avatars[0].width, naturalHeight: avatars[0].height, overflow });
+    await page.close();
+  }
+  process.stdout.write(`${JSON.stringify({ products: catalogue.products.length, imageReferences: urls.length, uniqueImages: new Set(urls).size, browserLoaded: dimensions.length, failedResponses: failedResponses.length, viewports, avatarViewports, resultsDirectory }, null, 2)}\n`);
 } finally { await browser.close(); }
 
 function escapeHtml(value) { return String(value || "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }

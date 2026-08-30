@@ -14,6 +14,7 @@ import {
 import { requireCommerceDb } from "./commerce-core.js";
 import { resolveCoarseLocation } from "./goats-geocoder.js";
 import { adminInboxMessageStatement } from "./admin-inbox.js";
+import { publicMediaUrl } from "./media-origin.js";
 
 export const GOATS_MEDIA_BINDING = "THIRDRAILIFY_PROFILE_MEDIA";
 export const MAX_GOAT_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -94,7 +95,7 @@ export async function publicListings(env, input = {}) {
   ]);
   return {
     ok: true,
-    items: (rows?.results || []).map(publicListingProjection),
+    items: (rows?.results || []).map((row) => publicListingProjection(row, env)),
     page,
     pageSize,
     total: Number(count?.count || 0),
@@ -133,7 +134,7 @@ export async function publicListingBySlug(env, slug, accountId = "") {
     `${publicSelect()} WHERE s.public_slug = ? AND s.status = 'approved' AND s.is_published = 1 LIMIT 1`,
   ).bind(validSlug(slug)).first();
   if (!row) throw new AuthFailure(404, "goat_not_found", "This GOAT listing was not found.");
-  const item = publicListingProjection(row);
+  const item = publicListingProjection(row, env);
   item.engagement = {
     comments: await effectiveEngagementMode(env, row.comment_mode, "community_comments_mode"),
     reactions: await effectiveReactionMode(env, row.reaction_mode),
@@ -152,9 +153,9 @@ export async function publicListingBySlug(env, slug, accountId = "") {
     item: {
       ...item,
       media: {
-        main: mediaProjection((media?.results || []).find((entry) => entry.role === "main")),
-        profile: mediaProjection((media?.results || []).find((entry) => entry.role === "profile")),
-        gallery: (media?.results || []).filter((entry) => entry.role === "gallery").map(mediaProjection),
+        main: mediaProjection((media?.results || []).find((entry) => entry.role === "main"), env, true),
+        profile: mediaProjection((media?.results || []).find((entry) => entry.role === "profile"), env, true),
+        gallery: (media?.results || []).filter((entry) => entry.role === "gallery").map((entry) => mediaProjection(entry, env, true)),
       },
       currentReaction,
       neighbours,
@@ -789,7 +790,7 @@ function publicSelect() {
     FROM community_submissions s`;
 }
 
-function publicListingProjection(row) {
+function publicListingProjection(row, env) {
   return {
     id: row.id,
     slug: row.public_slug,
@@ -799,7 +800,7 @@ function publicListingProjection(row) {
     publishedAt: row.approved_at,
     product: { id: row.product_id, slug: row.product_slug_snapshot, name: row.product_name_snapshot },
     location: { label: row.public_location_label, countryCode: row.country_code, latitude: row.public_latitude == null ? null : Number(row.public_latitude), longitude: row.public_longitude == null ? null : Number(row.public_longitude) },
-    media: { main: mediaProjection(row.main_media_id ? { id: row.main_media_id, role: "main", sort_order: 0 } : null), profile: mediaProjection(row.profile_media_id ? { id: row.profile_media_id, role: "profile", sort_order: 0 } : null), gallery: [] },
+    media: { main: mediaProjection(row.main_media_id ? { id: row.main_media_id, role: "main", sort_order: 0 } : null, env, true), profile: mediaProjection(row.profile_media_id ? { id: row.profile_media_id, role: "profile", sort_order: 0 } : null, env, true), gallery: [] },
     engagement: { comments: row.comment_mode || "inherit", reactions: row.reaction_mode || "inherit" },
     counts: { likes: Math.max(0, Number(row.like_count || 0) + Number(row.legacy_like_count || 0)), dislikes: Math.max(0, Number(row.dislike_count || 0) + Number(row.legacy_dislike_count || 0)), comments: Math.max(0, Number(row.comment_count || 0) + Number(row.legacy_comment_count || 0)) },
   };
@@ -841,8 +842,9 @@ function commentProjection(row) {
   return { id: row.id, displayName: row.author_display_name, avatarUrl: safePublicUrl(row.author_avatar_url), body: row.body, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
-function mediaProjection(row) {
-  return row ? { id: row.id, role: row.role, sortOrder: Number(row.sort_order || 0), url: `/api/goats/media/${row.id}` } : null;
+function mediaProjection(row, env, isPublic = false) {
+  const path = `/goats-media/${row?.id}`;
+  return row ? { id: row.id, role: row.role, sortOrder: Number(row.sort_order || 0), url: isPublic ? publicMediaUrl(env, path) || `/api/goats/media/${row.id}` : `/api/goats/media/${row.id}` } : null;
 }
 
 function moderationStatement(env, submissionId, actorId, eventType, metadata, timestamp) {

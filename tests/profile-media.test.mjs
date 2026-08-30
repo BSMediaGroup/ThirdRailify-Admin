@@ -7,15 +7,18 @@ import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../
 import { authEnvironment, cookiePair, createAuthDatabase } from "./auth-test-helpers.mjs";
 
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
+const MEDIA_ORIGIN = "https://cdn.thirdrailify.com";
 const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
 const PNG = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
 const WEBP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x08, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20]);
 
-test("Admin Wrangler binds the confirmed profile-media bucket without preview configuration", async () => {
+test("Admin Wrangler preserves the media bucket and explicitly configures preview CDN bindings", async () => {
   const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
   const bindings = config.r2_buckets.filter(({ binding }) => binding === "THIRDRAILIFY_PROFILE_MEDIA");
   assert.deepEqual(bindings, [{ binding: "THIRDRAILIFY_PROFILE_MEDIA", bucket_name: "thirdrailify-profile-media" }]);
-  assert.equal(config.env?.preview, undefined);
+  assert.deepEqual(config.env.preview.r2_buckets, bindings);
+  assert.equal(config.vars.THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN, MEDIA_ORIGIN);
+  assert.equal(config.env.preview.vars.THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN, MEDIA_ORIGIN);
 });
 
 test("avatar uploads and remote URLs become immutable Admin-owned media objects", async (t) => {
@@ -25,6 +28,7 @@ test("avatar uploads and remote URLs become immutable Admin-owned media objects"
   const env = authEnvironment(harness.db, {
     THIRDRAILIFY_PROFILE_MEDIA: bucket,
     THIRDRAILIFY_PROFILE_MEDIA_ORIGIN: ADMIN_ORIGIN,
+    THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN: MEDIA_ORIGIN,
   });
   await ensureEnvironmentMasters(env);
   const master = await loadAccountByEmail(env, env.ADMIN_EMAIL_1);
@@ -51,7 +55,7 @@ test("avatar uploads and remote URLs become immutable Admin-owned media objects"
     assert.equal(upload.status, 200);
     const uploadPayload = await upload.json();
     const contentHash = await digestHex(image.bytes);
-    assert.match(uploadPayload.account.avatarUrl, new RegExp(`^https://thirdrailify-admin\\.pages\\.dev/u/[a-f0-9]{20}/avatar/${contentHash}\\.${image.extension}$`));
+    assert.match(uploadPayload.account.avatarUrl, new RegExp(`^https://cdn\\.thirdrailify\\.com/u/[a-f0-9]{20}/avatar/${contentHash}\\.${image.extension}$`));
     assert.doesNotMatch(uploadPayload.account.avatarUrl, /^(?:data|blob):/);
     const objectKey = new URL(uploadPayload.account.avatarUrl).pathname.slice(1);
     assert.equal(bucket.objects.has(objectKey), true);

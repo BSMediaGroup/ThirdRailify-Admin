@@ -28,7 +28,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
       }
       return json(route, { ok: false, error: "not_found" }, 404);
     });
-    await page.goto(`${ORIGIN}/content`); await page.getByRole("heading", { level: 1, name: "Public banner" }).waitFor();
+    await page.goto(`${ORIGIN}/content`); await page.getByRole("heading", { level: 1, name: "Public banner" }).waitFor(); await page.evaluate(() => document.fonts.ready);
     const publicLink = page.getByRole("link", { name: "Open Public site in a new tab" });
     const publicLinkLabel = publicLink.locator("span"); const publicLinkIcon = publicLink.locator("svg");
     const [linkBox, labelBox, iconBox] = await Promise.all([publicLink.boundingBox(), publicLinkLabel.boundingBox(), publicLinkIcon.boundingBox()]);
@@ -40,6 +40,27 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     assert.ok(Math.abs((labelBox.y + labelBox.height / 2) - (iconBox.y + iconBox.height / 2)) <= 1, `${width}px label and external icon are vertically aligned`);
     if (width <= 760) assert.ok(linkBox.width >= 300, `${width}px Public link uses the available mobile width`);
     await page.getByText("Fixture preview only").waitFor();
+    assert.equal(await page.getByLabel("Divider size").inputValue(), "large");
+    assert.equal(await page.getByText("Allow visitors to dismiss this banner with a close button").locator("..").locator("input").isChecked(), true);
+    const normalPreview = page.locator(".admin-banner-preview--normal");
+    assert.equal(Math.round((await normalPreview.boundingBox()).height), 31);
+    const normalMotion = await page.locator(".admin-banner-preview__ticker > div").evaluate((element) => ({ name: getComputedStyle(element).animationName, duration: element.getAnimations()[0]?.effect?.getTiming().duration }));
+    assert.deepEqual(normalMotion, { name: "admin-banner-ticker", duration: 30000 });
+    await page.getByLabel("Presentation mode").selectOption("crossfade");
+    assert.equal(await page.locator(".admin-banner-preview--normal.is-crossfade .admin-banner-preview__inner span").evaluate((element) => getComputedStyle(element).animationName), "admin-banner-crossfade");
+    await page.getByLabel("Presentation mode").selectOption("ticker");
+    await page.getByRole("button", { name: "Dismiss announcement preview" }).click();
+    await page.getByText("Dismissed for this preview").waitFor();
+    await page.getByRole("button", { name: "Restore preview" }).click();
+    await normalPreview.waitFor();
+    const liveMotion = await page.locator(".admin-banner-preview--live").evaluate((element) => ({ sweep: getComputedStyle(element, "::after").animationName, energy: getComputedStyle(element.querySelector(".admin-banner-preview__energy")).animationName, pulse: getComputedStyle(element.querySelector(".admin-live-label i")).animationName }));
+    assert.deepEqual(liveMotion, { sweep: "admin-live-banner-sweep", energy: "admin-live-banner-energy", pulse: "admin-live-banner-pulse" });
+    await page.getByLabel("Animation treatment").selectOption("sweep");
+    assert.deepEqual(await page.locator(".admin-banner-preview--live").evaluate((element) => ({ sweep: getComputedStyle(element, "::after").animationName, pulse: getComputedStyle(element.querySelector(".admin-live-label i")).animationName })), { sweep: "admin-live-banner-sweep", pulse: "none" });
+    await page.getByLabel("Animation treatment").selectOption("pulse");
+    assert.deepEqual(await page.locator(".admin-banner-preview--live").evaluate((element) => ({ sweep: getComputedStyle(element, "::after").animationName, pulse: getComputedStyle(element.querySelector(".admin-live-label i")).animationName })), { sweep: "none", pulse: "admin-live-banner-pulse" });
+    await page.getByLabel("Animation treatment").selectOption("pulse-sweep");
+    assert.equal(Math.round((await page.locator(".admin-banner-preview--live").boundingBox()).height), 31);
     await page.getByRole("heading", { level: 2, name: "Homepage content rail" }).waitFor();
     assert.equal(await page.getByText("Third Railify triple zap").count(), 1);
     const preview = page.locator(".admin-home-rail-preview"); const previewSegments = preview.locator(".admin-home-rail-preview__track > .admin-home-rail-preview__segment");
@@ -49,19 +70,22 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
     assert.equal(await preview.locator(".admin-home-rail-preview__zap svg").count(), 0);
     const zapStyle = await page.locator(".admin-home-rail-preview__zap").first().evaluate((element) => ({ background: getComputedStyle(element).backgroundColor, mask: getComputedStyle(element).maskImage || getComputedStyle(element).webkitMaskImage }));
     assert.equal(zapStyle.background, "rgb(255, 209, 47)"); assert.match(zapStyle.mask, /trzap-0/);
+    assert.equal(Math.round((await page.locator(".admin-home-rail-preview__zap").first().boundingBox()).width), 14);
     const previewGeometry = await preview.evaluate((element) => { const track = element.querySelector(".admin-home-rail-preview__track"); const segments = [...track.children]; const spans = [...segments[0].querySelectorAll(":scope > span")]; const first = spans[0].getBoundingClientRect(); const second = spans[1].getBoundingClientRect(); const duration = Number(getComputedStyle(track).animationDuration.replace("s", "")); return { cycleDuration: duration / (spans.length / 2), gap: second.left - first.right, fontSize: getComputedStyle(spans[0]).fontSize, letterSpacing: getComputedStyle(spans[0]).letterSpacing, segmentWidths: segments.map((segment) => segment.getBoundingClientRect().width), trackWidth: track.getBoundingClientRect().width }; });
-    assert.equal(previewGeometry.cycleDuration, 28); assert.ok(previewGeometry.gap >= 29 && previewGeometry.gap <= 31); assert.equal(previewGeometry.fontSize, "8px"); assert.equal(previewGeometry.letterSpacing, "1.28px"); assert.ok(Math.abs(previewGeometry.segmentWidths[0] - previewGeometry.segmentWidths[1]) < 1); assert.ok(Math.abs(previewGeometry.trackWidth - previewGeometry.segmentWidths[0] * 2) < 1);
+    assert.equal(previewGeometry.cycleDuration, 28); assert.ok(previewGeometry.gap >= 29 && previewGeometry.gap <= 31); assert.equal(previewGeometry.fontSize, "8.8px"); assert.equal(previewGeometry.letterSpacing, "1.408px"); assert.ok(Math.abs(previewGeometry.segmentWidths[0] - previewGeometry.segmentWidths[1]) < 1); assert.ok(Math.abs(previewGeometry.trackWidth - previewGeometry.segmentWidths[0] * 2) < 1);
     assert.equal(await page.getByText("SAMPLE PREVIEW — Third Railify live broadcast title").count(), 1);
     assert.equal(await page.locator("code").filter({ hasText: "/watch/live" }).count(), 1);
-    const newTabChoice = page.getByText("Open external link in a new tab").locator("..");
-    const [newTabBox, checkboxBox, checkboxLabelBox] = await Promise.all([newTabChoice.boundingBox(), newTabChoice.locator("input").boundingBox(), newTabChoice.locator("span").boundingBox()]);
+    const newTabChoice = page.locator(".banner-message-editor fieldset .banner-check").first();
+    const [newTabBox, checkboxBox, checkboxLabelBox] = await Promise.all([newTabChoice.boundingBox(), newTabChoice.locator(":scope > input").boundingBox(), newTabChoice.locator(":scope > span").boundingBox()]);
     assert.ok(newTabBox && checkboxBox && checkboxLabelBox, `${width}px renders the external-link choice`);
-    assert.ok(Math.abs((checkboxBox.y + checkboxBox.height / 2) - (checkboxLabelBox.y + checkboxLabelBox.height / 2)) <= 1, `${width}px checkbox and label stay vertically aligned`);
+    const checkboxCenterDelta = Math.abs((checkboxBox.y + checkboxBox.height / 2) - (checkboxLabelBox.y + checkboxLabelBox.height / 2));
+    assert.ok(checkboxCenterDelta <= 1, `${width}px checkbox and label stay vertically aligned (delta ${checkboxCenterDelta}px)`);
     const removeButton = page.getByRole("button", { name: "Remove" });
     assert.notEqual(await removeButton.evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(243, 201, 40)", `${width}px destructive action does not use the gold primary fill`);
     const message = page.getByLabel(/Message text/).first(); await message.fill("Updated staging announcement");
     await page.getByText("Unsaved changes").waitFor(); await page.getByRole("button", { name: "Save banner settings" }).click();
     await page.getByText("Saved revision 2.").waitFor(); assert.equal(stored.normal.messages[0].text, "Updated staging announcement");
+    assert.equal(stored.normal.dismissible, true); assert.equal(stored.homeRail.glyphSize, "large");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${width}px has no horizontal overflow`);
     assert.deepEqual(errors, [], `${width}px has no console errors`);
     if (process.env.BANNER_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", `thirdrailify-admin-banner-${width}.png`), fullPage: true });
@@ -69,7 +93,7 @@ test("Site Content banner editor previews, validates unsaved state, and confirms
   }
 });
 
-function initialConfig() { return { normal: { enabled: true, messages: [{ text: "Initial announcement", ctaLabel: "Watch", href: "/watch", newTab: false }], mode: "static", speed: "normal" }, homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap" }, live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "Confirmed Watch signal", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" } }; }
+function initialConfig() { return { normal: { enabled: true, dismissible: true, messages: [{ text: "Initial announcement", ctaLabel: "Watch", href: "/watch", newTab: false }], mode: "ticker", speed: "normal" }, homeRail: { enabled: true, items: ["THIRD RAILIFY", "NEWS HANGOUT"], mode: "marquee", speed: "normal", easing: "linear", glyph: "zap", glyphSize: "large" }, live: { enabled: true, label: "LIVE NOW", showTitle: true, supportingText: "Confirmed Watch signal", ctaLabel: "WATCH NOW", animation: "pulse-sweep", intensity: "normal" } }; }
 function session() { return { ok: true, authenticated: true, csrfToken: "browser-fixture-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-28T00:00:00.000Z", lastLoginAt: null, source: "test", locked: true } }; }
 function authConfig() { return { configured: true, emailSignupConfigured: true, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: "https://thirdrailify-admin.pages.dev", environment: "test", cookieMode: "host-only" }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }

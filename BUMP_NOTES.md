@@ -1,5 +1,11 @@
 # Bump notes
 
+## 2026-08-30 - Post-cutover media CDN and bot ingress
+
+- Added the read-only `thirdrailify-media` Worker and `cdn.thirdrailify.com` custom domain over the existing R2 bucket. Immutable products/avatars use canonical content-addressed paths; GOATS/Wheels are D1 lifecycle-gated; private keys, listings, query variants, and mutation methods fail closed.
+- Backfilled only trusted first-party URL prefixes (49 product rows, one comment avatar, two account avatars), added exact legacy 301s, and moved upload/projection paths to the CDN. Real product and avatar bytes rendered from the canonical host.
+- Added HMAC-authenticated Admin machine ingress backed directly by the existing Public Durable Object. One restarted bot instance published real broadcast/community snapshots with 204 responses. Provider dashboards were audited without payment, Printful object, order, email, or Commerce-gate mutation.
+
 ## 2026-08-30 - Canonical production domain cutover
 
 - Activated `https://admin.thirdrailify.com` as the canonical Admin UI and deployed `4a72bc5d-cbe3-4ebe-81f2-2ec5ec0c6ea8`. The old Pages hostname redirects browser GET/HEAD outside `/api/*` while preserving API and webhook methods/bodies.

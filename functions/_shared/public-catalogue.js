@@ -1,9 +1,10 @@
 import { AuthFailure, cleanText } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
+import { canonicalPublicMediaUrl } from "./media-origin.js";
 
 export async function publicCataloguePayload(env) {
   const db = requireCommerceDb(env);
-  const [{ products, collections }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db), publicCheckoutEnabled(db)]);
+  const [{ products, collections }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env), publicCheckoutEnabled(db)]);
   return {
     ok: true,
     source: "commerce-d1",
@@ -21,12 +22,12 @@ export async function publicProductPayload(env, slug) {
     throw new AuthFailure(404, "product_not_found", "The product was not found.");
   }
   const db = requireCommerceDb(env);
-  const [{ products }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, normalizedSlug), publicCheckoutEnabled(db)]);
+  const [{ products }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env, normalizedSlug), publicCheckoutEnabled(db)]);
   if (!products.length) throw new AuthFailure(404, "product_not_found", "The product was not found.");
   return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled, product: products[0] };
 }
 
-async function loadPublicCatalogue(db, slug = null) {
+async function loadPublicCatalogue(db, env, slug = null) {
   const collectionResult = await db.prepare(
     `SELECT id, slug, title, description, display_order, updated_at
      FROM commerce_collections
@@ -64,14 +65,14 @@ async function loadPublicCatalogue(db, slug = null) {
   for (const row of variantResult?.results || []) variantsByProduct.get(row.product_id)?.push(serializePublicVariant(row));
   const collectionsByProduct = new Map(ids.map((id) => [id, []]));
   for (const row of membershipResult?.results || []) collectionsByProduct.get(row.product_id)?.push({ id: row.id, slug: row.slug, title: row.title });
-  const products = rows.map((row) => serializePublicProduct(row, variantsByProduct.get(row.id) || [], collectionsByProduct.get(row.id) || [])).filter(Boolean);
+  const products = rows.map((row) => serializePublicProduct(row, variantsByProduct.get(row.id) || [], collectionsByProduct.get(row.id) || [], env)).filter(Boolean);
   const publicProductIds = new Set(products.map((product) => product.id));
   const collectionProducts = new Map(collectionRows.map((row) => [row.id, []]));
   for (const row of membershipResult?.results || []) if (publicProductIds.has(row.product_id)) collectionProducts.get(row.id)?.push(row.product_id);
   return { products, collections: collectionRows.map((row) => serializePublicCollection(row, collectionProducts.get(row.id) || [])) };
 }
 
-function serializePublicProduct(row, variants, collections) {
+function serializePublicProduct(row, variants, collections, env) {
   if (String(row.currency_code || "").toUpperCase() !== "CAD") return null;
   if (row.requires_shipping === 1 && variants.length === 0) return null;
   const metadata = safeObject(row.safe_metadata_json);
@@ -81,8 +82,8 @@ function serializePublicProduct(row, variants, collections) {
   if (!prices.length) return null;
   const minUnitAmount = Math.min(...prices);
   const maxUnitAmount = Math.max(...prices);
-  const primaryImage = safeHttpsUrl(metadata.publicImage);
-  const additionalImages = safeStringArray(metadata.publicImages, 24, 4096).map(safeHttpsUrl).filter(Boolean);
+  const primaryImage = safeHttpsUrl(canonicalPublicMediaUrl(metadata.publicImage, env));
+  const additionalImages = safeStringArray(metadata.publicImages, 24, 4096).map((value) => safeHttpsUrl(canonicalPublicMediaUrl(value, env))).filter(Boolean);
   const images = [...new Set([primaryImage, ...additionalImages].filter(Boolean))];
   return {
     id: cleanText(row.id, 160),

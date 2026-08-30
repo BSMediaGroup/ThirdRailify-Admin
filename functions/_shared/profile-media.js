@@ -2,7 +2,6 @@ import {
   AuthFailure,
   enforceRateLimit,
   loadAccountById,
-  normalizeOrigin,
   nowIso,
   readJsonBody,
   requireAuthDb,
@@ -12,6 +11,7 @@ import {
   sessionEnvelope,
   writeAudit,
 } from "./auth-core.js";
+import { publicMediaOrigin } from "./media-origin.js";
 
 export const PROFILE_MEDIA_BINDING = "THIRDRAILIFY_PROFILE_MEDIA";
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
@@ -106,7 +106,7 @@ function requireProfileMediaBucket(env) {
 }
 
 function profileMediaOrigin(env) {
-  const origin = normalizeOrigin(env?.THIRDRAILIFY_PROFILE_MEDIA_ORIGIN) || normalizeOrigin(env?.THIRDRAILIFY_ADMIN_ORIGIN);
+  const origin = publicMediaOrigin(env);
   if (!origin || !origin.startsWith("https://")) {
     throw new AuthFailure(503, "profile_media_not_configured", "The profile image origin is not configured.");
   }

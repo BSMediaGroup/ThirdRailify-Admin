@@ -1,0 +1,12 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "thirdrailify-media",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [{ "pattern": "cdn.thirdrailify.com", "custom_domain": true }],
+  "observability": { "enabled": true },
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "thirdrailify-profile-media" }],
+  "d1_databases": [{ "binding": "COMMERCE_DB", "database_name": "thirdrailify-commerce", "database_id": "3dd23a7e-7c64-49cb-a52c-c1540b41db1c" }]
+}

@@ -1,5 +1,6 @@
-import { AuthFailure, cleanText, normalizeOrigin, nowIso } from "./auth-core.js";
+import { AuthFailure, cleanText, nowIso } from "./auth-core.js";
 import { requireCommerceDb, writeCommerceAudit } from "./commerce-core.js";
+import { publicMediaOrigin } from "./media-origin.js";
 
 const MEDIA_BINDING = "THIRDRAILIFY_PROFILE_MEDIA";
 export const MAX_COMMERCE_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -156,7 +157,7 @@ function requireMediaBucket(env) {
 }
 
 function mediaOrigin(env) {
-  const origin = normalizeOrigin(env?.THIRDRAILIFY_PROFILE_MEDIA_ORIGIN) || normalizeOrigin(env?.THIRDRAILIFY_ADMIN_ORIGIN);
+  const origin = publicMediaOrigin(env);
   if (!origin?.startsWith("https://")) throw new AuthFailure(503, "commerce_media_not_configured", "The commerce media origin is not configured.");
   return origin;
 }

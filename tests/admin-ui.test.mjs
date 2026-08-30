@@ -123,7 +123,7 @@ test("Watch authority failures render unknown archive state instead of false zer
 test("Site Content exposes separate normal and fixture-labelled Live Now configuration without a manual live-title field", async () => {
   const [app, page, client] = await Promise.all([read("src/App.tsx"), read("src/pages/SiteContentPage.tsx"), read("src/banner/client.ts")]);
   assert.match(app, /path="content" element={<SiteContentPage/);
-  for (const label of ["Normal promo / info", "Homepage content rail", "Seamless marquee scroll", "Third Railify triple zap", "Automatic Live Now", "Presentation mode", "Animation speed", "Locked destination", "Fixture preview only", "Unsaved changes"]) assert.match(page, new RegExp(label));
+  for (const label of ["Normal promo / info", "Homepage content rail", "Seamless marquee scroll", "Third Railify triple zap", "Divider size", "Allow visitors to dismiss", "Automatic Live Now", "Presentation mode", "Animation speed", "Locked destination", "Fixture preview only", "Unsaved changes"]) assert.match(page, new RegExp(label));
   assert.match(page, /SAMPLE PREVIEW — Third Railify live broadcast title/);
   assert.match(page, /<code>\/watch\/live<\/code>/);
   assert.doesNotMatch(page, /Active stream title<\/span><input/);

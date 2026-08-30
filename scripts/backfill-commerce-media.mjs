@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 
-const MEDIA_ORIGIN = String(process.env.THIRDRAILIFY_ADMIN_ORIGIN || "https://admin.thirdrailify.com").replace(/\/$/, "");
-const CATALOGUE_URL = `${MEDIA_ORIGIN}/api/public/commerce/catalogue`;
+const ADMIN_ORIGIN = String(process.env.THIRDRAILIFY_ADMIN_ORIGIN || "https://admin.thirdrailify.com").replace(/\/$/, "");
+const MEDIA_ORIGIN = String(process.env.THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN || "https://cdn.thirdrailify.com").replace(/\/$/, "");
+const CATALOGUE_URL = `${ADMIN_ORIGIN}/api/public/commerce/catalogue`;
 const BUCKET = "thirdrailify-profile-media";
 const MAX_BYTES = 10 * 1024 * 1024;
 const runId = new Date().toISOString().replace(/[:.]/g, "-");
