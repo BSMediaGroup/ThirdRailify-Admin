@@ -20,6 +20,7 @@ import {
   listAccessibleWheels,
   listOwnedStages,
   listPublicStages,
+  performStageOfficialSpinAll,
   saveStage,
 } from "../../_shared/wheel-stages-core.js";
 
@@ -74,6 +75,8 @@ async function handleInternal(method, env, path, body) {
   if (method === "PUT" && stageSave) return saveStage(env, accountId, decode(stageSave[1]), body.input || {});
   const stageLifecycle = path.match(/^stages\/([^/]+)\/lifecycle$/);
   if (method === "POST" && stageLifecycle) return archiveStage(env, accountId, decode(stageLifecycle[1]));
+  const stageSpinAll = path.match(/^stages\/([^/]+)\/spin-all$/);
+  if (method === "POST" && stageSpinAll) return performStageOfficialSpinAll(env, accountId, decode(stageSpinAll[1]), body.input || {});
   const read = path.match(/^([^/]+)\/read$/);
   if (method === "POST" && read) return getPublicWheel(env, decode(read[1]), accountId);
   const access = path.match(/^([^/]+)\/access$/);

@@ -1,5 +1,26 @@
 # Third Railify Admin
 
+## Analytics incident repair and Commerce Intelligence V1 (local implementation)
+
+The live `/analytics` failure is explained by production being one Commerce D1 migration behind: `commerce-migrations/0024_analytics_and_message_controls.sql` creates `analytics_events` and all 21 columns required by the ingestion and reporting contract. The reporting code has no correctness dependency on the four reporting indexes, although `0024` creates them for bounded query performance. The Admin endpoint now performs an explicit `PRAGMA table_info('analytics_events')` capability check before any report query and returns safe `503 analytics_migration_required` state instead of relying on the shared generic missing-table translator. Missing schema is never represented as zero traffic. Authentication failures, malformed ranges, independent Revenue Pulse failure, empty compatible storage, partial history, stale collection, and map-only failure remain distinct. Audience Analytics now uses a dedicated chart icon rather than the Overview grid icon.
+
+The new authenticated `/commerce/analytics` route is the read-only LIVE financial command centre. Its server-owned reporting layer excludes TEST/sandbox, pending, failed, and canceled records; keeps merchandise, donations, customer-paid shipping, and tax separate; applies completed persisted refunds/reversals; groups every value by original currency; and never ships raw commerce tables or personal/provider credential data to the browser. Gross collected is captured order totals plus completed donation authority. Net collected is gross less completed persisted refund/reversal evidence and becomes incomplete when a dispute lacks an authoritative amount.
+
+Historical fulfillment/product costs are considered known only when a provider-linked order has positive persisted transaction cost values. The schema's legacy zero defaults remain `Unknown`, never `$0.00`. Processor fees are reported only when a positive persisted transaction fee exists; no published fee schedule is estimated. Contribution margin is calculated only for fully evidenced merchandise orders as net collected less tax, known provider costs, and known processor fees. Partial-refund allocation, order-level cost allocation across multiple products, donation processor fees, and business overhead remain unavailable, so the UI does not expose a Profit metric. Coverage panels report known/unknown fulfillment costs, processor fees, order allocations, donation reversal evidence, unresolved disputes, currencies, freshness, and bounded-read truncation.
+
+No Commerce Intelligence migration was added. Existing migrations through `0021` already contain the read authorities; current Printful normalization discards provider cost fields and no provider response fixture proves a safe final-cost contract, so this milestone does not invent provider snapshots or guessed backfills. Secure CSV export is deferred because no established financial export infrastructure exists.
+
+Production rollout remains manual and was not performed here. From this repository, first inspect pending migrations and stop unless `0024_analytics_and_message_controls.sql` is the only pending Commerce migration. Back up the remote database, then use the pinned Wrangler 4.60.0 migration ledger command:
+
+```powershell
+$node22 = 'C:\Users\TempAdmin\.codex\tmp\node-v22.16.0-win-x64\node.exe'
+& $node22 node_modules/wrangler/bin/wrangler.js d1 migrations apply thirdrailify-commerce --remote --config wrangler.jsonc
+```
+
+Deploy Admin only after schema verification; Public needs deployment only if its analytics ingestion artifact or shared encrypted ingestion-secret custody is not already current. Verify the same `THIRDRAILIFY_ANALYTICS_INGEST_SECRET` is present in both Pages projects without printing it, then confirm an authorized `/api/admin/analytics` read, live `/analytics`, signed stable-origin ingestion, and absence of the ingestion secret from browser assets. Commerce Intelligence has no additional migration dependency beyond the existing commerce chain.
+
+Repository tree additions for this milestone are `functions/_shared/commerce-intelligence.js`, `src/commerce/intelligence-client.ts`, `src/pages/CommerceIntelligencePage.tsx`, `tests/analytics-browser.test.mjs`, `tests/commerce-intelligence.test.mjs`, and `tests/commerce-intelligence-browser.test.mjs`. No files were removed.
+
 ## Audience Analytics V1 and message controls (local implementation)
 
 The authenticated `/analytics` workspace is the reporting authority for first-party Public traffic. `POST /api/internal/analytics/ingest` accepts only exact-Public-origin, timely HMAC-signed events using `THIRDRAILIFY_ANALYTICS_INGEST_SECRET`; `GET /api/admin/analytics` requires the established Admin session and returns private/no-store aggregates. The dashboard provides exact trailing 24-hour, 7-day, 30-day, and 90-day totals; preceding-window coverage/deltas; UTC trends; top routes, sources, and devices; a lazy MapLibre/OpenFreeMap coarse activity map with a non-map regional fallback; and truthful LIVE Commerce revenue grouped by currency.

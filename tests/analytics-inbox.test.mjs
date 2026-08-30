@@ -5,12 +5,19 @@ import {
   mutateAccountInbox,
 } from "../functions/_shared/account-commerce.js";
 import {
+  ANALYTICS_REQUIRED_COLUMNS,
   analyticsReport,
+  analyticsSchemaState,
   delta,
   ingestAnalyticsEvent,
   normalizePublicPath,
   periodStarts,
 } from "../functions/_shared/analytics.js";
+import {
+  createSession,
+  ensureEnvironmentMasters,
+  loadAccountByEmail,
+} from "../functions/_shared/auth-core.js";
 import {
   adminInboxMessages,
   mutateAdminInboxMessages,
@@ -20,6 +27,9 @@ import {
   commerceEnvironment,
   createCommerceDatabases,
 } from "./commerce-test-helpers.mjs";
+import { cookiePair } from "./auth-test-helpers.mjs";
+
+const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 
 test("migration 0024 persists privacy-minimized idempotent events and valid comparison boundaries", async (t) => {
   const harness = await createCommerceDatabases();
@@ -58,6 +68,9 @@ test("migration 0024 persists privacy-minimized idempotent events and valid comp
   assert.equal(stored.public_path, "/watch");
   assert.equal(stored.latitude, -33.9);
   assert.doesNotMatch(JSON.stringify(stored), /ip|email|cookie|authorization/i);
+  assert.deepEqual(await analyticsSchemaState(harness.commerceDb), { compatible: true, tablePresent: true, missingColumns: [] });
+  const indexes = (await harness.commerceDb.prepare("PRAGMA index_list('analytics_events')").all()).results.map((row) => row.name);
+  for (const index of ["idx_analytics_events_occurred", "idx_analytics_events_session", "idx_analytics_events_path", "idx_analytics_events_geo"]) assert.ok(indexes.includes(index));
   await harness.commerceDb.prepare(`INSERT INTO commerce_orders
     (id,environment,checkout_status,payment_status,fulfillment_status,currency_code,customer_gross_amount,refund_amount,created_at,updated_at)
     VALUES('ord_analytics_live','live','checkout_created','partially_refunded','fulfilled','CAD',10000,1200,'2026-08-30T10:00:00.000Z','2026-08-30T10:00:00.000Z')`).run();
@@ -178,6 +191,64 @@ test("analytics read endpoint remains unavailable without an authenticated Admin
   assert.equal(response.status, 401);
 });
 
+test("analytics schema one migration behind returns an explicit migration-required response instead of false zero traffic", async (t) => {
+  const harness = await createCommerceDatabases({ commerceMigrationCount: 23 });
+  t.after(harness.dispose);
+  const env = commerceEnvironment(harness);
+  const schema = await analyticsSchemaState(harness.commerceDb);
+  assert.equal(schema.compatible, false);
+  assert.equal(schema.tablePresent, false);
+  assert.deepEqual(schema.missingColumns, ANALYTICS_REQUIRED_COLUMNS);
+  await assert.rejects(analyticsReport(env, "7d"), (error) => error.status === 503 && error.code === "analytics_migration_required");
+  const cookie = await adminCookie(env);
+  const response = await analyticsRead({ request: new Request(`${ADMIN_ORIGIN}/api/admin/analytics?range=7d`, { headers: { Cookie: cookie } }), env });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { ok: false, error: "analytics_migration_required", message: "Analytics database migration required." });
+});
+
+test("analytics compatibility rejects a present table with a missing required column before report queries", async (t) => {
+  const harness = await createCommerceDatabases({ commerceMigrationCount: 23 });
+  t.after(harness.dispose);
+  const columns = ANALYTICS_REQUIRED_COLUMNS.filter((column) => column !== "visitor_class");
+  await harness.commerceDb.prepare(`CREATE TABLE analytics_events (${columns.map((column) => `${column} TEXT`).join(",")})`).run();
+  const state = await analyticsSchemaState(harness.commerceDb);
+  assert.equal(state.tablePresent, true);
+  assert.deepEqual(state.missingColumns, ["visitor_class"]);
+  await assert.rejects(analyticsReport(commerceEnvironment(harness), "7d"), (error) => error.code === "analytics_migration_required");
+});
+
+test("empty compatible analytics storage is a truthful zero-event report and malformed ranges are rejected", async (t) => {
+  const harness = await createCommerceDatabases();
+  t.after(harness.dispose);
+  const env = commerceEnvironment(harness);
+  const report = await analyticsReport(env, "24h", new Date("2026-08-30T12:00:00.000Z"));
+  assert.equal(report.coverage.totalEvents, 0);
+  assert.equal(report.windows["24h"].views, 0);
+  assert.equal(report.revenue.available, true);
+  await assert.rejects(analyticsReport(env, "lifetime"), (error) => error.status === 400 && error.code === "analytics_range_invalid");
+  const cookie = await adminCookie(env);
+  const response = await analyticsRead({ request: new Request(`${ADMIN_ORIGIN}/api/admin/analytics?range=lifetime`, { headers: { Cookie: cookie } }), env });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "analytics_range_invalid");
+});
+
+test("commerce revenue failure remains isolated from audience reporting", async (t) => {
+  const harness = await createCommerceDatabases();
+  t.after(harness.dispose);
+  const db = harness.commerceDb;
+  const failingCommerceDb = {
+    prepare(sql) {
+      if (/FROM commerce_(?:orders|donations)/.test(String(sql))) return { bind() { return this; }, all() { return Promise.reject(new Error("fixture commerce reporting failure")); } };
+      return db.prepare(sql);
+    },
+  };
+  const report = await analyticsReport(commerceEnvironment(harness, { THIRDRAILIFY_COMMERCE_DB: failingCommerceDb }), "7d", new Date("2026-08-30T12:00:00.000Z"));
+  assert.equal(report.ok, true);
+  assert.equal(report.coverage.totalEvents, 0);
+  assert.equal(report.revenue.available, false);
+  assert.equal(report.revenue.currencies.length, 0);
+});
+
 async function insertAccount(db, id) {
   const now = new Date().toISOString();
   await db
@@ -186,4 +257,11 @@ async function insertAccount(db, id) {
     )
     .bind(id, `${id}@example.test`, "Inbox Fixture", now, now, now)
     .run();
+}
+
+async function adminCookie(env) {
+  await ensureEnvironmentMasters(env);
+  const account = await loadAccountByEmail(env, env.ADMIN_EMAIL_1);
+  const session = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), account, ADMIN_ORIGIN);
+  return cookiePair(session.cookie);
 }

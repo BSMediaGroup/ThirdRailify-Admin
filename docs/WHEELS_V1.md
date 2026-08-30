@@ -1,4 +1,8 @@
-# Wheels V1.8 Admin Authority
+# Wheels V1.10 Admin Authority
+
+## V1.10 Official animation plans
+
+Official winner selection remains the existing server-side Web Crypto rejection sample over authoritative active integer weights. Admin persists the immutable result before Public animates it; browser physics is presentation and cannot choose or replace the winner. The safe response adds a deterministic `spin-plan-v1` derived with SHA-256 over the secure random result UUID, Wheel ID, and participant snapshot hash. Its first two 32-bit words map to strictly interior `(word + 0.5) / 2^32` landing and turn-variance fractions. Retrying one idempotency key therefore returns the same winner, result ID, landing point, and turn variance with no new column or migration.
 
 ## V1.8 style and segment-media authority
 
@@ -49,7 +53,7 @@ The immutable insert snapshots entry ID, label, weight, wheel revision, canonica
 
 ## Configuration, limits, and audit
 
-The server validates titles/descriptions/labels, lifecycle/visibility, palette size, six-digit hex colours, preset/enum values, 2–20 second duration, message length, and a tested maximum of 1,000 entries. Rate-limit rows bound create, save, official-spin, winner, and media mutations. The editor never accepts raw HTML, script, arbitrary CSS, remote images, or sound uploads.
+The server validates titles/descriptions/labels, lifecycle/visibility, palette size, six-digit hex colours, preset/enum values, 2–60 second duration, message length, and a tested maximum of 1,000 entries. Rate-limit rows bound create, save, official-spin, winner, and media mutations. The editor never accepts raw HTML, script, arbitrary CSS, remote images, or sound uploads.
 
 ## V1.1 media authority
 

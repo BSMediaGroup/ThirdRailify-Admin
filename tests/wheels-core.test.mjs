@@ -54,7 +54,7 @@ test("creator grants, per-wheel roles, hidden projection, revision saves, and of
   const official = await performOfficialSpin(env, "spinner", created.wheel.slug, { revision: created.wheel.revision, idempotencyKey: "official-idempotency-key-0001" });
   assert.ok(created.wheel.entries.some((entry) => entry.id === official.spin.winningEntryId));
   const repeated = await performOfficialSpin(env, "spinner", created.wheel.slug, { revision: created.wheel.revision, idempotencyKey: "official-idempotency-key-0001" });
-  assert.equal(repeated.spin.id, official.spin.id); assert.equal(repeated.idempotent, true);
+  assert.equal(repeated.spin.id, official.spin.id); assert.equal(repeated.idempotent, true); assert.deepEqual(repeated.spin.animationPlan, official.spin.animationPlan); assert.ok(official.spin.animationPlan.landingFraction > 0 && official.spin.animationPlan.landingFraction < 1); assert.ok(official.spin.animationPlan.turnRandom > 0 && official.spin.animationPlan.turnRandom < 1);
   await assert.rejects(performOfficialSpin(env, "spinner", created.wheel.slug, { revision: created.wheel.revision, idempotencyKey: "official-idempotency-key-0002", winningEntryId: created.wheel.entries[0].id }), (error) => error.code === "client_winner_forbidden");
   const edited = await saveWheel(env, "creator", created.wheel.slug, { ...wheelInput(), title: "Revised wheel", revision: created.wheel.revision, entries: created.wheel.entries.map((entry) => ({ ...entry, label: `Changed ${entry.label}` })) });
   assert.equal(edited.wheel.revision, created.wheel.revision + 1);

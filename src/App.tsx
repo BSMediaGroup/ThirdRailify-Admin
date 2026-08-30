@@ -21,6 +21,7 @@ import {
 import { CustomerEmailsPage } from "./pages/CustomerEmailsPage";
 import { CustomersPage } from "./pages/CustomersPage";
 import { FulfillmentShippingPage } from "./pages/FulfillmentShippingPage";
+import { CommerceIntelligencePage } from "./pages/CommerceIntelligencePage";
 import {
   GoatModerationPage,
   GoatsCommentsPage,
@@ -31,7 +32,7 @@ import {
 } from "./pages/GoatsAdminPages";
 import { WheelAdminDetailPage, WheelsAccessPage, WheelsLibraryPage, WheelsResultsPage, WheelsStagesPage } from "./pages/WheelsAdminPages";
 
-const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats", "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results"]);
+const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/goats", "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results"]);
 
 export function App() {
   return (
@@ -55,6 +56,7 @@ export function App() {
         <Route path="customers" element={<CustomersPage />} />
         <Route path="commerce" element={<CommerceOverviewPage />} />
         <Route path="commerce/payments" element={<PaymentsPayoutsPage />} />
+        <Route path="commerce/analytics" element={<CommerceIntelligencePage />} />
         <Route path="commerce/business" element={<BusinessInformationPage />} />
         <Route path="commerce/tax" element={<TaxDocumentsPage />} />
         <Route path="commerce/emails" element={<CustomerEmailsPage />} />

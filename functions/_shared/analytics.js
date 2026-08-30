@@ -4,6 +4,12 @@ import { requireCommerceDb } from "./commerce-core.js";
 const encoder = new TextEncoder();
 const MAX_BODY_BYTES = 8 * 1024;
 const RANGE_HOURS = Object.freeze({ "24h": 24, "7d": 168, "30d": 720, "90d": 2160 });
+const ANALYTICS_REQUIRED_COLUMNS = Object.freeze([
+  "id", "event_type", "occurred_at", "session_id", "public_path", "page_type",
+  "referrer_host", "source_category", "country_code", "country_name", "region_code",
+  "region_name", "city", "latitude", "longitude", "device_class", "browser_family",
+  "platform_family", "visitor_class", "safe_metadata_json", "created_at",
+]);
 
 export async function readAnalyticsBody(request) {
   if (!String(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) throw new AuthFailure(415, "content_type_invalid", "A JSON analytics event is required.");
@@ -46,7 +52,9 @@ export async function ingestAnalyticsEvent(env, input) {
 
 export async function analyticsReport(env, rangeValue, nowValue = new Date()) {
   const db = requireCommerceDb(env);
-  const range = Object.hasOwn(RANGE_HOURS, rangeValue) ? rangeValue : "7d";
+  const range = rangeValue || "7d";
+  if (!Object.hasOwn(RANGE_HOURS, range)) throw new AuthFailure(400, "analytics_range_invalid", "The analytics reporting range is invalid.");
+  await assertAnalyticsSchema(db);
   const now = validDate(nowValue);
   const hours = RANGE_HOURS[range];
   const starts = periodStarts(now);
@@ -107,25 +115,49 @@ export async function analyticsReport(env, rangeValue, nowValue = new Date()) {
 }
 
 async function revenuePulse(db, starts, now) {
-  const orderRows = await db.prepare(`SELECT currency_code,
+  const orderQuery = db.prepare(`SELECT currency_code,
     SUM(CASE WHEN created_at>=? THEN customer_gross_amount ELSE 0 END) gross_24,SUM(CASE WHEN created_at>=? THEN refund_amount ELSE 0 END) refunds_24,
     SUM(CASE WHEN created_at>=? THEN customer_gross_amount ELSE 0 END) gross_7,SUM(CASE WHEN created_at>=? THEN refund_amount ELSE 0 END) refunds_7,
     SUM(CASE WHEN created_at>=? THEN customer_gross_amount ELSE 0 END) gross_30,SUM(CASE WHEN created_at>=? THEN refund_amount ELSE 0 END) refunds_30,
     SUM(CASE WHEN created_at>=? THEN customer_gross_amount ELSE 0 END) gross_90,SUM(CASE WHEN created_at>=? THEN refund_amount ELSE 0 END) refunds_90
     FROM commerce_orders WHERE environment='live' AND payment_status IN ('paid','partially_refunded','refunded') AND created_at<? GROUP BY currency_code`).bind(starts.current24,starts.current24,starts.current7,starts.current7,starts.current30,starts.current30,starts.current90,starts.current90,iso(now)).all();
-  let donationRows = { results: [] };
-  try { donationRows = await db.prepare(`SELECT currency_code,
+  const donationQuery = db.prepare(`SELECT currency_code,
     SUM(CASE WHEN created_at>=? THEN amount_minor ELSE 0 END) gross_24,SUM(CASE WHEN created_at>=? AND status IN ('refunded','reversed') THEN amount_minor ELSE 0 END) refunds_24,
     SUM(CASE WHEN created_at>=? THEN amount_minor ELSE 0 END) gross_7,SUM(CASE WHEN created_at>=? AND status IN ('refunded','reversed') THEN amount_minor ELSE 0 END) refunds_7,
     SUM(CASE WHEN created_at>=? THEN amount_minor ELSE 0 END) gross_30,SUM(CASE WHEN created_at>=? AND status IN ('refunded','reversed') THEN amount_minor ELSE 0 END) refunds_30,
     SUM(CASE WHEN created_at>=? THEN amount_minor ELSE 0 END) gross_90,SUM(CASE WHEN created_at>=? AND status IN ('refunded','reversed') THEN amount_minor ELSE 0 END) refunds_90
-    FROM commerce_donations WHERE environment='live' AND status IN ('completed','refunded','reversed') AND created_at<? GROUP BY currency_code`).bind(starts.current24,starts.current24,starts.current7,starts.current7,starts.current30,starts.current30,starts.current90,starts.current90,iso(now)).all(); } catch { /* Donation migration may not be applied locally yet. */ }
+    FROM commerce_donations WHERE environment='live' AND status IN ('completed','refunded','reversed') AND created_at<? GROUP BY currency_code`).bind(starts.current24,starts.current24,starts.current7,starts.current7,starts.current30,starts.current30,starts.current90,starts.current90,iso(now)).all();
+  const [orders, donations] = await Promise.allSettled([orderQuery, donationQuery]);
+  const orderRows = orders.status === "fulfilled" ? orders.value : { results: [] };
+  const donationRows = donations.status === "fulfilled" ? donations.value : { results: [] };
   const currencies = new Map();
   for (const row of rows(orderRows)) currencies.set(row.currency_code, revenueCurrency(row.currency_code));
   for (const row of rows(donationRows)) if (!currencies.has(row.currency_code)) currencies.set(row.currency_code, revenueCurrency(row.currency_code));
   for (const row of rows(orderRows)) applyRevenue(currencies.get(row.currency_code), row, "merchandise");
   for (const row of rows(donationRows)) applyRevenue(currencies.get(row.currency_code), row, "donations");
-  return { available: true, profitAvailable: false, profitUnavailableReason: "Authoritative processor fees and complete fulfilment costs are not available for every collected transaction.", currencies: [...currencies.values()] };
+  const sources = { merchandise: orders.status === "fulfilled", donations: donations.status === "fulfilled" };
+  const available = sources.merchandise || sources.donations;
+  return {
+    available,
+    partial: available && (!sources.merchandise || !sources.donations),
+    sources,
+    unavailableReason: available ? null : "Commerce collection reporting is temporarily unavailable.",
+    profitAvailable: false,
+    profitUnavailableReason: "Authoritative processor fees and complete fulfilment costs are not available for every collected transaction.",
+    currencies: [...currencies.values()],
+  };
+}
+
+export async function analyticsSchemaState(db) {
+  const result = await db.prepare("PRAGMA table_info('analytics_events')").all();
+  const present = new Set(rows(result).map((row) => String(row.name || "")));
+  const missingColumns = ANALYTICS_REQUIRED_COLUMNS.filter((column) => !present.has(column));
+  return { compatible: present.size > 0 && missingColumns.length === 0, tablePresent: present.size > 0, missingColumns };
+}
+
+async function assertAnalyticsSchema(db) {
+  const state = await analyticsSchemaState(db);
+  if (!state.compatible) throw new AuthFailure(503, "analytics_migration_required", "Analytics database migration required.");
 }
 
 function revenueCurrency(currencyCode) { return { currencyCode, windows: Object.fromEntries(["24h","7d","30d","90d"].map((key) => [key,{ merchandise:0,donations:0,gross:0,refunded:0,net:0 }])) }; }
@@ -155,4 +187,4 @@ function iso(value) { return value.toISOString(); }
 function rows(result) { return result?.results||[]; }
 async function digestHex(bytes) { const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)); return Array.from(digest,(byte)=>byte.toString(16).padStart(2,"0")).join(""); }
 
-export { MAX_BODY_BYTES, RANGE_HOURS };
+export { ANALYTICS_REQUIRED_COLUMNS, MAX_BODY_BYTES, RANGE_HOURS };

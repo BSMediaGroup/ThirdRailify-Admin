@@ -4,6 +4,7 @@ import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import {
+  AnalyticsApiError,
   getAnalytics,
   type AnalyticsReport,
   type Delta,
@@ -11,26 +12,23 @@ import {
 } from "../analytics/client";
 
 const RANGES: RangeKey[] = ["24h", "7d", "30d", "90d"];
+type AnalyticsFailure = { kind: "migration" | "auth" | "query"; message: string };
 export function AnalyticsPage() {
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [range, setRange] = useState<RangeKey>("7d");
   const [report, setReport] = useState<AnalyticsReport | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<AnalyticsFailure | null>(null);
   const [loading, setLoading] = useState(true);
   const load = useCallback(
     async (signal?: AbortSignal) => {
       const stop = startLoading("Loading audience analytics");
       setLoading(true);
-      setError("");
+      setError(null);
       try {
         setReport(await getAnalytics(range, signal));
       } catch (reason) {
         if ((reason as { name?: string })?.name !== "AbortError")
-          setError(
-            reason instanceof Error
-              ? reason.message
-              : "Audience analytics are unavailable.",
-          );
+          setError(analyticsFailure(reason));
       } finally {
         setLoading(false);
         stop();
@@ -86,12 +84,11 @@ export function AnalyticsPage() {
         </div>
       </header>
       {error ? (
-        <div className="analytics-state is-error" role="alert">
-          <strong>Analytics query failed.</strong>
-          <span>{error}</span>
-          <button type="button" onClick={() => void load()}>
-            Try again
-          </button>
+        <div className={`analytics-state is-error is-${error.kind}`} role="alert">
+          <p className="eyebrow">{error.kind === "migration" ? "Operational action required" : error.kind === "auth" ? "Admin access required" : "Reporting unavailable"}</p>
+          <h2>{error.kind === "migration" ? "Analytics database migration required" : error.kind === "auth" ? "Your Admin session could not be verified" : "Audience report query failed"}</h2>
+          <span>{error.message}</span>
+          {error.kind === "query" ? <button type="button" onClick={() => void load()}>Try again</button> : null}
         </div>
       ) : null}
       {loading && !report ? (
@@ -535,9 +532,11 @@ function RevenuePulse({ report }: { report: AnalyticsReport }) {
           <p className="eyebrow">Revenue pulse</p>
           <h3>Collected, not profit.</h3>
         </div>
-        <Link to="/commerce">Open Commerce</Link>
+        <Link to="/commerce/analytics">Open Commerce Intelligence</Link>
       </header>
-      {report.revenue.currencies.length ? (
+      {!report.revenue.available ? (
+        <p>{report.revenue.unavailableReason}</p>
+      ) : report.revenue.currencies.length ? (
         report.revenue.currencies.map((currency) => {
           const window = currency.windows[report.range];
           return (
@@ -571,9 +570,18 @@ function RevenuePulse({ report }: { report: AnalyticsReport }) {
       ) : (
         <p>No successful LIVE collections exist in this range.</p>
       )}
+      {report.revenue.partial ? <small>Revenue Pulse is partial because one commerce collection source is unavailable.</small> : null}
       <small>{report.revenue.profitUnavailableReason}</small>
     </article>
   );
+}
+function analyticsFailure(reason: unknown): AnalyticsFailure {
+  if (reason instanceof AnalyticsApiError) {
+    if (reason.code === "analytics_migration_required" || reason.code === "service_schema_mismatch") return { kind: "migration", message: "Apply the required Analytics schema migration before collection and reporting can begin. No traffic has been reported as zero." };
+    if (reason.status === 401 || reason.status === 403) return { kind: "auth", message: "Sign in again with an authorized Admin account, then return to Audience Analytics." };
+    return { kind: "query", message: reason.message };
+  }
+  return { kind: "query", message: reason instanceof Error ? reason.message : "Audience analytics are unavailable." };
 }
 function AnalyticsSkeleton() {
   return (

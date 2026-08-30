@@ -1,5 +1,31 @@
 # Bump notes
 
+## 2026-08-31 - Wheels V1.10 and Stage V1.1 authority
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added deterministic server-controlled Official animation plans derived from secure immutable result evidence; winner selection/persistence remains unchanged and precedes browser animation.
+- Added signed Stage Official All with complete per-Wheel access/revision/lock/cooldown/participant preflight, existing Stage and Official rate limits, deterministic per-Wheel batch idempotency, and one transactional batch of ordinary Wheel result/audit rows.
+- Added atomic six-Wheel locked/stale/permission failure coverage plus same-batch retry proof: valid inserts six, every failed preflight inserts zero, and retry inserts zero new rows while returning identical IDs/plans.
+- Extended validated configured spin duration to 60 seconds. No Admin page, schema migration, Stage result record, new secret, or production D1 data change was required.
+
+## 2026-08-31 - Analytics incident repair and Commerce Intelligence V1
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Proved the production Analytics incident is the unapplied `0024_analytics_and_message_controls.sql` schema: code queries `analytics_events`, while production reports the shared missing-table/column translation and the preceding local implementation explicitly left `0024` unapplied. Added a 21-column capability preflight before report queries and an explicit private/no-store `analytics_migration_required` response without weakening the schema guard, creating tables at request time, or returning false zero traffic.
+- Replaced the duplicated Overview grid icon with a dedicated Analytics trend/chart icon and polished migration, Admin-auth, query, empty, partial-history, stale, collection-configuration, Revenue Pulse, and map-only states. Invalid ranges now return a bounded 400, and a Revenue Pulse source failure no longer destroys audience reporting.
+- Added focused Analytics migration-behind, missing-table, missing-column, compatible-empty, populated, authorization, malformed-range, revenue-isolation, index, and responsive 1920/1440/390 browser coverage with explicit map fallback and overflow checks.
+- Added authenticated private/no-store `/api/admin/commerce/analytics` and `/commerce/analytics` under the Commerce hierarchy. The bounded server reporting layer owns 24h/7d/30d/90d and preceding-period calculations, currency separation, LIVE-only order/donation cohorts, completed refund/reversal evidence, time-series buckets, product snapshots, paginated order economics, donation/refund intelligence, freshness, and data coverage. TEST/sandbox, pending, failed, canceled, duplicates, PII, raw tables, secrets, and provider credentials are excluded.
+- Defined merchandise, donations, customer-paid shipping, tax, gross collected, refunds/reversals, net collected, fulfillment cost, processor fees, and contribution margin centrally. Legacy zero-default cost fields remain unknown; positive provider-linked historical values are the only recognized costs, fees are never estimated, partial refunds are not allocated to products, unlike currencies are never merged, and Contribution Margin is shown only for the fully evidenced subset. No Profit metric is exposed.
+- Added a bespoke responsive money-flow rail, executive comparisons, currency-specific trend, product performance, analytical order ledger, donation/refund panels, and compact provenance/coverage surface. The Audience Revenue Pulse deep-links into Commerce Intelligence.
+- Added no migration and no provider snapshot because current provider normalization does not persist proven final costs and the available response contracts do not justify guessed historical backfill. Secure CSV export remains deferred because the repository has no established financial export authority.
+- Production still requires a Commerce D1 backup, proof that only `0024` is pending, deliberate ledger application of only `0024`, schema verification, Admin deployment, masked ingestion-secret custody verification on Admin/Public, authenticated Analytics/API acceptance, stable-origin ingestion verification, and browser-asset secret scanning. No deployment, remote migration, provider/payment/order/refund/fulfillment mutation, DNS/domain change, or Cloudflare configuration change occurred in this local milestone.
+
 ## 2026-08-31 - Audience Analytics V1 and inbox message controls
 
 CURRENT VER=0.1.0-alpha.0

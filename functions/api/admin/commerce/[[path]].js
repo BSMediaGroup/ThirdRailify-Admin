@@ -85,6 +85,7 @@ import {
   pauseCommerceLaunch,
 } from "../../../_shared/commerce-launch.js";
 import { commerceJobsPayload, retryCommerceJob } from "../../../_shared/commerce-operations.js";
+import { commerceIntelligenceReport } from "../../../_shared/commerce-intelligence.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
 
@@ -133,6 +134,9 @@ async function handleGet(request, env, path) {
   } else if (path === "payments") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await paymentsControlPlanePayload(env, session);
+  } else if (path === "analytics") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await commerceIntelligenceReport(env, Object.fromEntries(new URL(request.url).searchParams));
   } else if (path === "fulfillment") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await fulfillmentShippingPayload(env, session);

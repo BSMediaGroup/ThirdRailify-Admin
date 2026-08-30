@@ -49,12 +49,13 @@ const RATE_RULES = {
 const ONE_TIME_TABLES = new Set(["email_verification_tokens", "password_reset_tokens"]);
 
 export class AuthFailure extends Error {
-  constructor(status, code, message, headers = {}) {
+  constructor(status, code, message, headers = {}, issues = undefined) {
     super(message);
     this.name = "AuthFailure";
     this.status = status;
     this.code = code;
     this.headers = headers;
+    this.issues = issues;
   }
 }
 
@@ -224,7 +225,7 @@ export function jsonResponse(payload, init = {}) {
 export function errorResponse(error, request, env) {
   if (error instanceof AuthFailure) {
     return jsonResponse(
-      { ok: false, error: error.code, message: error.message },
+      { ok: false, error: error.code, message: error.message, ...(Array.isArray(error.issues) && error.issues.length ? { issues: error.issues } : {}) },
       { status: error.status, headers: { ...corsHeaders(request, env), ...error.headers } },
     );
   }

@@ -239,7 +239,8 @@ export async function performOfficialSpin(env, accountId, slug, input) {
   const idempotencyKey = requiredText(input.idempotencyKey, 16, 120, "idempotency_key_invalid");
   if (Object.hasOwn(input, "winner") || Object.hasOwn(input, "winningEntryId")) throw new AuthFailure(400, "client_winner_forbidden", "Official winners are selected only by the server.");
   const existing = await db.prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? AND idempotency_key = ?").bind(wheel.id, idempotencyKey).first();
-  if (existing) return { ok: true, spin: officialProjection(existing), idempotent: true };
+  if (existing) return { ok: true, spin: await officialSpinProjection(existing), idempotent: true };
+  await requireOfficialCooldown(env, wheel);
   if (expectedRevision !== Number(wheel.revision)) throw new AuthFailure(409, "wheel_revision_conflict", "The wheel changed. Reload it before drawing.");
   const entries = (await entriesForWheel(env, wheel.id, false)).filter((entry) => entry.state === "active");
   if (entries.length < 2) throw new AuthFailure(409, "participants_insufficient", "At least two active participants are required for an official draw.");
@@ -266,15 +267,15 @@ export async function performOfficialSpin(env, accountId, slug, input) {
     ]);
   } catch (error) {
     const repeated = await db.prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? AND idempotency_key = ?").bind(wheel.id, idempotencyKey).first();
-    if (repeated) return { ok: true, spin: officialProjection(repeated), idempotent: true };
+    if (repeated) return { ok: true, spin: await officialSpinProjection(repeated), idempotent: true };
     throw error;
   }
   if (Number(result?.[0]?.meta?.changes || 0) !== 1) {
     const repeated = await db.prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? AND idempotency_key = ?").bind(wheel.id, idempotencyKey).first();
-    if (repeated) return { ok: true, spin: officialProjection(repeated), idempotent: true };
+    if (repeated) return { ok: true, spin: await officialSpinProjection(repeated), idempotent: true };
     throw new AuthFailure(409, "official_spin_conflict", "The wheel changed or another official draw started. Reload before drawing again.");
   }
-  return { ok: true, spin: officialProjection({ id: spinId, wheel_id: wheel.id, wheel_revision: expectedRevision, participant_snapshot_hash: snapshotHash, winning_entry_id: winner.id, winning_label_snapshot: winner.label, winning_weight_snapshot: winner.weight, created_at: timestamp }), idempotent: false };
+  return { ok: true, spin: await officialSpinProjection({ id: spinId, wheel_id: wheel.id, wheel_revision: expectedRevision, participant_snapshot_hash: snapshotHash, winning_entry_id: winner.id, winning_label_snapshot: winner.label, winning_weight_snapshot: winner.weight, created_at: timestamp }), idempotent: false };
 }
 
 export async function applyWinnerAction(env, accountId, slug, input) {
@@ -480,8 +481,8 @@ function validateConfig(input) {
   if (palette.length < (custom ? 1 : 2) || (custom && palette.length > 5)) throw new AuthFailure(400, "wheel_palette_invalid", custom ? "Custom palettes require between one and five valid colours." : "Choose at least two valid palette colours.");
   const pointer = clean(input.pointerAccent || DEFAULT_CONFIG.pointerAccent, 7);
   if (!HEX.test(pointer)) throw new AuthFailure(400, "wheel_pointer_invalid", "The pointer accent must be a six-digit hex colour.");
-  const duration = positiveInteger(input.spinDurationMs || DEFAULT_CONFIG.spinDurationMs, "spin_duration_invalid", 20000);
-  if (duration < 2000) throw new AuthFailure(400, "spin_duration_invalid", "Spin duration must be between 2 and 20 seconds.");
+  const duration = positiveInteger(input.spinDurationMs || DEFAULT_CONFIG.spinDurationMs, "spin_duration_invalid", 60000);
+  if (duration < 2000) throw new AuthFailure(400, "spin_duration_invalid", "Spin duration must be between 2 and 60 seconds.");
   const template = requiredText(input.winnerMessageTemplate || DEFAULT_CONFIG.winnerMessageTemplate, 1, 160, "winner_message_invalid");
   const paletteStyles = input.paletteStyles == null ? palette.map((color) => ({ mode: "solid", color })) : validatePaletteStyles(input.paletteStyles, palette, custom);
   return {
@@ -541,6 +542,12 @@ async function resultRows(env, wheelId, limit) { const rows = await requireWheel
 function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null, updatedAt: row.updated_at || null, directoryOrder: Number(row.display_order || 0) }; }
 function publicDetail(wheel, entries, history, access, media) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, media, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
 function officialProjection(row) { return { id: row.id, type: "official", winningEntryId: row.winning_entry_id, winningLabel: row.winning_label_snapshot, winningWeight: Number(row.winning_weight_snapshot), wheelRevision: Number(row.wheel_revision), snapshotHash: row.participant_snapshot_hash, createdAt: row.created_at, voided: Boolean(row.voided_at) }; }
+export async function officialAnimationPlan(row) {
+  const seed = new TextEncoder().encode(`thirdrailify-spin-plan-v1\n${row.id}\n${row.wheel_id}\n${row.participant_snapshot_hash}`);
+  const digest = await crypto.subtle.digest("SHA-256", seed); const view = new DataView(digest);
+  return { version: "spin-plan-v1", landingFraction: (view.getUint32(0, false) + .5) / 0x100000000, turnRandom: (view.getUint32(4, false) + .5) / 0x100000000 };
+}
+export async function officialSpinProjection(row) { return { ...officialProjection(row), animationPlan: await officialAnimationPlan(row) }; }
 function adminResultProjection(row) { return { ...officialProjection(row), wheelId: row.wheel_id, performedByAccountId: row.performed_by_account_id, idempotencyKey: row.idempotency_key, voidedAt: row.voided_at || null, voidReason: row.void_reason || null, voidedByAccountId: row.voided_by_account_id || null }; }
 async function adminWheelSummary(env, row) { return { id: row.id, reference: row.reference_code, slug: row.public_slug, title: row.title, description: row.description, lifecycle: row.lifecycle, visibility: row.visibility, owner: await accountSummary(env, row.owner_account_id), participantCount: Number(row.participant_count), revision: Number(row.revision), officialEnabled: Boolean(row.official_spin_enabled), demoEnabled: Boolean(row.public_demo_spin_enabled), editingLocked: Boolean(row.editing_locked), spinLocked: Boolean(row.official_spinning_locked), latestWinner: row.latest_winner || null, latestResultAt: row.latest_result_at || row.latest_official_spin_at || null, updatedAt: row.updated_at }; }
 async function wheelAccessRows(env, wheelId) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_access WHERE wheel_id = ? ORDER BY active DESC, role, created_at").bind(wheelId).all(); return Promise.all((rows?.results || []).map(async (row) => ({ account: await accountSummary(env, row.account_id), role: row.role, active: Boolean(row.active), updatedAt: row.updated_at }))); }
@@ -576,6 +583,13 @@ async function enforceWheelRateLimit(env, category, identifier, limit, windowSec
   await db.prepare(`INSERT INTO wheel_rate_limits (key_hash, category, window_started_at, request_count, blocked_until, updated_at) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(key_hash, category) DO UPDATE SET window_started_at = excluded.window_started_at, request_count = excluded.request_count, blocked_until = excluded.blocked_until, updated_at = excluded.updated_at`).bind(keyHash, category, expired ? timestamp : row.window_started_at, count, blockedUntil, timestamp).run();
   if (blockedUntil || (row?.blocked_until && Date.parse(row.blocked_until) > now)) throw new AuthFailure(429, "wheel_rate_limited", "Too many wheel changes. Try again shortly.", { "Retry-After": String(Math.min(windowSeconds, 900)) });
+}
+
+export async function requireOfficialCooldown(env, wheel, now = Date.now()) {
+  if (!wheel?.latest_official_spin_at) return;
+  const settings = await getWheelSettings(env); const seconds = Math.max(1, Number(settings.settings.officialSpinCooldownSeconds || 2));
+  const remaining = Date.parse(wheel.latest_official_spin_at) + seconds * 1000 - now;
+  if (remaining > 0) throw new AuthFailure(429, "official_spin_cooldown", "This Wheel is still inside its official-spin cooldown.", { "Retry-After": String(Math.max(1, Math.ceil(remaining / 1000))) });
 }
 
 async function uniqueSlug(db, value) { const base = slugify(value) || `wheel-${randomId().slice(0, 8)}`; for (let index = 0; index < 10; index += 1) { const candidate = index ? `${base.slice(0, 71)}-${randomId().slice(0, 6)}` : base; if (!await db.prepare("SELECT id FROM wheels WHERE public_slug = ? COLLATE NOCASE").bind(candidate).first()) return candidate; } throw new AuthFailure(409, "wheel_slug_unavailable", "A unique wheel URL could not be created."); }

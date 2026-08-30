@@ -3,7 +3,7 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "content" | "watch" | "wheels" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "analytics" | "content" | "watch" | "wheels" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -21,7 +21,7 @@ export const adminAreas: AdminArea[] = [
     path: "/analytics",
     label: "Audience Analytics",
     shortLabel: "Analytics",
-    icon: "overview",
+    icon: "analytics",
     summary: "Privacy-minimized first-party audience activity and truthful revenue pulse.",
     futureScope: ["Rolling traffic comparisons", "Coarse activity map", "Authoritative collected revenue"],
   },
@@ -196,6 +196,15 @@ export const adminAreas: AdminArea[] = [
     icon: "goats",
     summary: "Community submissions, moderation, comments, media, and email events.",
     futureScope: ["Approved public projection", "Approximate map locations", "Transactional outbox"],
+  },
+  {
+    path: "/commerce/analytics",
+    parentPath: "/commerce",
+    label: "Commerce Intelligence",
+    shortLabel: "Intelligence",
+    icon: "analytics",
+    summary: "LIVE merchandise, donation, refund, cost, and contribution reporting with explicit coverage.",
+    futureScope: ["Currency-separated reporting", "Historical transaction economics", "Authoritative cost coverage"],
   },
   {
     path: "/goats/pending",
