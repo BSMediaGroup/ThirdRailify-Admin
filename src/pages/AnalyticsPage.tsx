@@ -6,6 +6,9 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { AdminIcon } from "../components/AdminIcon";
+import { CountryFlag } from "../components/CountryFlag";
+import { createCountryFlagElement } from "../components/countryFlags";
+import { resetResizableTable } from "../components/resizableTableEvents";
 import {
   AnalyticsApiError,
   getAnalytics,
@@ -364,7 +367,7 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
         markers.forEach((other) => {
           if (other !== marker) other.getPopup()?.remove();
         });
-        if (!popup.isOpen()) popup.addTo(instance);
+        if (!popup.isOpen()) popup.setLngLat(marker.getLngLat()).addTo(instance);
       };
       marker.setPopup(popup);
       element.addEventListener("mouseenter", openPopup);
@@ -494,7 +497,10 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
       >
         {points.slice(0, 12).map((point) => (
           <article key={`${point.latitude}:${point.longitude}`}>
-            <strong>{place(point)}</strong>
+            <strong className="analytics-location-label">
+              <CountryFlag countryCode={point.countryCode} />
+              <span>{place(point)}</span>
+            </strong>
             <span>{number(point.views)} views</span>
             <small>
               {number(point.sessions)} sessions ·{" "}
@@ -540,7 +546,11 @@ function createAudiencePopup(point: AnalyticsReport["geography"][number]) {
   eyebrow.textContent = "Audience signal";
   const title = document.createElement("strong");
   title.textContent = place(point);
+  const heading = document.createElement("div");
+  heading.className = "analytics-map-card__location";
+  heading.append(createCountryFlagElement(point.countryCode), title);
   const metrics = document.createElement("div");
+  metrics.className = "analytics-map-card__metrics";
   const views = document.createElement("span");
   const viewsValue = document.createElement("b");
   viewsValue.textContent = number(point.views);
@@ -554,7 +564,7 @@ function createAudiencePopup(point: AnalyticsReport["geography"][number]) {
   route.textContent = point.topPath || "No route summary";
   const detail = document.createElement("small");
   detail.textContent = `${point.topSource || "direct"} · ${formatDate(point.latestAt)}`;
-  card.append(eyebrow, title, metrics, route, detail);
+  card.append(eyebrow, heading, metrics, route, detail);
   return card;
 }
 
@@ -607,11 +617,20 @@ function TrafficMatrix({ report }: { report: AnalyticsReport }) {
   return (
     <section className="analytics-matrix">
       <header>
-        <p className="eyebrow">Traffic comparison matrix</p>
-        <h2>Four windows. One honest baseline.</h2>
+        <div>
+          <p className="eyebrow">Traffic comparison matrix</p>
+          <h2>Four windows. One honest baseline.</h2>
+        </div>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => resetResizableTable("analytics-comparison")}
+        >
+          Reset columns
+        </button>
       </header>
       <div className="analytics-table-scroll">
-        <table>
+        <table data-resizable-key="analytics-comparison">
           <thead>
             <tr>
               <th scope="col">Metric</th>

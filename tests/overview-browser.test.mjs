@@ -19,7 +19,7 @@ test("Admin overview reports real cross-system state responsively without deferr
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/**", (route) => routeFixture(route, () => { statusReads += 1; }));
     await page.goto(ORIGIN); await page.getByRole("heading", { level: 1, name: "Every signal. One control room." }).waitFor();
-    await page.getByText("5/5", { exact: true }).waitFor();
+    await page.getByText("6/6", { exact: true }).waitFor();
 
     assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
     assert.equal((await page.locator(".overview-pulse__credential").innerText()).includes("MASTER"), true);
@@ -54,7 +54,7 @@ test("Admin overview reports real cross-system state responsively without deferr
     assert.deepEqual(errors, [], `no page errors at ${width}x${height}`);
     const copy = await page.locator("body").innerText(); const normalizedCopy = copy.replace(/\s+/g, " ");
     assert.doesNotMatch(copy, /Authenticated foundation|Still intentionally deferred|Products and orders remain provider-neutral shells/);
-    for (const value of [/3\s*\/\s*24 RETAINED EPISODES/, /50 CATALOGUE PRODUCTS/, /2 AWAITING MODERATION/, /2 ANNOUNCEMENT MESSAGES/, /4 TOTAL ACCOUNTS/]) assert.match(normalizedCopy, value);
+    for (const value of [/PAGE VIEWS 128/, /ANONYMOUS SESSIONS 74/, /PAGES \/ SESSION 1\.73/, /MAPPED REGIONS 3/, /3\s*\/\s*24 RETAINED EPISODES/, /50 CATALOGUE PRODUCTS/, /2 AWAITING MODERATION/, /2 ANNOUNCEMENT MESSAGES/, /4 TOTAL ACCOUNTS/]) assert.match(normalizedCopy, value);
     assert.match(copy, /2 GOATS submissions awaiting review/);
     assert.match(copy, /1 community email failed/);
     assert.match(normalizedCopy, /CHECKOUT DISABLED/);
@@ -63,6 +63,7 @@ test("Admin overview reports real cross-system state responsively without deferr
     assert.equal(await page.locator('a[href="/goats/pending"]').count() >= 1, true);
     assert.equal(await page.locator('a[href="/content"]').count() >= 1, true);
     assert.equal(await page.locator('a[href="/access"]').count() >= 1, true);
+    assert.equal(await page.locator('a[href="/analytics"]').count() >= 1, true);
     const refresh = page.getByRole("button", { name: "Refresh overview" }); await refresh.click(); await page.getByRole("button", { name: "Refresh overview" }).waitFor();
     assert.equal(statusReads >= 2, true, "manual refresh rereads authority");
     if (process.env.OVERVIEW_BROWSER_SCREENSHOTS === "1") await page.screenshot({ path: path.join(process.env.TEMP || ".", `thirdrailify-admin-overview-${width}-PROOF.png`), fullPage: true });
@@ -79,7 +80,7 @@ test("Admin overview fails soft per authority and disables nonessential motion",
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); }); page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => routeFixture(route, () => {}, { bannerUnavailable: true }));
   await page.goto(ORIGIN); await page.getByText("Partial operational snapshot", { exact: true }).waitFor();
-  assert.equal(await page.getByText("4/5", { exact: true }).count(), 1);
+  assert.equal(await page.getByText("5/6", { exact: true }).count(), 1);
   assert.equal(await page.getByText("Site content unavailable", { exact: true }).count(), 1);
   assert.doesNotMatch(await page.locator(".overview-module--content").innerText(), /0 announcement messages/);
   assert.equal(await page.locator(".overview-hero__signal span").evaluate((node) => getComputedStyle(node).animationName), "none");
@@ -91,7 +92,7 @@ test("Admin overview fails soft per authority and disables nonessential motion",
   const fullAdminContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const fullAdminPage = await fullAdminContext.newPage();
   await fullAdminPage.route("**/api/**", (route) => routeFixture(route, () => {}, { fullAdmin: true, onProtected: () => { protectedReads += 1; } }));
-  await fullAdminPage.goto(ORIGIN); await fullAdminPage.getByText("2/2", { exact: true }).waitFor();
+  await fullAdminPage.goto(ORIGIN); await fullAdminPage.getByText("3/3", { exact: true }).waitFor();
   assert.equal((await fullAdminPage.locator(".overview-pulse__credential").innerText()).includes("FULL ADMIN"), true);
   assert.equal(await fullAdminPage.locator(".overview-pulse__credential strong").evaluate((node) => getComputedStyle(node).overflow === "visible" && node.scrollWidth <= Math.ceil(node.getBoundingClientRect().width)), true, "Full Admin role is fully readable on phone");
   assert.equal(await fullAdminPage.getByText("Restricted", { exact: true }).count(), 3);
@@ -200,6 +201,7 @@ async function routeFixture(route, onStatus, options = {}) {
   if (apiPath === "/api/auth/config") return json(route, { configured: true, emailSignupConfigured: true, turnstileSiteKey: "fixture-site-key", oauthProviders: ["discord", "github", "twitter"], oauthProviderStates: [], publicOrigin: "https://thirdrailify.pages.dev", adminOrigin: ORIGIN, environment: "test", cookieMode: "host-only" });
   if (apiPath === "/api/auth/session") return json(route, session(Boolean(options.fullAdmin)));
   if (apiPath === "/api/admin/status") { onStatus(); return json(route, status()); }
+  if (apiPath === "/api/admin/analytics") return json(route, analytics());
   if (apiPath === "/api/admin/watch") { options.onProtected?.(); return json(route, watch()); }
   if (apiPath === "/api/admin/commerce/overview") return json(route, commerce());
   if (apiPath === "/api/admin/goats/overview") { options.onProtected?.(); return json(route, goats()); }
@@ -212,6 +214,7 @@ async function routeFixture(route, onStatus, options = {}) {
 
 function session(fullAdmin = false) { return { ok: true, authenticated: true, csrfToken: "fixture-csrf", access: { isAdmin: true, isMasterAdmin: !fullAdmin }, account: { id: fullAdmin ? "full" : "master", email: "admin@example.test", displayName: fullAdmin ? "Full Admin" : "Master", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: fullAdmin ? "full" : "master", status: "active", emailVerified: true, createdAt: "2026-08-29T00:00:00Z", lastLoginAt: null, source: "test", locked: true } }; }
 function status() { return { ok: true, authenticatedAccount: { displayName: "Master", adminLevel: "master" }, access: { isAdmin: true, isMasterAdmin: true }, configuration: { d1Configured: true, turnstileConfigured: true, resendConfigured: true, oauthProviders: ["discord", "github", "twitter"] }, accounts: { total: 4, regular: 1, admins: 3, disabled: 0, pending: 1 }, checkedAt: "2026-08-29T01:30:00Z" }; }
+function analytics() { const window = { views: 128, sessions: 74, pagesPerSession: 1.73, comparisonComplete: true, previous: { views: 96, sessions: 61, pagesPerSession: 1.57 }, deltas: { views: { available: true, value: 33.3, direction: "up" }, sessions: { available: true, value: 21.3, direction: "up" } } }; return { ok: true, range: "24h", generatedAt: "2026-08-29T01:30:00Z", timezone: "UTC", configured: true, coverage: { start: "2026-08-28T01:30:00Z", end: "2026-08-29T01:30:00Z", totalEvents: 128, lastIngestedAt: "2026-08-29T01:28:00Z" }, windows: { "24h": window, "7d": window, "30d": window, "90d": window }, selected: window, bucket: "hour", series: [], pages: [], sources: [], devices: [], geography: [{ countryCode: "AU" }, { countryCode: "CA" }, { countryCode: "US" }], revenue: { available: false, partial: false, sources: { merchandise: false, donations: false }, unavailableReason: "fixture", profitAvailable: false, profitUnavailableReason: "fixture", currencies: [] } }; }
 function watch() { return { ok: true, current: { freshness: "delayed", liveNow: [], primary: { title: "Latest validated Third Railify episode", platform: "rumble", presentationState: "archive", scheduledStart: null, actualStart: "2026-08-28T01:30:00Z", publishedAt: "2026-08-28T01:30:00Z" }, upcoming: null }, summary: { retained: 3, visible: 3, hidden: 0, remaining: 21, newest: { id: "episode-3", title: "Latest validated Third Railify episode", date: "2026-08-28T01:30:00Z" }, oldest: null }, episodes: [] }; }
 function commerce() { return { ok: true, databaseConfigured: true, encryptionConfigured: true, stripeSecretConfigured: true, printfulSecretConfigured: true, access: { isMasterAdmin: true, capabilities: ["commerce.view"] }, printfulCatalogueSnapshot: { available: false, configurationReady: true, actionPath: "", sourceTargetDistinct: true, source: { id: "source", name: "Legacy", type: "wix" }, target: { id: "target", name: "Third Railify API", type: "native" } }, posture: { checkout: "disabled", livePaymentCapture: "disabled", fulfillmentSubmission: "disabled" }, providers: [], business: { tradingName: "Third Railify Official", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicAddress: {}, publicContactEmail: "info@thirdrailify.com", supportEmail: "", publicPhone: "", websiteUrl: "", invoicePrefix: "", documentFooter: "", taxProviderState: "unavailable", invoiceAccentColor: "#f3c928", receiptAccentColor: "#f3c928" }, completeness: { businessProfile: "pending", tax: "setup_required", templates: "pending" }, counts: { products: 50, orders: 1, templates: 9 }, readiness: { ok: true, authority: "Commerce D1", phase: "pre_cutover", productionReady: false, mandatoryDomains: [], domains: {}, checkedAt: "2026-08-29T01:30:00Z" }, checkedAt: "2026-08-29T01:30:00Z" }; }
 function goats() { return { ok: true, counts: { pending: 2, approved: 11, rejected: 1, hidden: 0 }, email: { pending: 0, failed: 1 }, recent: [{ id: "goat-1", reference: "GOAT-001", displayName: "Rail Viewer", status: "pending", published: false, submittedAt: "2026-08-29T01:00:00Z", updatedAt: "2026-08-29T01:00:00Z", product: { id: "product-1", slug: "cap", name: "Third Railify Cap" }, rating: null, location: "London, Ontario", mediaCount: 2, mainMediaUrl: null, emailState: "failed", version: 1 }] }; }

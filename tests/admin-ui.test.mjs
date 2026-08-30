@@ -151,8 +151,8 @@ test("Site Content exposes separate normal and fixture-labelled Live Now configu
 
 test("Overview is a fail-soft operational snapshot rather than a deferred foundation page", async () => {
   const [page, styles, navigation, scripts] = await Promise.all([read("src/pages/OverviewPage.tsx"), read("src/styles/global.css"), read("src/config/navigation.ts"), read("package.json")]);
-  for (const authority of ["/api/admin/status", "getCommerceOverview", "manageWatch", "getGoatsOverview", "readBannerSettings"]) assert.match(page, new RegExp(authority.replaceAll("/", "\\/")));
-  for (const label of ["Operational workspaces", "Runtime posture", "Operational priorities", "Recent GOATS", "Partial operational snapshot"]) assert.match(page, new RegExp(label));
+  for (const authority of ["/api/admin/status", "getAnalytics", "getCommerceOverview", "manageWatch", "getGoatsOverview", "readBannerSettings"]) assert.match(page, new RegExp(authority.replaceAll("/", "\\/")));
+  for (const label of ["Audience signal", "Page views", "Anonymous sessions", "Mapped regions", "Operational workspaces", "Runtime posture", "Operational priorities", "Recent GOATS", "Partial operational snapshot"]) assert.match(page, new RegExp(label));
   assert.match(page, /Missing values remain unavailable rather than being replaced with zero/);
   assert.match(page, /Master Admin access is required/);
   assert.match(page, /overview-pulse__credential/);
@@ -160,6 +160,7 @@ test("Overview is a fail-soft operational snapshot rather than a deferred founda
   assert.match(page, /access\.isMasterAdmin \? "Master" : "Full Admin"/);
   assert.doesNotMatch(page, /Authenticated foundation|Still intentionally deferred|Products and orders remain provider-neutral shells/);
   assert.match(styles, /\.overview-module-grid/);
+  assert.match(styles, /\.overview-analytics__grid/);
   assert.match(styles, /\.overview-pulse__shield::before/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.overview-hero::after/);
   assert.match(navigation, /summary: "Cross-system operational state, queues, and direct workspace routes\."/);
@@ -207,6 +208,7 @@ test("Analytics and inbox surfaces expose truthful states, bulk controls, and ac
   assert.match(navigation, /path: "\/analytics"[\s\S]{0,120}Audience Analytics/);
   for (const text of ["Audience activity map", "Traffic comparison matrix", "Collected, not profit", "Preceding period unavailable", "No events retained yet"]) assert.match(analytics, new RegExp(text));
   assert.match(analytics, /import \* as maplibregl from "maplibre-gl"/); assert.match(analytics, /setWorkerUrl\(maplibreWorkerUrl\)/); assert.match(analytics, /data-analytics-map-engine="maplibre"/); assert.match(analytics, /Fullscreen audience activity map/); assert.match(analytics, /role="img"[\s\S]{0,80}aria-label="World map/);
+  assert.match(analytics, /CountryFlag countryCode=\{point\.countryCode\}/); assert.match(analytics, /createCountryFlagElement\(point\.countryCode\)/); assert.match(analytics, /resetResizableTable\("analytics-comparison"\)/);
   assert.match(analytics, /analytics-trend__line is-views/); assert.match(styles, /analytics-line-draw/);
   assert.match(inbox, /role="dialog"/); assert.match(inbox, /Mark unread/); assert.match(inbox, /inbox-message__actions/); assert.match(inbox, /Delete/);
   assert.match(inboxClient, /mutateInboxMessages/); assert.match(inboxClient, /"read" \| "unread" \| "delete"/);

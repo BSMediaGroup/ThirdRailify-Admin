@@ -70,7 +70,7 @@ function enhanceTable(table: HTMLTableElement, pathname: string, index: number) 
 }
 
 function addResetControl(table: HTMLTableElement, key: string) {
-  if (key === "accounts" || key === "customers") return;
+  if (key === "accounts" || key === "customers" || key === "analytics-comparison") return;
   const container = table.parentElement;
   if (!container || container.querySelector(":scope > .table-column-reset")) return;
   const button = document.createElement("button");

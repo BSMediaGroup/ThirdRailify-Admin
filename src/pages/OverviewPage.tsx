@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { adminApi } from "../auth/client";
+import { getAnalytics, type AnalyticsReport } from "../analytics/client";
 import { useAuth } from "../auth/AuthProvider";
 import { readBannerSettings, type BannerSettings } from "../banner/client";
 import { getCommerceOverview, type CommerceOverviewPayload } from "../commerce/client";
@@ -19,12 +20,12 @@ type StatusPayload = {
 };
 
 type GoatsOverviewPayload = Awaited<ReturnType<typeof getGoatsOverview>>;
-type Snapshot = { status: StatusPayload | null; watch: WatchAdminPayload | null; commerce: CommerceOverviewPayload | null; goats: GoatsOverviewPayload | null; banner: BannerSettings | null };
+type Snapshot = { status: StatusPayload | null; analytics: AnalyticsReport | null; watch: WatchAdminPayload | null; commerce: CommerceOverviewPayload | null; goats: GoatsOverviewPayload | null; banner: BannerSettings | null };
 type Source = keyof Snapshot;
 type SourceErrors = Partial<Record<Source, string>>;
 type Priority = { title: string; detail: string; to: string; label: string; tone: "attention" | "danger" | "info" };
 
-const EMPTY_SNAPSHOT: Snapshot = { status: null, watch: null, commerce: null, goats: null, banner: null };
+const EMPTY_SNAPSHOT: Snapshot = { status: null, analytics: null, watch: null, commerce: null, goats: null, banner: null };
 
 export function OverviewPage() {
   const { startLoading, inboxSummary } = useOutletContext<AdminShellOutletContext>();
@@ -40,16 +41,17 @@ export function OverviewPage() {
     const sequence = ++requestSequence.current;
     const stopLoading = startLoading("Refreshing operational overview");
     setLoading(true); setErrors({});
-    const [status, commerce, watch, goats, banner] = await Promise.all([
+    const [status, analytics, commerce, watch, goats, banner] = await Promise.all([
       capture(adminApi<StatusPayload>("/api/admin/status")),
+      capture(getAnalytics("24h")),
       capture(getCommerceOverview()),
       masterRead ? capture(manageWatch("read", csrfToken)) : restricted<WatchAdminPayload>(),
       masterRead ? capture(getGoatsOverview()) : restricted<GoatsOverviewPayload>(),
       masterRead ? capture(readBannerSettings()) : restricted<BannerSettings>(),
     ]);
     if (requestSequence.current === sequence) {
-      setSnapshot({ status: status.value, commerce: commerce.value, watch: watch.value, goats: goats.value, banner: banner.value });
-      setErrors(compactErrors({ status: status.error, commerce: commerce.error, watch: watch.error, goats: goats.error, banner: banner.error }));
+      setSnapshot({ status: status.value, analytics: analytics.value, commerce: commerce.value, watch: watch.value, goats: goats.value, banner: banner.value });
+      setErrors(compactErrors({ status: status.error, analytics: analytics.error, commerce: commerce.error, watch: watch.error, goats: goats.error, banner: banner.error }));
       setRefreshedAt(new Date().toISOString());
       setLoading(false);
     }
@@ -58,7 +60,7 @@ export function OverviewPage() {
 
   useEffect(() => { void load(); return () => { requestSequence.current += 1; }; }, [load]);
 
-  const expectedSources = masterRead ? 5 : 2;
+  const expectedSources = masterRead ? 6 : 3;
   const reportingSources = Object.values(snapshot).filter(Boolean).length;
   const priorities = operationalPriorities(snapshot, errors);
   const hasSnapshot = reportingSources > 0;
@@ -87,6 +89,8 @@ export function OverviewPage() {
     </section>
 
     {errorCount > 0 && <div className="overview-partial" role="alert"><AdminIcon name="signal" size={21} /><div><strong>Partial operational snapshot</strong><p>{errorCount} {errorCount === 1 ? "authority did" : "authorities did"} not report. Missing values remain unavailable rather than being replaced with zero.</p></div><button type="button" onClick={() => void load()} disabled={loading}>Retry</button></div>}
+
+    <AnalyticsOverview data={snapshot.analytics} error={errors.analytics} loading={loading} />
 
     <section className="overview-section" aria-labelledby="operations-title">
       <OverviewHeading eyebrow="Current authority" title="Operational workspaces" id="operations-title" detail={refreshedAt ? `Refreshed ${formatTime(refreshedAt)}` : "Reading current state"} />
@@ -170,6 +174,22 @@ function ModuleCard({ icon, eyebrow, title, status, tone, to, linkLabel, childre
   return <article className={`overview-module overview-module--${icon}`}><header><span className="overview-module__icon"><AdminIcon name={icon} size={21} /></span><div><p>{eyebrow}</p><h3>{title}</h3></div><b className={`overview-state is-${tone}`}><i />{status}</b></header><div className="overview-module__body">{children}</div><Link to={to}>{linkLabel}<AdminIcon name="arrow" size={15} /></Link></article>;
 }
 
+function AnalyticsOverview({ data, error, loading }: { data: AnalyticsReport | null; error?: string; loading: boolean }) {
+  const detail = error ? "Analytics authority unavailable" : data ? data.configured ? data.coverage.lastIngestedAt ? `Latest signal ${formatTime(data.coverage.lastIngestedAt)}` : "No retained events in this window" : "Collection not configured" : loading ? "Reading analytics authority" : "Analytics authority unavailable";
+  const metrics = data?.configured ? [
+    { label: "Page views", value: String(data.selected.views), note: "Exact first-party views" },
+    { label: "Anonymous sessions", value: String(data.selected.sessions), note: "Mathematically valid sessions" },
+    { label: "Pages / session", value: data.selected.pagesPerSession === null ? "—" : data.selected.pagesPerSession.toFixed(2), note: "Current 24-hour window" },
+    { label: "Mapped regions", value: String(data.geography.length), note: "Coarse locations only" },
+  ] : null;
+
+  return <section className="overview-section overview-analytics" aria-labelledby="overview-analytics-title">
+    <OverviewHeading eyebrow="Audience analytics / last 24 hours" title="Audience signal" id="overview-analytics-title" detail={detail} />
+    {metrics ? <div className="overview-analytics__grid">{metrics.map((metric, index) => <article key={metric.label} className="overview-analytics__stat"><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small><i aria-hidden="true">0{index + 1}</i></article>)}</div> : <div className={`overview-analytics__state${error ? " is-error" : ""}`}><AdminIcon name="signal" size={22} /><div><strong>{error ? "Analytics unavailable" : data ? "Analytics collection is not configured" : loading ? "Reading audience authority" : "Analytics unavailable"}</strong><p>{error || (data ? "Configure the analytics database before collection and reporting can begin." : loading ? "The current 24-hour window is being requested." : "No analytics report is available.")}</p></div></div>}
+    <Link className="overview-section__link" to="/analytics">Open Audience Analytics <AdminIcon name="arrow" size={15} /></Link>
+  </section>;
+}
+
 function OverviewHeading({ eyebrow, title, id, detail }: { eyebrow: string; title: string; id: string; detail: string }) { return <header className="overview-heading"><div><p>{eyebrow}</p><h2 id={id}>{title}</h2></div><span>{detail}</span></header>; }
 function Fact({ label, value }: { label: string; value: string | number }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
 function ModuleState({ text }: { text: string }) { return <div className="overview-module__fallback"><span aria-hidden="true">—</span><p>{text}</p></div>; }
@@ -182,7 +202,7 @@ function operationalPriorities(snapshot: Snapshot, errors: SourceErrors): Priori
   const failedEmails = snapshot.goats ? numberOrNull(snapshot.goats.email.failed) : null;
   if (failedEmails) priorities.push({ title: `${failedEmails} community ${failedEmails === 1 ? "email" : "emails"} failed`, detail: "Review the transactional outbox before attempting a protected retry.", to: "/goats/emails", label: "Inspect", tone: "danger" });
   if (snapshot.status?.accounts.pending) priorities.push({ title: `${snapshot.status.accounts.pending} ${snapshot.status.accounts.pending === 1 ? "account is" : "accounts are"} pending verification`, detail: "Review identity state without changing roles or sessions unnecessarily.", to: "/access", label: "Review", tone: "attention" });
-  for (const [source, detail, to] of [["watch", "Broadcast authority did not report current state.", "/watch"], ["commerce", "Commerce authority did not report current state.", "/commerce"], ["goats", "Community authority did not report current state.", "/goats"], ["banner", "Site-content authority did not report current state.", "/content"], ["status", "Account authority did not report current state.", "/access"]] as const) {
+  for (const [source, detail, to] of [["analytics", "Audience analytics authority did not report current state.", "/analytics"], ["watch", "Broadcast authority did not report current state.", "/watch"], ["commerce", "Commerce authority did not report current state.", "/commerce"], ["goats", "Community authority did not report current state.", "/goats"], ["banner", "Site-content authority did not report current state.", "/content"], ["status", "Account authority did not report current state.", "/access"]] as const) {
     if (errors[source] && errors[source] !== "restricted") priorities.push({ title: `${sourceLabel(source)} unavailable`, detail, to, label: "Open", tone: "danger" });
   }
   return priorities;

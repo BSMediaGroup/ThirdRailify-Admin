@@ -46,8 +46,22 @@ test("Audience Analytics renders explicit migration and ready states responsivel
         await page.locator('[data-analytics-map-state="ready"]').waitFor({ timeout: 25_000 });
         assert.equal(await page.locator('[data-analytics-map-engine="maplibre"] .maplibregl-canvas').count(), 1);
         assert.equal(await page.locator(".analytics-map-marker").count(), 2);
+        assert.equal(await page.locator(".analytics-region-list [data-country-flag]").count(), 2);
+        assert.equal(await page.locator(".analytics-matrix > header").getByRole("button", { name: "Reset columns" }).count(), 1);
+        assert.equal(await page.getByRole("button", { name: "Reset columns" }).count(), 1);
+        const matrixAlignment = await page.evaluate(() => {
+          const header = document.querySelector(".analytics-matrix > header")?.getBoundingClientRect();
+          const button = document.querySelector(".analytics-matrix > header button")?.getBoundingClientRect();
+          return { inside: Boolean(header && button && button.top >= header.top && button.bottom <= header.bottom), margin: button ? getComputedStyle(document.querySelector(".analytics-matrix > header button")).margin : "missing" };
+        });
+        assert.deepEqual(matrixAlignment, { inside: true, margin: "0px" });
         assert.equal(await page.locator(".analytics-trend__line.is-views").getAttribute("pathLength"), "1");
         if (viewport.width === 1440) {
+          await page.locator(".analytics-map-marker").first().dispatchEvent("mouseenter");
+          await page.waitForFunction(() => document.querySelectorAll("[data-country-flag]").length > 2);
+          const popupFlag = page.locator(".analytics-map-card [data-country-flag]");
+          await popupFlag.waitFor({ state: "attached" });
+          assert.ok(await popupFlag.evaluate((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0));
           await page.getByRole("button", { name: "Fullscreen map" }).click();
           const dialog = page.getByRole("dialog", { name: "Fullscreen audience activity map" });
           await dialog.waitFor();
