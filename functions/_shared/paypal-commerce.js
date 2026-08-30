@@ -13,6 +13,7 @@ import {
   paypalCredentials,
   PAYPAL_WEBHOOK_EVENTS,
 } from "./paypal-client.js";
+import { paypalAcceptanceStatus, paypalTechnicalReadiness, paypalWebhookUrl } from "./paypal-onboarding.js";
 
 const MAX_TOTAL = 2_147_483_647;
 const DONATION_MIN = 100;
@@ -287,14 +288,18 @@ export async function paypalAdminPayload(env, session) {
     db.prepare("SELECT * FROM commerce_payment_provider_state WHERE id='primary'").first(),
     db.prepare("SELECT status,environment,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider='paypal'").first(),
     db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key LIKE 'paypal_%' OR setting_key IN ('preferred_payment_provider','stripe_enabled','commerce_emergency_paused')").all(),
-    db.prepare("SELECT environment,normalized_state,COUNT(*) count FROM commerce_payment_attempts WHERE provider='paypal' GROUP BY environment,normalized_state").all(),
+    db.prepare("SELECT environment,CASE WHEN donation_id IS NOT NULL THEN 'donation' ELSE 'store' END kind,normalized_state,COUNT(*) count FROM commerce_payment_attempts WHERE provider='paypal' GROUP BY environment,kind,normalized_state").all(),
     db.prepare("SELECT environment,status,COUNT(*) count,COALESCE(SUM(CASE WHEN status='completed' THEN amount_minor ELSE 0 END),0) amount FROM commerce_donations GROUP BY environment,status").all(),
     db.prepare("SELECT environment,event_type,received_at,result_code FROM commerce_paypal_webhook_events WHERE verification_status='verified' ORDER BY received_at DESC LIMIT 20").all(),
     db.prepare("SELECT operation_kind,http_status,provider_code,provider_reason,request_id,retryable,occurred_at FROM commerce_provider_diagnostics WHERE provider='paypal' ORDER BY occurred_at DESC LIMIT 20").all(),
   ]);
   const settings=settingsMap(settingsResult); const metadata=parseJson(provider?.safe_metadata_json,{});
   const sandboxCredentials=paypalCredentials(env,"sandbox"),liveCredentials=paypalCredentials(env,"live");
-  return {ok:true,access,state:{preferredProvider:state?.preferred_provider||"paypal",revision:Number(state?.revision||1),stripeConfigured:Boolean(state?.stripe_configured),stripeEnabled:Boolean(state?.stripe_enabled),emergencyPaused:Boolean(state?.emergency_paused),reason:state?.transition_reason,updatedAt:state?.updated_at},provider:{status:provider?.status||"unavailable",environment:provider?.environment||"live",preferred:true,metadata,lastSynchronizedAt:provider?.last_synchronized_at||null},credentials:{sandbox:{clientIdConfigured:Boolean(sandboxCredentials.clientId),clientSecretConfigured:Boolean(sandboxCredentials.clientSecret),webhookIdConfigured:Boolean(sandboxCredentials.webhookId),expectedMerchantIdConfigured:Boolean(sandboxCredentials.expectedMerchantId)},live:{clientIdConfigured:Boolean(liveCredentials.clientId),clientSecretConfigured:Boolean(liveCredentials.clientSecret),webhookIdConfigured:Boolean(liveCredentials.webhookId),expectedMerchantIdConfigured:Boolean(liveCredentials.expectedMerchantId)}},settings,attempts:attempts?.results||[],donations:donations?.results||[],webhooks:webhooks?.results||[],diagnostics:diagnostics?.results||[],subscribedEvents:PAYPAL_WEBHOOK_EVENTS};
+  const attemptRows=attempts?.results||[];
+  const sandboxReadiness=paypalTechnicalReadiness({credentials:sandboxCredentials,metadata:metadata.sandbox,configured:settings.paypal_sandbox_configured===true,webhookConfigured:settings.paypal_sandbox_webhook_configured===true});
+  const liveReadiness=paypalTechnicalReadiness({credentials:liveCredentials,metadata:metadata.live,configured:settings.paypal_live_configured===true,webhookConfigured:settings.paypal_live_webhook_configured===true});
+  let webhookUrl=null; try{webhookUrl=paypalWebhookUrl(env);}catch{}
+  return {ok:true,access,state:{preferredProvider:state?.preferred_provider||"paypal",revision:Number(state?.revision||1),stripeConfigured:Boolean(state?.stripe_configured),stripeEnabled:Boolean(state?.stripe_enabled),emergencyPaused:Boolean(state?.emergency_paused),reason:state?.transition_reason,updatedAt:state?.updated_at},provider:{status:provider?.status||"unavailable",environment:provider?.environment||"live",preferred:true,metadata,lastSynchronizedAt:provider?.last_synchronized_at||null},credentials:{sandbox:{clientIdConfigured:Boolean(sandboxCredentials.clientId),clientSecretConfigured:Boolean(sandboxCredentials.clientSecret),webhookIdConfigured:Boolean(sandboxCredentials.webhookId),expectedMerchantIdConfigured:Boolean(sandboxCredentials.expectedMerchantId),oauthVerified:sandboxReadiness.oauthVerified,webhookReadbackVerified:sandboxReadiness.webhookReadbackVerified,storeAcceptance:paypalAcceptanceStatus(attemptRows,"sandbox","store"),donationAcceptance:paypalAcceptanceStatus(attemptRows,"sandbox","donation")},live:{clientIdConfigured:Boolean(liveCredentials.clientId),clientSecretConfigured:Boolean(liveCredentials.clientSecret),webhookIdConfigured:Boolean(liveCredentials.webhookId),expectedMerchantIdConfigured:Boolean(liveCredentials.expectedMerchantId),oauthVerified:liveReadiness.oauthVerified,webhookReadbackVerified:liveReadiness.webhookReadbackVerified,storeAcceptance:paypalAcceptanceStatus(attemptRows,"live","store"),donationAcceptance:paypalAcceptanceStatus(attemptRows,"live","donation")}},settings,attempts:attemptRows,donations:donations?.results||[],webhooks:webhooks?.results||[],diagnostics:diagnostics?.results||[],subscribedEvents:PAYPAL_WEBHOOK_EVENTS,webhookUrl,setupCommand:"npm run commerce:paypal -- status"};
 }
 
 async function requirePayPalConfiguration(env,target,forcedEnvironment=null,options={}) {

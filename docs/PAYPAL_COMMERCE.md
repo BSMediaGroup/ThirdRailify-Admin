@@ -11,6 +11,18 @@ Configure these as encrypted Admin Pages secrets, never Public or Worker values:
 
 Sandbox and Live use separate apps, credentials, Webhook IDs, and API origins. The browser receives only the selected environment's Client ID after D1 configuration and webhook gates are ready. OAuth tokens and Client Secrets remain server-only.
 
+Use the repository-local operator CLI; it rejects credentials on command-line arguments and writes secrets directly to Admin Pages encrypted custody:
+
+```text
+npm run commerce:paypal -- status
+npm run commerce:paypal -- configure sandbox
+npm run commerce:paypal -- verify sandbox
+npm run commerce:paypal -- configure live
+npm run commerce:paypal -- verify live
+```
+
+`configure` reads `PAYPAL_<ENV>_CLIENT_ID` and `PAYPAL_<ENV>_CLIENT_SECRET` from the named process environment or uses masked interactive prompts. It validates OAuth, reconciles exactly one canonical webhook, stores all three bindings through `wrangler pages secret put` stdin, deploys Admin, and then records only sanitized OAuth/webhook readback evidence in Commerce D1. Never put credentials in CLI arguments, source, committed JSON, or browser storage.
+
 Register the canonical Admin URL `/api/webhooks/paypal` for exactly:
 
 - `CHECKOUT.ORDER.APPROVED`

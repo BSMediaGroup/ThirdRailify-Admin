@@ -47,7 +47,7 @@ test("PayPal money conversion is exact integer CAD arithmetic", () => {
 });
 
 test("PayPal client keeps Sandbox and Live OAuth and Orders endpoints separate", async () => {
-  const urls=[];const fetchImpl=async(url,init={})=>{urls.push({url,authorization:new Headers(init.headers).get("Authorization")});if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:url.includes("sandbox")?"sandbox-token":"live-token",expires_in:3600});return Response.json({id:"ORDERENDPOINT",intent:"CAPTURE",status:"CREATED",purchase_units:[]},{status:201});};
+  const urls=[];const fetchImpl=async(url,init={})=>{urls.push({url,authorization:new Headers(init.headers).get("Authorization")});if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:url.includes("sandbox")?"sandbox-token":"live-token",token_type:"Bearer",expires_in:3600});return Response.json({id:"ORDERENDPOINT",intent:"CAPTURE",status:"CREATED",purchase_units:[]},{status:201});};
   const env={PAYPAL_SANDBOX_CLIENT_ID:"sandbox-client",PAYPAL_SANDBOX_CLIENT_SECRET:"sandbox-secret",PAYPAL_LIVE_CLIENT_ID:"live-client",PAYPAL_LIVE_CLIENT_SECRET:"live-secret"};
   await createPayPalOrder(env,"sandbox",{intent:"CAPTURE"},"sandbox-request-id",fetchImpl);await createPayPalOrder(env,"live",{intent:"CAPTURE"},"live-request-id",fetchImpl);
   assert.equal(urls.some((call)=>call.url==="https://api-m.sandbox.paypal.com/v2/checkout/orders"&&call.authorization==="Bearer sandbox-token"),true);
@@ -67,7 +67,7 @@ test("one-time donation is local-first, idempotent, server-created, and server-c
   const env=envFor(harness);let targetId="";const calls=[];
   const paypalFetch=async(url,init={})=>{
     calls.push({url,method:init.method,body:init.body,requestId:new Headers(init.headers).get("PayPal-Request-Id")});
-    if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"access-token-test",expires_in:3600});
+    if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"access-token-test",token_type:"Bearer",expires_in:3600});
     if(url.endsWith("/v2/checkout/orders")&&init.method==="POST"){
       const body=JSON.parse(init.body);targetId=body.purchase_units[0].reference_id;
       assert.equal(body.intent,"CAPTURE");assert.equal(body.purchase_units[0].amount.value,"15.00");assert.equal(body.payment_source.paypal.experience_context.shipping_preference,"NO_SHIPPING");
@@ -96,7 +96,7 @@ test("store order persists authoritative customer, delivery, totals, and PayPal 
   await insertTestProduct(harness.commerceDb,{requiresShipping:1,targetPrintfulProductId:"target-product-001",migrationStatus:"target_verified"});
   await insertTestVariant(harness.commerceDb,{migrationStatus:"target_verified"});
   const items=[{productId:"product-test-001",variantId:"variant-test-001",quantity:1}];const shipping=await insertTestShippingQuote(harness.commerceDb,{items});let providerBody;
-  const paypalFetch=async(url,init={})=>{if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"store-token",expires_in:3600});if(url.endsWith("/v2/checkout/orders")){providerBody=JSON.parse(init.body);const reference=providerBody.purchase_units[0].reference_id;return Response.json({id:"PAYPALSTORE001",intent:"CAPTURE",status:"CREATED",purchase_units:[{reference_id:reference,custom_id:reference,amount:{currency_code:"CAD",value:"32.50"}}]},{status:201});}throw new Error("unexpected request");};
+  const paypalFetch=async(url,init={})=>{if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"store-token",token_type:"Bearer",expires_in:3600});if(url.endsWith("/v2/checkout/orders")){providerBody=JSON.parse(init.body);const reference=providerBody.purchase_units[0].reference_id;return Response.json({id:"PAYPALSTORE001",intent:"CAPTURE",status:"CREATED",purchase_units:[{reference_id:reference,custom_id:reference,amount:{currency_code:"CAD",value:"32.50"}}]},{status:201});}throw new Error("unexpected request");};
   const body={checkoutRequestId:"22222222-2222-4222-8222-222222222222",items,recipient:shipping.recipient,quoteId:shipping.quoteId,shippingOptionId:shipping.shippingOptionId,customer:{mode:"guest",name:"Checkout Fixture",email:"store@example.test"}};
   const response=await storeRoute({request:post("/api/commerce/paypal/store",body),env:envFor(harness),data:{paypalFetch}});assert.equal(response.status,201,JSON.stringify(await response.clone().json()));const payload=await response.json();assert.equal(payload.orderId,"PAYPALSTORE001");
   assert.equal(providerBody.purchase_units[0].amount.breakdown.item_total.value,"27.50");assert.equal(providerBody.purchase_units[0].amount.breakdown.shipping.value,"5.00");assert.equal(providerBody.purchase_units[0].payment_source,undefined);assert.equal(providerBody.payment_source.paypal.experience_context.shipping_preference,"SET_PROVIDED_ADDRESS");
@@ -107,7 +107,7 @@ test("store order persists authoritative customer, delivery, totals, and PayPal 
 test("PayPal webhook verifies the exact raw event and unresolved delivery enters bounded recovery", async(t)=>{
   const harness=await createCommerceDatabases();t.after(harness.dispose);const env=envFor(harness);const now=Date.now();
   const raw=`{\n "id":"WH-EVENT-001", "event_type":"PAYMENT.CAPTURE.COMPLETED", "create_time":"${new Date(now).toISOString()}", "resource":{"id":"CAPTURE-MISSING","amount":{"currency_code":"CAD","value":"15.00"},"supplementary_data":{"related_ids":{"order_id":"ORDER-MISSING"}}}\n}`;
-  let verifyBody="";const paypalFetch=async(url,init={})=>{if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"webhook-token",expires_in:3600});if(url.endsWith("/v1/notifications/verify-webhook-signature")){verifyBody=String(init.body);return Response.json({verification_status:"SUCCESS"});}throw new Error("unexpected request");};
+  let verifyBody="";const paypalFetch=async(url,init={})=>{if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"webhook-token",token_type:"Bearer",expires_in:3600});if(url.endsWith("/v1/notifications/verify-webhook-signature")){verifyBody=String(init.body);return Response.json({verification_status:"SUCCESS"});}throw new Error("unexpected request");};
   const request=new Request(`${API}/api/webhooks/paypal`,{method:"POST",headers:{"Content-Type":"application/json","PayPal-Transmission-Id":"transmission-001","PayPal-Transmission-Time":new Date(now).toISOString(),"PayPal-Transmission-Sig":"signature","PayPal-Cert-Url":"https://api-m.sandbox.paypal.com/certs/test.pem","PayPal-Auth-Algo":"SHA256withRSA"},body:raw});
   const response=await handlePayPalWebhook(request,env,paypalFetch,now);assert.equal(response.status,200);assert.equal((await response.json()).result,"payment_attempt_unresolved");
   assert.ok(verifyBody.includes(`"webhook_event":${raw}`));
@@ -130,7 +130,7 @@ test("verified refund after completion updates donation authority once without f
   ]);
   const now=Date.now();const raw=JSON.stringify({id:"WH-REFUND-001",event_type:"PAYMENT.CAPTURE.REFUNDED",create_time:new Date(now).toISOString(),resource:{id:"CAPTUREREFUND",amount:{currency_code:"CAD",value:"15.00"},supplementary_data:{related_ids:{order_id:"ORDERREFUND"}}}});
   const makeRequest=()=>new Request(`${API}/api/webhooks/paypal`,{method:"POST",headers:{"Content-Type":"application/json","PayPal-Transmission-Id":"refund-transmission","PayPal-Transmission-Time":new Date(now).toISOString(),"PayPal-Transmission-Sig":"signature","PayPal-Cert-Url":"https://api-m.sandbox.paypal.com/cert.pem","PayPal-Auth-Algo":"SHA256withRSA"},body:raw});
-  const verify=async(url)=>url.endsWith("/v1/oauth2/token")?Response.json({access_token:"refund-token",expires_in:3600}):Response.json({verification_status:"SUCCESS"});
+  const verify=async(url)=>url.endsWith("/v1/oauth2/token")?Response.json({access_token:"refund-token",token_type:"Bearer",expires_in:3600}):Response.json({verification_status:"SUCCESS"});
   const first=await handlePayPalWebhook(makeRequest(),envFor(harness),verify,now);assert.equal((await first.json()).result,"payment_refunded");
   const duplicate=await handlePayPalWebhook(makeRequest(),envFor(harness),verify,now);assert.equal((await duplicate.json()).duplicate,true);
   assert.deepEqual(await harness.commerceDb.prepare("SELECT status,refunded_at FROM commerce_donations WHERE id=?").bind(donationId).first().then((row)=>({status:row.status,refunded:Boolean(row.refunded_at)})),{status:"refunded",refunded:true});

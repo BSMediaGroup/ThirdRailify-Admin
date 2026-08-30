@@ -867,6 +867,8 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .payments-panel dl > div,.payments-technical dl > div { display: grid; grid-template-columns: minmax(120px,.72fr) minmax(0,1.28fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
 .payments-panel dt,.payments-technical dt { color: var(--quiet); font: .56rem "Geist Mono",monospace; letter-spacing: .04em; text-transform: uppercase; }
 .payments-panel dd,.payments-technical dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--paper); font-size: .69rem; text-align: right; }
+.payments-copy-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.payments-copy-button { flex: 1 1 180px; min-height: 38px; }
 .payments-technical { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; background: rgba(0,0,0,.16); }
 .payments-technical > summary { color: var(--gold); cursor: pointer; font: 700 .6rem "Geist Mono",monospace; letter-spacing: .04em; text-transform: uppercase; }
 .payments-technical[open] > summary { margin-bottom: 12px; }

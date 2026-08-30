@@ -51,7 +51,9 @@ test("payments projection distinguishes configured secrets from verified evidenc
   assert.equal(payload.overall.stripeState, "configured"); assert.equal(payload.overall.testAcceptance, "unverified");
   assert.equal(payload.productionActivation.checkout.enabled, false); assert.equal(payload.productionActivation.livePayments.enabled, false); assert.equal(payload.productionActivation.fulfillment.enabled, false);
   assert.equal(payload.testEvidence, null); assert.equal(payload.payoutState.state, "unverified");
-  assert.deepEqual(payload.paypal, { provider: "paypal", state: "deferred", integrationMode: "direct_merchant", environment: "deferred", countryCode: "CA", currencyCode: "CAD", credentialConfigured: false, donationsEnabled: false, membershipEnabled: false, shopCheckoutEnabled: false, providerMutationAvailable: false, lastVerifiedAt: null });
+  assert.equal(payload.paypal.provider, "paypal"); assert.equal(payload.paypal.state, "setup_required"); assert.equal(payload.paypal.integrationMode, "direct_merchant"); assert.equal(payload.paypal.environment, "live");
+  assert.equal(payload.paypal.credentialConfigured, false); assert.equal(payload.paypal.sandbox.oauthVerified, false); assert.equal(payload.paypal.live.webhookReadbackVerified, false); assert.equal(payload.paypal.live.storeAcceptance, "not_run");
+  assert.equal(payload.paypal.donationsEnabled, false); assert.equal(payload.paypal.shopCheckoutEnabled, false); assert.equal(payload.paypal.providerMutationAvailable, false); assert.equal(payload.paypal.lastVerifiedAt, null);
   assert.equal(payload.payoutState.availableBalance, null); assert.equal(payload.payoutState.nextPayout, null); assert.equal(payload.payoutState.schedule, null);
   assert.equal(payload.paymentSummary.live.grossAmount, 0); assert.equal(payload.paymentSummary.test.grossAmount, 0);
   assert.equal(payload.paymentSummary.processingFees.available, false);
@@ -71,7 +73,7 @@ test("verified TEST evidence is canonical and excluded from exact LIVE minor-uni
   assert.equal(payload.webhookHealth.externallyVerified, false); assert.equal(payload.webhookHealth.counts.duplicates, null);
   assert.equal(payload.stripe.payoutsEnabledInTest, false); assert.equal(payload.payoutState.testCapabilityObserved, false); assert.equal(payload.payoutState.state, "unverified");
   assert.equal(payload.technical.stripeConnect, false); assert.equal(payload.technical.stripeAccountHeader, false); assert.equal(payload.technical.providerMutationAvailable, false);
-  assert.equal(payload.paypal.state, "deferred"); assert.equal(payload.paypal.integrationMode, "direct_merchant"); assert.equal(payload.paypal.credentialConfigured, false); assert.equal(payload.paypal.donationsEnabled, false); assert.equal(payload.paypal.shopCheckoutEnabled, false); assert.equal(payload.paypal.providerMutationAvailable, false);
+  assert.equal(payload.paypal.state, "setup_required"); assert.equal(payload.paypal.integrationMode, "direct_merchant"); assert.equal(payload.paypal.credentialConfigured, false); assert.equal(payload.paypal.donationsEnabled, false); assert.equal(payload.paypal.shopCheckoutEnabled, false); assert.equal(payload.paypal.providerMutationAvailable, false);
   await harness.commerceDb.prepare("UPDATE commerce_webhook_events SET payload_sha256=NULL WHERE provider_event_id=?").bind(EVENT_ID).run();
   const invalidated = await paymentsControlPlanePayload(env, { accountId: "master", account: { adminLevel: "master" } });
   assert.equal(invalidated.stripe.webhookAcceptanceVerified, true); assert.equal(invalidated.testEvidence, null); assert.equal(invalidated.overall.testAcceptance, "unverified");

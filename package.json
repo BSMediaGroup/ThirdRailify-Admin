@@ -48,6 +48,7 @@
     "commerce:printful:verify-permanent": "node scripts/verify-permanent-printful-token.mjs",
     "commerce:worker:build": "wrangler deploy --config commerce-worker/wrangler.jsonc --dry-run --outdir .wrangler/commerce-worker-build",
     "commerce:launch": "node scripts/commerce-launch.mjs",
+    "commerce:paypal": "node scripts/commerce-paypal.mjs",
     "goats:import:dry-run": "node scripts/validate-goats-import.mjs",
     "goats:wix:build-import": "node scripts/build-wix-goats-import.mjs",
     "test:goats:wix-import": "node --test --test-concurrency=1 tests/wix-goats-import.test.mjs",

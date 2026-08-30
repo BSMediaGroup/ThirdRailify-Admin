@@ -77,9 +77,11 @@ import {
   runPermanentPrintfulMigrationStep,
 } from "../../../_shared/printful-migration.js";
 import {
+  activatePayPalDonations,
   activateCommerceLaunch,
   applyEligibleVariantSellability,
   commerceLaunchPlan,
+  paypalDonationLaunchPlan,
   pauseCommerceLaunch,
 } from "../../../_shared/commerce-launch.js";
 import { commerceJobsPayload, retryCommerceJob } from "../../../_shared/commerce-operations.js";
@@ -124,7 +126,7 @@ async function handleGet(request, env, path) {
     payload = await productionReadinessPayload(env, session);
   } else if (path === "launch") {
     await requireMasterAdmin(env, request);
-    payload = await commerceLaunchPlan(env);
+    payload = new URL(request.url).searchParams.get("target") === "donations" ? await paypalDonationLaunchPlan(env) : await commerceLaunchPlan(env);
   } else if (path === "launch/jobs") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = { ok: true, ...(await commerceJobsPayload(env)) };
@@ -219,6 +221,10 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireMasterAdmin(env, request);
     payload = await activateCommerceLaunch(env, await readJsonBody(request), session.accountId);
     authEventType = "commerce_production_activated";
+  } else if (path === "launch/donations-activate") {
+    await requireMasterAdmin(env, request);
+    payload = await activatePayPalDonations(env, await readJsonBody(request), session.accountId);
+    authEventType = "commerce_paypal_donations_activated";
   } else if (path === "launch/pause") {
     await requireMasterAdmin(env, request);
     payload = await pauseCommerceLaunch(env, await readJsonBody(request), session.accountId);

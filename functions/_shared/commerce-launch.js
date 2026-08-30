@@ -1,9 +1,11 @@
 import { AuthFailure, cleanText, nowIso, randomId } from "./auth-core.js";
 import { requireCommerceDb, writeCommerceAudit } from "./commerce-core.js";
 import { paypalCredentials } from "./paypal-client.js";
+import { paypalTechnicalReadiness } from "./paypal-onboarding.js";
 
 export const LIVE_ACTIVATION_CONFIRMATION = "ACTIVATE LIVE COMMERCE";
 export const EMERGENCY_PAUSE_CONFIRMATION = "PAUSE LIVE COMMERCE";
+export const LIVE_DONATIONS_CONFIRMATION = "ACTIVATE LIVE PAYPAL DONATIONS";
 
 const ELIGIBLE_VARIANT_PREDICATE = `
   p.status='active' AND p.visibility='public' AND p.requires_shipping=1
@@ -44,6 +46,7 @@ export async function commerceLaunchPlan(env) {
   const paypal = providers.paypal || null;
   const printful = providers.printful || null;
   const paypalLive = paypalCredentials(env, "live");
+  const paypalLiveTechnical = paypalTechnicalReadiness({ credentials: paypalLive, metadata: paypal?.metadata?.live, configured: settings.paypal_live_configured === true, webhookConfigured: settings.paypal_live_webhook_configured === true });
   const markets = marketsResult?.results || [];
   const activeMarkets = markets.filter((market) => market.status === "active" && market.strategy === "printful_dynamic");
   const migrationState = json(migration?.safe_state_json, {});
@@ -51,9 +54,9 @@ export async function commerceLaunchPlan(env) {
   const hardGates = [
     gate("merchant_identity", Boolean(cleanText(business?.trading_name, 160) && business?.country_code === "CA" && business?.currency_code === "CAD" && cleanText(business?.support_email, 254) && business?.legal_business_name_ciphertext && business?.private_address_ciphertext), "The Canadian merchant identity, support contact, encrypted legal name, and encrypted private address are configured."),
     gate("paypal_preferred", settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && paypal?.integration_mode === "direct_merchant", "PayPal is preferred and Stripe is retained but disabled."),
-    gate("paypal_live_credential", paypalLive.configured && Boolean(paypalLive.expectedMerchantId) && settings.paypal_live_configured === true, "Distinct server-only PayPal LIVE credentials and the expected merchant identity are configured."),
-    gate("paypal_live_account", paypal?.status === "connected" && paypal?.environment === "live" && paypal?.country_code === "CA" && String(paypal?.currency_code || "").toUpperCase() === "CAD" && paypal?.metadata?.live?.merchant_id_verified === true, "The Canadian CAD PayPal merchant identity has been verified by provider readback."),
-    gate("paypal_live_webhook", Boolean(paypalLive.webhookId) && settings.paypal_live_webhook_configured === true && paypal?.metadata?.live?.webhook_configured === true, "The exact PayPal LIVE webhook is registered and its identifier is stored as a server secret."),
+    gate("paypal_live_credential", paypalLiveTechnical.credentialsConfigured && paypalLiveTechnical.oauthVerified, "Distinct server-only PayPal LIVE credentials authenticated successfully against the LIVE OAuth endpoint."),
+    gate("paypal_live_account", paypal?.status === "connected" && paypal?.environment === "live" && paypal?.integration_mode === "direct_merchant" && paypal?.country_code === "CA" && String(paypal?.currency_code || "").toUpperCase() === "CAD", "The configured PayPal connection is the Canadian CAD direct merchant app; no stronger merchant-onboarding claim is inferred."),
+    gate("paypal_live_webhook", paypalLiveTechnical.webhookReadbackVerified, "The exact PayPal LIVE webhook URL and event set were read back and its identifier is stored as a server secret."),
     gate("tax_policy", settings.tax_calculation_provider === "not_collecting", "An explicit server-authoritative tax policy is configured without inventing registrations."),
     gate("printful_store", printful?.status === "connected" && printful?.integration_mode === "fulfillment" && String(printful?.external_account_id || "") === "18668025" && printful?.metadata?.api_configured === true && hasPrintfulSecret(env), "The native Printful target store 18668025 is verified."),
     gate("printful_v2_webhook", settings.printful_v2_webhook_configured === true && hasPrintfulWebhookSecrets(env), "The signed Printful V2 webhook is configured and read back."),
@@ -118,6 +121,65 @@ export async function applyEligibleVariantSellability(env, actorAccountId = null
   const after = await eligibilityCounts(db);
   await writeCommerceAudit(env, { actorAccountId, action: "commerce.catalogue_sellability_applied", targetType: "commerce_product_variants", targetId: "eligible-production-catalogue", result: "success", metadata: { before, after, enabled: changes(enabled), disabled: changes(disabled) } });
   return { ok: true, before, after, enabled: changes(enabled), disabled: changes(disabled) };
+}
+
+export async function paypalDonationLaunchPlan(env) {
+  const db = requireCommerceDb(env);
+  const [settingsResult, provider, state] = await Promise.all([
+    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('preferred_payment_provider','stripe_enabled','paypal_live_configured','paypal_live_webhook_configured','paypal_live_capture_enabled','paypal_donations_enabled','paypal_store_checkout_enabled','commerce_emergency_paused')").all(),
+    db.prepare("SELECT status,environment,integration_mode,country_code,currency_code,safe_metadata_json FROM commerce_provider_connections WHERE provider='paypal'").first(),
+    db.prepare("SELECT * FROM commerce_payment_provider_state WHERE id='primary'").first(),
+  ]);
+  const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
+  const metadata = json(provider?.safe_metadata_json, {});
+  const credentials = paypalCredentials(env, "live");
+  const technical = paypalTechnicalReadiness({ credentials, metadata: metadata.live, configured: settings.paypal_live_configured === true, webhookConfigured: settings.paypal_live_webhook_configured === true });
+  const hardGates = [
+    gate("paypal_preferred", settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && state?.preferred_provider === "paypal" && Number(state?.stripe_enabled || 0) === 0, "PayPal is preferred and Stripe is retained but disabled."),
+    gate("paypal_live_oauth", technical.credentialsConfigured && technical.oauthVerified, "PayPal LIVE credentials authenticated successfully against the LIVE OAuth endpoint."),
+    gate("paypal_live_webhook", technical.webhookReadbackVerified, "The exact LIVE webhook URL and event set were read back."),
+    gate("paypal_direct_merchant", provider?.status === "connected" && provider?.environment === "live" && provider?.integration_mode === "direct_merchant" && provider?.country_code === "CA" && String(provider?.currency_code || "").toUpperCase() === "CAD", "The configured connection is the Canadian CAD direct merchant app."),
+    gate("emergency_pause_clear", settings.commerce_emergency_paused !== true && Number(state?.emergency_paused || 0) === 0, "Emergency pause is clear."),
+  ];
+  return {
+    ok: true,
+    authority: "Commerce D1 + Admin runtime secrets",
+    target: "donations",
+    revision: Number(state?.revision || 1),
+    ready: hardGates.every((entry) => entry.ready),
+    hardGates,
+    excludedDependencies: ["catalogue", "shipping", "printful", "fulfillment", "transactional_email"],
+    settings: { donationsEnabled: settings.paypal_donations_enabled === true, storeCheckoutEnabled: settings.paypal_store_checkout_enabled === true, liveCaptureEnabled: settings.paypal_live_capture_enabled === true, stripeEnabled: settings.stripe_enabled === true },
+    checkedAt: nowIso(),
+  };
+}
+
+export async function activatePayPalDonations(env, input, actorAccountId) {
+  requireTransitionInput(input, LIVE_DONATIONS_CONFIRMATION);
+  const plan = await paypalDonationLaunchPlan(env);
+  if (Number(input.expectedRevision) !== plan.revision) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The PayPal provider state changed. Review the donation plan before activation.");
+  if (!plan.ready) throw new AuthFailure(409, "paypal_donations_launch_blocked", "Live PayPal donations cannot activate while a hard gate is blocked.");
+  const db = requireCommerceDb(env);
+  const timestamp = nowIso();
+  const updates = await db.batch([
+    setting(db, "preferred_payment_provider", "paypal", timestamp, actorAccountId),
+    setting(db, "stripe_enabled", false, timestamp, actorAccountId),
+    setting(db, "commerce_environment", "production", timestamp, actorAccountId),
+    setting(db, "paypal_live_configured", true, timestamp, actorAccountId),
+    setting(db, "paypal_live_webhook_configured", true, timestamp, actorAccountId),
+    setting(db, "paypal_live_capture_enabled", true, timestamp, actorAccountId),
+    setting(db, "paypal_donations_enabled", true, timestamp, actorAccountId),
+    setting(db, "commerce_emergency_paused", false, timestamp, actorAccountId),
+    db.prepare(`UPDATE commerce_payment_provider_state SET preferred_provider='paypal',stripe_enabled=0,paypal_live_configured=1,
+      paypal_live_capture_enabled=1,paypal_donations_enabled=1,emergency_paused=0,revision=revision+1,
+      transition_reason='Authorized independent PayPal LIVE donation activation.',updated_by_actor=?,updated_at=? WHERE id='primary' AND revision=?`).bind(cleanText(actorAccountId,160)||"deployment-cli",timestamp,plan.revision),
+    db.prepare(`UPDATE commerce_provider_connections SET status='connected',environment='live',safe_metadata_json=json_set(safe_metadata_json,
+      '$.preferred',json('true'),'$.donations_enabled',json('true'),'$.live_capture_enabled',json('true')),updated_at=? WHERE provider='paypal'`).bind(timestamp),
+    db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,?,?,?,'success',?,?)")
+      .bind(randomId(), cleanText(actorAccountId,160)||null, "commerce.paypal_donations_activated", "commerce_payment_provider_state", "primary", JSON.stringify({ revision: plan.revision + 1, storeCheckoutEnabled: false, stripeEnabled: false }), timestamp),
+  ]);
+  if (changes(updates[8]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The PayPal provider state changed during donation activation.");
+  return paypalDonationLaunchPlan(env);
 }
 
 export async function activateCommerceLaunch(env, input, actorAccountId) {
