@@ -107,10 +107,13 @@ export async function getPublicWheel(env, slug, accountId = "") {
   const access = accountId ? await resolveWheelAccess(env, accountId, wheel) : emptyAccess();
   const publicVisible = wheel.lifecycle === "active" && wheel.visibility === "public";
   if (!publicVisible && !access.canViewPrivate) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
-  const entries = await entriesForWheel(env, wheel.id, access.canEdit);
-  const history = await publicHistory(env, wheel, 10);
-  const media = await mediaForWheel(env, wheel.id, { public: publicVisible });
-  return { ok: true, wheel: publicDetail(wheel, entries, history, access, media), access: accessProjection(access, wheel) };
+  const [entries, history, media, owner] = await Promise.all([
+    entriesForWheel(env, wheel.id, access.canEdit),
+    publicHistory(env, wheel, 10),
+    mediaForWheel(env, wheel.id, { public: publicVisible }),
+    publicWheelOwner(env, wheel.owner_account_id),
+  ]);
+  return { ok: true, wheel: publicDetail(wheel, entries, history, access, media, owner), access: accessProjection(access, wheel) };
 }
 
 export async function getCreatorAccess(env, accountId) {
@@ -533,6 +536,7 @@ function accessProjection(access, wheel) { return { role: access.role, isMasterA
 
 async function activeAccount(env, accountId) { const row = await loadAccountById(env, clean(accountId, 160)); return row?.status === "active" ? serializeAccount(env, row) : null; }
 async function accountSummary(env, accountId) { const account = await activeAccount(env, accountId); return account ? { id: account.id, displayName: account.displayName, email: account.email, role: account.role, adminLevel: account.adminLevel } : { id: accountId, displayName: "Unavailable account", email: null, role: "user", adminLevel: "none" }; }
+async function publicWheelOwner(env, accountId) { const account = await activeAccount(env, accountId); return account ? { displayName: account.displayName, avatarUrl: account.avatarUrl || null } : { displayName: "Unavailable creator", avatarUrl: null }; }
 
 async function wheelBySlug(env, slug) { return requireWheelDb(env).prepare("SELECT * FROM wheels WHERE public_slug = ? COLLATE NOCASE LIMIT 1").bind(clean(slug, 80)).first(); }
 async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT id, display_label, display_order, weight, segment_colour, segment_style_json, state FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, state: row.state })); }
@@ -540,7 +544,7 @@ async function publicHistory(env, wheel, limit) { const config = parseJson(wheel
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
 function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null, updatedAt: row.updated_at || null, directoryOrder: Number(row.display_order || 0) }; }
-function publicDetail(wheel, entries, history, access, media) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, media, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
+function publicDetail(wheel, entries, history, access, media, owner) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", owner, createdAt: wheel.created_at, updatedAt: wheel.updated_at, participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, media, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
 function officialProjection(row) { return { id: row.id, type: "official", winningEntryId: row.winning_entry_id, winningLabel: row.winning_label_snapshot, winningWeight: Number(row.winning_weight_snapshot), wheelRevision: Number(row.wheel_revision), snapshotHash: row.participant_snapshot_hash, createdAt: row.created_at, voided: Boolean(row.voided_at) }; }
 export async function officialAnimationPlan(row) {
   const seed = new TextEncoder().encode(`thirdrailify-spin-plan-v1\n${row.id}\n${row.wheel_id}\n${row.participant_snapshot_hash}`);

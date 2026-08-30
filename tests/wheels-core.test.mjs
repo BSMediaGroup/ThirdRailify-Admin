@@ -45,6 +45,10 @@ test("creator grants, per-wheel roles, hidden projection, revision saves, and of
   await assert.rejects(createWheel(env, "ordinary", wheelInput()), (error) => error.code === "creator_approval_required");
   await mutateCreatorGrant(env, "master", { accountId: "creator", action: "approve", mayCreate: true, maximumOwnedWheels: 4 });
   const created = await createWheel(env, "creator", wheelInput()); assert.equal(created.wheel.entries.length, 3); assert.equal(created.access.role, "owner");
+  const publicOwner = await getPublicWheel(env, created.wheel.slug);
+  assert.deepEqual(publicOwner.wheel.owner, { displayName: "Approved Creator", avatarUrl: null });
+  assert.equal(typeof publicOwner.wheel.createdAt, "string"); assert.equal(typeof publicOwner.wheel.updatedAt, "string");
+  assert.equal(Object.hasOwn(publicOwner.wheel.owner, "id"), false); assert.equal(Object.hasOwn(publicOwner.wheel.owner, "email"), false);
   const hiddenInput = wheelInput(); hiddenInput.entries = hiddenInput.entries.map((entry, index) => ({ ...entry, id: `20000000-0000-4000-8000-00000000000${index + 1}` }));
   const hidden = await createWheel(env, "creator", { ...hiddenInput, title: "Hidden Test Wheel", visibility: "hidden" });
   assert.equal((await listPublicWheels(env)).items.length, 1);
