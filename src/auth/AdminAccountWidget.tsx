@@ -29,7 +29,7 @@ export function AdminAccountWidget({ unreadCount = 0 }: { unreadCount?: number }
   };
   return <div className="admin-account" ref={root}>
     <button className="admin-account__trigger" type="button" onClick={() => setOpen((value) => !value)} aria-label={`${account.displayName} account menu`} aria-haspopup="menu" aria-expanded={open}>
-      <span className="admin-account__avatar-wrap"><AdminAvatar account={account} />{unreadCount ? <i className="admin-account__badge" aria-label={`${unreadCount} unread inbox messages`}>{unreadCount > 9 ? "9+" : unreadCount}</i> : null}</span><span><strong className="account-identity-name"><span>{account.displayName}</span><AccountAccessBadge account={account} /></strong><small>{secondaryIdentity}</small></span><b aria-hidden="true">&#9662;</b>
+      <span className="admin-account__avatar-wrap"><AdminAvatar account={account} />{unreadCount ? <i className="admin-account__badge" aria-label={`${unreadCount} unread inbox messages`}>{unreadCount > 9 ? "9+" : unreadCount}</i> : null}</span><span className="admin-account__copy"><strong className="account-identity-name"><span>{account.displayName}</span><AccountAccessBadge account={account} /></strong><small>{secondaryIdentity}</small></span>
     </button>
     {open && <div className="admin-account__menu" role="menu" aria-label="Admin account menu" onKeyDown={handleMenuKeyDown}>
       <div className="admin-account__identity">

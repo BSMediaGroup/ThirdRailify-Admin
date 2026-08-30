@@ -75,6 +75,7 @@ test("Customers, Account details, and Admin table resizing remain responsive and
   assert.ok(identityLine.badgeLeft > identityLine.nameRight && Math.abs(identityLine.badgeTop - identityLine.nameTop) < 4, "badge stays inline after the display name");
   assert.equal(await page.locator(".admin-account__identity > div > small").count(), 0, "identity header has no obsolete third role row");
   assert.equal(await page.locator(".admin-account__identity i, .admin-account__trigger > i").count(), 0, "identity widget has no status dot");
+  assert.equal(await page.locator(".admin-account__trigger > b").count(), 0, "compact Admin trigger has no dropdown chevron");
   await page.getByRole("button", { name: "Master Admin account menu" }).click();
   assert.equal(await page.getByRole("separator").count(), 7);
   await assertNoPhantomHorizontalScrollbar(page, ".accounts-table-wrap");
@@ -97,6 +98,15 @@ test("Customers, Account details, and Admin table resizing remain responsive and
     const mobile = await browser.newContext({ viewport, reducedMotion: "reduce" }); const mobilePage = await mobile.newPage();
     await mobilePage.route("**/api/**", respond); await mobilePage.goto(`${ORIGIN}/customers`);
     await mobilePage.getByText("Guest Buyer", { exact: true }).waitFor();
+    const badgesExpected = viewport.width > 620;
+    assert.equal(await mobilePage.locator(".admin-account__trigger .account-access-badge").isVisible(), badgesExpected, `Admin compact role badge follows the ${viewport.width}px breakpoint`);
+    if (!badgesExpected) {
+      const trigger = await mobilePage.locator(".admin-account__trigger").boundingBox();
+      assert.ok(trigger && trigger.width <= 45, `mobile Admin trigger returns to avatar-only width: ${JSON.stringify(trigger)}`);
+      await mobilePage.getByRole("button", { name: "Master Admin account menu" }).click();
+      assert.equal(await mobilePage.locator(".admin-account__identity .account-access-badge").isVisible(), false, "mobile Admin menu hides the role badge");
+      await mobilePage.getByRole("button", { name: "Master Admin account menu" }).click();
+    }
     if (viewport.width === 1440 || viewport.width === 390) await capture(mobilePage, `customers-${viewport.width}.png`);
     assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `Customers has no horizontal overflow at ${viewport.width}px`);
     assert.equal(await mobilePage.getByRole("separator").first().isVisible(), viewport.width > 760, `resize handle visibility matches the responsive table mode at ${viewport.width}px`);

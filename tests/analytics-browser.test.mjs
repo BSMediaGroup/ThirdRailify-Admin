@@ -46,6 +46,12 @@ test("Audience Analytics renders explicit migration and ready states responsivel
         await page.locator('[data-analytics-map-state="ready"]').waitFor({ timeout: 25_000 });
         assert.equal(await page.locator('[data-analytics-map-engine="maplibre"] .maplibregl-canvas').count(), 1);
         assert.equal(await page.locator(".analytics-map-marker").count(), 2);
+        const markerAlignment = await page.locator(".analytics-map-marker").evaluateAll((markers) => markers.map((marker) => {
+          const markerBox = marker.getBoundingClientRect(); const coreBox = marker.querySelector(".analytics-map-marker__core")?.getBoundingClientRect();
+          return { latitude: marker.getAttribute("data-latitude"), longitude: marker.getAttribute("data-longitude"), centerDeltaX: coreBox ? Math.abs((coreBox.left + coreBox.width / 2) - (markerBox.left + markerBox.width / 2)) : 999, centerDeltaY: coreBox ? Math.abs((coreBox.top + coreBox.height / 2) - (markerBox.top + markerBox.height / 2)) : 999 };
+        }));
+        assert.deepEqual(markerAlignment.map(({ latitude, longitude }) => [latitude, longitude]), [["-33.9", "151.2"], ["-32.9", "151.8"]], "MapLibre receives latitude/longitude in the correct order");
+        assert.equal(markerAlignment.every(({ centerDeltaX, centerDeltaY }) => centerDeltaX < 1 && centerDeltaY < 1), true, `visible marker cores sit on their coordinates: ${JSON.stringify(markerAlignment)}`);
         assert.equal(await page.locator(".analytics-region-list [data-country-flag]").count(), 2);
         assert.equal(await page.locator(".analytics-matrix > header").getByRole("button", { name: "Reset columns" }).count(), 1);
         assert.equal(await page.getByRole("button", { name: "Reset columns" }).count(), 1);
@@ -57,7 +63,7 @@ test("Audience Analytics renders explicit migration and ready states responsivel
         assert.deepEqual(matrixAlignment, { inside: true, margin: "0px" });
         assert.equal(await page.locator(".analytics-trend__line.is-views").getAttribute("pathLength"), "1");
         if (viewport.width === 1440) {
-          await page.locator(".analytics-map-marker").first().dispatchEvent("mouseenter");
+          await page.locator(".analytics-map-marker").nth(1).dispatchEvent("mouseenter");
           await page.waitForFunction(() => document.querySelectorAll("[data-country-flag]").length > 2);
           const popupFlag = page.locator(".analytics-map-card [data-country-flag]");
           await popupFlag.waitFor({ state: "attached" });
@@ -97,7 +103,7 @@ async function respond(route, mode) {
 
 function readyReport() {
   const metric = { views: 3, sessions: 2, pagesPerSession: 1.5, comparisonComplete: false, previous: { views: 0, sessions: 0, pagesPerSession: null }, deltas: { views: { available: false, value: null, direction: "unavailable" }, sessions: { available: false, value: null, direction: "unavailable" } } };
-  return { ok: true, range: "7d", generatedAt: new Date().toISOString(), timezone: "UTC", configured: true, coverage: { start: "2026-08-30T00:00:00.000Z", end: new Date().toISOString(), totalEvents: 3, lastIngestedAt: new Date().toISOString() }, windows: { "24h": metric, "7d": metric, "30d": metric, "90d": metric }, selected: metric, bucket: "day", series: [{ bucket: "2026-08-29T00:00:00.000Z", views: 1, sessions: 1 }, { bucket: "2026-08-30T00:00:00.000Z", views: 3, sessions: 2 }, { bucket: "2026-08-31T00:00:00.000Z", views: 2, sessions: 2 }], pages: [{ path: "/watch", views: 3, sessions: 2, latestAt: new Date().toISOString() }], sources: [{ source: "direct", views: 3, sessions: 2 }], devices: [{ device: "mobile", views: 3, sessions: 2 }], geography: [{ countryCode: "AU", countryName: "Australia", region: "New South Wales", city: "Sydney", latitude: -33.9, longitude: 151.2, views: 3, sessions: 2, latestAt: new Date().toISOString(), topPath: "/watch", topSource: "direct", memberViews: 1 }, { countryCode: "US", countryName: "United States", region: "California", city: "Los Angeles", latitude: 34.05, longitude: -118.24, views: 12, sessions: 8, latestAt: new Date().toISOString(), topPath: "/", topSource: "direct", memberViews: 0 }], revenue: { available: true, partial: false, sources: { merchandise: true, donations: true }, unavailableReason: null, profitAvailable: false, profitUnavailableReason: "Complete direct-cost evidence is unavailable.", currencies: [] } };
+  return { ok: true, range: "7d", generatedAt: new Date().toISOString(), timezone: "UTC", configured: true, coverage: { start: "2026-08-30T00:00:00.000Z", end: new Date().toISOString(), totalEvents: 3, lastIngestedAt: new Date().toISOString() }, windows: { "24h": metric, "7d": metric, "30d": metric, "90d": metric }, selected: metric, bucket: "day", series: [{ bucket: "2026-08-29T00:00:00.000Z", views: 1, sessions: 1 }, { bucket: "2026-08-30T00:00:00.000Z", views: 3, sessions: 2 }, { bucket: "2026-08-31T00:00:00.000Z", views: 2, sessions: 2 }], pages: [{ path: "/watch", views: 3, sessions: 2, latestAt: new Date().toISOString() }], sources: [{ source: "direct", views: 3, sessions: 2 }], devices: [{ device: "mobile", views: 3, sessions: 2 }], geography: [{ countryCode: "AU", countryName: "Australia", region: "New South Wales", city: "Sydney", latitude: -33.9, longitude: 151.2, views: 3, sessions: 2, latestAt: new Date().toISOString(), topPath: "/watch", topSource: "direct", memberViews: 1 }, { countryCode: "AU", countryName: "Australia", region: "New South Wales", city: "Newcastle", latitude: -32.9, longitude: 151.8, views: 12, sessions: 8, latestAt: new Date().toISOString(), topPath: "/wheels", topSource: "direct", memberViews: 0 }], revenue: { available: true, partial: false, sources: { merchandise: true, donations: true }, unavailableReason: null, profitAvailable: false, profitUnavailableReason: "Complete direct-cost evidence is unavailable.", currencies: [] } };
 }
 
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }

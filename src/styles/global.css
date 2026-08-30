@@ -392,7 +392,6 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .admin-account__trigger > span:not(.admin-avatar) { display: grid; min-width: 0; text-align: left; }
 .admin-account__trigger strong { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .76rem; }
 .admin-account__trigger small { color: var(--gold-soft); font: .52rem "Geist Mono", monospace; letter-spacing: .08em; }
-.admin-account__trigger b { color: var(--gold); font-size: .55rem; }
 .admin-avatar { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; object-fit: cover; }
 .admin-avatar--initial { background: var(--gold); color: #080806; font: 1.1rem "American Captain", sans-serif; }
 .admin-account__menu { position: absolute; z-index: 50; top: calc(100% + 9px); right: 0; display: grid; width: min(340px, calc(100vw - 24px)); padding: 10px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 16px; background: radial-gradient(100% 90% at 100% 0, rgba(243,201,40,.09), transparent 70%), rgba(16,16,13,.985); box-shadow: 0 28px 80px rgba(0,0,0,.66), 0 0 32px rgba(243,201,40,.06); backdrop-filter: blur(18px); animation: admin-account-menu-in .14s ease-out; }
@@ -593,8 +592,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 
 @media (max-width: 620px) {
   .admin-account__trigger { width: 44px; padding: 4px; }
-  .admin-account__trigger > span:not(.admin-avatar),
-  .admin-account__trigger b { display: none; }
+  .admin-account__trigger > span.admin-account__copy:not(.admin-avatar) { display: none; }
   .admin-account__menu { position: fixed; top: 70px; right: 12px; }
   .auth-backdrop { align-items: end; padding: 0; }
   .auth-dialog { width: 100%; max-height: 94vh; max-height: 94dvh; padding: 24px 18px max(24px, env(safe-area-inset-bottom)); border-right: 0; border-bottom: 0; border-left: 0; border-radius: 8px 8px 0 0; }
@@ -2355,11 +2353,10 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .analytics-map-loading { position: absolute; z-index: 4; left: 50%; bottom: 22px; display: flex; min-height: 38px; align-items: center; gap: 10px; padding: 0 13px; border: 1px solid rgba(243,201,40,.22); border-radius: 999px; background: rgba(8,9,6,.9); color: #c2bca3; font: 700 9px var(--font-mono,monospace); letter-spacing: .05em; transform: translateX(-50%); }
 .analytics-map-loading span { width: 10px; height: 10px; border: 2px solid rgba(243,201,40,.2); border-top-color: #f3c928; border-radius: 50%; animation: analytics-map-spin .8s linear infinite; }
 @keyframes analytics-map-spin { to { transform: rotate(1turn); } }
-.analytics-map-marker { position: relative; width: 52px; height: 62px; padding: 0; border: 0; background: transparent; filter: drop-shadow(0 10px 12px rgba(0,0,0,.65)); cursor: pointer; transform-origin: 50% 100%; }
-.analytics-map-marker__pulse { position: absolute; right: 5px; bottom: 3px; left: 5px; height: 14px; border: 1px solid rgba(255,220,63,.7); border-radius: 50%; background: rgba(243,201,40,.17); animation: analytics-marker-pulse 2.2s ease-out infinite; }
-.analytics-map-marker__core { position: absolute; z-index: 2; top: 5px; left: 50%; display: grid; width: 36px; height: 36px; place-items: center; border: 2px solid #ffed88; border-radius: 50% 50% 50% 13px; background: radial-gradient(circle at 34% 28%,#fff2a0 0 6%,#f3c928 36%,#b77f00 100%); box-shadow: inset 0 0 0 4px rgba(35,28,2,.24),0 0 0 5px rgba(243,201,40,.12),0 0 24px rgba(243,201,40,.65); color: #171000; font: 900 10px var(--font-mono,monospace); transform: translateX(-50%) rotate(-45deg) scale(var(--signal-scale)); }
-.analytics-map-marker__core b { font: inherit; transform: rotate(45deg); }
-.analytics-map-marker__stem { position: absolute; z-index: 1; bottom: 10px; left: 50%; width: 2px; height: 16px; background: linear-gradient(#f3c928,rgba(243,201,40,.1)); transform: translateX(-50%); }
+.analytics-map-marker { position: relative; width: 52px; height: 52px; padding: 0; border: 0; background: transparent; filter: drop-shadow(0 8px 12px rgba(0,0,0,.65)); cursor: pointer; transform-origin: 50% 50%; }
+.analytics-map-marker__pulse { position: absolute; top: 4px; left: 4px; width: 44px; height: 44px; border: 1px solid rgba(255,220,63,.7); border-radius: 50%; background: rgba(243,201,40,.14); transform-origin: 50% 50%; animation: analytics-marker-pulse 2.2s ease-out infinite; }
+.analytics-map-marker__core { position: absolute; z-index: 2; top: 50%; left: 50%; display: grid; width: 34px; height: 34px; place-items: center; border: 2px solid #ffed88; border-radius: 50%; background: radial-gradient(circle at 34% 28%,#fff2a0 0 6%,#f3c928 36%,#b77f00 100%); box-shadow: inset 0 0 0 4px rgba(35,28,2,.24),0 0 0 5px rgba(243,201,40,.12),0 0 24px rgba(243,201,40,.65); color: #171000; font: 900 10px var(--font-mono,monospace); transform: translate(-50%,-50%) scale(var(--signal-scale)); transform-origin: 50% 50%; }
+.analytics-map-marker__core b { font: inherit; }
 .analytics-map-marker:focus-visible { outline: none; }
 .analytics-map-marker:focus-visible .analytics-map-marker__core { box-shadow: inset 0 0 0 4px rgba(35,28,2,.24),0 0 0 5px #fff,0 0 28px rgba(243,201,40,.9); }
 @keyframes analytics-marker-pulse { 0% { opacity: .8; transform: scale(.55); } 70%,100% { opacity: 0; transform: scale(1.5); } }
@@ -2454,11 +2451,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .admin-account__trigger small { max-width: 168px; overflow: hidden; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 .admin-account__identity .account-access-badge { width: 18px; height: 18px; flex-basis: 18px; }
 @media (max-width: 620px) {
-  .admin-account__trigger { width: 64px; position: relative; }
-  .admin-account__trigger > span:not(.admin-avatar) { display: block; min-width: 15px; }
-  .admin-account__trigger .account-identity-name { display: inline-flex; }
-  .admin-account__trigger .account-identity-name > span:first-child,
-  .admin-account__trigger small { display: none; }
+  .admin-account__identity .account-access-badge { display: none; }
 }
 
 .operations-page { display: grid; min-width: 0; gap: 18px; }

@@ -358,9 +358,9 @@ function AudienceMap({ points }: { points: AnalyticsReport["geography"] }) {
         closeOnClick: false,
         focusAfterOpen: false,
         maxWidth: "330px",
-        offset: [0, -42],
+        offset: [0, -34],
       }).setDOMContent(createAudiencePopup(point));
-      const marker = new maplibregl.Marker({ element, anchor: "bottom" })
+      const marker = new maplibregl.Marker({ element, anchor: "center" })
         .setLngLat([point.longitude, point.latitude])
         .addTo(instance);
       const openPopup = () => {
@@ -517,6 +517,8 @@ function createAudienceMarker(point: AnalyticsReport["geography"][number]) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = "analytics-map-marker";
+  element.dataset.latitude = String(point.latitude);
+  element.dataset.longitude = String(point.longitude);
   element.setAttribute(
     "aria-label",
     `${place(point)}: ${number(point.views)} page views`,
@@ -532,9 +534,7 @@ function createAudienceMarker(point: AnalyticsReport["geography"][number]) {
   const count = document.createElement("b");
   count.textContent = compactNumber(point.views);
   core.append(count);
-  const stem = document.createElement("span");
-  stem.className = "analytics-map-marker__stem";
-  element.append(pulse, core, stem);
+  element.append(pulse, core);
   return element;
 }
 
