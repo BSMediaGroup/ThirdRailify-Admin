@@ -31,6 +31,8 @@ const RATE_RULES = {
   profile: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   avatar: { limit: 12, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   commerce: { limit: 30, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
+  account_commerce_read: { limit: 600, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
+  account_commerce_mutation: { limit: 120, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
   commerce_email: { limit: 5, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   commerce_snapshot: { limit: 2_000, windowSeconds: 4 * 60 * 60, blockSeconds: 15 * 60 },
   commerce_migration: { limit: 5_000, windowSeconds: 24 * 60 * 60, blockSeconds: 15 * 60 },

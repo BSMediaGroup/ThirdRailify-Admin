@@ -1,5 +1,13 @@
 # Third Railify Admin
 
+## Public account eligibility hotfix
+
+Public account eligibility is independent of Admin privilege. Regular, Full Admin, and environment Master Admin sessions all use the same canonical internal Account ID for profile, Customer linkage, addresses, orders, donations, and recipient-scoped Public Messages. The signed `/api/account-commerce/internal/*` relay continues to derive that ID from the authenticated Public session; browser-supplied account or recipient IDs are not trusted, and the separate Admin Inbox remains unchanged.
+
+Normal authenticated account reads now use a dedicated high-volume `account_commerce_read` limiter, while account mutations use `account_commerce_mutation` and Admin commerce mutations retain their existing `commerce` limiter. This prevents ordinary overview/header/inbox reads from inheriting a Master Admin's Admin-commerce mutation bucket without disabling abuse controls. Public clients issue bounded requests and do not automatically retry permanent 4xx or 429 responses.
+
+Server-owned account order and donation creation now writes an idempotent transactional Public Message in the same local Commerce D1 batch when the Customer is linked to an Account. Message recipient identity comes only from `commerce_customers.linked_account_id`; role never broadens or suppresses delivery. Authenticated donations lazily create the existing canonical account Customer when needed. Migration `0024_analytics_and_message_controls.sql` already represents these relationships, so this hotfix adds no migration. Repository tree addition: `functions/_shared/account-messages.js`.
+
 ## Operations directories and account access presentation (local implementation)
 
 The former `/media`, `/membership`, `/integrations`, and `/settings` scaffolds are now bounded operational directories built from existing authenticated clients and current repository authority. `/media` provides a read-only view of Commerce catalogue images plus approved GOATS previews and links to the authoritative Wheels and Access owners. `/membership` distinguishes Accounts from currently unavailable recurring membership/subscription authority. `/integrations` summarizes sanitized Auth, PayPal/Stripe, Printful, email, D1, R2, Turnstile, and OAuth configuration without calling providers or exposing secrets. `/settings` is an authority directory for the existing banner, GOATS, Wheels, Payments, Fulfillment, Emails, and Access owners; its three future global-control fields remain visibly disabled and non-persistent.

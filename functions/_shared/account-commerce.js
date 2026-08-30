@@ -533,8 +533,8 @@ function safeJson(value, fallback) { try { return JSON.parse(String(value)); } c
 function safeHttpsUrl(value) { try { const url = new URL(String(value || "")); return url.protocol === "https:" && !url.username && !url.password ? url.toString().slice(0, 2048) : null; } catch { return null; } }
 async function digestHex(bytes) { const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
-export async function enforceAccountCommerceRateLimit(env, request, accountId) {
-  return enforceRateLimit(env, request, "commerce", cleanText(accountId, 160));
+export async function enforceAccountCommerceRateLimit(env, request, accountId, mutation = false) {
+  return enforceRateLimit(env, request, mutation ? "account_commerce_mutation" : "account_commerce_read", cleanText(accountId, 160));
 }
 
 export { MAX_ADDRESSES, normalizeSavedAddress };

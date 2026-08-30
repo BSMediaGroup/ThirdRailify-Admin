@@ -28,6 +28,7 @@ import {
 } from "./shipping-core.js";
 import { orderCustomerProjection, prepareCheckoutCustomer, validateCheckoutCustomer } from "./commerce-customers.js";
 import { fulfillmentDetailForOrder } from "./printful-fulfillment.js";
+import { accountTransactionalMessageStatement } from "./account-messages.js";
 
 const encoder = new TextEncoder();
 const STRIPE_CHECKOUT_URL = "https://api.stripe.com/v1/checkout/sessions";
@@ -142,6 +143,18 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
         shippingSelection.option.name, shippingSelection.option.amount, shippingSelection.quoteId,
         shippingSelection.quotedAt, timestamp, timestamp,
       )] : []),
+      ...(customer?.accountId ? [accountTransactionalMessageStatement(db, customer.accountId, {
+        category: "orders",
+        sourceType: "order.created",
+        sourceId: orderId,
+        title: "Order started",
+        preview: "Your Third Railify order has been recorded.",
+        body: "Your order is linked to this account. Payment and fulfilment status will remain available in your account order history.",
+        actionUrl: `/account/orders/${orderId}`,
+        actionLabel: "View order",
+        details: { environment: configuration.environment, amount: expectedAmount, currencyCode: "CAD" },
+        createdAt: timestamp,
+      })] : []),
     ];
     try {
       await db.batch(statements);

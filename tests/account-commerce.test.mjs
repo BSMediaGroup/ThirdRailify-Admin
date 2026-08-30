@@ -10,9 +10,12 @@ import {
   accountCommerceOverview,
   accountOrderDetail,
   accountOrderHistory,
+  accountInboxMessages,
+  mutateAccountInbox,
 } from "../functions/_shared/account-commerce.js";
+import { createAccountTransactionalMessage } from "../functions/_shared/account-messages.js";
 import { decryptCommerceSecret, encryptCommerceSecret } from "../functions/_shared/commerce-core.js";
-import { hmacSha256 } from "../functions/_shared/auth-core.js";
+import { enforceRateLimit, ensureEnvironmentMasters, hmacSha256 } from "../functions/_shared/auth-core.js";
 import { onRequest as accountCommerceRequest } from "../functions/api/account-commerce/[[path]].js";
 import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-helpers.mjs";
 
@@ -130,10 +133,72 @@ test("the Admin internal route requires exact origin, a timely HMAC signature, a
   assert.equal((await accountCommerceRequest({ request: wrongOrigin, env })).status, 403);
 });
 
-async function insertAccount(db, id, displayName, email) {
+test("regular, promoted Admin, and environment Master accounts share canonical public commerce and recipient-scoped inbox behavior", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, {
+    ADMIN_EMAIL_1: "master-one@example.test", ADMIN_SECRET_1: "master-one-secret",
+    ADMIN_EMAIL_2: "master-two@example.test", ADMIN_SECRET_2: "master-two-secret",
+  });
+  await insertAccount(harness.authDb, "regular-account", "Regular Account", "regular@example.test");
+  await insertAccount(harness.authDb, "full-admin-account", "Full Admin", "full@example.test", "admin", "full");
+  await ensureEnvironmentMasters(env);
+  const accountIds = ["regular-account", "full-admin-account", "env-master-1", "env-master-2"];
+
+  for (const accountId of accountIds) {
+    const overview = await accountCommerceOverview(env, accountId);
+    assert.equal(overview.linked, false); assert.deepEqual(overview.addresses, []); assert.deepEqual(overview.orders, []);
+    assert.equal(overview.summary.orderCount, 0);
+    await createAccountTransactionalMessage(env, accountId, {
+      category: "orders", sourceType: "order.created", sourceId: `ord_${accountId}`,
+      title: "Order started", preview: "Your order was recorded.", body: "This account-scoped fixture represents a server-owned transactional event.",
+      actionUrl: `/account/orders/ord_${accountId}`, actionLabel: "View order", details: { status: "pending" },
+    });
+    const inbox = await accountInboxMessages(env, accountId);
+    assert.equal(inbox.total, 1); assert.equal(inbox.unread, 1); assert.equal(inbox.items[0].sourceId, `ord_${accountId}`);
+  }
+
+  const masterOne = await accountInboxMessages(env, "env-master-1");
+  assert.equal(masterOne.items.some((item) => item.sourceId === "ord_env-master-2"), false);
+  const fullAdmin = await accountInboxMessages(env, "full-admin-account");
+  assert.equal(fullAdmin.items.some((item) => item.sourceId === "ord_regular-account"), false);
+  await mutateAccountInbox(env, "env-master-1", { ids: [masterOne.items[0].id], action: "read" });
+  assert.equal((await accountInboxMessages(env, "env-master-1")).unread, 0);
+  await mutateAccountInbox(env, "env-master-1", { ids: [masterOne.items[0].id], action: "unread" });
+  assert.equal((await accountInboxMessages(env, "env-master-1")).unread, 1);
+  await assert.rejects(mutateAccountInbox(env, "env-master-1", { ids: [(await accountInboxMessages(env, "env-master-2")).items[0].id], action: "read" }), (error) => error.code === "account_inbox_message_not_found");
+  await mutateAccountInbox(env, "env-master-1", { ids: [masterOne.items[0].id], action: "delete" });
+  assert.equal((await accountInboxMessages(env, "env-master-1")).total, 0);
+
+  const linked = await accountAddressCreate(env, "env-master-1", HOME);
+  assert.equal(linked.linked, true); assert.equal(linked.addresses.length, 1); assert.equal(linked.summary.orderCount, 0);
+  await assert.rejects(createAccountTransactionalMessage(env, "missing-account", { category:"orders",sourceType:"order.created",sourceId:"ord_missing",title:"Missing",preview:"Missing",body:"Missing" }), (error) => error.code === "account_unavailable");
+});
+
+test("ordinary account page reads do not share the Master Admin commerce mutation limiter", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_COMMUNITY_API_SECRET: BRIDGE_SECRET });
+  await insertAccount(harness.authDb, "env-master-1", "Master Admin", "master@example.test", "admin", "master", "env_master");
+  const limiterRequest = new Request(`${ADMIN_ORIGIN}/api/admin/commerce/fixture`, { headers: { "CF-Connecting-IP": "192.0.2.44" } });
+  for (let attempt = 0; attempt < 30; attempt += 1) await enforceRateLimit(env, limiterRequest, "commerce", "env-master-1");
+  await assert.rejects(enforceRateLimit(env, limiterRequest, "commerce", "env-master-1"), (error) => error.status === 429 && error.code === "too_many_attempts");
+
+  for (let load = 0; load < 12; load += 1) {
+    for (const route of ["overview", "inbox", "inbox"]) {
+      const raw = JSON.stringify({ accountId: "env-master-1", input: {} });
+      const response = await accountCommerceRequest({ request: await signedInternalRequest(route, raw, PUBLIC_ORIGIN, "192.0.2.44"), env });
+      assert.equal(response.status, 200, `initial account read ${load + 1}/${route} must not inherit the Admin mutation bucket`);
+    }
+  }
+  const categories = (await harness.authDb.prepare("SELECT category,attempt_count,blocked_until FROM auth_rate_limits ORDER BY category").all()).results;
+  assert.equal(categories.find((row) => row.category === "commerce").blocked_until !== null, true);
+  assert.equal(categories.find((row) => row.category === "account_commerce_read").attempt_count, 36);
+  assert.equal(categories.find((row) => row.category === "account_commerce_read").blocked_until, null);
+});
+
+async function insertAccount(db, id, displayName, email, role = "user", adminLevel = "none", source = "test") {
   const now = new Date().toISOString();
-  await db.prepare("INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES (?,?,?,'user','none','active',?,?,?,'test')")
-    .bind(id, email, displayName, now, now, now).run();
+  await db.prepare("INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES (?,?,?, ?,?,'active',?,?,?,?)")
+    .bind(id, email, displayName, role, adminLevel, now, now, now, source).run();
 }
 
 async function insertHistoricalSnapshot(env, db, customerId) {
@@ -161,10 +226,12 @@ async function insertOrder(db, id, customerId, environment, amount, createdAt) {
     VALUES (?,?,1,'product-account-fixture','Fixture Product','CAD',?,1,?,0,?)`).bind(`item_${id}`, id, amount, amount, createdAt).run();
 }
 
-async function signedInternalRequest(route, raw, origin = PUBLIC_ORIGIN) {
+async function signedInternalRequest(route, raw, origin = PUBLIC_ORIGIN, ip = "") {
   const pathname = `/api/account-commerce/internal/${route}`;
   const timestamp = String(Math.floor(Date.now() / 1000));
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw))), (byte) => byte.toString(16).padStart(2, "0")).join("");
   const signature = await hmacSha256(BRIDGE_SECRET, `${timestamp}\nPOST\n${pathname}\n${digest}`);
-  return new Request(`${ADMIN_ORIGIN}${pathname}`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json", "X-ThirdRailify-Timestamp": timestamp, "X-ThirdRailify-Signature": signature }, body: raw });
+  const headers = { Origin: origin, "Content-Type": "application/json", "X-ThirdRailify-Timestamp": timestamp, "X-ThirdRailify-Signature": signature };
+  if (ip) headers["CF-Connecting-IP"] = ip;
+  return new Request(`${ADMIN_ORIGIN}${pathname}`, { method: "POST", headers, body: raw });
 }

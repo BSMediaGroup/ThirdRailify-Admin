@@ -2,6 +2,7 @@ import { AuthFailure, cleanText, enforceRateLimit, nowIso, randomId, verifyTurns
 import { commerceAccessForSession, decryptCommerceSecret, encryptCommerceSecret, requireCommerceDb } from "./commerce-core.js";
 import { prepareCheckoutCustomer, validateCheckoutCustomer } from "./commerce-customers.js";
 import { authoritativeCartLines, authoritativeSubtotal, normalizeCartItems, normalizeDeliveryRecipient, resolveShippingSelection } from "./shipping-core.js";
+import { accountTransactionalMessageStatement } from "./account-messages.js";
 import {
   PayPalApiError,
   capturePayPalOrder,
@@ -94,6 +95,13 @@ export async function createPayPalStorePayment(env, request, input, session, fet
         order_id,recipient_ciphertext,destination_country_code,destination_region_code,shipping_strategy,provider,
         provider_shipping_method_id,display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at,updated_at
       ) VALUES (?,?,?,?,?,?,?,?,?,'CAD',?,?,?,?)`).bind(orderId,recipientCiphertext,shipping.recipient.countryCode,shipping.recipient.region,shipping.strategy,shipping.provider,shipping.option.providerRateId,shipping.option.name,shipping.option.amount,shipping.quoteId,shipping.quotedAt,timestamp,timestamp),
+      ...(customer.accountId ? [accountTransactionalMessageStatement(db, customer.accountId, {
+        category:"orders",sourceType:"order.created",sourceId:orderId,title:"Order started",
+        preview:"Your Third Railify order has been recorded.",
+        body:"Your order is linked to this account. Payment and fulfilment status will remain available in your account order history.",
+        actionUrl:`/account/orders/${orderId}`,actionLabel:"View order",
+        details:{environment:configuration.environment === "live" ? "live" : "test",amount:total,currencyCode:"CAD"},createdAt:timestamp,
+      })] : []),
     ]);
     order = await db.prepare("SELECT * FROM commerce_orders WHERE id=?").bind(orderId).first();
   }
@@ -114,10 +122,21 @@ export async function createPayPalDonationPayment(env, request, input, session, 
   if (donation && donation.request_digest !== requestDigest) throw new AuthFailure(409, "donation_request_conflict", "This donation request identifier is already in use.");
   if (!donation) {
     const timestamp = nowIso();
-    const customer = session?.accountId ? await db.prepare("SELECT id FROM commerce_customers WHERE customer_kind='account' AND linked_account_id=?").bind(session.accountId).first() : null;
+    const accountContact = session?.accountId && session?.account?.email ? validateCheckoutCustomer({ mode:"account", name:session.account.displayName, email:session.account.email }, session) : null;
+    const customer = accountContact ? await prepareCheckoutCustomer(env, db, accountContact) : null;
     const donationId = `don_${randomId()}`;
-    await db.prepare(`INSERT INTO commerce_donations (id,request_id,request_digest,customer_id,environment,currency_code,amount_minor,status,donor_display_preference,created_at,updated_at)
-      VALUES (?,?,?,?,?,'CAD',?,'created','private',?,?)`).bind(donationId,donationRequestId,requestDigest,customer?.id || null,configuration.environment,amountMinor,timestamp,timestamp).run();
+    await db.batch([
+      ...(customer ? [customer.statement, ...(customer.auditStatement ? [customer.auditStatement] : [])] : []),
+      db.prepare(`INSERT INTO commerce_donations (id,request_id,request_digest,customer_id,environment,currency_code,amount_minor,status,donor_display_preference,created_at,updated_at)
+        VALUES (?,?,?,?,?,'CAD',?,'created','private',?,?)`).bind(donationId,donationRequestId,requestDigest,customer?.id || null,configuration.environment,amountMinor,timestamp,timestamp),
+      ...(customer?.accountId ? [accountTransactionalMessageStatement(db, customer.accountId, {
+        category:"donations",sourceType:"donation.created",sourceId:donationId,title:"Donation started",
+        preview:"Your Third Railify donation has been recorded.",
+        body:"Your donation is linked to this account. Its authoritative payment state remains server-controlled.",
+        actionUrl:"/account",actionLabel:"View account",
+        details:{environment:configuration.environment,amount:amountMinor,currencyCode:"CAD"},createdAt:timestamp,
+      })] : []),
+    ]);
     donation = await db.prepare("SELECT * FROM commerce_donations WHERE id=?").bind(donationId).first();
   }
   return createProviderOrderForTarget(env, { target: "donation", donation, configuration }, fetchImpl);

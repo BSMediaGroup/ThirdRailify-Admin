@@ -5,6 +5,8 @@ import { onRequest as captureRoute } from "../functions/api/commerce/paypal/capt
 import { onRequest as storeRoute } from "../functions/api/commerce/paypal/store.js";
 import { handlePayPalWebhook } from "../functions/api/webhooks/paypal.js";
 import { createPayPalOrder, minorUnitsToPayPal, paypalAmountToMinor, PAYPAL_WEBHOOK_EVENTS } from "../functions/_shared/paypal-client.js";
+import { createPayPalDonationPayment, createPayPalStorePayment } from "../functions/_shared/paypal-commerce.js";
+import { accountInboxMessages } from "../functions/_shared/account-commerce.js";
 import { commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestShippingQuote, insertTestVariant, TEST_DELIVERY_RECIPIENT } from "./commerce-test-helpers.mjs";
 
 const ORIGIN = "https://thirdrailify.pages.dev";
@@ -91,6 +93,16 @@ test("one-time donation is local-first, idempotent, server-created, and server-c
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_operation_jobs").first()).count,0);
 });
 
+test("an authenticated Master donation lazily creates the canonical customer and account message",async(t)=>{
+  const harness=await createCommerceDatabases();t.after(harness.dispose);await enableSandbox(harness.commerceDb);const timestamp=new Date().toISOString();
+  await harness.authDb.prepare("INSERT INTO accounts(id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES('env-master-1','master@example.test','Master Admin','admin','master','active',?,?,?,'env_master')").bind(timestamp,timestamp,timestamp).run();
+  const body={donationRequestId:"88888888-8888-4888-8888-888888888888",amountMinor:1500};const session={accountId:"env-master-1",account:{id:"env-master-1",displayName:"Master Admin",email:"master@example.test",role:"admin",adminLevel:"master",status:"active"}};
+  const paypalFetch=async(url,init={})=>{if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"donation-master-token",token_type:"Bearer",expires_in:3600});if(url.endsWith("/v2/checkout/orders")){const requestBody=JSON.parse(init.body);const reference=requestBody.purchase_units[0].reference_id;return Response.json({id:"PAYPALDONMASTER001",intent:"CAPTURE",status:"CREATED",purchase_units:[{reference_id:reference,custom_id:reference,amount:{currency_code:"CAD",value:"15.00"}}]},{status:201});}throw new Error("unexpected request");};
+  const created=await createPayPalDonationPayment(envFor(harness),post("/api/commerce/paypal/donation",body),body,session,paypalFetch);
+  const donation=await harness.commerceDb.prepare("SELECT d.customer_id,c.linked_account_id FROM commerce_donations d JOIN commerce_customers c ON c.id=d.customer_id").first();assert.equal(donation.linked_account_id,"env-master-1");
+  const inbox=await accountInboxMessages(envFor(harness),"env-master-1");assert.equal(inbox.total,1);assert.equal(inbox.items[0].sourceId,created.reference);assert.equal(inbox.items[0].sourceType,"donation.created");
+});
+
 test("store order persists authoritative customer, delivery, totals, and PayPal attempt before provider approval",async(t)=>{
   const harness=await createCommerceDatabases();t.after(harness.dispose);await enableSandboxStore(harness.commerceDb);
   await insertTestProduct(harness.commerceDb,{requiresShipping:1,targetPrintfulProductId:"target-product-001",migrationStatus:"target_verified"});
@@ -102,6 +114,25 @@ test("store order persists authoritative customer, delivery, totals, and PayPal 
   assert.equal(providerBody.purchase_units[0].amount.breakdown.item_total.value,"27.50");assert.equal(providerBody.purchase_units[0].amount.breakdown.shipping.value,"5.00");assert.equal(providerBody.purchase_units[0].payment_source,undefined);assert.equal(providerBody.payment_source.paypal.experience_context.shipping_preference,"SET_PROVIDED_ADDRESS");
   const order=await harness.commerceDb.prepare("SELECT customer_payment_provider,payment_status,customer_gross_amount,product_subtotal_amount,shipping_amount,tax_amount,tax_status,environment FROM commerce_orders").first();assert.deepEqual(order,{customer_payment_provider:"paypal",payment_status:"pending",customer_gross_amount:3250,product_subtotal_amount:2750,shipping_amount:500,tax_amount:0,tax_status:"not_collecting",environment:"test"});
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_order_delivery_snapshots").first()).count,1);assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_customers").first()).count,1);
+});
+
+test("an environment Master purchase uses its canonical customer and receives only its transactional account message",async(t)=>{
+  const harness=await createCommerceDatabases();t.after(harness.dispose);await enableSandboxStore(harness.commerceDb);
+  await insertTestProduct(harness.commerceDb,{requiresShipping:1,targetPrintfulProductId:"target-product-001",migrationStatus:"target_verified"});
+  await insertTestVariant(harness.commerceDb,{migrationStatus:"target_verified"});
+  const timestamp=new Date().toISOString();
+  await harness.authDb.batch([
+    harness.authDb.prepare("INSERT INTO accounts(id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES('env-master-1','master@example.test','Master Admin','admin','master','active',?,?,?,'env_master')").bind(timestamp,timestamp,timestamp),
+    harness.authDb.prepare("INSERT INTO accounts(id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES('other-account','other@example.test','Other Account','user','none','active',?,?,?,'test')").bind(timestamp,timestamp,timestamp),
+  ]);
+  const items=[{productId:"product-test-001",variantId:"variant-test-001",quantity:1}];const shipping=await insertTestShippingQuote(harness.commerceDb,{items});
+  const body={checkoutRequestId:"77777777-7777-4777-8777-777777777777",items,recipient:shipping.recipient,quoteId:shipping.quoteId,shippingOptionId:shipping.shippingOptionId,customer:{mode:"account",name:"Master Admin",email:"master@example.test"}};
+  const session={accountId:"env-master-1",account:{id:"env-master-1",displayName:"Master Admin",email:"master@example.test",role:"admin",adminLevel:"master",status:"active"}};
+  const paypalFetch=async(url,init={})=>{if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"master-token",token_type:"Bearer",expires_in:3600});if(url.endsWith("/v2/checkout/orders")){const requestBody=JSON.parse(init.body);const reference=requestBody.purchase_units[0].reference_id;return Response.json({id:"PAYPALMASTER001",intent:"CAPTURE",status:"CREATED",purchase_units:[{reference_id:reference,custom_id:reference,amount:{currency_code:"CAD",value:"32.50"}}]},{status:201});}throw new Error("unexpected request");};
+  const created=await createPayPalStorePayment(envFor(harness),post("/api/commerce/paypal/store",body),body,session,paypalFetch);
+  const customer=await harness.commerceDb.prepare("SELECT linked_account_id FROM commerce_customers WHERE customer_kind='account'").first();assert.equal(customer.linked_account_id,"env-master-1");
+  const inbox=await accountInboxMessages(envFor(harness),"env-master-1");assert.equal(inbox.total,1);assert.equal(inbox.items[0].sourceId,created.reference);assert.equal(inbox.items[0].sourceType,"order.created");
+  assert.equal((await accountInboxMessages(envFor(harness),"other-account")).total,0);
 });
 
 test("PayPal webhook verifies the exact raw event and unresolved delivery enters bounded recovery", async(t)=>{

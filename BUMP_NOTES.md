@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-08-31 - Master Admin public-account hotfix
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Root cause: signed Public account overview and inbox reads shared the low `commerce` rate-limit category with Admin commerce mutations. The account page performs an overview read plus page/header inbox reads, so an active Master Admin could inherit an exhausted bucket and receive HTTP 429 `too_many_attempts` from both panels even though its canonical `env-master-1` or `env-master-2` Account row was valid.
+- Separated trusted authenticated account reads and mutations into `account_commerce_read` and `account_commerce_mutation`; login, handoff, security, checkout, provider, and Admin commerce protections remain unchanged. Public clients remain bounded and do not automatically retry permanent 4xx/429 responses.
+- Locked the role-independent Account contract into tests for Regular, promoted Full Admin, Master Admin 1, and Master Admin 2: valid empty Commerce/address/order states, canonical lazy Customer linkage, recipient-scoped inbox read/unread/delete, unread counts, transactional delivery, and cross-account denial.
+- Added server-owned idempotent account transactional message creation and wired account-linked local order/donation creation to the canonical Customer's `linked_account_id`. Authenticated donations now use the existing lazy Account Customer path; no email matching, shadow identity, role downgrade, or Admin Inbox crossover was introduced.
+- No migration is required because applied migration `0024_analytics_and_message_controls.sql` already contains the account-recipient schema and indexes. Production rollout requires an Admin deployment followed by authenticated Master/Full/Regular stable-origin account acceptance; no remote migration, deployment, provider call, purchase, donation, payment, DNS, secret, or Cloudflare resource mutation occurred locally.
+
 ## 2026-08-31 - Admin operations directories and access presentation
 
 CURRENT VER=0.1.0-alpha.0

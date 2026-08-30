@@ -25,9 +25,10 @@ export async function onRequest({ request, env }) {
     const { body, raw } = await readAccountCommerceInternalBody(request);
     await verifyAccountCommerceInternalRequest(request, env, raw);
     const accountId = String(body.accountId || "");
-    await enforceAccountCommerceRateLimit(env, request, accountId);
     const input = body.input && typeof body.input === "object" && !Array.isArray(body.input) ? body.input : {};
     const internalPath = path.slice("internal/".length);
+    const mutation = internalPath === "contact" || internalPath === "addresses/create" || internalPath === "inbox/mutate" || /^addresses\/adr_[0-9a-f-]{36}\/(?:update|delete|default)$/.test(internalPath);
+    await enforceAccountCommerceRateLimit(env, request, accountId, mutation);
     let payload;
     if (internalPath === "overview") payload = await accountCommerceOverview(env, accountId);
     else if (internalPath === "inbox") payload = await accountInboxMessages(env, accountId, input);
