@@ -3,6 +3,7 @@ import { Link, useOutletContext } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { adminApi } from "../auth/client";
 import { AdminIcon } from "../components/AdminIcon";
+import { AccountAccessIcon, type AccountAccessKind } from "../components/AccountAccessBadge";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { getCustomerEmailsControlPlane, getFulfillmentShipping, getMerchandisingProducts, getPaymentsControlPlane, type CommerceOverviewPayload, type CustomerEmailsPayload, type FulfillmentShippingPayload, type MerchandisingProduct, type PaymentsControlPlanePayload } from "../commerce/client";
 import { getCommerceOverview } from "../commerce/client";
@@ -95,15 +96,65 @@ export function SettingsOperationsPage() {
   </OperationsPage>;
 }
 
+type InspectedRole = "master" | "full" | "regular";
+
 function RolePermissionsPanel({ policy, denied, canManage, dirty, busy, error, messageText, onToggle, onSave, onReset }: { policy: RolePolicyPayload | null; denied: AdminCapability[]; canManage: boolean; dirty: boolean; busy: boolean; error: string; messageText: string; onToggle: (capability: AdminCapability, effective: boolean) => void; onSave: () => void; onReset: () => void }) {
-  return <section className="role-permissions" aria-labelledby="role-permissions-title">
-    <header className="role-permissions__heading"><div><p className="eyebrow">Master-controlled policy</p><h2 id="role-permissions-title">Role Permissions &amp; Scopes</h2><p>Full Admin inherits every registered normal Admin capability by default. Stored rows represent restrictions only.</p></div><span className={canManage ? "is-master" : "is-readonly"}><AdminIcon name="shield" size={18} />{canManage ? "Master editing" : "Read-only policy"}</span></header>
-    <div className="role-summary"><article><span>Master Admin</span><strong>Full system authority</strong><p>Fixed, immutable, and owns permission policy.</p></article><article><span>Full Admin</span><strong>Default capability parity</strong><p>{policy ? `${denied.length} currently restricted scope${denied.length === 1 ? "" : "s"}.` : "Loading effective policy…"}</p></article><article><span>Regular User</span><strong>No Admin authority</strong><p>Public and member functionality only.</p></article></div>
-    {!canManage && <div className="role-policy-note"><AdminIcon name="shield" size={18} /><div><strong>Permission policy is managed by Master Admin.</strong><p>You can inspect every scope and current effective Full Admin state.</p></div></div>}
+  const [selectedRole, setSelectedRole] = useState<InspectedRole>("full");
+  const [permissionQuery, setPermissionQuery] = useState("");
+  const roleOptions: Array<{ id: InspectedRole; icon: AccountAccessKind; label: string; summary: string; state: string }> = [
+    { id: "master", icon: "master_admin", label: "Master Admin", summary: "Full system authority", state: "Fixed / immutable" },
+    { id: "full", icon: "full_admin", label: "Full Admin", summary: "Default capability parity", state: policy ? `${denied.length} explicit restriction${denied.length === 1 ? "" : "s"}` : "Loading policy" },
+    { id: "regular", icon: "regular_user", label: "Regular User", summary: "No Admin authority", state: "Fixed / non-configurable" },
+  ];
+  const selected = roleOptions.find((role) => role.id === selectedRole) || roleOptions[1];
+  const normalizedQuery = permissionQuery.trim().toLowerCase();
+  const visibleGroups = policy ? policy.groups.map((group) => {
+    const groupMatches = `${group.id} ${group.label} ${group.description}`.toLowerCase().includes(normalizedQuery);
+    const capabilities = policy.capabilities.filter((capability) => capability.group === group.id && (!normalizedQuery || groupMatches || `${capability.id} ${capability.label} ${capability.description}`.toLowerCase().includes(normalizedQuery)));
+    return { ...group, capabilities };
+  }).filter((group) => group.capabilities.length) : [];
+  const visibleCount = visibleGroups.reduce((count, group) => count + group.capabilities.length, 0);
+  const persistedDenials = policy?.deniedCapabilities || [];
+  const dirtyCount = new Set([...denied.filter((id) => !persistedDenials.includes(id)), ...persistedDenials.filter((id) => !denied.includes(id))]).size;
+  const editingFullAdmin = canManage && selectedRole === "full";
+  const context = selectedRole === "master"
+    ? { detail: "Policy owner · all registered capabilities", mode: "Fixed / immutable", note: "Master Admin owns the policy and cannot be restricted." }
+    : selectedRole === "regular"
+      ? { detail: "Public and member access only", mode: "No Admin control-plane authority", note: "Regular User has no configurable Admin policy." }
+      : { detail: `${denied.length} explicit restriction${denied.length === 1 ? "" : "s"}${dirty ? " in current draft" : ""}`, mode: editingFullAdmin ? "Policy editable by Master Admin" : "Read-only · Managed by Master Admin", note: "No stored denial means default access." };
+
+  return <section className={`role-permissions role-permissions--${selectedRole}`} aria-labelledby="role-permissions-title">
+    <header className="role-permissions__heading"><div><p className="eyebrow">Master-controlled policy</p><h2 id="role-permissions-title">Role Permissions &amp; Scopes</h2><p>Inspect each role's effective Admin authority. Full Admin remains default-enabled; persisted policy rows are explicit restrictions only.</p></div><span className={editingFullAdmin ? "is-master" : "is-readonly"}><AdminIcon name="shield" size={18} />{editingFullAdmin ? "Master edit mode · Full Admin" : context.mode}</span></header>
+
+    <fieldset className="role-selector"><legend>Inspect role policy</legend><div className="role-selector__options">{roleOptions.map((role) => <label className={`role-option role-option--${role.id}`} key={role.id}><input type="radio" name="inspected-role" value={role.id} checked={selectedRole === role.id} onChange={() => setSelectedRole(role.id)} /><span className="role-option__card"><span className="role-option__icon"><AccountAccessIcon kind={role.icon} /></span><span className="role-option__copy"><strong>{role.label}</strong><small>{role.summary}</small><b>{role.state}</b></span><span className="role-option__selected" aria-hidden="true">Selected</span></span></label>)}</div></fieldset>
+
+    <section className={`selected-role-context selected-role-context--${selectedRole}`} aria-live="polite" aria-label={`Selected role: ${selected.label}`}><span className="selected-role-context__icon"><AccountAccessIcon kind={selected.icon} /></span><div><span>Selected role</span><h3>{selected.label}</h3><strong>{selected.summary}</strong><p>{context.detail}</p></div><b>{context.mode}</b></section>
+
+    <aside className="policy-legend" aria-label="Policy state legend"><div className="is-default"><i /><span><strong>Default access</strong><small>Full Admin inherits automatically.</small></span></div><div className="is-restricted"><i /><span><strong>Restricted</strong><small>Master explicitly disabled it.</small></span></div><div className="is-required"><i /><span><strong>Required</strong><small>The role cannot disable it.</small></span></div><div className="is-master"><i /><span><strong>Master only</strong><small>Only Master may perform it.</small></span></div></aside>
+
+    {selectedRole !== "full" && <div className="role-policy-note"><AdminIcon name="shield" size={18} /><div><strong>{context.mode}</strong><p>{context.note}</p></div></div>}
     {error && <div className="admin-alert" role="alert">{error}</div>}{messageText && <div className="auth-success" role="status">{messageText}</div>}
-    {!policy ? <LoadingState label="Loading Role Permissions & Scopes…" /> : <div className="permission-groups">{policy.groups.map((group) => <article className="permission-group" key={group.id}><header><span><AdminIcon name={permissionIcon(group.id)} size={20} /></span><div><h3>{group.label}</h3><p>{group.description}</p></div></header><div>{policy.capabilities.filter((capability) => capability.group === group.id).map((capability) => { const restricted = denied.includes(capability.id); const state = capability.masterOnly ? "Master only" : !capability.mutable ? "Required" : restricted ? "Restricted" : "Default access"; return <label className={`permission-row${restricted ? " is-restricted" : ""}${!capability.mutable ? " is-locked" : ""}`} key={capability.id}><span className="permission-row__copy"><strong>{capability.label}</strong><small>{capability.description}</small><code>{capability.id}</code></span><span className={`permission-state is-${capability.masterOnly ? "master" : restricted ? "restricted" : capability.mutable ? "default" : "required"}`}>{state}</span><input type="checkbox" checked={!restricted && !capability.masterOnly} disabled={!canManage || !capability.mutable || capability.masterOnly || busy} onChange={(event) => onToggle(capability.id, event.target.checked)} aria-label={`${capability.label}: ${state}`} /></label>; })}</div></article>)}</div>}
-    {canManage && <footer className={`role-permissions__savebar${dirty ? " is-dirty" : ""}`}><div><i /><span>{busy ? "Applying policy…" : dirty ? "Unsaved permission changes" : "Full Admin policy is current"}</span></div><div><button className="secondary-button" type="button" disabled={busy || !denied.length} onClick={onReset}>Reset to defaults</button><button className="primary-button" type="button" disabled={busy || !dirty} onClick={onSave}>Apply policy</button></div></footer>}
+
+    {policy && <div className="permission-toolbar"><label><span>Search permissions</span><input type="search" value={permissionQuery} onChange={(event) => setPermissionQuery(event.target.value)} placeholder="Domain, permission, description, or ID" /></label><p><strong>{visibleCount}</strong> of {policy.capabilities.length} scopes shown</p></div>}
+
+    {!policy ? <LoadingState label="Loading Role Permissions & Scopes…" /> : visibleGroups.length ? <div className="permission-groups" data-selected-role={selectedRole}>{visibleGroups.map((group) => { const groupRestrictedCount = group.capabilities.filter((capability) => denied.includes(capability.id)).length; return <article className={`permission-group permission-group--${group.id}${selectedRole === "full" && groupRestrictedCount ? " has-restrictions" : ""}`} key={group.id}><header><span><AdminIcon name={permissionIcon(group.id)} size={20} /></span><div><h3>{group.label}</h3><p>{group.description}</p></div><b>{selectedRole === "full" && groupRestrictedCount ? `${groupRestrictedCount} restricted` : `${group.capabilities.length} scope${group.capabilities.length === 1 ? "" : "s"}`}</b></header><div>{group.capabilities.map((capability) => {
+      const restricted = denied.includes(capability.id);
+      const presentation = capabilityPresentation(selectedRole, capability, restricted);
+      const editable = editingFullAdmin && capability.mutable && !capability.masterOnly && !busy;
+      const descriptionId = `permission-${selectedRole}-${capability.id.replaceAll(".", "-")}-description`;
+      return <label className={`permission-row is-${presentation.tone}${editable ? " is-editable" : " is-locked"}`} key={capability.id}><span className="permission-row__copy"><strong>{capability.label}</strong><small id={descriptionId}>{capability.description}</small><code>{capability.id}</code></span><span className="permission-row__control"><span className={`permission-state is-${presentation.tone}`}>{presentation.state}</span><span className="policy-switch"><input type="checkbox" role="switch" checked={presentation.checked} disabled={!editable} onChange={(event) => onToggle(capability.id, event.target.checked)} aria-label={`${capability.label} for ${selected.label}: ${presentation.state}`} aria-describedby={descriptionId} /><span className="policy-switch__track" aria-hidden="true"><i /></span></span></span></label>;
+    })}</div></article>; })}</div> : <div className="operations-state"><strong>No matching permissions</strong><span>Try a domain, permission name, description, or capability ID.</span></div>}
+
+    {selectedRole === "full" ? editingFullAdmin ? <footer className={`role-permissions__savebar${dirty ? " is-dirty" : ""}`}><div><i /><span><strong>{busy ? "Applying policy…" : dirty ? `${dirtyCount} unsaved policy change${dirtyCount === 1 ? "" : "s"}` : "Full Admin policy is current"}</strong><small>Reset removes explicit denials and restores default parity.</small></span></div><div><button className="secondary-button" type="button" disabled={busy || !denied.length} onClick={onReset}>Reset to defaults</button><button className="primary-button" type="button" disabled={busy || !dirty} onClick={onSave}>Apply policy</button></div></footer> : <footer className="role-permissions__savebar is-readonly"><div><AdminIcon name="shield" size={18} /><span><strong>Read-only · Managed by Master Admin</strong><small>Current Full Admin restrictions remain visible for inspection.</small></span></div></footer> : <footer className="role-permissions__savebar is-readonly"><div><AdminIcon name="shield" size={18} /><span><strong>{context.mode}</strong><small>{context.note}</small></span></div></footer>}
   </section>;
+}
+
+function capabilityPresentation(role: InspectedRole, capability: RolePolicyPayload["capabilities"][number], restricted: boolean) {
+  if (role === "master") return { checked: true, state: capability.masterOnly ? "Master only" : "Required", tone: capability.masterOnly ? "master" : "required" };
+  if (role === "regular") return { checked: false, state: "Unavailable", tone: "unavailable" };
+  if (capability.masterOnly) return { checked: false, state: "Master only", tone: "master" };
+  if (!capability.mutable) return { checked: true, state: "Required", tone: "required" };
+  return restricted ? { checked: false, state: "Restricted", tone: "restricted" } : { checked: true, state: "Default access", tone: "default" };
 }
 
 function permissionIcon(group: string): Parameters<typeof AdminIcon>[0]["name"] { return ({ analytics: "analytics", inbox: "emails", watch: "watch", content: "content", commerce: "commerce", wheels: "wheels", media: "media", goats: "goats", membership: "vip", users: "users", integrations: "integrations", settings: "settings", role_permissions: "shield" } as Record<string, Parameters<typeof AdminIcon>[0]["name"]>)[group] || "overview"; }

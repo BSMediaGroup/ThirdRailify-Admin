@@ -22,6 +22,7 @@ import {
   bulkUpdateCollections,
   updateCollectionMemberships,
   bulkUpdateMerchandisingProducts,
+  updateProductFeatured,
   getCommerceMediaLimits,
   ingestMerchandisingProductMedia,
   uploadMerchandisingProductMedia,
@@ -297,6 +298,8 @@ export function CommerceProductsPage() {
   const [allMatching, setAllMatching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pendingVisibility, setPendingVisibility] = useState<string[]>([]);
+  const [pendingFeatured, setPendingFeatured] = useState<string[]>([]);
+  const [featuredErrors, setFeaturedErrors] = useState<Record<string, string>>({});
   const [featuredIds, setFeaturedIds] = useState<string[]>([]);
   const [featuredQuery, setFeaturedQuery] = useState("");
   const [featuredFilter, setFeaturedFilter] = useState<"all" | "featured" | "not_featured">("not_featured");
@@ -308,6 +311,7 @@ export function CommerceProductsPage() {
   const mainRequest = useRef(0);
   const featuredRequest = useRef(0);
   const featuredAuthority = useRef("");
+  const featuredPendingAuthority = useRef(new Set<string>());
   const mainFilters = useMemo<ProductListFilters>(() => ({ page, pageSize, query, visibility, status, migration, category, sort }), [category, migration, page, pageSize, query, sort, status, visibility]);
   const matchingFilters = useMemo<Omit<ProductListFilters, "page" | "pageSize">>(() => ({ query, visibility, status, migration, category, featured: "all", sort }), [category, migration, query, sort, status, visibility]);
 
@@ -396,17 +400,29 @@ export function CommerceProductsPage() {
       setSavingFeatured(false);
     }
   };
-  const mutateExplicit = async (operation: ProductBulkOperation, ids: string[], successPrefix: string) => {
-    if (!csrfToken || !canManage || !ids.length || busy) return;
-    setBusy(true); setError(""); setMessage("");
+  const reconcileFeatured = useCallback((productId: string, next: { featured: boolean; featuredOrder: number | null; updatedAt?: string | null }) => {
+    setPayload((current) => patchFeaturedPayload(current, productId, next));
+    setFeaturedBrowser((current) => patchFeaturedPayload(current, productId, next));
+    setSelectedProduct((current) => current?.id === productId ? { ...current, ...next, updatedAt: next.updatedAt || current.updatedAt } : current);
+  }, []);
+  const toggleFeatured = async (product: MerchandisingProduct) => {
+    if (!csrfToken || !canManage || featuredPendingAuthority.current.has(product.id)) return;
+    const requested = !product.featured;
+    const previous = { featured: product.featured, featuredOrder: product.featuredOrder, updatedAt: product.updatedAt };
+    const optimisticOrder = requested ? Math.max(0, ...(payload?.featured || []).map((entry) => entry.featuredOrder || 0)) + 10 : null;
+    featuredPendingAuthority.current.add(product.id);
+    setPendingFeatured((current) => current.includes(product.id) ? current : [...current, product.id]);
+    setFeaturedErrors((current) => { const next = { ...current }; delete next[product.id]; return next; });
+    reconcileFeatured(product.id, { featured: requested, featuredOrder: optimisticOrder });
     try {
-      const result = await bulkUpdateMerchandisingProducts(csrfToken, { operation, productIds: ids });
-      setMessage(successPrefix + " " + String(result.updated) + " updated; " + String(result.unchanged) + " unchanged.");
-      refresh();
-    } catch (reason) {
-      setError(errorMessage(reason, "The product state could not be updated."));
+      const result = await updateProductFeatured(csrfToken, product.id, requested);
+      reconcileFeatured(product.id, result.product);
+    } catch {
+      reconcileFeatured(product.id, previous);
+      setFeaturedErrors((current) => ({ ...current, [product.id]: "Could not update Featured status. Try again." }));
     } finally {
-      setBusy(false);
+      featuredPendingAuthority.current.delete(product.id);
+      setPendingFeatured((current) => current.filter((id) => id !== product.id));
     }
   };
   const toggleVisibility = async (product: MerchandisingProduct) => {
@@ -456,8 +472,22 @@ export function CommerceProductsPage() {
         <div className="commerce-product-table" role="list">{payload.items.map((product) => {
           const visible = product.visibility === "public";
           const selected = allMatching || selectedIds.includes(product.id);
-          const pending = pendingVisibility.includes(product.id);
-          return <article key={product.id} role="listitem" className={"commerce-product-row" + (bulkMode ? " is-bulk" : "") + (selected ? " is-selected" : "")}>{bulkMode && <label className="commerce-product-row__select"><input type="checkbox" aria-label={"Select " + product.title} checked={selected} disabled={allMatching} onChange={() => setSelectedIds((current) => current.includes(product.id) ? current.filter((id) => id !== product.id) : [...current, product.id])} /></label>}<div className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <span aria-hidden="true">TR</span>}</div><div><strong>{product.title}</strong><small>/{product.slug}</small><span>{product.categories.join(" · ") || "Uncategorized"}{product.tags.length ? " · " + product.tags.join(" · ") : ""}</span></div><div><span>Price</span><strong>{product.price.label}</strong><small>{product.activeVariantCount} / {product.variantCount} public variants</small></div><div><span>Storefront</span><strong>{visible && product.status === "active" ? "Public" : "Hidden"}</strong><small>{product.featured ? "Featured" : "Order " + String(product.displayOrder)}</small></div><div><span>Fulfillment mapping</span><strong>{humanize(product.readiness.fulfillment)}</strong><small>Migration: {humanize(product.migrationStatus)}</small></div><div className="commerce-product-row__actions"><button className="commerce-icon-action" type="button" title={visible ? "Hide from store" : "Show in store"} aria-label={(visible ? "Hide " : "Show ") + product.title + (visible ? " from store" : " in store")} aria-pressed={visible} onClick={() => void toggleVisibility(product)} disabled={!canManage || pending}>{pending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name={visible ? "eye" : "eyeOff"} size={18} />}</button><button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={product.featured ? "Remove from featured" : "Add to featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void mutateExplicit(product.featured ? "unfeature" : "feature", [product.id], product.featured ? "Featured product removed." : "Featured product added.")} disabled={!canManage || busy}><AdminIcon name="star" size={18} /></button><button className="commerce-row-action commerce-row-action--icon" type="button" title="Edit product" aria-label="Edit product" onClick={() => setSelectedProduct(product)}><AdminIcon name="edit" size={18} /></button></div></article>;
+          const visibilityPending = pendingVisibility.includes(product.id);
+          const featuredPending = pendingFeatured.includes(product.id);
+          return <article key={product.id} role="listitem" className={"commerce-product-row" + (bulkMode ? " is-bulk" : "") + (selected ? " is-selected" : "") + (featuredErrors[product.id] ? " has-featured-error" : "")}>
+            {bulkMode && <label className="commerce-product-row__select"><input type="checkbox" aria-label={"Select " + product.title} checked={selected} disabled={allMatching} onChange={() => setSelectedIds((current) => current.includes(product.id) ? current.filter((id) => id !== product.id) : [...current, product.id])} /></label>}
+            <div className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <span aria-hidden="true">TR</span>}</div>
+            <div><strong>{product.title}</strong><small>/{product.slug}</small><span>{product.categories.join(" · ") || "Uncategorized"}{product.tags.length ? " · " + product.tags.join(" · ") : ""}</span></div>
+            <div><span>Price</span><strong>{product.price.label}</strong><small>{product.activeVariantCount} / {product.variantCount} public variants</small></div>
+            <div><span>Storefront</span><strong>{visible && product.status === "active" ? "Public" : "Hidden"}</strong><small>{product.featured ? "Featured" : "Order " + String(product.displayOrder)}</small></div>
+            <div><span>Fulfillment mapping</span><strong>{humanize(product.readiness.fulfillment)}</strong><small>Migration: {humanize(product.migrationStatus)}</small></div>
+            <div className="commerce-product-row__actions">
+              <button className="commerce-icon-action" type="button" title={visible ? "Hide from store" : "Show in store"} aria-label={(visible ? "Hide " : "Show ") + product.title + (visible ? " from store" : " in store")} aria-pressed={visible} onClick={() => void toggleVisibility(product)} disabled={!canManage || visibilityPending}>{visibilityPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name={visible ? "eye" : "eyeOff"} size={18} />}</button>
+              <button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={product.featured ? "Remove from featured" : "Add to featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void toggleFeatured(product)} disabled={!canManage || featuredPending}>{featuredPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name="star" size={18} />}</button>
+              <button className="commerce-row-action commerce-row-action--icon" type="button" title="Edit product" aria-label="Edit product" onClick={() => setSelectedProduct(product)}><AdminIcon name="edit" size={18} /></button>
+            </div>
+            {featuredErrors[product.id] && <p className="commerce-product-row__featured-error" role="alert">{featuredErrors[product.id]}</p>}
+          </article>;
         })}</div>
         {!payload.items.length && <CommerceState>No products match the current search and filters.</CommerceState>}
         <ProductPagination page={payload.page} totalPages={payload.totalPages} onPage={setPage} label="Product pages" />
@@ -466,8 +496,8 @@ export function CommerceProductsPage() {
       <section className="commerce-section featured-products-manager" aria-labelledby="featured-manager-title">
         <div className="featured-products-manager__heading"><div><p className="eyebrow">Storefront priority</p><h2 id="featured-manager-title">Featured Products Manager</h2><p>See the current storefront rail, set its order, or find another catalogue product without scanning the full list.</p></div><strong>{orderedFeatured.length} featured</strong></div>
         <div className="featured-products-manager__grid">
-          <section className="featured-current" aria-labelledby="current-featured-title"><div><p className="eyebrow">Current featured products</p><h3 id="current-featured-title">Storefront order</h3></div>{orderedFeatured.length ? <ol>{orderedFeatured.map((product, index) => <li key={product.id}><span className="featured-current__position">{String(index + 1).padStart(2, "0")}</span><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span className="featured-current__identity"><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" ? "Public" : "Hidden"}</small></span><span className="merchandising-order-actions"><button type="button" onClick={() => moveFeatured(product.id, -1)} disabled={index === 0 || savingFeatured} aria-label={"Move " + product.title + " up"}>↑</button><button type="button" onClick={() => moveFeatured(product.id, 1)} disabled={index === orderedFeatured.length - 1 || savingFeatured} aria-label={"Move " + product.title + " down"}>↓</button></span><button className="commerce-icon-action is-featured" type="button" title="Remove from featured" aria-label={"Remove " + product.title + " from featured products"} aria-pressed={true} onClick={() => void mutateExplicit("unfeature", [product.id], "Featured product removed.")} disabled={!canManage || busy}><AdminIcon name="star" size={18} /></button></li>)}</ol> : <p className="merchandising-empty">No products are featured. Use the catalogue finder to add one.</p>}{featuredDirty && <div className="featured-order-save" role="status"><p><strong>Featured order changed</strong><span>Save to publish this deterministic order.</span></p><div><button className="text-button" type="button" onClick={() => setFeaturedIds(authoritativeFeaturedIds)} disabled={savingFeatured}>Discard</button><button className="button-link" type="button" onClick={() => void saveFeatured()} disabled={savingFeatured || !canManage || !payload.databaseConfigured}>{savingFeatured ? "Saving…" : "Save order"}</button></div></div>}</section>
-          <section className="featured-finder" aria-labelledby="featured-finder-title"><div><p className="eyebrow">Add / find products</p><h3 id="featured-finder-title">Catalogue finder</h3></div><div className="featured-finder__tools"><Field label="Search title or slug"><input type="search" value={featuredQuery} onChange={(event) => { setFeaturedQuery(event.target.value); setFeaturedPage(1); }} placeholder="Find a product" /></Field><Field label="Featured state"><select value={featuredFilter} onChange={(event) => { setFeaturedFilter(event.target.value as typeof featuredFilter); setFeaturedPage(1); }}><option value="all">All</option><option value="featured">Featured</option><option value="not_featured">Not featured</option></select></Field></div><div className="featured-finder__results" role="list">{featuredBrowser?.items.map((product) => { const eligible = ["active", "legacy_production"].includes(product.status); return <article key={product.id} role="listitem"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" ? "Public" : "Hidden"}</small></span><button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={product.featured ? "Remove from featured" : "Add to featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void mutateExplicit(product.featured ? "unfeature" : "feature", [product.id], product.featured ? "Featured product removed." : "Featured product added.")} disabled={!canManage || busy || (!product.featured && !eligible)}><AdminIcon name="star" size={18} /></button></article>; })}</div>{featuredBrowser && !featuredBrowser.items.length && <p className="merchandising-empty">No catalogue products match this finder.</p>}{featuredBrowser && <ProductPagination page={featuredBrowser.page} totalPages={featuredBrowser.totalPages} onPage={setFeaturedPage} label="Featured catalogue pages" />}</section>
+          <section className="featured-current" aria-labelledby="current-featured-title"><div><p className="eyebrow">Current featured products</p><h3 id="current-featured-title">Storefront order</h3></div>{orderedFeatured.length ? <ol>{orderedFeatured.map((product, index) => { const pending = pendingFeatured.includes(product.id); return <li key={product.id}><span className="featured-current__position">{String(index + 1).padStart(2, "0")}</span><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span className="featured-current__identity"><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" ? "Public" : "Hidden"}</small></span><span className="merchandising-order-actions"><button type="button" onClick={() => moveFeatured(product.id, -1)} disabled={index === 0 || savingFeatured} aria-label={"Move " + product.title + " up"}>↑</button><button type="button" onClick={() => moveFeatured(product.id, 1)} disabled={index === orderedFeatured.length - 1 || savingFeatured} aria-label={"Move " + product.title + " down"}>↓</button></span><button className="commerce-icon-action is-featured" type="button" title="Remove from featured" aria-label={"Remove " + product.title + " from featured products"} aria-pressed={true} onClick={() => void toggleFeatured(product)} disabled={!canManage || pending}>{pending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name="star" size={18} />}</button></li>; })}</ol> : <p className="merchandising-empty">No products are featured. Use the catalogue finder to add one.</p>}{featuredDirty && <div className="featured-order-save" role="status"><p><strong>Featured order changed</strong><span>Save to publish this deterministic order.</span></p><div><button className="text-button" type="button" onClick={() => setFeaturedIds(authoritativeFeaturedIds)} disabled={savingFeatured}>Discard</button><button className="button-link" type="button" onClick={() => void saveFeatured()} disabled={savingFeatured || !canManage || !payload.databaseConfigured}>{savingFeatured ? "Saving…" : "Save order"}</button></div></div>}</section>
+          <section className="featured-finder" aria-labelledby="featured-finder-title"><div><p className="eyebrow">Add / find products</p><h3 id="featured-finder-title">Catalogue finder</h3></div><div className="featured-finder__tools"><Field label="Search title or slug"><input type="search" value={featuredQuery} onChange={(event) => { setFeaturedQuery(event.target.value); setFeaturedPage(1); }} placeholder="Find a product" /></Field><Field label="Featured state"><select value={featuredFilter} onChange={(event) => { setFeaturedFilter(event.target.value as typeof featuredFilter); setFeaturedPage(1); }}><option value="all">All</option><option value="featured">Featured</option><option value="not_featured">Not featured</option></select></Field></div><div className="featured-finder__results" role="list">{featuredBrowser?.items.map((product) => { const eligible = ["active", "legacy_production"].includes(product.status); const pending = pendingFeatured.includes(product.id); return <article key={product.id} role="listitem"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" ? "Public" : "Hidden"}</small></span><button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={product.featured ? "Remove from featured" : "Add to featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void toggleFeatured(product)} disabled={!canManage || pending || (!product.featured && !eligible)}>{pending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name="star" size={18} />}</button></article>; })}</div>{featuredBrowser && !featuredBrowser.items.length && <p className="merchandising-empty">No catalogue products match this finder.</p>}{featuredBrowser && <ProductPagination page={featuredBrowser.page} totalPages={featuredBrowser.totalPages} onPage={setFeaturedPage} label="Featured catalogue pages" />}</section>
         </div>
       </section>
     </div> : null}
@@ -479,6 +509,16 @@ function ProductPagination({ page, totalPages, onPage, label }: { page: number; 
   return <nav className="commerce-pagination" aria-label={label}><button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1}>Previous</button><div>{paginationItems(page, totalPages).map((item) => typeof item === "number" ? <button key={item} type="button" className={item === page ? "is-current" : ""} aria-current={item === page ? "page" : undefined} onClick={() => onPage(item)}>{item}</button> : <span key={item} aria-hidden="true">…</span>)}</div><span>Page {page} of {totalPages}</span><button type="button" onClick={() => onPage(page + 1)} disabled={page >= totalPages}>Next</button></nav>;
 }
 function paginationItems(page: number, totalPages: number): Array<number | string> { if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1); const pages = new Set([1, totalPages, page - 1, page, page + 1].filter((value) => value > 0 && value <= totalPages)); const sorted = [...pages].sort((a, b) => a - b); const result: Array<number | string> = []; sorted.forEach((value, index) => { if (index && value - sorted[index - 1] > 1) result.push("ellipsis-" + String(value)); result.push(value); }); return result; }
+function patchFeaturedPayload(payload: MerchandisingListPayload | null, productId: string, patch: { featured: boolean; featuredOrder: number | null; updatedAt?: string | null }) {
+  if (!payload) return payload;
+  const source = payload.items.find((product) => product.id === productId) || payload.featured.find((product) => product.id === productId);
+  if (!source) return payload;
+  const product = { ...source, ...patch, updatedAt: patch.updatedAt || source.updatedAt };
+  const items = payload.items.map((entry) => entry.id === productId ? { ...entry, ...patch, updatedAt: patch.updatedAt || entry.updatedAt } : entry);
+  const featured = (patch.featured ? [...payload.featured.filter((entry) => entry.id !== productId), product] : payload.featured.filter((entry) => entry.id !== productId))
+    .sort((left, right) => (left.featuredOrder ?? Infinity) - (right.featuredOrder ?? Infinity) || left.slug.localeCompare(right.slug));
+  return { ...payload, items, featured, totals: { ...payload.totals, featuredProducts: featured.length } };
+}
 function bulkOperationLabel(operation: ProductBulkOperation) { return operation === "show" ? "Show in store" : operation === "hide" ? "Hide from store" : operation === "feature" ? "Feature" : "Unfeature"; }
 
 

@@ -3,7 +3,7 @@ import { AdminIcon } from "../components/AdminIcon";
 import { useAuth } from "./AuthProvider";
 import type { AdminCapability } from "./capabilities";
 
-export function AdminCapabilityBoundary({ view, manage, children }: { view: AdminCapability; manage?: AdminCapability; children: ReactNode }) {
+export function AdminCapabilityBoundary({ view, manage, preserveInspectionControls = false, children }: { view: AdminCapability; manage?: AdminCapability; preserveInspectionControls?: boolean; children: ReactNode }) {
   const { hasCapability } = useAuth();
   if (!hasCapability(view)) return <section className="capability-restricted" aria-labelledby="capability-restricted-title">
     <span><AdminIcon name="shield" size={30} /></span>
@@ -14,6 +14,6 @@ export function AdminCapabilityBoundary({ view, manage, children }: { view: Admi
   const readOnly = Boolean(manage && !hasCapability(manage));
   return <>
     {readOnly && <div className="capability-readonly-callout" role="status"><AdminIcon name="shield" size={19} /><div><strong>Read-only access</strong><p>Master Admin has restricted management for this workspace. Inspection remains available.</p></div></div>}
-    {readOnly ? <fieldset className="capability-readonly-surface" disabled>{children}</fieldset> : children}
+    {readOnly && !preserveInspectionControls ? <fieldset className="capability-readonly-surface" disabled>{children}</fieldset> : children}
   </>;
 }

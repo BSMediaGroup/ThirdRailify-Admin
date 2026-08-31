@@ -116,6 +116,28 @@ test("bulk product state operations are authenticated, controlled, audited, sync
   const audit = await harness.commerceDb.prepare("SELECT metadata_json FROM commerce_audit WHERE action='commerce.products_bulk_updated' ORDER BY id DESC LIMIT 1").first(); assert.match(audit.metadata_json, /operation|selection|matched|updated/);
 });
 
+test("targeted Featured mutation is authoritative, idempotent, bounded, and isolated from the generic Commerce limiter", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  await insertTestProduct(harness.commerceDb, { id: "featured-target", slug: "featured-target", title: "Featured Target", targetPrintfulProductId: "provider-must-stay-unchanged", migrationStatus: "target_verified", unitAmount: 4321 });
+  const url = ADMIN_ORIGIN + "/api/admin/commerce/products/featured-target/featured";
+  const post = (featured, overrides = {}) => commerceRequest({ request: jsonRequest(url, { origin: overrides.origin || ADMIN_ORIGIN, cookie: overrides.cookie ?? cookie, csrfToken: overrides.csrfToken ?? created.csrfToken, body: overrides.body || { featured } }), env, data: { commerceFetch: () => { throw new Error("provider call forbidden"); } } });
+
+  const unauthenticated = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, csrfToken: created.csrfToken, body: { featured: true } }), env, data: {} }); assert.equal(unauthenticated.status, 401);
+  const noCsrf = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, body: { featured: true } }), env, data: {} }); assert.equal(noCsrf.status, 403);
+  const invalid = await post(true, { body: { featured: "true" } }); assert.equal(invalid.status, 400); assert.equal((await invalid.json()).error, "commerce_product_featured_invalid");
+  const extra = await post(true, { body: { featured: true, title: "stale payload" } }); assert.equal(extra.status, 400); assert.equal((await extra.json()).error, "commerce_product_featured_fields_invalid");
+
+  const enabled = await post(true); const enabledPayload = await enabled.json(); assert.equal(enabled.status, 200); assert.deepEqual(Object.keys(enabledPayload).sort(), ["changed", "ok", "product"]); assert.equal(enabledPayload.changed, true); assert.deepEqual(Object.keys(enabledPayload.product).sort(), ["featured", "featuredOrder", "id", "updatedAt"]); assert.equal(enabledPayload.product.featured, true); assert.equal(enabledPayload.product.featuredOrder, 10);
+  const duplicate = await post(true); const duplicatePayload = await duplicate.json(); assert.equal(duplicate.status, 200); assert.equal(duplicatePayload.changed, false); assert.equal(duplicatePayload.product.featuredOrder, 10);
+  const disabled = await post(false); assert.equal(disabled.status, 200); assert.equal((await disabled.json()).product.featured, false);
+  const stored = await harness.commerceDb.prepare("SELECT is_featured,featured_order,unit_amount,target_printful_product_id,migration_status,visibility FROM commerce_products WHERE id='featured-target'").first(); assert.deepEqual(stored, { is_featured: 0, featured_order: null, unit_amount: 4321, target_printful_product_id: "provider-must-stay-unchanged", migration_status: "target_verified", visibility: "public" });
+
+  for (let attempt = 0; attempt < 20; attempt += 1) { const response = await post(attempt % 2 === 0); assert.equal(response.status, 200); }
+  const rateRows = await harness.authDb.prepare("SELECT category,attempt_count FROM auth_rate_limits WHERE category IN ('commerce','commerce_catalogue_mutation') ORDER BY category").all();
+  assert.deepEqual(rateRows.results, [{ category: "commerce_catalogue_mutation", attempt_count: 25 }]);
+  const audit = await harness.commerceDb.prepare("SELECT actor_account_id,metadata_json FROM commerce_audit WHERE action='commerce.product_featured_updated' ORDER BY created_at DESC LIMIT 1").first(); assert.equal(audit.actor_account_id, "env-master-1"); assert.match(audit.metadata_json, /featured/);
+});
+
 test("individual featured toggle appends deterministically and unfeature removes ordering", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
   await insertTestProduct(harness.commerceDb, { id: "featured-existing", slug: "featured-existing", title: "Existing", isFeatured: 1, featuredOrder: 10 });

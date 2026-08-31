@@ -34,6 +34,7 @@ import {
   updateCollectionMemberships,
   updateCollectionProducts,
   updateFeaturedProducts,
+  updateMerchandisingProductFeatured,
   updateMerchandisingProduct,
   updateMerchandisingVariant,
   updateProductCollections,
@@ -198,7 +199,9 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   await requireCsrf(request, session);
   const snapshotBody = path === "printful/catalogue/snapshot" ? await readSnapshotRequest(request) : null;
   const isSnapshotStart = snapshotBody?.phase === "begin" && !snapshotBody?.checkpoint;
-  const rateCategory = path === "printful/catalogue/migrate"
+  const rateCategory = isFeaturedCatalogueMutation(path)
+    ? "commerce_catalogue_mutation"
+    : path === "printful/catalogue/migrate"
     ? "commerce_migration"
     : path.endsWith("/send-test") ? "commerce_email"
     : path === "printful/catalogue/snapshot" && !isSnapshotStart ? "commerce_snapshot" : "commerce";
@@ -355,6 +358,10 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateFeaturedProducts(env, session, body);
     authEventType = "commerce_featured_products_updated";
+  } else if (/^products\/[^/]+\/featured$/.test(path)) {
+    const body = await readJsonBody(request);
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
+    payload = await updateMerchandisingProductFeatured(env, session, decodePathPart(path.split("/")[1]), body);
   } else if (/^products\/[^/]+\/media\/ingest$/.test(path)) {
     await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     const productId = decodePathPart(path.split("/")[1]);
@@ -477,6 +484,10 @@ function requireCommerceDatabase(env) {
   if (!env?.THIRDRAILIFY_COMMERCE_DB || typeof env.THIRDRAILIFY_COMMERCE_DB.prepare !== "function") {
     throw new AuthFailure(503, "commerce_database_unavailable", "Commerce storage is required for this audited action.");
   }
+}
+
+function isFeaturedCatalogueMutation(path) {
+  return path === "products/bulk" || path === "products/featured" || /^products\/[^/]+\/featured$/.test(path);
 }
 
 function requireAdminOriginWhenPresent(request, env) {

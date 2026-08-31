@@ -211,6 +211,7 @@ export type ProductBulkResult = {
   ok: true; operation: ProductBulkOperation; selection: "explicit" | "matching"; matched: number; requested: number;
   updated: number; unchanged: number; rejected: number; errors: string[]; updatedIds: string[];
 };
+export type ProductFeaturedResult = { ok: true; changed: boolean; product: { id: string; featured: boolean; featuredOrder: number | null; updatedAt: string | null } };
 export type ControlledTestAcceptance = {
   enabled: boolean; normalCheckoutEnabled: boolean; livePaymentsEnabled: boolean; fulfillmentEnabled: boolean;
   existingOrderCount: number;
@@ -513,6 +514,9 @@ export function getMerchandisingProductList(filters: ProductListFilters = {}) {
 }
 export function bulkUpdateMerchandisingProducts(csrfToken: string, body: { operation: ProductBulkOperation; productIds: string[] } | { operation: ProductBulkOperation; matching: Omit<ProductListFilters, "page" | "pageSize">; confirmMatching: true; expectedCount: number }) {
   return adminApi<ProductBulkResult>("/api/admin/commerce/products/bulk", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+}
+export function updateProductFeatured(csrfToken: string, productId: string, featured: boolean) {
+  return adminApi<ProductFeaturedResult>(`/api/admin/commerce/products/${encodeURIComponent(productId)}/featured`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ featured }) });
 }
 export function getCollections() { return adminApi<CollectionsPayload>("/api/admin/commerce/collections"); }
 export function getCollectionOptions() { return adminApi<CollectionOptionsPayload>("/api/admin/commerce/collections/options"); }

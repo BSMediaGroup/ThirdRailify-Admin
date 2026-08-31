@@ -89,5 +89,5 @@ export function App() {
 
 function guard(path: string, element: ReactNode) {
   const policy = adminRoutePolicy(path);
-  return <AdminCapabilityBoundary view={policy.view} manage={policy.manage}>{element}</AdminCapabilityBoundary>;
+  return <AdminCapabilityBoundary view={policy.view} manage={policy.manage} preserveInspectionControls={path === "/settings"}>{element}</AdminCapabilityBoundary>;
 }

@@ -436,6 +436,45 @@ export async function updateFeaturedProducts(env, session, input) {
   return merchandisingProductsPayload(env, session);
 }
 
+export async function updateMerchandisingProductFeatured(env, session, productId, input) {
+  const db = requireCommerceDb(env);
+  const id = cleanText(productId, 160);
+  if (!id) throw new AuthFailure(400, "commerce_product_id_invalid", "The commerce product ID is invalid.");
+  requireExactFields(input, ["featured"], "commerce_product_featured_fields_invalid");
+  const featured = normalizeProductFeatured(input.featured);
+  const current = await db.prepare("SELECT id, status, is_featured, featured_order, updated_at FROM commerce_products WHERE id = ?").bind(id).first();
+  if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
+  if (featured === 1 && !["active", "legacy_production"].includes(current.status)) {
+    throw new AuthFailure(409, "commerce_product_not_displayable", "Only a displayable catalogue product can be featured.");
+  }
+  const alreadyEqual = Number(current.is_featured) === featured && (featured === 0 || Number.isSafeInteger(Number(current.featured_order)));
+  if (alreadyEqual) return { ok: true, changed: false, product: featuredMutationProduct(current) };
+
+  const timestamp = nowIso();
+  try {
+    if (featured === 1) {
+      await db.prepare(`UPDATE commerce_products
+                        SET is_featured = 1,
+                            featured_order = (SELECT COALESCE(MAX(featured_order), 0) + 10 FROM commerce_products WHERE is_featured = 1),
+                            updated_at = ?
+                        WHERE id = ? AND is_featured = 0`).bind(timestamp, id).run();
+    } else {
+      await db.prepare("UPDATE commerce_products SET is_featured = 0, featured_order = NULL, updated_at = ? WHERE id = ? AND is_featured = 1").bind(timestamp, id).run();
+    }
+    const updated = await db.prepare("SELECT id, is_featured, featured_order, updated_at FROM commerce_products WHERE id = ?").bind(id).first();
+    await writeCommerceAudit(env, { actorAccountId: session?.accountId, action: "commerce.product_featured_updated", targetType: "commerce_product", targetId: id, result: "success", metadata: { featured: Boolean(featured) } });
+    return { ok: true, changed: true, product: featuredMutationProduct(updated) };
+  } catch (error) {
+    if (error instanceof AuthFailure) throw error;
+    console.error("commerce_product_featured_update_failed", { errorName: cleanText(error?.name, 80) || "Error" });
+    throw new AuthFailure(500, "commerce_product_featured_update_failed", "Could not update Featured status. Try again.");
+  }
+}
+
+function featuredMutationProduct(row) {
+  return { id: cleanText(row.id, 160), featured: Number(row.is_featured) === 1, featuredOrder: Number.isSafeInteger(Number(row.featured_order)) ? Number(row.featured_order) : null, updatedAt: cleanText(row.updated_at, 80) || null };
+}
+
 export async function bulkUpdateMerchandisingProducts(env, session, input) {
   const db = requireCommerceDb(env);
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["operation", "productIds", "matching", "confirmMatching", "expectedCount"].includes(key))) {
