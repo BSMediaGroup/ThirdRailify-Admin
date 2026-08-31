@@ -1,5 +1,15 @@
 # Wheels V1.12 Admin Authority
 
+## Wheel Mechanics V2 authority and editor
+
+The existing revisioned `wheel_settings` global row remains the sole authority; Mechanics V2 is a canonical object inside its existing JSON and needs no migration or competing row. Read-only normalization accepts V1 built-ins and custom intent without persistence mutation. Only the existing protected Save path writes canonical V2, advances the optimistic revision, and audits the change. Public receives only safe animation fields and the revision.
+
+`/wheels/mechanics` retains the graphite/gold/violet Admin system and now provides nine compiled decay cards, seven bounded physics slider/numeric pairs, a keyboard/drag/numeric seven-point monotone-PCHIP editor, saved-versus-draft velocity/deceleration/progress/cadence graphs, local 3/10/20/60-second preview, and calculated naturalness/handbrake diagnostics. The preview is synthetic and local: it performs no API mutation or Official draw.
+
+Natural Hybrid final coefficients are quadratic `0.05`, viscous `0.40`, clicker `0.02`, onset `0.18`, blend `0.12`, capture speed `0.010`, and capture duration fraction `0.080`. The pure shared compiler applies fixed-step RK4 `1/2048`, bounded monotone C2 quintic terminal capture, canonical 1025-point Float64 resampling, and one Simpson midpoint integration into exact normalized angular progress. Custom Shape uses shape-preserving monotone PCHIP with locked `(0,1)` and `(1,0)` endpoints.
+
+Admin production deployment `a563a173-8533-4038-8cde-86f0a9a624a5` serves the isolated 18-file manifest SHA-256 `0caba373de312905ed0a1616b87dab8dbbb882e3a64396558e9afe5b07755b12`. Stable and immutable Admin origins expose the same entry-JS hash and safe revision 5 Mechanics V2 `custom-shape` projection. No production Save was made; Public preview and production consumed the normalized existing policy read-only.
+
 ## V1.12 global mechanics authority
 
 The existing `wheel_settings` row with `setting_key = 'global'` now owns the normalized mechanics object alongside prior global defaults. It stores the selected profile/custom parameters, launch RPS bounds, full-turn bounds, and default/minimum/maximum duration policy under the row's existing optimistic revision. Read normalizes legacy rows without mutating them. Save strictly validates the complete policy, conditionally advances the revision, and appends an existing `wheel_audit_events` record; no migration or second settings model is required.

@@ -1,5 +1,11 @@
 # Wheels Stage V1.1 authority
 
+## Wheel Mechanics V2 boundary
+
+Admin continues to project one sanitized revisioned global policy; Stage stores no curve and gains no winner authority. Public compiles and freezes one mechanics snapshot for an individual/focused spin or once for the complete Spin All batch. Actual weighted-segment boundary events drive click cadence, while Official All preflight, atomic result persistence, idempotency, landing derivation, and settlement ordering remain unchanged.
+
+Admin deployment `a563a173-8533-4038-8cde-86f0a9a624a5` preceded Public preview `41bdf876-c2ce-4ea9-a441-82ac891215e1` and production `f1845dff-806d-4529-a81a-9e2b945ebd6f`. Genuine four-Wheel Stage Demo acceptance used one projection/revision/shared start and produced exact local settlements without a Wheel API write or Official result.
+
 ## V1.12 mechanics boundary
 
 Stage membership and Official All authority do not store or select a decay curve. Public reads the sanitized global mechanics projection once before coordinating a batch, then snapshots the same settings revision and start timestamp for all one-to-six animations. Admin continues to own results and the atomic Official All transaction; changing global mechanics cannot change winners, landing evidence, idempotency, or an animation already in progress.

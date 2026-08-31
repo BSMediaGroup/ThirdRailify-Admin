@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-01 - Wheel Mechanics V2 authority and diagnostics
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Upgraded the existing `/wheels/mechanics` authority in place with the Natural Hybrid ODE compiler, nine distinct profiles, strict client/server coefficient bounds, real velocity/deceleration/progress/cadence graphs, saved/draft comparison, and measured handbrake warnings.
+- Added accessible bounded Custom Physics and seven-point monotone-PCHIP Custom Shape editing plus a local 3/10/20/60-second immutable-snapshot preview. Fractional point inputs now pass native browser step validation and Save remains revision/CSRF/capability protected.
+- V1 rows normalize without writes; explicit Save emits canonical Mechanics V2 in the existing global settings JSON. No schema or migration was added.
+- Eight-viewport Admin browser evidence and sampled metrics are under `.artifacts/wheels-mechanics-v2`. No production policy Save, D1/R2 mutation, Official result, provider, secret, DNS, or custom-domain change was performed.
+- Deployed Admin first from an isolated current-production baseline as `a563a173-8533-4038-8cde-86f0a9a624a5` (`https://a563a173.thirdrailify-admin.pages.dev`) with 18-file manifest SHA-256 `0caba373de312905ed0a1616b87dab8dbbb882e3a64396558e9afe5b07755b12`. Stable and immutable routes serve byte-identical `index-D9Cc-nAa.js`; the safe projection reports revision 5 Mechanics V2 `custom-shape`, proving normalization without a settings save.
+
 ## 2026-09-01 - Production Poll gallery routing hotfix
 
 CURRENT VER=0.1.0-alpha.0

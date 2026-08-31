@@ -1,0 +1,69 @@
+{
+  "generatedAt": "2026-08-31T17:15:43.041Z",
+  "profile": "natural-hybrid",
+  "coefficients": {
+    "quadraticDrag": 0.05,
+    "viscousDrag": 0.4,
+    "clickerFriction": 0.02,
+    "clickerOnsetSpeed": 0.18,
+    "clickerBlendWidth": 0.12,
+    "captureStartSpeed": 0.01,
+    "captureDurationFraction": 0.08
+  },
+  "sampleCount": 1025,
+  "sampleTimes": [
+    {
+      "u": 0.1,
+      "velocity": 0.7066267685789986,
+      "progress": 0.30982533799254397
+    },
+    {
+      "u": 0.25,
+      "velocity": 0.4255751776548977,
+      "progress": 0.6165893122825404
+    },
+    {
+      "u": 0.5,
+      "velocity": 0.1774240415670765,
+      "progress": 0.8822350921299552
+    },
+    {
+      "u": 0.75,
+      "velocity": 0.052638279437002826,
+      "progress": 0.9805384903603703
+    },
+    {
+      "u": 0.9,
+      "velocity": 0.013828473726325884,
+      "progress": 0.9981033241734362
+    },
+    {
+      "u": 0.97,
+      "velocity": 0.0013878012945628265,
+      "progress": 0.9999570097500184
+    }
+  ],
+  "diagnostics": {
+    "speedAt25": 0.4255751776548977,
+    "speedAt50": 0.1774240415670765,
+    "speedAt75": 0.052638279437002826,
+    "speedAt90": 0.01390724962355498,
+    "tailDurationFraction": 0.369140625,
+    "terminalSpeed": 0,
+    "terminalAcceleration": 0,
+    "peakDeceleration": 3.547623770309502,
+    "maximumJerk": 13.952318360330992,
+    "estimatedFinalClickIntervalMs": 1347.955604219704,
+    "finalTravelPercent": 0.1916723863328751,
+    "captureSpeedRemoved": 0.010000019543941776,
+    "handbrakeRisk": false,
+    "checks": {
+      "monotoneSpeed": true,
+      "softTerminalStop": true,
+      "noReverseMotion": true,
+      "noFinalSnap": true,
+      "suspenseTailPresent": true,
+      "frameRateIndependent": true
+    }
+  }
+}

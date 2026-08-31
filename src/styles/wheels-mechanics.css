@@ -3,6 +3,23 @@
   gap: 18px;
   padding-bottom: 30px;
 }
+.mechanics-editor-fieldset {
+  display: contents;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.mechanics-readonly {
+  display: grid;
+  gap: 3px;
+  padding: 13px 16px;
+  border: 1px solid rgba(243, 201, 40, 0.32);
+  border-radius: 12px;
+  background: rgba(243, 201, 40, 0.06);
+  color: var(--muted);
+}
+.mechanics-readonly strong { color: var(--gold); }
 .mechanics-savebar {
   position: sticky;
   top: 12px;
@@ -111,6 +128,7 @@
   font-size: 0.72rem;
   color: var(--gold-soft);
 }
+.curve-preset-card:disabled { cursor: not-allowed; opacity: 0.68; }
 .curve-card-check {
   justify-self: start;
   padding: 4px 7px;
@@ -187,6 +205,14 @@
   stroke-width: 2;
   filter: drop-shadow(0 0 5px rgba(189, 108, 226, 0.42));
 }
+.graph-current {
+  fill: none;
+  stroke: rgba(243, 201, 40, 0.72);
+  stroke-width: 2;
+  stroke-dasharray: 8 7;
+  stroke-linecap: round;
+}
+.graph-marker--capture { stroke: rgba(243, 201, 40, 0.72); }
 .mechanics-graphs {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
@@ -202,6 +228,10 @@
     ),
     linear-gradient(145deg, #11110e, #090907);
 }
+.mechanics-panel--graph h3 { margin: 0 0 4px; font-size: 1.02rem; }
+.mechanics-panel--graph > p { min-height: 42px; margin: 0 0 8px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.mechanics-graphs--v2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mechanics-graph-studio { overflow: hidden; }
 .custom-curve-grid,
 .mechanics-fields {
   display: grid;
@@ -221,6 +251,7 @@
   text-transform: uppercase;
   color: var(--muted);
 }
+.range-field > small { min-height: 34px; color: var(--quiet); line-height: 1.4; }
 .range-field > div {
   display: grid;
   grid-template-columns: minmax(100px, 1fr) 82px auto;
@@ -257,6 +288,25 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
+.physics-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.physics-control-grid .range-field:last-child { grid-column: 1 / -1; max-width: calc(50% - 9px); }
+.custom-shape-editor { display: grid; gap: 18px; }
+.custom-shape-canvas { display: block; width: 100%; height: auto; touch-action: none; }
+.custom-shape-canvas rect { fill: rgba(7, 6, 8, .7); stroke: rgba(204, 146, 236, .13); }
+.custom-shape-canvas polyline { fill: none; stroke: #b967df; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 6px rgba(179, 96, 218, .28)); }
+.custom-shape-canvas circle { fill: var(--gold); stroke: #100f0c; stroke-width: 3; cursor: grab; outline: none; }
+.custom-shape-canvas circle:focus { stroke: #fff8d3; stroke-width: 5; }
+.custom-shape-canvas circle.is-locked { fill: #8c7f4b; cursor: not-allowed; }
+.shape-point-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.shape-point-row { display: grid; grid-template-columns: minmax(110px, .7fr) repeat(2, minmax(120px, 1fr)); align-items: end; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: #0a0a08; }
+.shape-point-row > strong { align-self: center; color: var(--gold-soft); font-size: .68rem; letter-spacing: .08em; }
+.shape-point-row label { display: grid; gap: 5px; }
+.shape-point-row label > span { color: var(--quiet); font-size: .67rem; text-transform: uppercase; letter-spacing: .08em; }
+.shape-point-row input { width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 8px; background: #090908; color: var(--ink); padding: 7px; }
 .mechanics-fields label {
   display: grid;
   gap: 7px;
@@ -354,6 +404,8 @@
   display: grid;
   gap: 16px;
 }
+.preview-selectors { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.sound-toggle button { min-height: 42px; }
 .preview-console label {
   display: grid;
   gap: 7px;
@@ -395,6 +447,19 @@
   padding: 0;
   list-style: none;
 }
+.diagnostic-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.diagnostic-metrics > span { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0a0a08; }
+.diagnostic-metrics small { color: var(--quiet); }
+.diagnostic-metrics strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.diagnostic-checks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.diagnostic-checks > span { display: inline-flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .72rem; }
+.diagnostic-checks b { font-size: .61rem; letter-spacing: .08em; }
+.diagnostic-checks .is-pass b { color: var(--safe); }
+.diagnostic-checks .is-warn b { color: var(--gold); }
+.handbrake-risk { display: grid; gap: 3px; margin-top: 14px; padding: 13px; border: 1px solid rgba(114, 215, 165, .28); border-radius: 11px; background: rgba(114, 215, 165, .06); color: var(--muted); }
+.handbrake-risk strong { color: var(--safe); font-size: .78rem; letter-spacing: .08em; }
+.handbrake-risk.is-warning { border-color: rgba(230, 159, 63, .45); background: rgba(230, 159, 63, .08); }
+.handbrake-risk.is-warning strong { color: #efb66c; }
 .mechanics-invariants li {
   padding: 12px 14px;
   border: 1px solid var(--line);
@@ -451,12 +516,15 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .mechanics-graphs,
-  .mechanics-control-grid {
+  .mechanics-control-grid,
+  .mechanics-graphs--v2 {
     grid-template-columns: 1fr;
   }
   .policy-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .diagnostic-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .shape-point-grid { grid-template-columns: 1fr; }
   .wheels-overview-jumps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -482,6 +550,7 @@
   }
   .curve-preset-grid,
   .custom-curve-grid,
+  .physics-control-grid,
   .mechanics-fields,
   .policy-fields,
   .mechanics-invariants ul,
@@ -489,6 +558,11 @@
   .wheels-overview-jumps {
     grid-template-columns: 1fr;
   }
+  .physics-control-grid .range-field:last-child { grid-column: auto; max-width: none; }
+  .shape-point-row { grid-template-columns: 1fr 1fr; }
+  .shape-point-row > strong { grid-column: 1 / -1; }
+  .diagnostic-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .preview-selectors { grid-template-columns: 1fr; }
   .mechanics-preview .preview-layout {
     grid-template-columns: 1fr;
   }

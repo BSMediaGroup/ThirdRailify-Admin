@@ -40,13 +40,13 @@ test("secure bounded integers use rejection sampling and weighted snapshot hashe
 test("global mechanics extends the existing revisioned policy row with fallback, validation, projection, conflict, rate limit, and audit", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness, { THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET: "wheel-mechanics-rate-secret" });
   const legacy = await getWheelSettings(env); assert.deepEqual(legacy.settings.mechanics, cloneDefaultWheelMechanics()); assert.equal(legacy.revision, 1);
-  const mechanics = { ...cloneDefaultWheelMechanics(), curveProfile: "long-settle", launchRpsMin: 2.4, launchRpsMax: 4.1, customCurve: { holdEnd: .06, tailStart: .7, tailVelocity: .15 } };
+  const mechanics = cloneDefaultWheelMechanics(); mechanics.curveProfile = "custom-physics"; mechanics.launchRpsMin = 2.4; mechanics.launchRpsMax = 4.1; mechanics.physics = { ...mechanics.physics, viscousDrag: .46, clickerFriction: .035 };
   const saved = await saveWheelSettings(env, "master", { ...legacy.settings, mechanics, revision: legacy.revision }); assert.equal(saved.revision, 2); assert.deepEqual(saved.settings.mechanics, mechanics);
   const projection = await getPublicWheelMechanics(env); assert.deepEqual(projection, { ok: true, mechanics, revision: 2, updatedAt: saved.updatedAt }); assert.deepEqual(Object.keys(projection).sort(), ["mechanics", "ok", "revision", "updatedAt"]);
   await assert.rejects(saveWheelSettings(env, "master", { ...saved.settings, revision: 1 }), (error) => error.code === "wheel_revision_conflict");
   await assert.rejects(saveWheelSettings(env, "master", { ...saved.settings, revision: 2, mechanics: { ...mechanics, launchRpsMin: 5, launchRpsMax: 4 } }), (error) => error.code === "wheel_mechanics_invalid");
   const stored = await harness.commerceDb.prepare("SELECT value_json,revision FROM wheel_settings WHERE setting_key='global'").first(); assert.equal(stored.revision, 2); assert.deepEqual(JSON.parse(stored.value_json).mechanics, mechanics);
-  const audits = await harness.commerceDb.prepare("SELECT event_type,metadata_json FROM wheel_audit_events WHERE event_type='wheel_settings_saved'").all(); assert.equal(audits.results.length, 1); assert.deepEqual(JSON.parse(audits.results[0].metadata_json), { previousRevision: 1, mechanicsVersion: 1, curveProfile: "long-settle" });
+  const audits = await harness.commerceDb.prepare("SELECT event_type,metadata_json FROM wheel_audit_events WHERE event_type='wheel_settings_saved'").all(); assert.equal(audits.results.length, 1); assert.deepEqual(JSON.parse(audits.results[0].metadata_json), { previousRevision: 1, mechanicsVersion: 2, curveProfile: "custom-physics" });
   const limiter = await harness.commerceDb.prepare("SELECT request_count FROM wheel_rate_limits WHERE category='admin_settings'").first(); assert.equal(limiter.request_count, 3);
 });
 
