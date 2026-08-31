@@ -13,6 +13,7 @@ PENDING VER=0.1.0-alpha.0
 - Updated the stale Products authorization fixture to the current canonical role model: Full Admin receives normal catalogue parity by default, while a Regular account is rejected. No permission authority, runtime capability, schema, or account state changed.
 - Focused gates are green under repository-pinned Node 22.16.0: 11 product-merchandising tests, 3 Commerce browser tests, 16 authorization tests, lint, typecheck, production build, and the Commerce Worker dry-run build.
 - No migration, provider/payment/fulfilment operation, DNS/domain mutation, product price/visibility change, or direct D1 Featured write was performed. The catalogue freshness deployment and final stable-origin readback follow the clean scoped release.
+- Scoped freshness commit `b0df548` shipped through Git-integrated Pages production deployment `7ae71e58-491f-47b3-b6d9-b640a65a4c08`; the stable Admin catalogue projection returns HTTP 200 with `Cache-Control: no-store`, and remote D1 readback contains zero Featured rows after the acceptance product was restored.
 
 ## 2026-08-31 - Admin Products Featured-toggle reliability hotfix
 
