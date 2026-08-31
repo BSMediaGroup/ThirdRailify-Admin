@@ -620,6 +620,12 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 - Replaced the complete-catalogue featured checkbox wall with current-featured ordering/removal and a separate searchable, filtered, paginated add/find browser. Responsive and keyboard-focused coverage includes 1440, 1024, 768, and 390 pixel layouts.
 - No D1 migration, provider request, catalogue migration continuation, checkout/payment/fulfillment change, deployment, or Public repository change is part of this milestone.
 
+## 2026-09-01 - Polls V1.1 production schema rollout
+
+- Audited the remote `thirdrailify-commerce` ledger and proved `0027_polls_v11_media.sql` was the sole pending migration while 0025 and 0026 were already recorded.
+- Exported and hashed the complete production D1 database before applying 0027 once through Wrangler's migration ledger. The rollout created `poll_media_assets` plus its four declared indexes; the post-rollout ledger is current and `PRAGMA foreign_key_check` is clean.
+- This resolves the deployed Poll V1.1 serializer dependency on banner and option media without changing the working Rumble discovery path, secrets, DNS, providers, payments, or fulfillment.
+
 ## 2026-08-29 — Admin account menu alignment
 
 - Restored the Admin account menu's Sign out action to the same left-justified icon-and-label layout as the other menu actions. The account-menu-scoped rule now overrides the global centered button layout, with live Chromium regression coverage at 1440 and 390 widths.
