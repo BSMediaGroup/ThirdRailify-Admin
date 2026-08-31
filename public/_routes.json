@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "include": ["/", "/analytics", "/inbox", "/access", "/watch", "/content", "/wheels", "/wheels/*", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/*", "/goats", "/goats/*", "/media", "/membership", "/integrations", "/settings", "/api/account-commerce/*", "/api/auth/*", "/api/admin/*", "/api/internal/*", "/api/banner", "/api/catalogue/*", "/api/commerce/*", "/api/community/discord/ingest", "/api/contact", "/api/goats/*", "/api/public/*", "/api/watch/ingest", "/api/webhooks/*", "/api/wheels", "/api/wheels/*", "/commerce-media/*", "/u/*"],
+  "include": ["/", "/analytics", "/inbox", "/access", "/watch", "/content", "/wheels", "/wheels/*", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/*", "/goats", "/goats/*", "/media", "/membership", "/integrations", "/settings", "/api/account-commerce/*", "/api/auth/*", "/api/admin/*", "/api/internal/*", "/api/banner", "/api/catalogue/*", "/api/commerce/*", "/api/community/discord/ingest", "/api/contact", "/api/goats/*", "/api/polls", "/api/polls/*", "/api/public/*", "/api/watch/ingest", "/api/webhooks/*", "/api/wheels", "/api/wheels/*", "/commerce-media/*", "/u/*"],
   "exclude": ["/assets/*"]
 }

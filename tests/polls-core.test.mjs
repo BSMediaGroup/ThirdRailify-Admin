@@ -8,6 +8,7 @@ import {
   createPoll,
   getPollCreatorAccess,
   ingestRumbleVotes,
+  listPublicPolls,
   mutatePollCreatorGrant,
   recordBotHeartbeat,
   submitWebVote,
@@ -15,7 +16,9 @@ import {
   updateAutomationConfig,
   updatePoll,
   verifyBotServiceRequest,
+  verifyPublicPollRequest,
 } from "../functions/_shared/polls-core.js";
+import { onRequest as pollRequest, publicRead } from "../functions/api/polls/[[path]].js";
 import { normalizePollTrigger } from "../functions/_shared/poll-normalization.js";
 import { createCommerceDatabases, commerceEnvironment } from "./commerce-test-helpers.mjs";
 
@@ -97,6 +100,76 @@ test("bot service HMAC rejects tampering and replay", async (t) => {
   await assert.rejects(verifyBotServiceRequest(request, env, new Uint8Array()), (error) => error.code === "bot_request_replayed");
   const tampered = new Request(`https://admin.example${path}`, { headers: serviceHeaders(timestamp, "request_identifier_67890", "0".repeat(64)) });
   await assert.rejects(verifyBotServiceRequest(tampered, env, new Uint8Array()), (error) => error.code === "bot_signature_invalid");
+});
+
+test("public Poll Pages routing, empty and populated reads, service authentication, and failure states stay explicit", async (t) => {
+  const routes = JSON.parse(await readFile(new URL("../public/_routes.json", import.meta.url), "utf8"));
+  assert.ok(routes.include.includes("/api/polls"));
+  assert.ok(routes.include.includes("/api/polls/*"));
+
+  const harness = await createCommerceDatabases();
+  t.after(() => harness.dispose());
+  const env = commerceEnvironment(harness, {
+    THIRDRAILIFY_COMMUNITY_API_SECRET: HMAC_SECRET,
+    THIRDRAILIFY_POLL_VOTER_SECRET: HMAC_SECRET,
+    THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET: HMAC_SECRET,
+  });
+
+  const emptyResponse = await publicRead(new Request("https://admin.example/api/polls?view=open&search="), env, "");
+  assert.equal(emptyResponse.status, 200);
+  assert.match(emptyResponse.headers.get("cache-control") || "", /^public,/);
+  assert.deepEqual((await emptyResponse.json()).items, []);
+
+  await account(harness.authDb, "public-reader-fixture", "Public Reader Fixture");
+  await harness.commerceDb.prepare("INSERT INTO poll_creator_grants (account_id,active,may_create_polls,granted_by_account_id,created_at,updated_at) VALUES (?,1,1,NULL,?,?)")
+    .bind("public-reader-fixture", new Date().toISOString(), new Date().toISOString()).run();
+  const created = await createPoll(env, "public-reader-fixture", { ...pollInput("Public route fixture"), rumbleEnabled: false });
+  await changePollLifecycle(env, "public-reader-fixture", created.poll.slug, { revision: created.poll.revision, action: "open" });
+  const populatedResponse = await publicRead(new Request("https://admin.example/api/polls?view=open&search="), env, "");
+  const populated = await populatedResponse.json();
+  assert.equal(populatedResponse.status, 200);
+  assert.equal(populated.items.length, 1);
+  assert.equal(populated.items[0].slug, created.poll.slug);
+
+  await assert.rejects(listPublicPolls({}, { view: "open" }), (error) => error.code === "polls_database_not_configured");
+  await assert.rejects(
+    listPublicPolls({ THIRDRAILIFY_COMMERCE_DB: { prepare() { throw new Error("poll query failed"); } } }, { view: "open" }),
+    /poll query failed/,
+  );
+
+  const path = "/api/polls/internal/access";
+  const raw = JSON.stringify({ accountId: "" });
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const requestId = "public_poll_request_12345";
+  const signature = await hmac(`POST\n${path}\n${timestamp}\n${requestId}\n${await sha256(raw)}`);
+  const signed = new Request(`https://admin.example${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...serviceHeaders(timestamp, requestId, signature) },
+    body: raw,
+  });
+  await verifyPublicPollRequest(signed.clone(), env, raw);
+  const replay = await pollRequest({ request: signed, env });
+  assert.equal(replay.status, 409);
+  assert.equal((await replay.json()).error, "service_request_replayed");
+
+  const requestIdTwo = "public_poll_request_67890";
+  const signatureTwo = await hmac(`POST\n${path}\n${timestamp}\n${requestIdTwo}\n${await sha256(raw)}`);
+  const accepted = await pollRequest({ request: new Request(`https://admin.example${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...serviceHeaders(timestamp, requestIdTwo, signatureTwo) },
+    body: raw,
+  }), env });
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await accepted.json(), { ok: true, authenticated: false, canCreate: false, canManageAll: false });
+
+  const rejected = await pollRequest({ request: new Request(`https://admin.example${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...serviceHeaders(timestamp, "public_poll_request_99999", "0".repeat(64)) },
+    body: raw,
+  }), env });
+  assert.equal(rejected.status, 401);
+  assert.equal((await rejected.json()).error, "poll_signature_invalid");
 });
 
 test("creator grants, ownership, option locks, signed voting, and desired/applied config stay fail closed", async (t) => {

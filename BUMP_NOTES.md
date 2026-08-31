@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-01 - Production Poll gallery routing hotfix
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Production `GET https://thirdrailify.com/api/polls?view=open&search=` returned HTTP 502 while its upstream `GET https://admin.thirdrailify.com/api/polls?view=open&search=` returned the Admin SPA as HTTP 200 `text/html`; the Poll handler and Commerce D1 were never reached.
+- Root cause was the Admin Pages `_routes.json` allowlist omitting both `/api/polls` and `/api/polls/*` even though the Poll Function shipped in the same source. Added only those two Pages Function routes; no Poll core, bot control-plane, auth, signing, replay, voter, or D1 behavior changed.
+- Remote read-only verification found the complete migration-0025 Poll table/index set and zero Poll rows. Zero public/open Polls remains HTTP 200 with `items: []`, and Public renders the authoritative `No open Polls` state rather than an outage.
+- Added focused regression coverage for Pages routing, empty and populated public reads without an Admin browser session, Poll relay HMAC/replay rejection, private `no-store` internal responses, missing D1 binding, and query failure. No migration was run and no secret was read, printed, regenerated, or changed.
+- Production deployment and stable-origin acceptance evidence: pending this hotfix's validated release.
+
 ## 2026-09-01 - Current Printful catalogue reconciliation
 
 CURRENT VER=0.1.0-alpha.0
