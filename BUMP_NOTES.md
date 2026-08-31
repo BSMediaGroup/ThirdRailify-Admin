@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-01 - Polls V1.2 lifecycle and gallery visibility authority
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Proved the existing authority already separates `polls.state` from `polls.is_public`; no migration was added or changed. Close now preserves listing rather than writing visibility as a lifecycle side effect, while archive/restore keep their existing private semantics.
+- Added bounded public Poll paging with total/page metadata. Closed results use deterministic `closed_at DESC, updated_at DESC, id ASC` order and exclude drafts, hidden closed Polls, and archived Polls.
+- Added revision-checked closed-Poll hide/show authority for owners and `polls.manage` Admins. Unauthorized accounts fail closed; hidden public detail returns 404 to ordinary viewers while the authorized management read remains available.
+- Updated Admin Poll management to expose lifecycle and listing separately, owner identity, aggregate totals, and explicit **Hide from gallery / Show in gallery** controls without deleting records.
+- Added lifecycle/listing, close-preservation, pagination/sort, search, hidden/archived exclusion, public/private detail, owner denial, Admin override, and responsive Admin browser coverage. Rollout requires Admin authority/API before Public; no deployment, remote migration/D1 write, bot/provider/payment action, secret, or DNS change was performed.
+
 ## 2026-09-01 - Gaming request Inbox intake
 
 CURRENT VER=0.1.0-alpha.0

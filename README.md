@@ -1,5 +1,13 @@
 # Third Railify Admin
 
+## Polls V1.2 lifecycle and public listing authority (local implementation)
+
+The existing migration-0025 schema already separates Poll lifecycle (`polls.state`: `draft|open|closed|archived`) from public listing (`polls.is_public`). Closing now changes only lifecycle/timestamps/revision and preserves the current listing flag. Archive remains the deliberate lifecycle removal state and clears listing; restore returns to a private draft. No redundant visibility column or migration is required.
+
+Public `view=closed` is bounded by `page`/`pageSize`, counts total matches, and sorts by `closed_at DESC, updated_at DESC, id ASC`; drafts, hidden closed Polls, and archived Polls remain excluded. A revision-checked owner/Admin visibility mutation can hide or show only a closed Poll while preserving its closed lifecycle. Public detail continues for listed open/closed Polls, while signed owners/Admins can inspect their hidden management view. Admin `/polls` now exposes lifecycle and listing as separate columns with explicit hide/show controls, owner identity, and authoritative vote totals.
+
+Rollout requires Admin authority/API first, followed by Public Function/app and staged/stable acceptance. No migration, deployment, remote D1 write, bot/provider action, secret, or DNS change was performed.
+
 ## Gaming request Inbox intake (local implementation)
 
 Signed Public `POST /api/gaming/suggestions` requests now enter the existing durable Admin Inbox as category `gaming` and source type `gaming_suggestion`. The receiver verifies the exact Public origin, timestamp, request ID, body digest, and existing `THIRDRAILIFY_COMMUNITY_API_SECRET`; applies the existing Turnstile and rate-limit authorities; normalizes only exact HTTPS Steam app URLs; and preserves server-signed account attribution without trusting browser identity. Idempotency uses the existing Inbox source identity constraint. No new Admin page, schema migration, provider API, Steam credential, email delivery, or remote mutation is required; operators use the existing `/inbox` destination.

@@ -5,9 +5,11 @@ import {
   automationsStatus,
   botActivePoll,
   changePollLifecycle,
+  changePollVisibility,
   createPoll,
   getCreatorRumbleDiscovery,
   getPollCreatorAccess,
+  getPublicPoll,
   ingestRumbleVotes,
   listPublicPolls,
   mutatePollCreatorGrant,
@@ -87,6 +89,57 @@ test("Poll migration, lifecycle, one-current-vote semantics, lease conflict, and
   assert.equal(closed.poll.state, "closed");
   assert.equal((await botActivePoll(env)).activePoll, null);
   await assert.rejects(submitWebVote(env, actor, open.poll.slug, { optionId: optionOne }), (error) => error.code === "poll_not_open");
+});
+
+test("closed Poll listing is independent from lifecycle, paginated, and owner/Admin visibility remains authorized", async (t) => {
+  const harness = await createCommerceDatabases();
+  t.after(() => harness.dispose());
+  const env = commerceEnvironment(harness, {
+    THIRDRAILIFY_POLL_VOTER_SECRET: HMAC_SECRET,
+    THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET: HMAC_SECRET,
+  });
+  await account(harness.authDb, "history-owner", "History Owner");
+  await account(harness.authDb, "history-other", "History Other");
+  await account(harness.authDb, "history-admin", "History Admin", { role: "admin", adminLevel: "full" });
+  await harness.commerceDb.prepare("INSERT INTO poll_creator_grants (account_id,active,may_create_polls,granted_by_account_id,created_at,updated_at) VALUES (?,1,1,NULL,?,?)")
+    .bind("history-owner", new Date().toISOString(), new Date().toISOString()).run();
+
+  const draft = await createPoll(env, "history-owner", { ...pollInput("History draft"), rumbleEnabled: false });
+  assert.equal((await listPublicPolls(env, { view: "open" })).items.length, 0);
+  assert.equal((await listPublicPolls(env, { view: "closed" })).items.length, 0);
+
+  const opened = await changePollLifecycle(env, "history-owner", draft.poll.slug, { revision: draft.poll.revision, action: "open" });
+  assert.equal(opened.poll.public, true);
+  assert.equal((await listPublicPolls(env, { view: "open" })).items[0].id, opened.poll.id);
+  const closed = await changePollLifecycle(env, "history-owner", opened.poll.slug, { revision: opened.poll.revision, action: "close" });
+  assert.equal(closed.poll.state, "closed");
+  assert.equal(closed.poll.public, true, "close preserves public listing");
+  const olderDraft = await createPoll(env, "history-owner", { ...pollInput("Older history Poll"), rumbleEnabled: false });
+  const olderOpen = await changePollLifecycle(env, "history-owner", olderDraft.poll.slug, { revision: olderDraft.poll.revision, action: "open" });
+  const olderClosed = await changePollLifecycle(env, "history-owner", olderOpen.poll.slug, { revision: olderOpen.poll.revision, action: "close" });
+  await harness.commerceDb.prepare("UPDATE polls SET closed_at=? WHERE id=?").bind("2026-09-01T02:00:00.000Z", closed.poll.id).run();
+  await harness.commerceDb.prepare("UPDATE polls SET closed_at=? WHERE id=?").bind("2026-09-01T01:00:00.000Z", olderClosed.poll.id).run();
+  const closedPage = await listPublicPolls(env, { view: "closed", page: 1, pageSize: 1 });
+  assert.equal(closedPage.items[0].id, closed.poll.id);
+  assert.deepEqual({ page: closedPage.page, pageSize: closedPage.pageSize, total: closedPage.total, totalPages: closedPage.totalPages }, { page: 1, pageSize: 1, total: 2, totalPages: 2 });
+  assert.equal((await listPublicPolls(env, { view: "closed", page: 2, pageSize: 1 })).items[0].id, olderClosed.poll.id);
+  await changePollLifecycle(env, "history-owner", olderClosed.poll.slug, { revision: olderClosed.poll.revision, action: "archive" });
+
+  await assert.rejects(changePollVisibility(env, "history-other", closed.poll.slug, { revision: closed.poll.revision, public: false }), (error) => error.code === "poll_owner_required");
+  const hidden = await changePollVisibility(env, "history-owner", closed.poll.slug, { revision: closed.poll.revision, public: false });
+  assert.equal(hidden.poll.state, "closed");
+  assert.equal(hidden.poll.public, false);
+  assert.equal((await listPublicPolls(env, { view: "closed" })).items.length, 0);
+  await assert.rejects(getPublicPoll(env, closed.poll.slug), (error) => error.code === "poll_not_found");
+  assert.equal((await getPublicPoll(env, closed.poll.slug, "history-owner", true)).poll.id, closed.poll.id);
+
+  const shown = await changePollVisibility(env, "history-admin", closed.poll.slug, { revision: hidden.poll.revision, public: true });
+  assert.equal(shown.poll.public, true);
+  assert.equal((await listPublicPolls(env, { view: "closed", search: "history draft" })).items.length, 1);
+  const archived = await changePollLifecycle(env, "history-admin", closed.poll.slug, { revision: shown.poll.revision, action: "archive" });
+  assert.equal(archived.poll.state, "archived");
+  assert.equal(archived.poll.public, false);
+  assert.equal((await listPublicPolls(env, { view: "closed" })).items.length, 0);
 });
 
 test("bot service HMAC rejects tampering and replay", async (t) => {

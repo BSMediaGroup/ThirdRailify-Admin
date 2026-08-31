@@ -1,6 +1,7 @@
 import { AuthFailure, errorResponse, jsonResponse } from "../../_shared/auth-core.js";
 import {
   changePollLifecycle,
+  changePollVisibility,
   createPoll,
   getCreatorRumbleDiscovery,
   getPollCreatorAccess,
@@ -49,15 +50,18 @@ export async function onRequest(context) {
 async function publicRead(request, env, path) {
   if (request.method !== "GET" && request.method !== "HEAD") throw new AuthFailure(405, "method_not_allowed", "This Poll method is not allowed.");
   const url = new URL(request.url);
-  const payload = path ? await getPublicPoll(env, decode(path)) : await listPublicPolls(env, { view: url.searchParams.get("view"), search: url.searchParams.get("search") });
-  return jsonResponse(payload, { headers: { "Cache-Control": payload?.poll?.state === "open" || !path ? PUBLIC_CACHE : "public, max-age=60", ETag: `W/\"${hash(JSON.stringify(payload))}\"` } });
+  const payload = path ? await getPublicPoll(env, decode(path)) : await listPublicPolls(env, {
+    view: url.searchParams.get("view"), search: url.searchParams.get("search"), page: url.searchParams.get("page"), pageSize: url.searchParams.get("pageSize"),
+  });
+  const cacheControl = path ? payload?.poll?.state === "open" ? PUBLIC_CACHE : "public, max-age=60" : payload?.view === "closed" ? "public, max-age=60" : PUBLIC_CACHE;
+  return jsonResponse(payload, { headers: { "Cache-Control": cacheControl, ETag: `W/\"${hash(JSON.stringify(payload))}\"` } });
 }
 
 async function internalAction(method, env, path, body) {
   const accountId = String(body.accountId || "").slice(0, 160);
   if (method === "POST" && path === "access") return getPollCreatorAccess(env, accountId);
   if (method === "POST" && path === "discovery") return getCreatorRumbleDiscovery(env, accountId);
-  if (method === "POST" && path === "mine") return listCreatorPolls(env, accountId);
+  if (method === "POST" && path === "mine") return listCreatorPolls(env, accountId, body.input || {});
   if (method === "POST" && path === "create") return createPoll(env, accountId, body.input || {});
   const read = path.match(/^([^/]+)\/read$/);
   if (method === "POST" && read) return getPublicPoll(env, decode(read[1]), accountId, true);
@@ -65,6 +69,8 @@ async function internalAction(method, env, path, body) {
   if (method === "PUT" && save) return updatePoll(env, accountId, decode(save[1]), body.input || {});
   const lifecycle = path.match(/^([^/]+)\/lifecycle$/);
   if (method === "POST" && lifecycle) return changePollLifecycle(env, accountId, decode(lifecycle[1]), body.input || {});
+  const visibility = path.match(/^([^/]+)\/visibility$/);
+  if (method === "POST" && visibility) return changePollVisibility(env, accountId, decode(visibility[1]), body.input || {});
   const vote = path.match(/^([^/]+)\/vote$/);
   if (method === "POST" && vote) return submitWebVote(env, relayActor(body.actor, accountId), decode(vote[1]), body.input || {});
   const mediaRemove = path.match(/^([^/]+)\/media\/(banner|option)(?:\/([^/]+))?$/);

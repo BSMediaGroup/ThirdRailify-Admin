@@ -20,7 +20,8 @@ const SOURCE_SCOPE = /^(?:channel|user):[A-Za-z0-9_-]{1,180}$/;
 const ID = /^[A-Za-z0-9_-]{8,180}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const SERVICE_WINDOW_SECONDS = 300;
-const PUBLIC_LIMIT = 100;
+const PUBLIC_PAGE_SIZE = 12;
+const PUBLIC_MAX_PAGE_SIZE = 48;
 
 export function requirePollDb(env) {
   const db = env?.THIRDRAILIFY_COMMERCE_DB;
@@ -50,6 +51,8 @@ export async function listPublicPolls(env, input = {}, accountId = "") {
   const view = new Set(["open", "closed", "recent", "mine"]).has(input.view) ? input.view : "open";
   if (view === "mine" && !accountId) throw new AuthFailure(401, "authentication_required", "Sign in to view your Polls.");
   const search = clean(input.search, 100).toLowerCase();
+  const page = boundedListInteger(input.page, 1, 10_000, 1);
+  const pageSize = boundedListInteger(input.pageSize, 1, PUBLIC_MAX_PAGE_SIZE, PUBLIC_PAGE_SIZE);
   const where = view === "mine"
     ? "p.owner_account_id = ?"
     : view === "closed"
@@ -59,14 +62,26 @@ export async function listPublicPolls(env, input = {}, accountId = "") {
         : "p.is_public = 1 AND p.state = 'open'";
   const bindings = view === "mine" ? [accountId] : [];
   bindings.push(search, `%${escapeLike(search)}%`, `%${escapeLike(search)}%`);
-  const rows = await db.prepare(`SELECT p.*,
+  const order = view === "closed"
+    ? "p.closed_at DESC, p.updated_at DESC, p.id ASC"
+    : view === "open"
+      ? "p.opened_at DESC, p.updated_at DESC, p.id ASC"
+      : view === "recent"
+        ? "CASE p.state WHEN 'open' THEN 0 ELSE 1 END, COALESCE(p.closed_at,p.opened_at,p.updated_at) DESC, p.id ASC"
+        : "p.updated_at DESC, p.id ASC";
+  const predicate = `${where}
+      AND (?='' OR lower(p.title) LIKE ? ESCAPE '\\' OR lower(COALESCE(p.description,'')) LIKE ? ESCAPE '\\')`;
+  const [count, rows] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS count FROM polls p WHERE ${predicate}`).bind(...bindings).first(),
+    db.prepare(`SELECT p.*,
       (SELECT COUNT(*) FROM poll_votes v WHERE v.poll_id=p.id) AS total_votes
-    FROM polls p WHERE ${where}
-      AND (?='' OR lower(p.title) LIKE ? ESCAPE '\\' OR lower(COALESCE(p.description,'')) LIKE ? ESCAPE '\\')
-    ORDER BY CASE p.state WHEN 'open' THEN 0 WHEN 'closed' THEN 1 ELSE 2 END, p.updated_at DESC LIMIT ${PUBLIC_LIMIT}`)
-    .bind(...bindings).all();
+    FROM polls p WHERE ${predicate}
+    ORDER BY ${order} LIMIT ? OFFSET ?`)
+      .bind(...bindings, pageSize, (page - 1) * pageSize).all(),
+  ]);
   const items = await Promise.all((rows?.results || []).map((row) => projectSummary(env, row)));
-  return { ok: true, view, items, count: items.length, refreshedAt: nowIso() };
+  const total = Number(count?.count || 0);
+  return { ok: true, view, items, count: items.length, page, pageSize, total, totalPages: total ? Math.ceil(total / pageSize) : 0, refreshedAt: nowIso() };
 }
 
 export async function getPublicPoll(env, slug, accountId = "", includePrivate = false) {
@@ -106,9 +121,9 @@ export async function getCreatorRumbleDiscovery(env, accountId) {
   };
 }
 
-export async function listCreatorPolls(env, accountId) {
+export async function listCreatorPolls(env, accountId, input = {}) {
   await requireCreator(env, accountId);
-  return listPublicPolls(env, { view: "mine" }, accountId);
+  return listPublicPolls(env, { ...input, view: "mine" }, accountId);
 }
 
 export async function createPoll(env, accountId, input) {
@@ -213,10 +228,10 @@ export async function changePollLifecycle(env, accountId, slug, input) {
       .bind(row.rumble_source_scope, row.id, nextRevision, timestamp, timestamp));
   }
   if (action === "close" || action === "archive") statements.push(db.prepare("DELETE FROM poll_rumble_leases WHERE poll_id=?").bind(row.id));
-  statements.push(db.prepare(`UPDATE polls SET state=?,is_public=?,revision=?,updated_at=?,
+  statements.push(db.prepare(`UPDATE polls SET state=?,is_public=CASE WHEN ?='open' THEN 1 WHEN ? IN ('draft','archived') THEN 0 ELSE is_public END,revision=?,updated_at=?,
     opened_at=CASE WHEN ?='open' THEN ? ELSE opened_at END,
     closed_at=CASE WHEN ?='closed' THEN ? WHEN ?='open' THEN NULL ELSE closed_at END
-    WHERE id=? AND revision=?`).bind(target, target === "open" || target === "closed" ? 1 : 0, nextRevision, timestamp,
+    WHERE id=? AND revision=?`).bind(target, target, target, nextRevision, timestamp,
       target, timestamp, target, timestamp, target, row.id, revision));
   try { await db.batch(statements); }
   catch (error) {
@@ -224,6 +239,24 @@ export async function changePollLifecycle(env, accountId, slug, input) {
     throw error;
   }
   await activity(env, row.id, accountId, `poll_${action}ed`, "success", { revision: nextRevision });
+  return getPublicPoll(env, row.public_slug, accountId, true);
+}
+
+export async function changePollVisibility(env, accountId, slug, input) {
+  const db = requirePollDb(env);
+  const row = await requireManagedPoll(env, accountId, slug);
+  const revision = integer(input.revision, 1, 1_000_000, "poll_revision_invalid");
+  if (revision !== Number(row.revision)) throw new AuthFailure(409, "poll_revision_conflict", "This Poll changed after it was loaded.");
+  if (row.state !== "closed") throw new AuthFailure(409, "poll_visibility_state_invalid", "Only a closed Poll can be shown in or hidden from the public gallery.");
+  if (typeof input.public !== "boolean") throw new AuthFailure(400, "poll_visibility_invalid", "Choose whether this Poll is listed in the public gallery.");
+  const isPublic = input.public ? 1 : 0;
+  if (Number(row.is_public) === isPublic) return getPublicPoll(env, row.public_slug, accountId, true);
+  const timestamp = nowIso();
+  const nextRevision = Number(row.revision) + 1;
+  const result = await db.prepare("UPDATE polls SET is_public=?,revision=?,updated_at=? WHERE id=? AND revision=? AND state='closed'")
+    .bind(isPublic, nextRevision, timestamp, row.id, revision).run();
+  if (Number(result?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "poll_revision_conflict", "This Poll changed after it was loaded.");
+  await activity(env, row.id, accountId, "poll_visibility_changed", "success", { public: Boolean(isPublic), revision: nextRevision });
   return getPublicPoll(env, row.public_slug, accountId, true);
 }
 
@@ -663,6 +696,7 @@ function required(value, minimum, maximum, code) { const text = clean(value, max
 function optional(value, maximum) { const text = clean(value, maximum); return text || null; }
 function clean(value, maximum) { return Array.from(String(value ?? ""), (character) => { const point = character.codePointAt(0) || 0; return point < 32 || point === 127 ? " " : character; }).join("").replace(/\s+/g, " ").trim().slice(0, maximum); }
 function integer(value, minimum, maximum, code) { const result = Number(value); if (!Number.isSafeInteger(result) || result < minimum || result > maximum) throw new AuthFailure(400, code, "A Poll numeric field is outside its allowed range."); return result; }
+function boundedListInteger(value, minimum, maximum, fallback) { const result = Number(value); return Number.isSafeInteger(result) && result >= minimum && result <= maximum ? result : fallback; }
 function boundedId(value, code) { const result = clean(value, 180); if (!ID.test(result)) throw new AuthFailure(400, code, "A required identifier is invalid."); return result; }
 function safeJson(value, fallback) { try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback; } catch { return fallback; } }
 function escapeLike(value) { return value.replace(/[\\%_]/g, "\\$&"); }

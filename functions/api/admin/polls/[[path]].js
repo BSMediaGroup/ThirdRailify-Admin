@@ -1,6 +1,6 @@
 import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
 import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
-import { adminPollAccess, adminPollLibrary, changePollLifecycle, getPublicPoll, mutatePollCreatorGrant, readPollJson } from "../../../_shared/polls-core.js";
+import { adminPollAccess, adminPollLibrary, changePollLifecycle, changePollVisibility, getPublicPoll, mutatePollCreatorGrant, readPollJson } from "../../../_shared/polls-core.js";
 
 const PREFIX = "/api/admin/polls";
 
@@ -21,6 +21,8 @@ export async function onRequest({ request, env }) {
     if (path === "grants") return response(await mutatePollCreatorGrant(env, session.accountId, body), request, env);
     const lifecycle = path.match(/^([^/]+)\/lifecycle$/);
     if (lifecycle) return response(await changePollLifecycle(env, session.accountId, decode(lifecycle[1]), body), request, env);
+    const visibility = path.match(/^([^/]+)\/visibility$/);
+    if (visibility) return response(await changePollVisibility(env, session.accountId, decode(visibility[1]), body), request, env);
     throw new AuthFailure(404, "poll_route_not_found", "The Admin Poll action was not found.");
   } catch (error) { return errorResponse(error, request, env); }
 }
