@@ -1,5 +1,32 @@
 # Bump notes
 
+## 2026-08-31 - Automations and Poll authority V1
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added `/automations` with versioned desired/applied state, signed bot pull/heartbeat, truthful online/stale/offline runtime, safe Discord fields, Rumble scheduler/lease/backoff/backlog status, active Poll monitor, and bounded activity.
+- Existing Rumble/channel slash-command changes now synchronize the supported dynamic slice back through the signed bot endpoint with optimistic revisions; Admin outages retain explicit local-pending state and conflicts refresh authoritative desired state without silent last-write-wins.
+- Added dedicated `/polls` lifecycle management and `/polls/access` creator moderation through new default-parity `polls.*` and `automations.*` capabilities. Approved regular accounts remain owner-scoped; Admin-global control stays privileged.
+- Added additive `0025_automations_polls_v1.sql` for Poll/options/current votes, creator grants, unique Rumble leases, event fingerprints, desired config, runtime heartbeat, service nonces, abuse bounds, and activity.
+- Added server-owned web vote replacement, signed-in-only enforcement, signed Public relay, bot HMAC/replay protection, stale revision rejection, bounded Rumble batches, exact trigger validation, and server-side result aggregation.
+- Added a presentation-only General Trigger Studio with explicit Rant deferral and a disabled Wheels automation scaffold. No general rule, Rant, or Wheel-entry execution was activated.
+- Added migration/lifecycle/dedupe/HMAC/cross-language tests. Migration backup/application, dedicated secret custody, Admin â†’ bot â†’ Public rollout, staging/browser acceptance, and production verification remain pending; no deployment or remote D1 write occurred.
+
+## 2026-08-31 - Wheels V1.12 mechanics authority and Admin restructure
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Split `/wheels` into a real operational Overview and `/wheels/library` into the focused Wheel table, while retaining Stages, Access, Results, and Wheel detail routes.
+- Added `/wheels/mechanics`, a Master-authorized visual editor with sampled preset graphs, integrated progress, bounded Custom controls, launch/full-turn/duration policy, deterministic 10/60-second examples, local zero-write previews, explicit Discard/Reset/Save actions, and invariant documentation.
+- Kept the page inside the established Admin graphite, neutral-border, and restrained gold visual system across desktop and mobile; it adds no competing blue/navy theme.
+- Extended the existing revisioned `wheel_settings` global row and existing Wheel audit table; no migration or competing authority was added. Saves preserve CSRF, origin, capability, rate-limit, optimistic-revision, and audit requirements.
+- Exposed only a sanitized cacheable public mechanics projection. Admin/D1 write authority, participant fairness, Official result persistence, and Stage atomicity remain unchanged.
+- This implementation is local and uncommitted. No migration, D1 write, deployment, or production mechanics mutation has been performed.
+
 ## 2026-08-31 - Featured live acceptance and catalogue freshness
 
 CURRENT VER=0.1.0-alpha.0

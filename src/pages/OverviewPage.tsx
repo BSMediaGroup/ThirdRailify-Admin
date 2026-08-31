@@ -9,7 +9,9 @@ import { getCommerceOverview, type CommerceOverviewPayload } from "../commerce/c
 import { AccountAccessIcon } from "../components/AccountAccessBadge";
 import { AdminIcon } from "../components/AdminIcon";
 import type { AdminShellOutletContext } from "../components/AdminShell";
+import { BotHeartbeatCard } from "../components/BotHeartbeatCard";
 import { getGoatsOverview, type GoatAdminSummary } from "../goats/client";
+import { getAutomations, type AutomationPayload } from "../polls/admin-client";
 import { manageWatch, type WatchAdminPayload } from "../watch/client";
 
 type StatusPayload = {
@@ -22,12 +24,12 @@ type StatusPayload = {
 };
 
 type GoatsOverviewPayload = Awaited<ReturnType<typeof getGoatsOverview>>;
-type Snapshot = { status: StatusPayload | null; analytics: AnalyticsReport | null; watch: WatchAdminPayload | null; commerce: CommerceOverviewPayload | null; goats: GoatsOverviewPayload | null; banner: BannerSettings | null };
+type Snapshot = { status: StatusPayload | null; analytics: AnalyticsReport | null; watch: WatchAdminPayload | null; commerce: CommerceOverviewPayload | null; goats: GoatsOverviewPayload | null; banner: BannerSettings | null; automations: AutomationPayload | null };
 type Source = keyof Snapshot;
 type SourceErrors = Partial<Record<Source, string>>;
 type Priority = { title: string; detail: string; to: string; label: string; tone: "attention" | "danger" | "info" };
 
-const EMPTY_SNAPSHOT: Snapshot = { status: null, analytics: null, watch: null, commerce: null, goats: null, banner: null };
+const EMPTY_SNAPSHOT: Snapshot = { status: null, analytics: null, watch: null, commerce: null, goats: null, banner: null, automations: null };
 
 export function OverviewPage() {
   const { startLoading, inboxSummary } = useOutletContext<AdminShellOutletContext>();
@@ -42,31 +44,33 @@ export function OverviewPage() {
   const watchRead = hasCapability("watch.view") && Boolean(csrfToken);
   const goatsRead = hasCapability("goats.view");
   const bannerRead = hasCapability("content.view");
+  const automationsRead = hasCapability("automations.view");
 
   const load = useCallback(async () => {
     const sequence = ++requestSequence.current;
     const stopLoading = startLoading("Refreshing operational overview");
     setLoading(true); setErrors({});
-    const [status, analytics, commerce, watch, goats, banner] = await Promise.all([
+    const [status, analytics, commerce, watch, goats, banner, automations] = await Promise.all([
       capture(adminApi<StatusPayload>("/api/admin/status")),
       analyticsRead ? capture(getAnalytics("24h")) : restricted<AnalyticsReport>(),
       commerceRead ? capture(getCommerceOverview()) : restricted<CommerceOverviewPayload>(),
       watchRead ? capture(manageWatch("read", csrfToken)) : restricted<WatchAdminPayload>(),
       goatsRead ? capture(getGoatsOverview()) : restricted<GoatsOverviewPayload>(),
       bannerRead ? capture(readBannerSettings()) : restricted<BannerSettings>(),
+      automationsRead ? capture(getAutomations()) : restricted<AutomationPayload>(),
     ]);
     if (requestSequence.current === sequence) {
-      setSnapshot({ status: status.value, analytics: analytics.value, commerce: commerce.value, watch: watch.value, goats: goats.value, banner: banner.value });
-      setErrors(compactErrors({ status: status.error, analytics: analytics.error, commerce: commerce.error, watch: watch.error, goats: goats.error, banner: banner.error }));
+      setSnapshot({ status: status.value, analytics: analytics.value, commerce: commerce.value, watch: watch.value, goats: goats.value, banner: banner.value, automations: automations.value });
+      setErrors(compactErrors({ status: status.error, analytics: analytics.error, commerce: commerce.error, watch: watch.error, goats: goats.error, banner: banner.error, automations: automations.error }));
       setRefreshedAt(new Date().toISOString());
       setLoading(false);
     }
     stopLoading();
-  }, [analyticsRead, bannerRead, commerceRead, csrfToken, goatsRead, startLoading, watchRead]);
+  }, [analyticsRead, automationsRead, bannerRead, commerceRead, csrfToken, goatsRead, startLoading, watchRead]);
 
   useEffect(() => { void load(); return () => { requestSequence.current += 1; }; }, [load]);
 
-  const expectedSources = 1 + [analyticsRead, commerceRead, watchRead, goatsRead, bannerRead].filter(Boolean).length;
+  const expectedSources = 1 + [analyticsRead, commerceRead, watchRead, goatsRead, bannerRead, automationsRead].filter(Boolean).length;
   const reportingSources = Object.values(snapshot).filter(Boolean).length;
   const priorities = operationalPriorities(snapshot, errors);
   const hasSnapshot = reportingSources > 0;
@@ -95,6 +99,11 @@ export function OverviewPage() {
     </section>
 
     {errorCount > 0 && <div className="overview-partial" role="alert"><AdminIcon name="signal" size={21} /><div><strong>Partial operational snapshot</strong><p>{errorCount} {errorCount === 1 ? "authority did" : "authorities did"} not report. Missing values remain unavailable rather than being replaced with zero.</p></div><button type="button" onClick={() => void load()} disabled={loading}>Retry</button></div>}
+
+    <section className="overview-section overview-section--heartbeat" aria-labelledby="bot-runtime-title">
+      <OverviewHeading eyebrow="Signed runtime authority" title="Bot heartbeat" id="bot-runtime-title" detail={snapshot.automations?.runtime.heartbeatAt ? `Last pulse ${formatTime(String(snapshot.automations.runtime.heartbeatAt))}` : automationsRead ? "Reading current signal" : "Access restricted"} />
+      <BotHeartbeatCard payload={snapshot.automations} error={errors.automations === "restricted" ? undefined : errors.automations} loading={loading && automationsRead} compact linkTo="/automations" />
+    </section>
 
     <AnalyticsOverview data={snapshot.analytics} error={errors.analytics} loading={loading} />
 
@@ -288,7 +297,7 @@ function operationalPriorities(snapshot: Snapshot, errors: SourceErrors): Priori
   const failedEmails = snapshot.goats ? numberOrNull(snapshot.goats.email.failed) : null;
   if (failedEmails) priorities.push({ title: `${failedEmails} community ${failedEmails === 1 ? "email" : "emails"} failed`, detail: "Review the transactional outbox before attempting a protected retry.", to: "/goats/emails", label: "Inspect", tone: "danger" });
   if (snapshot.status?.accounts.pending) priorities.push({ title: `${snapshot.status.accounts.pending} ${snapshot.status.accounts.pending === 1 ? "account is" : "accounts are"} pending verification`, detail: "Review identity state without changing roles or sessions unnecessarily.", to: "/access", label: "Review", tone: "attention" });
-  for (const [source, detail, to] of [["analytics", "Audience analytics authority did not report current state.", "/analytics"], ["watch", "Broadcast authority did not report current state.", "/watch"], ["commerce", "Commerce authority did not report current state.", "/commerce"], ["goats", "Community authority did not report current state.", "/goats"], ["banner", "Site-content authority did not report current state.", "/content"], ["status", "Account authority did not report current state.", "/access"]] as const) {
+  for (const [source, detail, to] of [["analytics", "Audience analytics authority did not report current state.", "/analytics"], ["watch", "Broadcast authority did not report current state.", "/watch"], ["commerce", "Commerce authority did not report current state.", "/commerce"], ["goats", "Community authority did not report current state.", "/goats"], ["banner", "Site-content authority did not report current state.", "/content"], ["automations", "Bot heartbeat authority did not report current runtime state.", "/automations"], ["status", "Account authority did not report current state.", "/access"]] as const) {
     if (errors[source] && errors[source] !== "restricted") priorities.push({ title: `${sourceLabel(source)} unavailable`, detail, to, label: "Open", tone: "danger" });
   }
   return priorities;

@@ -1,0 +1,22 @@
+export type WheelCurveProfile = "broadcast-smooth" | "heavy-flywheel" | "quick-draw" | "long-settle" | "classic-linear" | "custom";
+export type WheelCurve = { holdEnd: number; tailStart: number; tailVelocity: number };
+export type WheelMechanics = { mechanicsVersion: 1; curveProfile: WheelCurveProfile; customCurve: WheelCurve; launchRpsMin: number; launchRpsMax: number; minimumFullTurns: number; maximumFullTurns: number; defaultSpinDurationMs: number; minimumSpinDurationMs: number; maximumSpinDurationMs: number };
+export const WHEEL_MECHANICS_VERSION: 1;
+export const CURVE_PRESETS: Readonly<Record<Exclude<WheelCurveProfile, "custom">, Readonly<WheelCurve & { name: string; description: string }>>>;
+export const MECHANICS_BOUNDS: Readonly<Record<string, readonly [number, number]>>;
+export const DEFAULT_WHEEL_MECHANICS: Readonly<WheelMechanics>;
+export function normalizeWheelMechanics(value: unknown, options?: { strict?: boolean }): WheelMechanics;
+export function cloneDefaultWheelMechanics(): WheelMechanics;
+export function curveParameters(mechanics?: WheelMechanics): WheelCurve & { name?: string; description?: string };
+export function smootherstep(value: number): number;
+export function smootherstepIntegral(value: number): number;
+export function velocityAtNormalizedTime(normalizedTime: number, mechanics?: WheelMechanics): number;
+export function curveTotalArea(mechanics?: WheelMechanics): number;
+export function progressAtNormalizedTime(normalizedTime: number, mechanics?: WheelMechanics): number;
+export function progressAtTime(elapsedMs: number, durationMs: number, mechanics?: WheelMechanics): number;
+export function velocityAtTime(elapsedMs: number, durationMs: number, mechanics?: WheelMechanics, totalTravel?: number): number;
+export function launchRpsForSample(turnRandom: number, mechanics?: WheelMechanics): number;
+export function fullTurnsForMechanics(durationMs: number, turnRandom: number, mechanics?: WheelMechanics, positiveTargetDeltaDegrees?: number): number;
+export function estimatedFullTurnRange(durationMs: number, mechanics?: WheelMechanics): { minimum: number; maximum: number };
+export function spinRotationAtTime(plan: { startRotation: number; totalTravel: number; durationMs: number; mechanics: WheelMechanics }, elapsedMs: number): number;
+

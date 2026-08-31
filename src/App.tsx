@@ -32,11 +32,13 @@ import {
   GoatsQueuePage,
 } from "./pages/GoatsAdminPages";
 import { WheelAdminDetailPage, WheelsAccessPage, WheelsLibraryPage, WheelsResultsPage, WheelsStagesPage } from "./pages/WheelsAdminPages";
+import { WheelsMechanicsPage, WheelsOverviewPage } from "./pages/WheelsMechanicsPages";
 import { IntegrationsOperationsPage, MediaOperationsPage, MembershipOperationsPage, SettingsOperationsPage } from "./pages/OperationsPages";
+import { AutomationsPage, PollCreatorAccessPage, PollManagementPage } from "./pages/PollsAdminPages";
 import { AdminCapabilityBoundary } from "./auth/AdminCapabilityBoundary";
 import { adminRoutePolicy } from "./auth/capabilities";
 
-const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/media", "/membership", "/integrations", "/settings", "/goats", "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results"]);
+const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/media", "/membership", "/integrations", "/settings", "/goats", "/wheels", "/wheels/library", "/wheels/stages", "/wheels/mechanics", "/wheels/access", "/wheels/results", "/polls", "/polls/access", "/automations"]);
 
 export function App() {
   return (
@@ -52,11 +54,16 @@ export function App() {
         <Route path="membership" element={guard("/membership", <MembershipOperationsPage />)} />
         <Route path="integrations" element={guard("/integrations", <IntegrationsOperationsPage />)} />
         <Route path="settings" element={guard("/settings", <SettingsOperationsPage />)} />
-        <Route path="wheels" element={guard("/wheels", <WheelsLibraryPage />)} />
+        <Route path="wheels" element={guard("/wheels", <WheelsOverviewPage />)} />
+        <Route path="wheels/library" element={guard("/wheels/library", <WheelsLibraryPage />)} />
         <Route path="wheels/stages" element={guard("/wheels/stages", <WheelsStagesPage />)} />
+        <Route path="wheels/mechanics" element={guard("/wheels/mechanics", <WheelsMechanicsPage />)} />
         <Route path="wheels/access" element={guard("/wheels/access", <WheelsAccessPage />)} />
         <Route path="wheels/results" element={guard("/wheels/results", <WheelsResultsPage />)} />
         <Route path="wheels/:id" element={guard("/wheels", <WheelAdminDetailPage />)} />
+        <Route path="polls" element={guard("/polls", <PollManagementPage />)} />
+        <Route path="polls/access" element={guard("/polls/access", <PollCreatorAccessPage />)} />
+        <Route path="automations" element={guard("/automations", <AutomationsPage />)} />
         <Route path="shop" element={guard("/shop", <Navigate to="/products" replace />)} />
         <Route path="products" element={guard("/products", <CommerceProductsPage />)} />
         <Route path="collections" element={guard("/collections", <CommerceCollectionsPage />)} />

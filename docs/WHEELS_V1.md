@@ -1,3 +1,13 @@
+# Wheels V1.12 Admin Authority
+
+## V1.12 global mechanics authority
+
+The existing `wheel_settings` row with `setting_key = 'global'` now owns the normalized mechanics object alongside prior global defaults. It stores the selected profile/custom parameters, launch RPS bounds, full-turn bounds, and default/minimum/maximum duration policy under the row's existing optimistic revision. Read normalizes legacy rows without mutating them. Save strictly validates the complete policy, conditionally advances the revision, and appends an existing `wheel_audit_events` record; no migration or second settings model is required.
+
+`/wheels/mechanics` is the visual Master-authorized editor. Named profiles and the bounded Custom profile are sampled from the same pure module used by Public. Its test-spin preview is local and synthetic: it creates no Official result and sends no Wheel write. The editor uses the established Admin graphite surfaces, warm neutral borders, and restrained gold emphasis. `/api/wheels/mechanics` exposes only the sanitized normalized projection and settings revision; all policy writes remain on the protected Admin settings endpoint with existing origin, CSRF, capability, rate-limit, and revision checks.
+
+`/wheels` is now a metrics-and-jump-point Overview. `/wheels/library` owns the Wheel table, while `/wheels/stages`, `/wheels/access`, `/wheels/results`, and `/wheels/:id` retain their previous responsibilities.
+
 # Wheels V1.10 Admin Authority
 
 ## V1.10 Official animation plans

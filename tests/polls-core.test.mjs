@@ -1,0 +1,198 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import {
+  automationsStatus,
+  botActivePoll,
+  changePollLifecycle,
+  createPoll,
+  getPollCreatorAccess,
+  ingestRumbleVotes,
+  mutatePollCreatorGrant,
+  recordBotHeartbeat,
+  submitWebVote,
+  synchronizeBotDesiredConfig,
+  updateAutomationConfig,
+  updatePoll,
+  verifyBotServiceRequest,
+} from "../functions/_shared/polls-core.js";
+import { normalizePollTrigger } from "../functions/_shared/poll-normalization.js";
+import { createCommerceDatabases, commerceEnvironment } from "./commerce-test-helpers.mjs";
+
+const HMAC_SECRET = "poll-test-secret-with-enough-entropy";
+
+test("Poll migration, lifecycle, one-current-vote semantics, lease conflict, and ingestion dedupe", async (t) => {
+  const harness = await createCommerceDatabases();
+  t.after(() => harness.dispose());
+  const env = commerceEnvironment(harness, {
+    THIRDRAILIFY_POLL_VOTER_SECRET: HMAC_SECRET,
+    THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET: HMAC_SECRET,
+    THIRDRAILIFY_BOT_ADMIN_SECRET: HMAC_SECRET,
+  });
+  await account(harness.authDb, "creator-one", "Creator One");
+  await account(harness.authDb, "creator-two", "Creator Two");
+  await harness.commerceDb.prepare("INSERT INTO poll_creator_grants (account_id,active,may_create_polls,granted_by_account_id,created_at,updated_at) VALUES (?,1,1,NULL,?,?)")
+    .bind("creator-one", new Date().toISOString(), new Date().toISOString()).run();
+  await harness.commerceDb.prepare("INSERT INTO poll_creator_grants (account_id,active,may_create_polls,granted_by_account_id,created_at,updated_at) VALUES (?,1,1,NULL,?,?)")
+    .bind("creator-two", new Date().toISOString(), new Date().toISOString()).run();
+  assert.equal((await getPollCreatorAccess(env, "creator-one")).canCreate, true);
+
+  const first = await createPoll(env, "creator-one", pollInput("Primary live choice"));
+  assert.equal(first.poll.state, "draft");
+  const open = await changePollLifecycle(env, "creator-one", first.poll.slug, { revision: first.poll.revision, action: "open" });
+  assert.equal(open.poll.state, "open");
+  assert.equal((await botActivePoll(env)).activePoll.id, open.poll.id);
+
+  const actor = { namespace: "web_anonymous", key: "anonymous:fixture", label: null };
+  const optionOne = open.poll.options[0].id;
+  const optionTwo = open.poll.options[1].id;
+  assert.equal((await submitWebVote(env, actor, open.poll.slug, { optionId: optionOne })).vote.repeated, false);
+  assert.equal((await submitWebVote(env, actor, open.poll.slug, { optionId: optionOne })).vote.repeated, true);
+  const changed = await submitWebVote(env, actor, open.poll.slug, { optionId: optionTwo });
+  assert.equal(changed.vote.changed, true);
+  assert.equal(changed.poll.totalVotes, 1);
+  assert.equal(changed.poll.options.find((item) => item.id === optionTwo).votes, 1);
+
+  const second = await createPoll(env, "creator-two", pollInput("Conflicting live choice"));
+  await assert.rejects(
+    changePollLifecycle(env, "creator-two", second.poll.slug, { revision: second.poll.revision, action: "open" }),
+    (error) => error.code === "rumble_source_poll_conflict",
+  );
+
+  const event = {
+    eventFingerprint: "a".repeat(64),
+    sourceScope: "user:sample-owner",
+    livestreamId: "sample-live",
+    actorKey: "viewer-one",
+    actorLabel: "Viewer One",
+    optionId: optionOne,
+    providerEventAt: new Date(Date.now() + 1000).toISOString(),
+  };
+  const accepted = await ingestRumbleVotes(env, { pollId: open.poll.id, pollRevision: open.poll.revision, events: [event] });
+  assert.equal(accepted.accepted, 1);
+  const duplicate = await ingestRumbleVotes(env, { pollId: open.poll.id, pollRevision: open.poll.revision, events: [event] });
+  assert.equal(duplicate.duplicate, 1);
+
+  const disabled = await updatePoll(env, "creator-one", open.poll.slug, { revision: open.poll.revision, rumbleEnabled: false });
+  assert.equal((await botActivePoll(env)).activePoll, null);
+  const openedSecond = await changePollLifecycle(env, "creator-two", second.poll.slug, { revision: second.poll.revision, action: "open" });
+  await changePollLifecycle(env, "creator-two", second.poll.slug, { revision: openedSecond.poll.revision, action: "close" });
+  const closed = await changePollLifecycle(env, "creator-one", open.poll.slug, { revision: disabled.poll.revision, action: "close" });
+  assert.equal(closed.poll.state, "closed");
+  assert.equal((await botActivePoll(env)).activePoll, null);
+  await assert.rejects(submitWebVote(env, actor, open.poll.slug, { optionId: optionOne }), (error) => error.code === "poll_not_open");
+});
+
+test("bot service HMAC rejects tampering and replay", async (t) => {
+  const harness = await createCommerceDatabases();
+  t.after(() => harness.dispose());
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_BOT_ADMIN_SECRET: HMAC_SECRET });
+  const path = "/api/internal/bot/config";
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const requestId = "request_identifier_12345";
+  const digest = await sha256("");
+  const signature = await hmac(`${"GET"}\n${path}\n${timestamp}\n${requestId}\n${digest}`);
+  const request = new Request(`https://admin.example${path}`, { headers: serviceHeaders(timestamp, requestId, signature) });
+  await verifyBotServiceRequest(request, env, new Uint8Array());
+  await assert.rejects(verifyBotServiceRequest(request, env, new Uint8Array()), (error) => error.code === "bot_request_replayed");
+  const tampered = new Request(`https://admin.example${path}`, { headers: serviceHeaders(timestamp, "request_identifier_67890", "0".repeat(64)) });
+  await assert.rejects(verifyBotServiceRequest(tampered, env, new Uint8Array()), (error) => error.code === "bot_signature_invalid");
+});
+
+test("creator grants, ownership, option locks, signed voting, and desired/applied config stay fail closed", async (t) => {
+  const harness = await createCommerceDatabases();
+  t.after(() => harness.dispose());
+  const env = commerceEnvironment(harness, {
+    THIRDRAILIFY_POLL_VOTER_SECRET: HMAC_SECRET,
+    THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET: HMAC_SECRET,
+  });
+  await account(harness.authDb, "unapproved", "Unapproved Creator");
+  await account(harness.authDb, "owner", "Poll Owner");
+  await account(harness.authDb, "intruder", "Other Creator");
+  await account(harness.authDb, "master", "Master Admin", { role: "admin", adminLevel: "master" });
+
+  await assert.rejects(createPoll(env, "unapproved", pollInput("Denied")), (error) => error.code === "poll_creator_not_approved");
+  await mutatePollCreatorGrant(env, "master", { accountId: "owner", action: "approve" });
+  await mutatePollCreatorGrant(env, "master", { accountId: "intruder", action: "approve" });
+
+  const created = await createPoll(env, "owner", {
+    ...pollInput("Authority fixture"),
+    rumbleEnabled: false,
+    options: [{ label: "One" }, { label: "Two" }],
+    webVotingMode: "signed_in",
+  });
+  assert.deepEqual(created.poll.options.map((option) => option.trigger), ["1", "2"]);
+  const duplicateTitle = await createPoll(env, "owner", { ...pollInput("Authority fixture"), rumbleEnabled: false });
+  assert.equal(duplicateTitle.poll.slug, "authority-fixture-2");
+  await assert.rejects(updatePoll(env, "intruder", created.poll.slug, { revision: created.poll.revision, title: "Taken over" }), (error) => error.code === "poll_owner_required");
+
+  const adminEdit = await updatePoll(env, "master", created.poll.slug, { revision: created.poll.revision, title: "Admin-reviewed fixture" });
+  const opened = await changePollLifecycle(env, "owner", created.poll.slug, { revision: adminEdit.poll.revision, action: "open" });
+  await assert.rejects(updatePoll(env, "owner", created.poll.slug, {
+    revision: opened.poll.revision,
+    options: opened.poll.options.map((option) => ({ id: option.id, label: option.label, trigger: option.trigger })),
+  }), (error) => error.code === "poll_structure_locked");
+  await assert.rejects(submitWebVote(env, { namespace: "web_anonymous", key: "anonymous:test" }, created.poll.slug, { optionId: opened.poll.options[0].id }), (error) => error.code === "authentication_required");
+  await assert.rejects(changePollLifecycle(env, "owner", created.poll.slug, { revision: adminEdit.poll.revision, action: "close" }), (error) => error.code === "poll_revision_conflict");
+
+  const desired = await updateAutomationConfig(env, "master", { revision: 1, desiredState: { discord: { enabled: true }, rumble: { enabled: true, pollIntervalSeconds: 15 } } });
+  assert.equal(desired.config.desiredRevision, 2);
+  await assert.rejects(updateAutomationConfig(env, "master", { revision: 1, desiredState: {} }), (error) => error.code === "config_revision_conflict");
+  await recordBotHeartbeat(env, {
+    startupInstanceId: "instance_identifier_12345",
+    botVersion: "1.1.0",
+    desiredRevision: 2,
+    appliedRevision: 2,
+    runtime: { discordConnected: true, counters: { accepted: 4 }, secret: "must-not-project" },
+  });
+  const status = await automationsStatus(env);
+  assert.equal(status.runtime.state, "online");
+  assert.equal(status.runtime.appliedRevision, 2);
+  assert.equal(status.runtime.secret, undefined);
+  assert.equal(JSON.stringify(status).includes("must-not-project"), false);
+  const slashSync = await synchronizeBotDesiredConfig(env, { revision: 2, desiredState: { discord: {}, rumble: { enabled: false, intervalSeconds: 90, pollIntervalSeconds: 15 } } });
+  assert.equal(slashSync.revision, 3);
+  assert.equal(slashSync.desiredState.rumble.intervalSeconds, 90);
+  await assert.rejects(synchronizeBotDesiredConfig(env, { revision: 2, desiredState: {} }), (error) => error.code === "config_revision_conflict");
+
+  await assert.rejects(createPoll(env, "owner", { ...pollInput("Collision"), options: [{ label: "One", trigger: "Ａ" }, { label: "Two", trigger: "a" }] }), (error) => error.code === "poll_trigger_collision");
+});
+
+test("JavaScript Poll normalization follows the canonical cross-language fixture", async () => {
+  const fixture = JSON.parse(await readFile(new URL("../../ThirdRailify/tests/fixtures/poll-normalization-v1.json", import.meta.url), "utf8"));
+  for (const vector of fixture.vectors) assert.equal(normalizePollTrigger(vector.input), vector.normalized);
+});
+
+function pollInput(title) {
+  return {
+    title,
+    description: "A deterministic local Poll fixture.",
+    webVotingMode: "anyone",
+    rumbleEnabled: true,
+    rumbleSourceScope: "user:sample-owner",
+    livestreamMode: "automatic",
+    requestedIntervalSeconds: 15,
+    options: [{ label: "One", trigger: "1" }, { label: "Two", trigger: "CARROT" }],
+  };
+}
+
+async function account(db, id, name, { role = "user", adminLevel = "none" } = {}) {
+  const now = new Date().toISOString();
+  await db.prepare("INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES (?,?,?,?,?,'active',?,?,?,'test')")
+    .bind(id, `${id}@example.test`, name, role, adminLevel, now, now, now).run();
+}
+
+function serviceHeaders(timestamp, requestId, signature) {
+  return { "X-ThirdRailify-Timestamp": timestamp, "X-ThirdRailify-Request-Id": requestId, "X-ThirdRailify-Signature": signature };
+}
+
+async function sha256(value) {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hmac(value) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(HMAC_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
+  return Buffer.from(bytes).toString("base64url");
+}

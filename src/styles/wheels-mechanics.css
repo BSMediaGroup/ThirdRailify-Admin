@@ -1,0 +1,582 @@
+.wheel-mechanics-page {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 30px;
+}
+.mechanics-savebar {
+  position: sticky;
+  top: 12px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: rgba(11, 11, 9, 0.96);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px);
+}
+.mechanics-savebar > div {
+  display: grid;
+  margin-right: auto;
+}
+.mechanics-savebar span,
+.wheels-overview-jump > span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: var(--gold-soft);
+}
+.mechanics-savebar strong {
+  font-size: 0.9rem;
+}
+.mechanics-panel,
+.wheels-overview-mechanics,
+.wheels-overview-jump {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(
+    145deg,
+    rgba(17, 17, 14, 0.98),
+    rgba(9, 9, 7, 0.99)
+  );
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22);
+}
+.mechanics-panel {
+  padding: 22px;
+}
+.mechanics-section-title {
+  margin-bottom: 18px;
+}
+.mechanics-section-title h2,
+.wheels-overview-mechanics h2 {
+  margin: 3px 0 5px;
+  font-size: clamp(1.2rem, 2.3vw, 1.75rem);
+}
+.mechanics-section-title p:last-child,
+.wheels-overview-mechanics p,
+.wheels-overview-jump p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.curve-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.curve-preset-card {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #0c0c0a;
+  color: inherit;
+  transition:
+    border-color 0.18s,
+    transform 0.18s,
+    background 0.18s;
+}
+.curve-preset-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  background: #11110e;
+}
+.curve-preset-card.is-selected {
+  border-color: var(--gold);
+  background: linear-gradient(
+    145deg,
+    rgba(243, 201, 40, 0.1),
+    rgba(255, 255, 255, 0.018)
+  );
+  box-shadow:
+    inset 0 0 0 1px rgba(243, 201, 40, 0.13),
+    0 0 24px rgba(243, 201, 40, 0.045);
+}
+.curve-preset-card strong {
+  font-size: 1rem;
+}
+.curve-preset-card small {
+  min-height: 40px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.curve-preset-card > span:last-child {
+  font-size: 0.72rem;
+  color: var(--gold-soft);
+}
+.curve-card-check {
+  justify-self: start;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(243, 201, 40, 0.1);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: var(--gold);
+}
+.mechanics-curve-graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.mechanics-curve-graph text {
+  fill: var(--quiet);
+  font-size: 11px;
+}
+.graph-plot {
+  fill: rgba(7, 6, 8, 0.62);
+  stroke: rgba(204, 146, 236, 0.09);
+  stroke-width: 1;
+}
+.graph-grid {
+  fill: none;
+  stroke: rgba(217, 183, 230, 0.085);
+  stroke-width: 1;
+}
+.graph-area {
+  pointer-events: none;
+}
+.graph-line {
+  fill: none;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 5px rgba(179, 96, 218, 0.28));
+  pointer-events: none;
+}
+.graph-line--glow {
+  stroke-width: 10;
+  opacity: 0.16;
+  filter: blur(5px);
+}
+.is-thumbnail .graph-line {
+  stroke-width: 2.7;
+}
+.is-thumbnail .graph-line--glow {
+  stroke-width: 8;
+  opacity: 0.14;
+}
+.graph-marker {
+  stroke: rgba(243, 201, 40, 0.32);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+}
+.graph-marker-label {
+  fill: var(--gold-soft) !important;
+  font:
+    700 9px "Geist Mono",
+    monospace;
+  letter-spacing: 0.08em;
+}
+.graph-point {
+  fill: var(--gold-hot);
+  stroke: #0b0b09;
+  stroke-width: 2;
+}
+.graph-terminal {
+  fill: #dda7f5;
+  stroke: #0b0b09;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 5px rgba(189, 108, 226, 0.42));
+}
+.mechanics-graphs {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+  gap: 18px;
+}
+.mechanics-panel--graph {
+  min-width: 0;
+  background:
+    radial-gradient(
+      circle at 42% 72%,
+      rgba(142, 73, 183, 0.075),
+      transparent 48%
+    ),
+    linear-gradient(145deg, #11110e, #090907);
+}
+.custom-curve-grid,
+.mechanics-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.range-field {
+  display: grid;
+  gap: 9px;
+}
+.range-field > span,
+.mechanics-fields label > span,
+.preview-console label > span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.range-field > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) 82px auto;
+  align-items: center;
+  gap: 9px;
+}
+.range-field input[type="range"] {
+  accent-color: var(--gold);
+}
+.range-field input[type="number"],
+.mechanics-fields input,
+.mechanics-fields select,
+.preview-console select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #090908;
+  color: var(--ink);
+  padding: 9px;
+}
+.range-field em,
+.number-with-suffix em {
+  font-size: 0.72rem;
+  font-style: normal;
+  color: var(--quiet);
+}
+.mechanics-helper {
+  margin: 16px 0 0;
+  color: var(--quiet);
+}
+.mechanics-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.mechanics-fields label {
+  display: grid;
+  gap: 7px;
+}
+.mechanics-fields--single {
+  grid-template-columns: 1fr;
+}
+.number-with-suffix {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.turn-examples {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  padding: 13px;
+  border-radius: 12px;
+  background: rgba(243, 201, 40, 0.055);
+  color: var(--muted);
+}
+.turn-examples span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.turn-examples small {
+  color: var(--gold-soft);
+}
+.mechanics-preview .preview-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.7fr) minmax(300px, 1.3fr);
+  align-items: center;
+  gap: 28px;
+}
+.preview-wheel-shell {
+  position: relative;
+  width: min(100%, 370px);
+  aspect-ratio: 1;
+  margin: auto;
+  padding: 16px;
+}
+.preview-pointer {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 0;
+  translate: -50% 0;
+  width: 0;
+  height: 0;
+  border-left: 16px solid transparent;
+  border-right: 16px solid transparent;
+  border-top: 38px solid #f3c928;
+  filter: drop-shadow(0 5px 7px rgba(0, 0, 0, 0.5));
+}
+.preview-wheel {
+  position: absolute;
+  inset: 16px;
+  border: 8px solid #191914;
+  border-radius: 50%;
+  background: conic-gradient(
+    #f3c928 0 25%,
+    #b8182f 25% 50%,
+    #5b2c83 50% 75%,
+    #bb6bd9 75%
+  );
+  box-shadow:
+    0 0 0 3px #4a4534,
+    0 24px 50px rgba(0, 0, 0, 0.38);
+  will-change: transform;
+}
+.preview-wheel span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: 0.7rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 3px #000;
+  transform-origin: 0 0;
+}
+.preview-wheel span:nth-child(1) {
+  transform: rotate(45deg) translate(45px, -5px);
+}
+.preview-wheel span:nth-child(2) {
+  transform: rotate(135deg) translate(45px, -5px);
+}
+.preview-wheel span:nth-child(3) {
+  transform: rotate(225deg) translate(45px, -5px);
+}
+.preview-wheel span:nth-child(4) {
+  transform: rotate(315deg) translate(45px, -5px);
+}
+.preview-console {
+  display: grid;
+  gap: 16px;
+}
+.preview-console label {
+  display: grid;
+  gap: 7px;
+}
+.preview-readouts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.preview-readouts > span {
+  display: grid;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0a0a08;
+}
+.preview-readouts small {
+  color: var(--quiet);
+}
+.preview-readouts strong {
+  font-variant-numeric: tabular-nums;
+}
+.preview-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.preview-console > small {
+  color: var(--quiet);
+}
+.policy-fields {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.mechanics-invariants ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mechanics-invariants li {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0b0b09;
+  color: var(--muted);
+}
+.mechanics-invariants li::before {
+  content: "✓";
+  margin-right: 9px;
+  color: var(--safe);
+  font-weight: 900;
+}
+.wheels-overview-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.wheels-overview-mechanics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 18px 0;
+  padding: 22px;
+}
+.wheels-overview-jumps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.wheels-overview-jump {
+  display: grid;
+  gap: 7px;
+  padding: 19px;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    transform 0.18s,
+    border-color 0.18s;
+}
+.wheels-overview-jump:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+}
+.wheels-overview-jump strong {
+  font-size: 1.08rem;
+}
+.admin-alert--success {
+  border-color: rgba(114, 215, 165, 0.38);
+  background: rgba(114, 215, 165, 0.08);
+  color: #a9ecc7;
+}
+@media (max-width: 1050px) {
+  .curve-preset-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mechanics-graphs,
+  .mechanics-control-grid {
+    grid-template-columns: 1fr;
+  }
+  .policy-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wheels-overview-jumps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .wheel-mechanics-page {
+    gap: 12px;
+  }
+  .mechanics-savebar {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    top: auto;
+  }
+  .mechanics-savebar > div {
+    grid-column: 1/-1;
+  }
+  .mechanics-savebar button {
+    width: 100%;
+  }
+  .mechanics-panel {
+    padding: 16px;
+  }
+  .curve-preset-grid,
+  .custom-curve-grid,
+  .mechanics-fields,
+  .policy-fields,
+  .mechanics-invariants ul,
+  .wheels-overview-metrics,
+  .wheels-overview-jumps {
+    grid-template-columns: 1fr;
+  }
+  .mechanics-preview .preview-layout {
+    grid-template-columns: 1fr;
+  }
+  .preview-wheel-shell {
+    width: min(88vw, 320px);
+  }
+  .wheels-overview-mechanics {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .wheels-overview-mechanics .primary-button {
+    width: 100%;
+    text-align: center;
+  }
+  .turn-examples span {
+    display: grid;
+  }
+  .range-field > div {
+    grid-template-columns: 1fr 76px auto;
+  }
+  .mechanics-graphs {
+    gap: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .curve-preset-card,
+  .wheels-overview-jump {
+    transition: none;
+  }
+  .preview-wheel {
+    will-change: auto;
+  }
+}
+
+.wheel-automation-deferred {
+  margin-top: 18px;
+  overflow: hidden;
+}
+.wheel-automation-deferred > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.wheel-automation-deferred > header p {
+  margin: 0.35rem 0 0;
+  color: #abb6c8;
+  font-size: 0.75rem;
+}
+.wheel-automation-deferred > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.wheel-automation-deferred > div label {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 15px;
+  background: #0d131e;
+  color: #abb6c8;
+}
+.wheel-automation-deferred footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+  padding: 14px 18px;
+}
+.wheel-automation-deferred footer span {
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: #8e9aad;
+  font-size: 0.65rem;
+}
+.wheel-automation-deferred footer button {
+  margin-left: auto;
+}
+@media (max-width: 800px) {
+  .wheel-automation-deferred > div {
+    grid-template-columns: 1fr;
+  }
+  .wheel-automation-deferred > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

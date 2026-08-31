@@ -1,5 +1,19 @@
 # Third Railify Admin
 
+## Automations and Poll authority V1 (local implementation)
+
+Admin Commerce D1 is the sole authority for Poll definitions/options, creator grants, lifecycle, current votes, Rumble event fingerprints, one active Rumble lease per source, bot desired-state revisions, heartbeat/runtime state, and bounded activity. Additive `commerce-migrations/0025_automations_polls_v1.sql` follows `0024`; it must be applied deliberately after backup/ledger inspection and before any V1 code rollout. No remote migration was run.
+
+`/polls` provides the all/open/draft/closed/archived catalogue with owner, audience policy, Rumble state, totals, inspection, lifecycle controls, and `/polls/access` creator moderation. `polls.view/manage` and `automations.view/manage` use the existing capability registry: Master and Full Admin retain current parity, approved regular accounts create/manage only owned Polls through Public, and regular accounts cannot self-grant or mutate bot-global state.
+
+`/automations` is the versioned bot command centre. It shows online/stale/offline heartbeat state, desired/applied revision, safe Discord settings, Rumble configuration-versus-health, scheduler/lease/backoff/backlog state, the active Poll and triggers, and bounded activity. Supported Rumble enablement/cadence and notification channel/role values converge with the existing slash commands through signed optimistic revision sync; an Admin outage leaves local slash changes explicitly pending, and a revision conflict refreshes Admin authority instead of silently overwriting it. Process control is explicitly deferred. The General Trigger Studio is presentation-only; follower/subscriber/gift/livestream rule execution, ordinary Rant parsing, and Wheel-entry execution remain disabled pending verified contracts.
+
+Public relays use `THIRDRAILIFY_COMMUNITY_API_SECRET`; the bot uses the separate `THIRDRAILIFY_BOT_ADMIN_SECRET`. Bot service requests sign method, exact path, timestamp, request ID, and SHA-256 body digest with replay retention. Poll voter hashes use `THIRDRAILIFY_POLL_VOTER_SECRET`; browser abuse bounds use the existing `THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET`. None is browser-editable or projected. API groups live under `/api/polls`, `/api/admin/polls`, `/api/admin/automations`, and `/api/internal/bot`.
+
+Tree additions: `commerce-migrations/0025_automations_polls_v1.sql`, `functions/_shared/poll-normalization.js`, `functions/_shared/polls-core.js`, the Poll/Admin/Automations/bot Functions, `src/polls/`, `src/pages/PollsAdminPages.tsx`, `src/styles/polls-admin.css`, and `tests/polls-core.test.mjs`. Rollout order is migration and secret custody, Admin, bot, then Public; verify staging HMAC, revision convergence, heartbeat, lease release, account/anonymous votes, and responsive routes before production promotion.
+
+Wheels V1.12 adds `/wheels/mechanics` as the visual editor for the existing revisioned global Wheels settings authority, `/wheels` as an operational Overview, and `/wheels/library` as the focused library. The editor follows the same graphite, warm-neutral, and gold Admin visual system. Public receives only the sanitized read projection; saving remains protected and audited. See `docs/WHEELS_V1.md` and `docs/WHEELS_STAGE_V1.md`.
+
 ## Admin authorization and Full Admin parity
 
 Admin authorization is server-owned and capability-based. `functions/_shared/admin-capabilities.js` is the canonical registry and resolver; `src/auth/capabilities.ts` mirrors its identifiers only for route, navigation, and read-only presentation. Master Admin receives every registered capability and cannot be restricted. Full Admin receives every registered normal Admin capability by default, including ordinary operational mutations, then loses only capabilities explicitly denied by Master Admin. Regular users receive no Admin capabilities. Unknown identifiers fail closed.
@@ -210,7 +224,7 @@ ThirdRailify-Admin/
 │   ├── api/                Shared auth, protected Admin/GOATS APIs, public projections, and signed Stripe/Printful webhook receivers
 │   └── u/                  Immutable R2-backed profile-media delivery
 ├── commerce-import/        Sanitized catalogue evidence and design-only variant schema
-├── commerce-migrations/    Commerce authority through additive `0018_printful_fulfillment_lifecycle.sql`
+├── commerce-migrations/    Commerce authority through additive `0025_automations_polls_v1.sql`
 ├── migrations/             Idempotent D1 account foundation
 ├── src/
 │   ├── auth/               Gate, session provider, modal, Turnstile, and account widget

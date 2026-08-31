@@ -3,7 +3,7 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "analytics" | "content" | "watch" | "wheels" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "analytics" | "content" | "watch" | "wheels" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -67,11 +67,20 @@ export const adminAreas: AdminArea[] = [
   },
   {
     path: "/wheels",
-    label: "Wheels",
+    label: "Wheels Overview",
     shortLabel: "Wheels",
     icon: "wheels",
-    summary: "Competition wheel persistence, lifecycle, locks, access, and official results.",
-    futureScope: ["Admin D1 authority", "Approved creators", "Immutable official draws"],
+    summary: "Wheel inventory, Stage, results, access, and global mechanics overview.",
+    futureScope: ["Admin D1 authority", "Global mechanics", "Immutable official draws"],
+  },
+  {
+    path: "/wheels/library",
+    parentPath: "/wheels",
+    label: "Wheel Library",
+    shortLabel: "Library",
+    icon: "wheels",
+    summary: "Wheel lifecycle, visibility, locks, ownership, and participant authority.",
+    futureScope: ["Lifecycle controls", "Owner context", "Public launch paths"],
   },
   {
     path: "/wheels/stages",
@@ -81,6 +90,15 @@ export const adminAreas: AdminArea[] = [
     icon: "wheels",
     summary: "Multi-Wheel Stage ownership, visibility, lifecycle, and membership.",
     futureScope: ["Stage moderation", "Ordered Wheel membership", "Safe deletion"],
+  },
+  {
+    path: "/wheels/mechanics",
+    parentPath: "/wheels",
+    label: "Mechanics",
+    shortLabel: "Mechanics",
+    icon: "settings",
+    summary: "Global decay profile, launch envelope, duration policy, and safe preview.",
+    futureScope: ["Revisioned policy", "Public-safe projection", "All-mode parity"],
   },
   {
     path: "/wheels/access",
@@ -99,6 +117,31 @@ export const adminAreas: AdminArea[] = [
     icon: "orders",
     summary: "Immutable official draw history and audited voiding.",
     futureScope: ["Snapshot hashes", "Idempotency", "Non-destructive voids"],
+  },
+  {
+    path: "/polls",
+    label: "Polls",
+    shortLabel: "Polls",
+    icon: "polls",
+    summary: "Poll lifecycle, creators, web voting, results, and Rumble lease authority.",
+    futureScope: ["Authoritative aggregate results", "Approved creators", "One Rumble Poll per source"],
+  },
+  {
+    path: "/polls/access",
+    parentPath: "/polls",
+    label: "Poll Creator Access",
+    shortLabel: "Access",
+    icon: "users",
+    summary: "Explicit regular-account Poll creator grants.",
+    futureScope: ["Create Polls", "Manage owned Polls", "Admin moderation"],
+  },
+  {
+    path: "/automations",
+    label: "Automations",
+    shortLabel: "Automations",
+    icon: "automations",
+    summary: "Discord bot desired state, heartbeat, Rumble runtime, and Poll automation monitor.",
+    futureScope: ["Versioned bot configuration", "Exact-chat Poll voting", "Deferred trigger studio"],
   },
   {
     path: "/products",

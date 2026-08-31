@@ -1,5 +1,9 @@
 # Wheels Stage V1.1 authority
 
+## V1.12 mechanics boundary
+
+Stage membership and Official All authority do not store or select a decay curve. Public reads the sanitized global mechanics projection once before coordinating a batch, then snapshots the same settings revision and start timestamp for all one-to-six animations. Admin continues to own results and the atomic Official All transaction; changing global mechanics cannot change winners, landing evidence, idempotency, or an animation already in progress.
+
 ## Official All
 
 The signed `POST /api/wheels/stages/:slug/spin-all` operation accepts the expected Stage revision, Stage-ordered Wheel slugs/revisions, and one secure batch idempotency key—never winners. Admin re-resolves the active account, Stage, current ordered membership, and every Wheel's independent Official permission, lifecycle, lock, revision, cooldown, active entries, and existing rate limits. Stage ownership does not grant Wheel permission.

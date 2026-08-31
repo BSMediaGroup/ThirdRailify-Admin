@@ -5,6 +5,7 @@ import {
   createWheel,
   getCreatorAccess,
   getPublicWheel,
+  getPublicWheelMechanics,
   getWheelAccess,
   listPublicWheels,
   performOfficialSpin,
@@ -53,6 +54,7 @@ async function handlePublicRead(request, env, path) {
     return wheelMediaResponse(env, decode(media[1]), request, accountId);
   }
   if (!path) return cached(await listPublicWheels(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort") }));
+  if (path === "mechanics") return cached(await getPublicWheelMechanics(env));
   if (path === "stages") return cached(await listPublicStages(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort") }));
   const stage = path.match(/^stages\/([^/]+)$/);
   if (stage) return cached(await getStage(env, decode(stage[1])));

@@ -10,6 +10,7 @@ import {
   timingSafeEqual,
 } from "./auth-core.js";
 import { mediaForWheel, retireSegmentMediaAssets, validateSegmentMediaReferences } from "./wheel-media.js";
+import { cloneDefaultWheelMechanics, normalizeWheelMechanics } from "../../src/wheels/mechanics.mjs";
 
 const MAX_ENTRIES = 1000;
 const MAX_BODY_BYTES = 384 * 1024;
@@ -148,7 +149,7 @@ export async function createWheel(env, accountId, input) {
   const description = optionalText(input.description, 280);
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const lifecycle = input.lifecycle === "draft" ? "draft" : "active";
-  const config = validateConfig(input.config || {});
+  const policy = await getWheelSettings(env); const config = validateConfig(input.config || {}, policy.settings.mechanics);
   const entries = validateEntries(input.entries || [], { newIds: true });
   if (segmentAssetIds(config, entries).length) throw new AuthFailure(400, "wheel_segment_media_invalid", "Create the wheel before assigning wheel-owned segment images.");
   const id = randomId(); const timestamp = nowIso();
@@ -179,7 +180,7 @@ export async function saveWheel(env, accountId, slug, input) {
   if (expectedRevision !== Number(wheel.revision)) throw new AuthFailure(409, "wheel_revision_conflict", "The wheel changed. Reload it before saving.");
   const title = requiredText(input.title, 1, 100, "wheel_title_invalid");
   const description = optionalText(input.description, 280);
-  const config = validateConfig(input.config || {});
+  const policy = await getWheelSettings(env); const storedConfig = parseJson(wheel.config_json, DEFAULT_CONFIG); const config = validateConfig(input.config || {}, policy.settings.mechanics, { existingDuration: Number(storedConfig.spinDurationMs) });
   const requestedEntries = validateEntries(input.entries || []);
   const referencedSegmentAssets = segmentAssetIds(config, requestedEntries);
   await validateSegmentMediaReferences(env, wheel.id, referencedSegmentAssets);
@@ -431,12 +432,21 @@ export async function voidOfficialResult(env, actorId, input) {
 
 export async function getWheelSettings(env) {
   const row = await requireWheelDb(env).prepare("SELECT value_json, revision, updated_at FROM wheel_settings WHERE setting_key = 'global'").first();
-  return { ok: true, settings: parseJson(row?.value_json, {}), revision: Number(row?.revision || 1), updatedAt: row?.updated_at || null };
+  const stored = parseJson(row?.value_json, {});
+  return { ok: true, settings: { ...stored, mechanics: normalizeWheelMechanics(stored.mechanics || cloneDefaultWheelMechanics()) }, revision: Number(row?.revision || 1), updatedAt: row?.updated_at || null };
+}
+
+export async function getPublicWheelMechanics(env) {
+  const policy = await getWheelSettings(env);
+  return { ok: true, mechanics: policy.settings.mechanics, revision: policy.revision, updatedAt: policy.updatedAt };
 }
 
 export async function saveWheelSettings(env, actorId, input) {
   await enforceWheelRateLimit(env, "admin_settings", actorId, 30, 3600);
   const revision = positiveInteger(input.revision, "wheel_revision_invalid", 2_147_483_647);
+  let mechanics;
+  try { mechanics = normalizeWheelMechanics(input.mechanics || cloneDefaultWheelMechanics(), { strict: true }); }
+  catch (error) { throw new AuthFailure(400, "wheel_mechanics_invalid", error instanceof Error ? error.message : "Wheel mechanics are invalid."); }
   const settings = {
     defaultTheme: PRESETS.has(input.defaultTheme) ? input.defaultTheme : "third-rail-gold",
     maximumParticipants: positiveInteger(input.maximumParticipants || MAX_ENTRIES, "maximum_participants_invalid", MAX_ENTRIES),
@@ -444,9 +454,13 @@ export async function saveWheelSettings(env, actorId, input) {
     officialSpinCooldownSeconds: positiveInteger(input.officialSpinCooldownSeconds || 2, "cooldown_invalid", 60),
     defaultCelebrationIntensity: CELEBRATIONS.has(input.defaultCelebrationIntensity) ? input.defaultCelebrationIntensity : legacyCelebration(input.defaultCelebrationIntensity),
     defaultPublicHistory: input.defaultPublicHistory !== false,
+    mechanics,
   };
-  const timestamp = nowIso(); const result = await requireWheelDb(env).prepare("UPDATE wheel_settings SET value_json = ?, revision = revision + 1, updated_at = ?, updated_by_account_id = ? WHERE setting_key = 'global' AND revision = ?").bind(JSON.stringify(settings), timestamp, actorId, revision).run();
-  if (Number(result?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "wheel_revision_conflict", "Wheel settings changed. Reload before saving.");
+  const timestamp = nowIso(); const db = requireWheelDb(env); const result = await db.batch([
+    db.prepare("UPDATE wheel_settings SET value_json = ?, revision = revision + 1, updated_at = ?, updated_by_account_id = ? WHERE setting_key = 'global' AND revision = ?").bind(JSON.stringify(settings), timestamp, actorId, revision),
+    db.prepare("INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, event_type, metadata_json, created_at) SELECT ?, NULL, ?, 'wheel_settings_saved', ?, ? FROM wheel_settings WHERE setting_key = 'global' AND revision = ? AND updated_at = ?").bind(randomId(), actorId, JSON.stringify({ previousRevision: revision, mechanicsVersion: mechanics.mechanicsVersion, curveProfile: mechanics.curveProfile }), timestamp, revision + 1, timestamp),
+  ]);
+  if (Number(result?.[0]?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "wheel_revision_conflict", "Wheel settings changed. Reload before saving.");
   return getWheelSettings(env);
 }
 
@@ -476,7 +490,7 @@ function validateEntries(input, options = {}) {
   });
 }
 
-function validateConfig(input) {
+function validateConfig(input, mechanics = null, options = {}) {
   const rawPalette = Array.isArray(input.palette) ? input.palette : DEFAULT_CONFIG.palette;
   if (rawPalette.length > 12 || rawPalette.some((value) => !HEX.test(clean(value, 7)))) throw new AuthFailure(400, "wheel_palette_invalid", "Palette colours must be six-digit hex values.");
   const palette = rawPalette.map((value) => clean(value, 7).toUpperCase());
@@ -484,8 +498,9 @@ function validateConfig(input) {
   if (palette.length < (custom ? 1 : 2) || (custom && palette.length > 5)) throw new AuthFailure(400, "wheel_palette_invalid", custom ? "Custom palettes require between one and five valid colours." : "Choose at least two valid palette colours.");
   const pointer = clean(input.pointerAccent || DEFAULT_CONFIG.pointerAccent, 7);
   if (!HEX.test(pointer)) throw new AuthFailure(400, "wheel_pointer_invalid", "The pointer accent must be a six-digit hex colour.");
-  const duration = positiveInteger(input.spinDurationMs || DEFAULT_CONFIG.spinDurationMs, "spin_duration_invalid", 60000);
+  const duration = positiveInteger(input.spinDurationMs || mechanics?.defaultSpinDurationMs || DEFAULT_CONFIG.spinDurationMs, "spin_duration_invalid", 60000);
   if (duration < 2000) throw new AuthFailure(400, "spin_duration_invalid", "Spin duration must be between 2 and 60 seconds.");
+  if (mechanics && duration !== options.existingDuration && (duration < mechanics.minimumSpinDurationMs || duration > mechanics.maximumSpinDurationMs)) throw new AuthFailure(400, "spin_duration_policy_invalid", `Spin duration must be between ${mechanics.minimumSpinDurationMs / 1000} and ${mechanics.maximumSpinDurationMs / 1000} seconds under the global Wheel policy.`);
   const template = requiredText(input.winnerMessageTemplate || DEFAULT_CONFIG.winnerMessageTemplate, 1, 160, "winner_message_invalid");
   const paletteStyles = input.paletteStyles == null ? palette.map((color) => ({ mode: "solid", color })) : validatePaletteStyles(input.paletteStyles, palette, custom);
   return {

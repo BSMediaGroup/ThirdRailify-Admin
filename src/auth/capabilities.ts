@@ -2,7 +2,7 @@ export const adminCapabilityIds = [
   "overview.view", "analytics.view", "inbox.view", "inbox.manage", "watch.view", "watch.manage",
   "content.view", "content.manage", "commerce.view", "commerce.catalogue.manage", "commerce.business.manage",
   "commerce.payments.manage", "commerce.integrations.manage", "commerce.templates.manage", "commerce.operations.manage",
-  "wheels.view", "wheels.manage", "media.view", "goats.view", "goats.manage",
+  "wheels.view", "wheels.manage", "polls.view", "polls.manage", "automations.view", "automations.manage", "media.view", "goats.view", "goats.manage",
   "membership.view", "users.view", "users.manage", "integrations.view",
   "settings.view", "settings.manage", "role_permissions.view", "role_permissions.manage",
 ] as const;
@@ -30,9 +30,14 @@ const policies: Record<string, AdminRoutePolicy> = {
   "/commerce/emails": { view: "commerce.view", manage: "commerce.templates.manage" },
   "/commerce/fulfillment": { view: "commerce.view", manage: "commerce.operations.manage" },
   "/wheels": { view: "wheels.view", manage: "wheels.manage" },
+  "/wheels/library": { view: "wheels.view", manage: "wheels.manage" },
   "/wheels/stages": { view: "wheels.view", manage: "wheels.manage" },
+  "/wheels/mechanics": { view: "wheels.view", manage: "wheels.manage" },
   "/wheels/access": { view: "wheels.view", manage: "wheels.manage" },
   "/wheels/results": { view: "wheels.view", manage: "wheels.manage" },
+  "/polls": { view: "polls.view", manage: "polls.manage" },
+  "/polls/access": { view: "polls.view", manage: "polls.manage" },
+  "/automations": { view: "automations.view", manage: "automations.manage" },
   "/media": { view: "media.view" },
   "/goats": { view: "goats.view", manage: "goats.manage" },
   "/goats/pending": { view: "goats.view", manage: "goats.manage" },
@@ -49,6 +54,7 @@ const policies: Record<string, AdminRoutePolicy> = {
 
 export function adminRoutePolicy(path: string): AdminRoutePolicy {
   if (path.startsWith("/wheels/")) return policies["/wheels"];
+  if (path.startsWith("/polls/")) return policies["/polls"];
   if (path.startsWith("/goats/")) return policies["/goats"];
   return policies[path] || { view: "overview.view" };
 }
