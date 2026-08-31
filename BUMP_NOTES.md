@@ -10,7 +10,9 @@ PENDING VER=0.1.0-alpha.0
 - Root cause was the Admin Pages `_routes.json` allowlist omitting both `/api/polls` and `/api/polls/*` even though the Poll Function shipped in the same source. Added only those two Pages Function routes; no Poll core, bot control-plane, auth, signing, replay, voter, or D1 behavior changed.
 - Remote read-only verification found the complete migration-0025 Poll table/index set and zero Poll rows. Zero public/open Polls remains HTTP 200 with `items: []`, and Public renders the authoritative `No open Polls` state rather than an outage.
 - Added focused regression coverage for Pages routing, empty and populated public reads without an Admin browser session, Poll relay HMAC/replay rejection, private `no-store` internal responses, missing D1 binding, and query failure. No migration was run and no secret was read, printed, regenerated, or changed.
-- Production deployment and stable-origin acceptance evidence: pending this hotfix's validated release.
+- Deployed scoped commit `22ae8f300c085cc4864a6f7aa0b6d89be867910c` as Admin Pages production deployment `314ee37e-f4e0-4f68-aac3-9b1a71e86180`. Both its immutable URL and stable Admin `/api/polls` return HTTP 200 JSON; stable Public `/api/polls` returns HTTP 200 with `items: []`.
+- Live direct-refresh browser acceptance at 1440px and 390px showed `No open Polls`, exactly one successful Poll API request per load, and no application exception/request storm. The already-injected Cloudflare Insights beacon remained blocked by its own SRI mismatch and is unrelated to Poll routing.
+- Post-deploy read-only Bot authority evidence remained healthy: bot `1.1.0`, Discord connected, config synchronized, configured/desired/applied revision `1`, and a current 14-second heartbeat at capture time.
 
 ## 2026-09-01 - Current Printful catalogue reconciliation
 
