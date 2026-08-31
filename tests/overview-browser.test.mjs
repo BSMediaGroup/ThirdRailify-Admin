@@ -27,6 +27,7 @@ test("Admin overview reports real cross-system state responsively without deferr
     assert.equal(await page.locator('.overview-analytics__plot svg[aria-label*="last 24 hours"]').count(), 1);
     assert.equal(Boolean(await page.locator(".overview-analytics__line.is-views").getAttribute("d")), true);
     assert.equal(Boolean(await page.locator(".overview-analytics__line.is-sessions").getAttribute("d")), true);
+    assert.equal(await page.locator(".overview-analytics__area").evaluate((node) => getComputedStyle(node).animationName), "analytics-area-rise", `Overview gradient rises from the baseline at ${width}x${height}`);
     assert.deepEqual(await page.locator(".overview-analytics__y-axis text:not(.overview-analytics__axis-title)").allTextContents(), ["40", "30", "20", "10", "0"], `Y axis exposes the rounded event scale at ${width}x${height}`);
     assert.deepEqual(await page.locator(".overview-analytics__x-axis text:not(.overview-analytics__axis-title)").allTextContents(), ["02:00", "10:00", "14:00", "22:00", "01:00"], `X axis exposes UTC bucket times at ${width}x${height}`);
     const trendBuckets = page.locator(".overview-analytics__bucket");

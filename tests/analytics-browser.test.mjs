@@ -75,6 +75,7 @@ test("Audience Analytics renders explicit migration and ready states responsivel
         });
         assert.deepEqual(matrixAlignment, { inside: true, margin: "0px" });
         assert.equal(await page.locator(".analytics-trend__line.is-views").getAttribute("pathLength"), "1");
+        assert.equal(await page.locator(".analytics-trend__area").evaluate((node) => getComputedStyle(node).animationName), "none", `Analytics gradient remains static for reduced motion at ${viewport.width}px`);
         if (viewport.width === 1440) {
           await page.locator(".analytics-map-marker").nth(1).dispatchEvent("mouseenter");
           await page.waitForFunction(() => document.querySelectorAll("[data-country-flag]").length > 3);
@@ -101,6 +102,15 @@ test("Audience Analytics renders explicit migration and ready states responsivel
       await context.close();
     }
   }
+
+  const motionContext = await browser.newContext({ viewport: { width: 1024, height: 768 }, reducedMotion: "no-preference" });
+  const motionPage = await motionContext.newPage();
+  await motionPage.route("**/api/**", (route) => respond(route, "ready"));
+  await motionPage.goto(`${ORIGIN}/analytics`);
+  const animatedArea = motionPage.locator(".analytics-trend__area");
+  await animatedArea.waitFor();
+  assert.equal(await animatedArea.evaluate((node) => getComputedStyle(node).animationName), "analytics-area-rise", "Analytics gradient rises from the baseline when motion is enabled");
+  await motionContext.close();
 });
 
 async function respond(route, mode) {

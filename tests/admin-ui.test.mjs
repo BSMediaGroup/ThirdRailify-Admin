@@ -240,6 +240,9 @@ test("Analytics and inbox surfaces expose truthful states, bulk controls, and ac
   assert.match(analytics, /import \* as maplibregl from "maplibre-gl"/); assert.match(analytics, /setWorkerUrl\(maplibreWorkerUrl\)/); assert.match(analytics, /data-analytics-map-engine="maplibre"/); assert.match(analytics, /Fullscreen audience activity map/); assert.match(analytics, /role="img"[\s\S]{0,80}aria-label="World map/);
   assert.match(analytics, /CountryFlag countryCode=\{point\.countryCode\}/); assert.match(analytics, /createCountryFlagElement\(point\.countryCode\)/); assert.match(analytics, /resetResizableTable\("analytics-comparison"\)/);
   assert.match(analytics, /analytics-trend__line is-views/); assert.match(styles, /analytics-line-draw/);
+  assert.match(styles, /\.overview-analytics__area \{[^}]*transform: scaleY\(0\)[^}]*transform-origin: center bottom[^}]*analytics-area-rise/);
+  assert.match(styles, /\.analytics-trend__area \{[^}]*transform: scaleY\(0\)[^}]*transform-origin: center bottom[^}]*analytics-area-rise/);
+  assert.match(styles, /@keyframes analytics-area-rise \{ to \{ opacity: 1; transform: scaleY\(1\); \} \}/);
   assert.match(inbox, /role="dialog"/); assert.match(inbox, /Mark unread/); assert.match(inbox, /inbox-message__actions/); assert.match(inbox, /Delete/);
   assert.match(inboxClient, /mutateInboxMessages/); assert.match(inboxClient, /"read" \| "unread" \| "delete"/);
   assert.match(styles, /\.message-lightbox/); assert.match(styles, /\.analytics-map-panel/); assert.match(styles, /prefers-reduced-motion/);
