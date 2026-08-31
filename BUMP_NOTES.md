@@ -1,5 +1,19 @@
 # Bump notes
 
+## 2026-08-31 - Featured live acceptance and catalogue freshness
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Confirmed the targeted Featured hotfix is present in commit `cfabd36` and Pages deployment `3bb386ed-88ec-484f-abbe-326be052bd1e`. The earlier failing production bundle used the broad `/products/bulk` path; the deployed bundle now calls `POST /api/admin/commerce/products/:id/featured`.
+- Live Master Admin acceptance used `product-395660089` (`bleh-unisex-classic-tee`): OFF changed to ON with HTTP 200 JSON `ok`, the row updated without an error, a cache-disabled hard reload remained ON, and restoration through the same UI returned HTTP 200 and persisted OFF.
+- A separately instrumented live click produced exactly one targeted Featured POST, zero product-list or auth/session refetches, and HTTP 200 in each direction; the final hard reload confirmed the restored OFF state.
+- Narrowed only the public catalogue-list projection to `Cache-Control: no-store` so Public Featured merchandising cannot retain the prior five-minute edge freshness plus stale-while-revalidate window. Product details and unrelated Admin assets retain their established caching.
+- Updated the stale Products authorization fixture to the current canonical role model: Full Admin receives normal catalogue parity by default, while a Regular account is rejected. No permission authority, runtime capability, schema, or account state changed.
+- Focused gates are green under repository-pinned Node 22.16.0: 11 product-merchandising tests, 3 Commerce browser tests, 16 authorization tests, lint, typecheck, production build, and the Commerce Worker dry-run build.
+- No migration, provider/payment/fulfilment operation, DNS/domain mutation, product price/visibility change, or direct D1 Featured write was performed. The catalogue freshness deployment and final stable-origin readback follow the clean scoped release.
+
 ## 2026-08-31 - Admin Products Featured-toggle reliability hotfix
 
 CURRENT VER=0.1.0-alpha.0
