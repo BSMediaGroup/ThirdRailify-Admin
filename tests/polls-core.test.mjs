@@ -45,7 +45,9 @@ test("Poll migration, lifecycle, one-current-vote semantics, lease conflict, and
   assert.equal(first.poll.state, "draft");
   const open = await changePollLifecycle(env, "creator-one", first.poll.slug, { revision: first.poll.revision, action: "open" });
   assert.equal(open.poll.state, "open");
-  assert.equal((await botActivePoll(env)).activePoll.id, open.poll.id);
+  const botPoll = (await botActivePoll(env)).activePoll;
+  assert.equal(botPoll.id, open.poll.id);
+  assert.deepEqual(botPoll.options, open.poll.options.map((option) => ({ id: option.id, normalizedTrigger: option.normalizedTrigger })));
 
   const actor = { namespace: "web_anonymous", key: "anonymous:fixture", label: null };
   const optionOne = open.poll.options[0].id;

@@ -392,7 +392,7 @@ export async function botActivePoll(env) {
   const options = await optionsForPoll(env, row.id);
   return { ok: true, activePoll: { id: row.id, revision: Number(row.revision), openedAt: row.opened_at, sourceScope: row.rumble_source_scope,
     livestreamMode: row.rumble_livestream_mode, livestreamId: row.rumble_livestream_id || null, requestedIntervalSeconds: Number(row.requested_interval_seconds),
-    options: options.map((option) => ({ id: option.id, normalizedTrigger: option.triggerNormalized })) }, fetchedAt: nowIso() };
+    options: options.map((option) => ({ id: option.id, normalizedTrigger: option.normalizedTrigger })) }, fetchedAt: nowIso() };
 }
 
 export async function recordBotHeartbeat(env, input) {

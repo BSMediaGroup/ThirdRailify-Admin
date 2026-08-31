@@ -1,5 +1,10 @@
 # Bump notes
 
+## 2026-09-01 - Poll bot active-option response contract
+
+- Fixed the signed bot control projection to read the Poll serializer's canonical `normalizedTrigger` property. The previous camel-case mismatch omitted every active option's trigger from JSON, so no-active-Poll refreshes were valid but opening a Poll produced the bot's sanitized `response_schema_invalid` diagnostic.
+- Added an exact active-Poll option-contract assertion alongside the existing no-active-Poll lifecycle coverage. No HMAC, replay, desired-revision, discovery, secret, or Poll voting authority was weakened.
+
 ## 2026-09-01 - Polls V1.1 discovery and media authority
 
 CURRENT VER=0.1.0-alpha.0
