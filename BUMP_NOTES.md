@@ -1,5 +1,15 @@
 # Bump notes
 
+## 2026-09-01 - Gaming request Inbox intake
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added exact-Public-origin signed `POST /api/gaming/suggestions` intake using the existing community HMAC, Turnstile, abuse limiter, and durable Admin Inbox authority.
+- Persisted complete bounded requests under category `gaming`, with exact Steam app URL normalization, signed account attribution, source-ID idempotency, and no browser-supplied identity authority.
+- Reused the existing `/inbox`; no new Admin UI, schema migration, provider API, Steam credential, email delivery, deployment, remote database write, secret, DNS, or provider action was added.
+
 ## 2026-09-01 - Poll bot active-option response contract
 
 - Fixed the signed bot control projection to read the Poll serializer's canonical `normalizedTrigger` property. The previous camel-case mismatch omitted every active option's trigger from JSON, so no-active-Poll refreshes were valid but opening a Poll produced the bot's sanitized `response_schema_invalid` diagnostic.

@@ -1,5 +1,13 @@
 # Third Railify Admin
 
+## Gaming request Inbox intake (local implementation)
+
+Signed Public `POST /api/gaming/suggestions` requests now enter the existing durable Admin Inbox as category `gaming` and source type `gaming_suggestion`. The receiver verifies the exact Public origin, timestamp, request ID, body digest, and existing `THIRDRAILIFY_COMMUNITY_API_SECRET`; applies the existing Turnstile and rate-limit authorities; normalizes only exact HTTPS Steam app URLs; and preserves server-signed account attribution without trusting browser identity. Idempotency uses the existing Inbox source identity constraint. No new Admin page, schema migration, provider API, Steam credential, email delivery, or remote mutation is required; operators use the existing `/inbox` destination.
+
+Focused coverage is `npm run test:gaming`. No deployment, remote database write, migration, secret, DNS, or provider action was performed.
+
+Gaming tree additions are `functions/api/gaming/suggestions.js` and `tests/gaming-suggestions.test.mjs`. The existing limiter registry, Pages route manifest, package scripts, README, and bump notes are extended in place; no file or migration was added elsewhere.
+
 ## Polls V1.1 discovery and media authority (local implementation)
 
 The existing bot heartbeat now carries a bounded, secret-safe Rumble discovery projection. Creator-authorized signed requests can read only the resolved `channel_id`-first/`user_id`-fallback source, display name, safe livestream metadata, and freshness. Raw chat, stream keys, server URLs, credentials, and arbitrary runtime fields are excluded; bot health is reported as healthy, stale, or offline and does not widen creator grants.
@@ -186,6 +194,7 @@ The production output is `dist/`. The local development server uses port 5174 an
 | `/api/admin/watch` | `watch.view`/`watch.manage`, exact-origin, CSRF, rate-limited and audited bridge to signed Public archive management |
 | `/api/admin/banner` | `content.view`/`content.manage` banner authority with exact-origin, CSRF, rate limit, validation, revision matching, and audit |
 | `/api/banner` | Cacheable read-only projection of safe banner presentation fields for Public Pages |
+| `/api/gaming/suggestions` | Exact-Public-origin HMAC/Turnstile/rate-protected Gaming request intake into the existing Admin Inbox |
 | `/api/goats/*` | Approved-only public reads plus signed fixed internal ingestion actions |
 | `/api/catalogue/merchandising` | Cacheable public read projection of product ID/slug/featured order only; no write path |
 | `/orders` | Read-only bounded local Checkout/payment/fulfillment states plus current Customer linkage and immutable historical checkout contact; no synthetic orders or revenue |
