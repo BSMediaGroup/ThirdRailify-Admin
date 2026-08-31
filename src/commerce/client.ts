@@ -143,7 +143,8 @@ export type MerchandisingVariant = {
   id: string; productId: string; localVariantKey: string; displayLabel: string; status: string; visibility: string;
   sellable: boolean; availability: string; unitAmount: number; currencyCode: string; sku: string | null;
   size: string | null; color: string | null; options: Record<string, string>; fulfillmentProvider: string;
-  fulfillmentMappingStatus: string; migrationStatus: string; integration: Record<string, string | null>; updatedAt: string;
+  fulfillmentMappingStatus: string; migrationStatus: string; integration: Record<string, string | null>;
+  provider: { storeId: string | null; presence: string; lastSeenAt: string | null; reconciledAt: string | null; snapshotFingerprint: string | null; archivedAt: string | null }; updatedAt: string;
 };
 export type MerchandisingProduct = {
   id: string; slug: string; title: string; description: string; primaryImageUrl: string | null; additionalImages: string[];
@@ -151,6 +152,7 @@ export type MerchandisingProduct = {
   price: { minimum: number | null; maximum: number | null; label: string }; maxQuantity: number; requiresShipping: boolean;
   featured: boolean; featuredOrder: number | null; displayOrder: number; migrationStatus: string; sourceProvider: string;
   integration: Record<string, string | null>; variantCount: number; activeVariantCount: number; sellableVariantCount: number;
+  provider: { storeId: string | null; presence: string; reconciliationStatus: string; lastSeenAt: string | null; reconciledAt: string | null; snapshotFingerprint: string | null; archivedAt: string | null; archivedReason: string | null };
   readiness: { displayable: boolean; checkout: boolean; fulfillment: string }; variants: MerchandisingVariant[];
   displayData: { hasImage: boolean; hasPrice: boolean; ready: boolean }; updatedAt: string;
 };
@@ -197,14 +199,28 @@ export type CommerceOrderDetail = {
 };
 export type ProductListFilters = {
   page?: number; pageSize?: 20 | 50 | 75 | 100; query?: string; visibility?: string; status?: string;
-  migration?: string; category?: string; featured?: "all" | "featured" | "not_featured"; sort?: "display" | "name" | "price";
+  migration?: string; category?: string; featured?: "all" | "featured" | "not_featured"; catalogue?: "current" | "all" | "archived" | "provider_missing" | "wrong_store" | "needs_review"; sort?: "display" | "name" | "price";
 };
 export type MerchandisingListPayload = {
   ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; items: MerchandisingProduct[]; featured: MerchandisingProduct[];
   page: number; pageSize: 20 | 50 | 75 | 100; totalItems: number; totalPages: number;
-  filters: Required<Pick<ProductListFilters, "query" | "visibility" | "status" | "migration" | "category" | "featured" | "sort">>;
+  filters: Required<Pick<ProductListFilters, "query" | "visibility" | "status" | "migration" | "category" | "featured" | "catalogue" | "sort">>;
   facets: { categories: string[]; migrationStatuses: string[] };
-  totals: { products: number; publicProducts: number; variants: number; featuredProducts: number }; updatedAt: string | null;
+  totals: { products: number; totalProducts: number; currentProducts: number; archivedProducts: number; providerMissingProducts: number; wrongStoreProducts: number; needsReviewProducts: number; publicProducts: number; variants: number; featuredProducts: number }; updatedAt: string | null;
+};
+export type CatalogueReconciliationPreview = {
+  ok: true; runId: string; state: "previewed"; confirmationText: string; previewedAt: string;
+  authority: { provider: "Printful"; contract: string; store: PrintfulStoreIdentity; storeVerified: true; selection: string; methods: ["GET"] };
+  snapshot: { fingerprint: string; retrievedAt: string; products: number; variants: number; ignoredProducts: number; ignoredVariants: number; incompleteProducts: number; productsWithoutImages: number; productsWithoutValidVariants: number };
+  local: { products: number; activeProducts: number; publicProducts: number; variants: number };
+  counts: Record<string, number>; changes: Record<string, number>; unusualReduction: boolean; blockers: Array<{ reason: string }>;
+  groups: Record<string, Array<Record<string, unknown>>>; planDigest: string;
+};
+export type CatalogueReconciliationStatus = {
+  ok: true; access: CommerceAccess | null;
+  authority: { provider: "Printful"; contract: string; configuredStoreId: string; configurationState: string; storeVerified: boolean; store: PrintfulStoreIdentity | null };
+  counts: { totalProducts: number; currentProducts: number; publicProducts: number; archivedProducts: number; needsReviewProducts: number; currentVariants: number };
+  latest: null | { id: string; state: string; store: PrintfulStoreIdentity; snapshotFingerprint: string; providerProducts: number; providerVariants: number; unusualReduction: boolean; previewedAt: string; appliedAt: string | null; updatedAt: string };
 };
 export type ProductBulkOperation = "show" | "hide" | "feature" | "unfeature";
 export type ProductBulkResult = {
@@ -512,6 +528,9 @@ export function getMerchandisingProductList(filters: ProductListFilters = {}) {
   Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
   return adminApi<MerchandisingListPayload>(`/api/admin/commerce/products/list?${query.toString()}`);
 }
+export function getCatalogueReconciliationStatus() { return adminApi<CatalogueReconciliationStatus>("/api/admin/commerce/products/reconciliation"); }
+export function previewCatalogueReconciliation(csrfToken: string) { return adminApi<CatalogueReconciliationPreview>("/api/admin/commerce/products/reconciliation/preview", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: "{}" }); }
+export function applyCatalogueReconciliation(csrfToken: string, runId: string, confirmation: string) { return adminApi<{ ok: true; state: "applied"; providerProducts: number; providerVariants: number; changes: Record<string, number> }>("/api/admin/commerce/products/reconciliation/apply", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ runId, confirmation }) }); }
 export function bulkUpdateMerchandisingProducts(csrfToken: string, body: { operation: ProductBulkOperation; productIds: string[] } | { operation: ProductBulkOperation; matching: Omit<ProductListFilters, "page" | "pageSize">; confirmMatching: true; expectedCount: number }) {
   return adminApi<ProductBulkResult>("/api/admin/commerce/products/bulk", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
 }

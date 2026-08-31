@@ -6,6 +6,7 @@ import stripeFeatureIcon from "../../assets/icons/stripeicon.svg";
 import { useAuth } from "../auth/AuthProvider";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { AdminIcon } from "../components/AdminIcon";
+import { useAdminToast } from "../components/AdminToasts";
 import { OrdersManagementPage } from "./OrdersManagementPage";
 import {
   getCommerceOverview,
@@ -15,6 +16,9 @@ import {
   pauseCommerceLaunch,
   getPaymentsControlPlane,
   getMerchandisingProductList,
+  getCatalogueReconciliationStatus,
+  previewCatalogueReconciliation,
+  applyCatalogueReconciliation,
   getCollectionOptions,
   getCollectionList,
   getCollectionDetail,
@@ -53,6 +57,8 @@ import {
   type ProductListFilters,
   type ProviderStatus,
   type CommerceMediaLimits,
+  type CatalogueReconciliationPreview,
+  type CatalogueReconciliationStatus,
 } from "../commerce/client";
 
 const REQUIRED_POSTURE = [
@@ -187,6 +193,7 @@ export { TaxDocumentsPage } from "./TaxDocumentsPage";
 /* Superseded by the dedicated authoritative CustomerEmailsPage component.
 export function CustomerEmailsPage() {
   const { csrfToken } = useAuth();
+  const { showToast } = useAdminToast();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<TemplatesPayload | null>(null);
   const [selected, setSelected] = useState("");
@@ -194,7 +201,6 @@ export function CustomerEmailsPage() {
   const [preview, setPreview] = useState<TemplatePreviewPayload | null>(null);
   const [recipient, setRecipient] = useState("");
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   const load = useCallback(async () => {
     const stop = startLoading("Loading commerce templates"); setError("");
     try {
@@ -205,21 +211,21 @@ export function CustomerEmailsPage() {
     finally { stop(); }
   }, [selected, startLoading]);
   useEffect(() => { void load(); }, [load]);
-  const choose = (key: string) => { setSelected(key); setDraft(payload?.templates.find((item) => item.templateKey === key) || null); setPreview(null); setMessage(""); };
+  const choose = (key: string) => { setSelected(key); setDraft(payload?.templates.find((item) => item.templateKey === key) || null); setPreview(null); };
   const change = <K extends keyof CommerceTemplate>(key: K, value: CommerceTemplate[K]) => setDraft((current) => current ? { ...current, [key]: value } : current);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!draft || !csrfToken || !payload?.databaseConfigured) return;
-    const stop = startLoading("Saving structured email template"); setError(""); setMessage("");
-    try { const next = await saveCommerceTemplate(csrfToken, draft); setPayload(next); setDraft(next.templates.find((item) => item.templateKey === draft.templateKey) || draft); setMessage("Draft template saved. No email was sent."); }
+    const stop = startLoading("Saving structured email template"); setError("");
+    try { const next = await saveCommerceTemplate(csrfToken, draft); setPayload(next); setDraft(next.templates.find((item) => item.templateKey === draft.templateKey) || draft); showToast("Draft template saved. No email was sent.", { title: "Email template saved" }); }
     catch (reason) { setError(errorMessage(reason, "The template could not be saved.")); }
     finally { stop(); }
   };
   const renderPreview = async (orderId?: string) => { if (!draft || !csrfToken) return; setError(""); try { setPreview(await previewCommerceTemplate(csrfToken, draft, orderId)); } catch (reason) { setError(errorMessage(reason, "The safe template preview could not be rendered.")); } };
-  const sendTest = async () => { if (!draft || !csrfToken || !recipient) return; setError(""); setMessage(""); try { const result = await sendCommerceTemplateTest(csrfToken, draft.templateKey, recipient); setMessage(result.duplicate ? "The deterministic TEST/PREVIEW delivery had already been sent; no duplicate was created." : `TEST/PREVIEW email sent to ${result.recipient}.`); } catch (reason) { setError(errorMessage(reason, "The protected test email could not be sent.")); } };
+  const sendTest = async () => { if (!draft || !csrfToken || !recipient) return; setError(""); try { const result = await sendCommerceTemplateTest(csrfToken, draft.templateKey, recipient); showToast(result.duplicate ? "The deterministic TEST/PREVIEW delivery had already been sent; no duplicate was created." : `TEST/PREVIEW email sent to ${result.recipient}.`, { title: result.duplicate ? "Duplicate prevented" : "Test email sent", tone: result.duplicate ? "info" : "success" }); } catch (reason) { setError(errorMessage(reason, "The protected test email could not be sent.")); } };
   return <>
     <CommerceHeading eyebrow="Structured plain text" title="Customer emails" summary="Edit seven permanent lifecycle templates with an explicit merge-variable allowlist, same-engine preview, and protected idempotent TEST/PREVIEW delivery." status={payload?.databaseConfigured ? "pending" : "unavailable"} />
     <div className="commerce-callout is-pending"><AdminIcon name="emails" /><div><strong>Community lifecycle templates are now first-class</strong><p>GOATS submission, Admin alert, approval, and rejection templates use their own idempotent outbox and documented variables.</p><Link className="text-link" to="/goats/emails">Open GOATS email templates <AdminIcon name="arrow" size={15} /></Link></div></div>
-    {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
+    {error && <div className="admin-alert" role="alert">{error}</div>}
     {payload && draft ? <div className="template-workspace"><nav aria-label="Email template types">{payload.templates.filter((template) => template.templateKind === "email").map((template) => <button type="button" key={template.templateKey} className={template.templateKey === selected ? "is-active" : ""} onClick={() => choose(template.templateKey)}><span>{template.displayName}</span><small>{template.enabled ? `${template.status} · enabled` : template.status}</small></button>)}</nav>
       <div className="template-workspace__editor">
         <form className="commerce-form" onSubmit={(event) => void submit(event)}>
@@ -279,17 +285,23 @@ export { CustomerEmailsPage } from "./CustomerEmailsPage";
 
 
 export function CommerceProductsPage() {
-  const { csrfToken } = useAuth();
+  const { csrfToken, access } = useAuth();
+  const { showToast } = useAdminToast();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<MerchandisingListPayload | null>(null);
   const [featuredBrowser, setFeaturedBrowser] = useState<MerchandisingListPayload | null>(null);
   const [collections, setCollections] = useState<CommerceCollection[]>([]);
+  const [reconciliation, setReconciliation] = useState<CatalogueReconciliationStatus | null>(null);
+  const [reconciliationPreview, setReconciliationPreview] = useState<CatalogueReconciliationPreview | null>(null);
+  const [reconciliationBusy, setReconciliationBusy] = useState(false);
+  const [reconciliationConfirmation, setReconciliationConfirmation] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<MerchandisingProduct | null>(null);
   const [query, setQuery] = useState("");
   const [visibility, setVisibility] = useState("all");
   const [status, setStatus] = useState("all");
   const [migration, setMigration] = useState("all");
   const [category, setCategory] = useState("all");
+  const [catalogue, setCatalogue] = useState<ProductListFilters["catalogue"]>("current");
   const [sort, setSort] = useState<ProductListFilters["sort"]>("display");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<20 | 50 | 75 | 100>(20);
@@ -307,13 +319,12 @@ export function CommerceProductsPage() {
   const [savingFeatured, setSavingFeatured] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   const mainRequest = useRef(0);
   const featuredRequest = useRef(0);
   const featuredAuthority = useRef("");
   const featuredPendingAuthority = useRef(new Set<string>());
-  const mainFilters = useMemo<ProductListFilters>(() => ({ page, pageSize, query, visibility, status, migration, category, sort }), [category, migration, page, pageSize, query, sort, status, visibility]);
-  const matchingFilters = useMemo<Omit<ProductListFilters, "page" | "pageSize">>(() => ({ query, visibility, status, migration, category, featured: "all", sort }), [category, migration, query, sort, status, visibility]);
+  const mainFilters = useMemo<ProductListFilters>(() => ({ page, pageSize, query, visibility, status, migration, category, catalogue, sort }), [catalogue, category, migration, page, pageSize, query, sort, status, visibility]);
+  const matchingFilters = useMemo<Omit<ProductListFilters, "page" | "pageSize">>(() => ({ query, visibility, status, migration, category, featured: "all", catalogue, sort }), [catalogue, category, migration, query, sort, status, visibility]);
 
   const loadMain = useCallback(async () => {
     const requestId = ++mainRequest.current;
@@ -344,6 +355,7 @@ export function CommerceProductsPage() {
     }
   }, [featuredFilter, featuredPage, featuredQuery]);
   useEffect(() => { void loadMain(); }, [loadMain, refreshKey]);
+  useEffect(() => { let active = true; void getCatalogueReconciliationStatus().then((next) => { if (active) setReconciliation(next); }).catch((reason) => { if (active) setError(errorMessage(reason, "Catalogue reconciliation status is unavailable.")); }); return () => { active = false; }; }, [refreshKey]);
   useEffect(() => { void loadFeaturedBrowser(); }, [loadFeaturedBrowser, refreshKey]);
   useEffect(() => {
     let active = true;
@@ -357,7 +369,7 @@ export function CommerceProductsPage() {
       setFeaturedIds((payload?.featured || []).map((product) => product.id));
     }
   }, [payload?.featured]);
-  useEffect(() => { setSelectedIds([]); setAllMatching(false); }, [category, migration, pageSize, query, sort, status, visibility]);
+  useEffect(() => { setSelectedIds([]); setAllMatching(false); }, [catalogue, category, migration, pageSize, query, sort, status, visibility]);
 
   const canManage = Boolean(payload?.access?.capabilities.includes("commerce.catalogue.manage"));
   const authoritativeFeaturedIds = payload?.featured.map((product) => product.id) || [];
@@ -367,6 +379,23 @@ export function CommerceProductsPage() {
   const resultStart = payload?.totalItems ? (payload.page - 1) * payload.pageSize + 1 : 0;
   const resultEnd = payload?.totalItems ? Math.min(payload.page * payload.pageSize, payload.totalItems) : 0;
   const refresh = () => setRefreshKey((value) => value + 1);
+  const previewReconciliation = async () => {
+    if (!csrfToken || !access.isMasterAdmin || reconciliationBusy) return;
+    setReconciliationBusy(true); setError(""); setReconciliationPreview(null); setReconciliationConfirmation("");
+    try { setReconciliationPreview(await previewCatalogueReconciliation(csrfToken)); }
+    catch (reason) { setError(errorMessage(reason, "The read-only Printful reconciliation preview failed safely.")); }
+    finally { setReconciliationBusy(false); }
+  };
+  const applyReconciliation = async () => {
+    if (!csrfToken || !access.isMasterAdmin || !reconciliationPreview || reconciliationBusy) return;
+    setReconciliationBusy(true); setError("");
+    try {
+      const result = await applyCatalogueReconciliation(csrfToken, reconciliationPreview.runId, reconciliationConfirmation);
+      showToast(`Catalogue reconciliation applied: ${result.providerProducts} current products and ${result.providerVariants} current variants.`, { title: "Catalogue reconciled" });
+      setReconciliationPreview(null); setReconciliationConfirmation(""); setCatalogue("current"); refresh();
+    } catch (reason) { setError(errorMessage(reason, "Catalogue reconciliation was not applied.")); }
+    finally { setReconciliationBusy(false); }
+  };
   const moveFeatured = (id: string, offset: -1 | 1) => setFeaturedIds((current) => {
     const index = current.indexOf(id);
     const target = index + offset;
@@ -388,11 +417,11 @@ export function CommerceProductsPage() {
   };
   const saveFeatured = async () => {
     if (!csrfToken || !canManage) return;
-    setSavingFeatured(true); setError(""); setMessage("");
+    setSavingFeatured(true); setError("");
     try {
       const next = await saveFeaturedProducts(csrfToken, featuredIds);
       setFeaturedIds(next.featured.map((product) => product.id));
-      setMessage("Featured order saved to Commerce D1.");
+      showToast("Featured order saved to Commerce D1.", { title: "Featured order saved" });
       refresh();
     } catch (reason) {
       setError(errorMessage(reason, "Featured products could not be saved."));
@@ -432,7 +461,7 @@ export function CommerceProductsPage() {
     try {
       const result = await bulkUpdateMerchandisingProducts(csrfToken, { operation, productIds: [product.id] });
       setPayload((current) => current ? { ...current, items: current.items.map((entry) => entry.id === product.id ? { ...entry, visibility: operation === "show" ? "public" : "private" } : entry) } : current);
-      setMessage((operation === "show" ? "Shown in store. " : "Hidden from store. ") + String(result.updated) + " product updated.");
+      showToast((operation === "show" ? "Shown in store. " : "Hidden from store. ") + String(result.updated) + " product updated.", { title: "Storefront visibility updated" });
       refresh();
     } catch (reason) {
       setError(errorMessage(reason, "Storefront visibility could not be updated."));
@@ -443,12 +472,12 @@ export function CommerceProductsPage() {
   const applyBulk = async (operation: ProductBulkOperation) => {
     if (!csrfToken || !canManage || !payload || !selectedCount || busy) return;
     if (allMatching && !window.confirm("Apply “" + bulkOperationLabel(operation) + "” to all " + String(payload.totalItems) + " products matching the current filters?")) return;
-    setBusy(true); setError(""); setMessage("");
+    setBusy(true); setError("");
     try {
       const result = allMatching
         ? await bulkUpdateMerchandisingProducts(csrfToken, { operation, matching: matchingFilters, confirmMatching: true, expectedCount: payload.totalItems })
         : await bulkUpdateMerchandisingProducts(csrfToken, { operation, productIds: selectedIds });
-      setMessage(bulkOperationLabel(operation) + " completed: " + String(result.updated) + " updated; " + String(result.unchanged) + " unchanged; " + String(result.rejected) + " rejected.");
+      showToast(bulkOperationLabel(operation) + " completed: " + String(result.updated) + " updated; " + String(result.unchanged) + " unchanged; " + String(result.rejected) + " rejected.", { title: "Bulk update complete" });
       setSelectedIds([]); setAllMatching(false); refresh();
     } catch (reason) {
       setError(errorMessage(reason, "The bulk product update could not be applied."));
@@ -461,12 +490,12 @@ export function CommerceProductsPage() {
   return <>
     <CommerceHeading eyebrow="Commerce D1 authority" title="Shop / Products" summary="Manage the replacement catalogue, real variants, integer CAD prices, public presentation, and provider readiness. Displayability is independent from the globally disabled checkout and paused fulfillment migration." status={payload?.databaseConfigured ? "connected" : "unavailable"} />
     {error && <div className="admin-alert" role="alert">{error}</div>}
-    {message && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Merchandising saved</strong><p>{message}</p></div></div>}
     {!payload && !error ? <CommerceState>Loading catalogue merchandising…</CommerceState> : payload ? <div className="merchandising-workspace commerce-catalogue-manager">
-      <section className="commerce-posture" aria-label="Catalogue totals"><div><span>Products</span><strong>{payload.totals.products}</strong></div><div><span>Public</span><strong>{payload.totals.publicProducts}</strong></div><div><span>Variants</span><strong>{payload.totals.variants}</strong></div><div><span>Checkout</span><strong>Globally disabled</strong></div></section>
+      <section className="commerce-section catalogue-reconciliation" aria-labelledby="catalogue-reconciliation-title"><div className="commerce-section-heading-actions"><div><p className="eyebrow">Current provider authority</p><h2 id="catalogue-reconciliation-title">Printful catalogue reconciliation</h2></div><button className="button-link" type="button" onClick={() => void previewReconciliation()} disabled={!access.isMasterAdmin || reconciliationBusy}>{reconciliationBusy ? "Reading Printful…" : "Preview reconciliation"}</button></div><p>Configured store <code>{reconciliation?.authority.configuredStoreId || "Unavailable"}</code> · {reconciliation?.authority.storeVerified ? `${reconciliation.authority.store?.name} verified` : "not yet verified by a reconciliation read"}. Preview performs bounded GET requests only; Apply requires a fresh matching snapshot and exact confirmation.</p>{!access.isMasterAdmin && <p className="commerce-action-note">Full Admins can inspect this state. Only Master Admin can preview or apply catalogue reconciliation.</p>}<div className="catalogue-reconciliation__counts"><span>Current <strong>{reconciliation?.counts.currentProducts ?? payload.totals.currentProducts}</strong></span><span>Archived <strong>{reconciliation?.counts.archivedProducts ?? payload.totals.archivedProducts}</strong></span><span>Current variants <strong>{reconciliation?.counts.currentVariants ?? payload.totals.variants}</strong></span><span>Needs review <strong>{reconciliation?.counts.needsReviewProducts ?? payload.totals.needsReviewProducts}</strong></span><span>Provider read <strong>{reconciliationPreview?.snapshot.products ?? reconciliation?.latest?.providerProducts ?? "—"}</strong></span></div>{reconciliationPreview && <div className={reconciliationPreview.unusualReduction || reconciliationPreview.blockers.length ? "catalogue-reconciliation__preview is-warning" : "catalogue-reconciliation__preview"} role="status"><h3>Preview ready: {reconciliationPreview.snapshot.products} products / {reconciliationPreview.snapshot.variants} variants</h3><p>{Object.entries(reconciliationPreview.changes).map(([key, value]) => `${humanize(key)} ${value}`).join(" · ")}</p>{reconciliationPreview.unusualReduction && <p><strong>Unusual reduction detected.</strong> Review every group before applying.</p>}{reconciliationPreview.blockers.map((blocker, index) => <p key={index}><strong>Blocked:</strong> {blocker.reason}</p>)}<details><summary>Classification counts</summary><dl>{Object.entries(reconciliationPreview.counts).map(([key, value]) => <div key={key}><dt>{humanize(key)}</dt><dd>{value}</dd></div>)}</dl></details><Field label={`Type ${reconciliationPreview.confirmationText} to apply`}><input value={reconciliationConfirmation} onChange={(event) => setReconciliationConfirmation(event.target.value)} autoComplete="off" /></Field><button className="button-link" type="button" onClick={() => void applyReconciliation()} disabled={reconciliationBusy || reconciliationPreview.blockers.length > 0 || reconciliationConfirmation !== reconciliationPreview.confirmationText}>Apply reconciliation</button></div>}</section>
+      <section className="commerce-posture" aria-label="Catalogue totals"><div><span>Current products</span><strong>{payload.totals.currentProducts || payload.totals.products}</strong></div><div><span>Public current</span><strong>{payload.totals.publicProducts}</strong></div><div><span>Archived</span><strong>{payload.totals.archivedProducts}</strong></div><div><span>Current variants</span><strong>{payload.totals.variants}</strong></div></section>
       <section className="commerce-section" aria-labelledby="catalogue-products-title">
         <div className="commerce-section-heading-actions"><SectionTitle id="catalogue-products-title" eyebrow="Authoritative catalogue" title="Products and readiness" /><button className={bulkMode ? "button-link" : "secondary-button"} type="button" onClick={() => { setBulkMode((value) => !value); setSelectedIds([]); setAllMatching(false); }} disabled={!canManage}>{bulkMode ? "Exit bulk edit" : "Bulk edit"}</button></div>
-        <div className="commerce-product-filters"><Field label="Search"><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} type="search" placeholder="Title, slug, category, or tag" /></Field><Field label="Visibility"><select value={visibility} onChange={(event) => { setVisibility(event.target.value); setPage(1); }}><option value="all">All</option><option value="public">Public</option><option value="private">Hidden</option></select></Field><Field label="Status"><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="all">All</option>{["active", "disabled", "pending", "restricted", "error"].map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Migration"><select value={migration} onChange={(event) => { setMigration(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.migrationStatuses.map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Category"><select value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.categories.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Sort"><select value={sort} onChange={(event) => { setSort(event.target.value as ProductListFilters["sort"]); setPage(1); }}><option value="display">Featured / display</option><option value="name">Name</option><option value="price">Price</option></select></Field></div>
+        <div className="commerce-product-filters"><Field label="Search"><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} type="search" placeholder="Title, slug, category, or tag" /></Field><Field label="Catalogue"><select value={catalogue} onChange={(event) => { setCatalogue(event.target.value as ProductListFilters["catalogue"]); setPage(1); }}><option value="current">Current provider</option><option value="archived">Archived / inactive</option><option value="provider_missing">Provider missing</option><option value="wrong_store">Wrong store</option><option value="needs_review">Needs review</option><option value="all">All historical</option></select></Field><Field label="Visibility"><select value={visibility} onChange={(event) => { setVisibility(event.target.value); setPage(1); }}><option value="all">All</option><option value="public">Public</option><option value="private">Hidden</option></select></Field><Field label="Status"><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="all">All</option>{["active", "disabled", "pending", "restricted", "error"].map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Migration"><select value={migration} onChange={(event) => { setMigration(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.migrationStatuses.map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Category"><select value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.categories.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Sort"><select value={sort} onChange={(event) => { setSort(event.target.value as ProductListFilters["sort"]); setPage(1); }}><option value="display">Featured / display</option><option value="name">Name</option><option value="price">Price</option></select></Field></div>
         {bulkMode && <div className="commerce-bulk-toolbar" aria-label="Bulk product actions"><strong aria-live="polite">{selectedCount} selected</strong><div><button type="button" className="text-button" onClick={() => { setAllMatching(false); setSelectedIds((current) => [...new Set([...current, ...payload.items.map((product) => product.id)])]); }}>Select current page</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(false); }}>Clear selection</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(true); }}>Select all {payload.totalItems} matching</button></div><div className="commerce-bulk-toolbar__actions"><button type="button" onClick={() => void applyBulk("show")} disabled={!selectedCount || busy}>Show in store</button><button type="button" onClick={() => void applyBulk("hide")} disabled={!selectedCount || busy}>Hide from store</button><button type="button" onClick={() => void applyBulk("feature")} disabled={!selectedCount || busy}>Feature</button><button type="button" onClick={() => void applyBulk("unfeature")} disabled={!selectedCount || busy}>Unfeature</button></div>{allMatching && <small>All {payload.totalItems} products matching the current search and filters will be affected. You’ll confirm before applying.</small>}</div>}
         <div className="commerce-results-bar"><p>Showing {resultStart}–{resultEnd} of {payload.totalItems} products</p><Field label="Rows per page"><select aria-label="Rows per page" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as 20 | 50 | 75 | 100); setPage(1); }}>{[20, 50, 75, 100].map((value) => <option key={value} value={value}>{value}</option>)}</select></Field></div>
         <div className="commerce-product-table" role="list">{payload.items.map((product) => {
@@ -474,16 +503,17 @@ export function CommerceProductsPage() {
           const selected = allMatching || selectedIds.includes(product.id);
           const visibilityPending = pendingVisibility.includes(product.id);
           const featuredPending = pendingFeatured.includes(product.id);
+          const providerEligible = !reconciliation?.counts.currentProducts || product.provider.presence === "current";
           return <article key={product.id} role="listitem" className={"commerce-product-row" + (bulkMode ? " is-bulk" : "") + (selected ? " is-selected" : "") + (featuredErrors[product.id] ? " has-featured-error" : "")}>
             {bulkMode && <label className="commerce-product-row__select"><input type="checkbox" aria-label={"Select " + product.title} checked={selected} disabled={allMatching} onChange={() => setSelectedIds((current) => current.includes(product.id) ? current.filter((id) => id !== product.id) : [...current, product.id])} /></label>}
             <div className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <span aria-hidden="true">TR</span>}</div>
-            <div><strong>{product.title}</strong><small>/{product.slug}</small><span>{product.categories.join(" · ") || "Uncategorized"}{product.tags.length ? " · " + product.tags.join(" · ") : ""}</span></div>
+            <div><strong>{product.title}</strong><small>/{product.slug}</small><span>{humanize(product.provider.presence)} · {humanize(product.provider.reconciliationStatus)}</span><span>{product.categories.join(" · ") || "Uncategorized"}{product.tags.length ? " · " + product.tags.join(" · ") : ""}</span></div>
             <div><span>Price</span><strong>{product.price.label}</strong><small>{product.activeVariantCount} / {product.variantCount} public variants</small></div>
             <div><span>Storefront</span><strong>{visible && product.status === "active" ? "Public" : "Hidden"}</strong><small>{product.featured ? "Featured" : "Order " + String(product.displayOrder)}</small></div>
             <div><span>Fulfillment mapping</span><strong>{humanize(product.readiness.fulfillment)}</strong><small>Migration: {humanize(product.migrationStatus)}</small></div>
             <div className="commerce-product-row__actions">
-              <button className="commerce-icon-action" type="button" title={visible ? "Hide from store" : "Show in store"} aria-label={(visible ? "Hide " : "Show ") + product.title + (visible ? " from store" : " in store")} aria-pressed={visible} onClick={() => void toggleVisibility(product)} disabled={!canManage || visibilityPending}>{visibilityPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name={visible ? "eye" : "eyeOff"} size={18} />}</button>
-              <button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={product.featured ? "Remove from featured" : "Add to featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void toggleFeatured(product)} disabled={!canManage || featuredPending}>{featuredPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name="star" size={18} />}</button>
+              <button className="commerce-icon-action" type="button" title={providerEligible ? (visible ? "Hide from store" : "Show in store") : "Archived products cannot be published"} aria-label={(visible ? "Hide " : "Show ") + product.title + (visible ? " from store" : " in store")} aria-pressed={visible} onClick={() => void toggleVisibility(product)} disabled={!canManage || visibilityPending || !providerEligible}>{visibilityPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name={visible ? "eye" : "eyeOff"} size={18} />}</button>
+              <button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={providerEligible ? (product.featured ? "Remove from featured" : "Add to featured") : "Archived products cannot be featured"} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void toggleFeatured(product)} disabled={!canManage || featuredPending || !providerEligible}>{featuredPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name="star" size={18} />}</button>
               <button className="commerce-row-action commerce-row-action--icon" type="button" title="Edit product" aria-label="Edit product" onClick={() => setSelectedProduct(product)}><AdminIcon name="edit" size={18} /></button>
             </div>
             {featuredErrors[product.id] && <p className="commerce-product-row__featured-error" role="alert">{featuredErrors[product.id]}</p>}
@@ -492,7 +522,7 @@ export function CommerceProductsPage() {
         {!payload.items.length && <CommerceState>No products match the current search and filters.</CommerceState>}
         <ProductPagination page={payload.page} totalPages={payload.totalPages} onPage={setPage} label="Product pages" />
       </section>
-      {selectedProduct && <ProductMerchandisingEditor product={selectedProduct} collections={collections} csrfToken={csrfToken} canManage={canManage} onClose={() => setSelectedProduct(null)} onSaved={(product, notice) => { replaceProduct(product); setMessage(notice); }} onError={setError} />}
+      {selectedProduct && <ProductMerchandisingEditor product={selectedProduct} collections={collections} csrfToken={csrfToken} canManage={canManage} onClose={() => setSelectedProduct(null)} onSaved={(product, notice) => { replaceProduct(product); showToast(notice, { title: "Merchandising saved" }); }} onError={setError} />}
       <section className="commerce-section featured-products-manager" aria-labelledby="featured-manager-title">
         <div className="featured-products-manager__heading"><div><p className="eyebrow">Storefront priority</p><h2 id="featured-manager-title">Featured Products Manager</h2><p>See the current storefront rail, set its order, or find another catalogue product without scanning the full list.</p></div><strong>{orderedFeatured.length} featured</strong></div>
         <div className="featured-products-manager__grid">
@@ -525,6 +555,7 @@ function bulkOperationLabel(operation: ProductBulkOperation) { return operation 
 
 export function CommerceCollectionsPage() {
   const { csrfToken } = useAuth();
+  const { showToast } = useAdminToast();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CollectionListPayload | null>(null);
   const [orderCollections, setOrderCollections] = useState<CommerceCollection[]>([]);
@@ -544,7 +575,6 @@ export function CommerceCollectionsPage() {
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
     const stop = startLoading("Loading authoritative collections");
@@ -573,7 +603,7 @@ export function CommerceCollectionsPage() {
   const authoritativeOrder = orderCollections.map((collection) => collection.id);
   const ordered = orderIds.map((id) => orderCollections.find((collection) => collection.id === id)).filter((collection): collection is CommerceCollection => Boolean(collection));
   const orderDirty = orderIds.join("\u0000") !== authoritativeOrder.join("\u0000");
-  const refresh = (notice: string) => { setMessage(notice); setRefreshKey((value) => value + 1); };
+  const refresh = (notice: string) => { if (notice) showToast(notice, { title: "Collections updated" }); setRefreshKey((value) => value + 1); };
   const move = (id: string, offset: -1 | 1) => setOrderIds((current) => { const index = current.indexOf(id); const target = index + offset; if (index < 0 || target < 0 || target >= current.length) return current; const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; return next; });
   const saveOrder = async () => {
     if (!csrfToken || !canManage) return;
@@ -603,15 +633,15 @@ export function CommerceCollectionsPage() {
 
   return <>
     <CommerceHeading eyebrow="Commerce D1 authority" title="Shop / Collections" summary="Search, filter, order, publish, and assign the stable collections projected to the Public shop. All Products remains a virtual aggregate." status={payload?.databaseConfigured ? "connected" : "unavailable"} />
-    {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
+    {error && <div className="admin-alert" role="alert">{error}</div>}
     {!payload && !error ? <CommerceState>Loading collection authority…</CommerceState> : payload ? <div className="collection-admin-workspace">
       <section className="commerce-posture" aria-label="Collection totals"><div><span>Active collections</span><strong>{payload.totals.collections}</strong></div><div><span>Public</span><strong>{payload.totals.publicCollections}</strong></div><div><span>Hidden</span><strong>{payload.totals.hiddenCollections}</strong></div><div><span>Empty</span><strong>{payload.totals.emptyCollections}</strong></div></section>
       <section className="commerce-section collection-management" aria-labelledby="collection-list-title">
-        <div className="collection-admin-heading"><SectionTitle id="collection-list-title" eyebrow="Stable Public discovery" title="Collections" /><div><button className="text-button" type="button" aria-pressed={bulkMode} onClick={() => { setBulkMode((value) => !value); setSelectedIds([]); setAllMatching(false); }}>Bulk edit</button><button className="button-link" type="button" onClick={() => { setCreating(true); setSelectedId(null); setMessage(""); }} disabled={!canManage}>Create collection</button></div></div>
+        <div className="collection-admin-heading"><SectionTitle id="collection-list-title" eyebrow="Stable Public discovery" title="Collections" /><div><button className="text-button" type="button" aria-pressed={bulkMode} onClick={() => { setBulkMode((value) => !value); setSelectedIds([]); setAllMatching(false); }}>Bulk edit</button><button className="button-link" type="button" onClick={() => { setCreating(true); setSelectedId(null); }} disabled={!canManage}>Create collection</button></div></div>
         <div className="commerce-product-filters collection-filters"><Field label="Search title, slug, description"><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a collection" /></Field><Field label="Storefront visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)}><option value="all">All visibility</option><option value="public">Public</option><option value="hidden">Hidden</option></select></Field><Field label="Product membership"><select value={contents} onChange={(event) => setContents(event.target.value as typeof contents)}><option value="all">All collections</option><option value="contains_products">Contains products</option><option value="empty">Empty</option></select></Field><Field label="Sort"><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="display">Storefront order</option><option value="title_asc">Title A–Z</option><option value="title_desc">Title Z–A</option><option value="product_count">Product count</option><option value="updated_desc">Recently updated</option></select></Field></div>
         <div className="commerce-results-bar"><span>{payload.totalItems ? `${payload.startIndex}–${payload.endIndex} of ${payload.totalItems} collections` : "No matching collections"}</span><Field label="Rows per page"><select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as typeof pageSize)}>{[20,50,75,100].map((size) => <option key={size} value={size}>{size}</option>)}</select></Field></div>
         {bulkMode && <div className="commerce-bulk-toolbar" aria-label="Bulk collection actions"><strong aria-live="polite">{selectedCount} selected</strong><div><button type="button" className="text-button" onClick={() => { setAllMatching(false); setSelectedIds((current) => [...new Set([...current, ...payload.items.map((collection) => collection.id)])]); }}>Select current page</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(false); }}>Clear selection</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(true); }}>Select all {payload.totalItems} matching</button></div><div className="commerce-bulk-toolbar__actions"><button type="button" onClick={() => void applyBulk("show")} disabled={!selectedCount || busy}>Show on storefront</button><button type="button" onClick={() => void applyBulk("hide")} disabled={!selectedCount || busy}>Hide from storefront</button></div>{allMatching && <small>All {payload.totalItems} collections matching the current filters will be affected after confirmation.</small>}</div>}
-        <div className="collection-admin-list" role="list">{payload.items.map((collection) => { const selected = allMatching || selectedIds.includes(collection.id); const visible = collection.visibility === "public"; return <article key={collection.id} role="listitem" className={(bulkMode ? "is-bulk " : "") + (selected ? "is-selected" : "")}>{bulkMode && <label className="commerce-product-row__select"><input type="checkbox" aria-label={`Select ${collection.title}`} checked={selected} disabled={allMatching} onChange={() => setSelectedIds((current) => current.includes(collection.id) ? current.filter((id) => id !== collection.id) : [...current, collection.id])} /></label>}<CollectionThumbnail url={collection.thumbnailUrl} label={`${collection.title} derived product thumbnail`} /><div className="collection-admin-list__identity"><strong>{collection.title}</strong><small>/{collection.slug}</small><span>{collection.description || "No description"}</span></div><dl><div><dt>Products</dt><dd>{collection.assignedProductCount}</dd><small>{collection.publicProductCount} storefront-ready</small></div><div><dt>Position</dt><dd>{collection.displayOrder}</dd><small>{visible ? "Public" : "Hidden"}</small></div></dl><div className="commerce-product-row__actions"><button className="commerce-icon-action" type="button" title={visible ? "Hide from storefront" : "Show on storefront"} aria-label={`${visible ? "Hide" : "Show"} ${collection.title} ${visible ? "from" : "on"} storefront`} aria-pressed={visible} onClick={() => void toggleVisibility(collection)} disabled={!canManage || busy}><AdminIcon name={visible ? "eye" : "eyeOff"} size={18} /></button><button className="commerce-row-action commerce-row-action--icon" type="button" title="Edit collection" aria-label="Edit collection" onClick={() => { setSelectedId(collection.id); setCreating(false); setMessage(""); }}><AdminIcon name="edit" size={18} /></button></div></article>; })}</div>
+        <div className="collection-admin-list" role="list">{payload.items.map((collection) => { const selected = allMatching || selectedIds.includes(collection.id); const visible = collection.visibility === "public"; return <article key={collection.id} role="listitem" className={(bulkMode ? "is-bulk " : "") + (selected ? "is-selected" : "")}>{bulkMode && <label className="commerce-product-row__select"><input type="checkbox" aria-label={`Select ${collection.title}`} checked={selected} disabled={allMatching} onChange={() => setSelectedIds((current) => current.includes(collection.id) ? current.filter((id) => id !== collection.id) : [...current, collection.id])} /></label>}<CollectionThumbnail url={collection.thumbnailUrl} label={`${collection.title} derived product thumbnail`} /><div className="collection-admin-list__identity"><strong>{collection.title}</strong><small>/{collection.slug}</small><span>{collection.description || "No description"}</span></div><dl><div><dt>Products</dt><dd>{collection.assignedProductCount}</dd><small>{collection.publicProductCount} storefront-ready</small></div><div><dt>Position</dt><dd>{collection.displayOrder}</dd><small>{visible ? "Public" : "Hidden"}</small></div></dl><div className="commerce-product-row__actions"><button className="commerce-icon-action" type="button" title={visible ? "Hide from storefront" : "Show on storefront"} aria-label={`${visible ? "Hide" : "Show"} ${collection.title} ${visible ? "from" : "on"} storefront`} aria-pressed={visible} onClick={() => void toggleVisibility(collection)} disabled={!canManage || busy}><AdminIcon name={visible ? "eye" : "eyeOff"} size={18} /></button><button className="commerce-row-action commerce-row-action--icon" type="button" title="Edit collection" aria-label="Edit collection" onClick={() => { setSelectedId(collection.id); setCreating(false); }}><AdminIcon name="edit" size={18} /></button></div></article>; })}</div>
         {!payload.items.length && <CommerceState>{payload.totals.collections ? "No collections match the current search and filters." : "No collections exist yet. Create one to establish storefront discovery."}</CommerceState>}
         <ProductPagination page={payload.page} totalPages={payload.totalPages} onPage={setPage} label="Collection pages" />
       </section>
@@ -735,6 +765,7 @@ function ProductMerchandisingEditor({ product, collections, csrfToken, canManage
   const [variantId, setVariantId] = useState(product.variants[0]?.id || "");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(0);
+  const providerWritable = product.provider.presence === "current" || product.provider.presence === "legacy";
   useEffect(() => { setForm(productForm(product)); setVariantId((current) => product.variants.some((variant) => variant.id === current) ? current : product.variants[0]?.id || ""); }, [product]);
   const variant = product.variants.find((entry) => entry.id === variantId) || null;
   const update = (key: string, value: string | boolean) => setForm((current) => ({ ...current, [key]: value }));
@@ -754,7 +785,7 @@ function ProductMerchandisingEditor({ product, collections, csrfToken, canManage
     return { ...current, primaryImageUrl: promoted, additionalImages };
   });
   const saveProduct = async (event: FormEvent) => {
-    event.preventDefault(); if (!csrfToken || !canManage || uploading) return; setSaving(true); onError("");
+    event.preventDefault(); if (!csrfToken || !canManage || !providerWritable || uploading) return; setSaving(true); onError("");
     try {
       const selectedCollections = collections.filter((collection) => form.collectionIds.includes(collection.id));
       const media = await ingestMerchandisingProductMedia(csrfToken, product.id, uniqueMediaUrls([form.primaryImageUrl, ...form.additionalImages]));
@@ -767,21 +798,22 @@ function ProductMerchandisingEditor({ product, collections, csrfToken, canManage
     finally { setSaving(false); }
   };
   return <CommerceEditorModal titleId="product-editor-title" onClose={onClose}><section className="commerce-product-editor"><header><div><p className="eyebrow">Product editor</p><h2 id="product-editor-title">{product.title}</h2></div><button type="button" className="commerce-editor-close" onClick={onClose} data-autofocus>Close editor</button></header>
+    {!providerWritable && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Archived provider record — read only</strong><p>This product is {humanize(product.provider.presence)}. History and curation are preserved, but it cannot be edited, published, featured, or made sellable.</p></div></div>}
     <form onSubmit={(event) => void saveProduct(event)}>
       <div className="commerce-form-grid">
         <Field label="Title"><input value={form.title} onChange={(event) => update("title", event.target.value)} maxLength={240} required /></Field>
         <Field label="Slug"><input value={form.slug} onChange={(event) => update("slug", event.target.value)} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={180} required /></Field>
         <Field label="Description" className="commerce-field--wide"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} maxLength={12000} rows={5} /></Field>
-        <ProductMediaEditor productId={product.id} csrfToken={csrfToken} canManage={canManage} primaryImageUrl={form.primaryImageUrl} additionalImages={form.additionalImages} onPrimaryChange={(url) => setForm((current) => ({ ...current, primaryImageUrl: url }))} onAddAdditional={addAdditional} onReplaceAdditional={(urls) => setForm((current) => ({ ...current, additionalImages: uniqueMediaUrls(urls) }))} onRemoveAdditional={removeAdditional} onMoveAdditional={moveAdditional} onPromoteAdditional={promoteAdditional} onUploadingChange={setUploading} />
+        <ProductMediaEditor productId={product.id} csrfToken={csrfToken} canManage={canManage && providerWritable} primaryImageUrl={form.primaryImageUrl} additionalImages={form.additionalImages} onPrimaryChange={(url) => setForm((current) => ({ ...current, primaryImageUrl: url }))} onAddAdditional={addAdditional} onReplaceAdditional={(urls) => setForm((current) => ({ ...current, additionalImages: uniqueMediaUrls(urls) }))} onRemoveAdditional={removeAdditional} onMoveAdditional={moveAdditional} onPromoteAdditional={promoteAdditional} onUploadingChange={setUploading} />
         <fieldset className="commerce-collection-picker commerce-field--wide"><legend>Collections</legend><p>Choose every active collection this product belongs to.</p><div>{collections.map((collection) => { const inputId = `product-collection-${collection.id}`; return <label key={collection.id} htmlFor={inputId} className={form.collectionIds.includes(collection.id) ? "is-selected" : ""}><input id={inputId} type="checkbox" checked={form.collectionIds.includes(collection.id)} onChange={() => setForm((current) => ({ ...current, collectionIds: current.collectionIds.includes(collection.id) ? current.collectionIds.filter((id) => id !== collection.id) : [...current.collectionIds, collection.id] }))} /><span>{collection.title}<small>{collection.visibility === "public" ? "Public" : "Hidden"}</small></span></label>; })}</div></fieldset>
         <Field label="Tags" hint="Comma separated."><input value={form.tags} onChange={(event) => update("tags", event.target.value)} /></Field>
         <fieldset className="commerce-presentation-controls commerce-field--wide"><legend>Storefront presentation</legend><p>Control whether this product is visible and whether it receives prioritized storefront placement.</p><div><Field label="Public visibility"><select value={form.visibility} onChange={(event) => update("visibility", event.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field><Field label="Catalogue status"><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="active">Active</option><option value="disabled">Inactive</option></select></Field></div><label className="commerce-featured-switch"><input type="checkbox" role="switch" checked={form.featured} onChange={(event) => update("featured", event.target.checked)} /><span className="commerce-featured-switch__track" aria-hidden="true"><i /></span><span><strong>Featured product</strong><small>Featured products receive prioritized placement in the storefront rail.</small></span></label></fieldset>
         <Field label="Display order"><input type="number" min={0} max={999999} value={form.displayOrder} onChange={(event) => update("displayOrder", event.target.value)} /></Field>
         <Field label="Maximum quantity"><input type="number" min={1} max={20} value={form.maxQuantity} onChange={(event) => update("maxQuantity", event.target.value)} /></Field>
       </div>
-      <div className="merchandising-savebar"><p>{uploading ? `${uploading} image upload${uploading === 1 ? "" : "s"} in progress. Product association will wait.` : dirty ? "Unsaved product changes. Provider identity and migration provenance remain read-only." : "Product is up to date. Provider identity and migration provenance are read-only."}</p><button className="button-link" type="submit" disabled={!dirty || !canManage || !csrfToken || saving || Boolean(uploading)}>{saving ? "Saving…" : "Save product"}</button></div>
+      <div className="merchandising-savebar"><p>{!providerWritable ? "Archived products remain read only." : uploading ? `${uploading} image upload${uploading === 1 ? "" : "s"} in progress. Product association will wait.` : dirty ? "Unsaved product changes. Provider identity and migration provenance remain read-only." : "Product is up to date. Provider identity and migration provenance are read-only."}</p><button className="button-link" type="submit" disabled={!providerWritable || !dirty || !canManage || !csrfToken || saving || Boolean(uploading)}>{saving ? "Saving…" : "Save product"}</button></div>
     </form>
-    <section className="commerce-variant-manager" aria-labelledby="variant-editor-title"><SectionTitle id="variant-editor-title" eyebrow="Variant authority" title={`Variants (${product.variants.length})`} />{product.variants.length ? <><Field label="Choose variant"><select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{product.variants.map((entry) => <option key={entry.id} value={entry.id}>{entry.displayLabel} — {formatCad(entry.unitAmount)}</option>)}</select></Field>{variant && <VariantMerchandisingEditor key={variant.id} product={product} variant={variant} csrfToken={csrfToken} canManage={canManage} onSaved={onSaved} onError={onError} />}</> : <CommerceState>No variants are attached to this product.</CommerceState>}</section>
+    <section className="commerce-variant-manager" aria-labelledby="variant-editor-title"><SectionTitle id="variant-editor-title" eyebrow="Variant authority" title={`Variants (${product.variants.length})`} />{product.variants.length ? <><Field label="Choose variant"><select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{product.variants.map((entry) => <option key={entry.id} value={entry.id}>{entry.displayLabel} — {formatCad(entry.unitAmount)}</option>)}</select></Field>{variant && <VariantMerchandisingEditor key={variant.id} product={product} variant={variant} csrfToken={csrfToken} canManage={canManage && providerWritable} onSaved={onSaved} onError={onError} />}</> : <CommerceState>No variants are attached to this product.</CommerceState>}</section>
   </section></CommerceEditorModal>;
 }
 
@@ -916,7 +948,7 @@ function MiniMetric({ label, value }: { label: string; value: string }) { return
 function PaymentActivityCard({ environment, summary, currency }: { environment: "LIVE" | "TEST / SANDBOX"; summary: PaymentsControlPlanePayload["paymentSummary"]["live"]; currency: string }) { const test = environment.startsWith("TEST"); return <article className={`payments-panel payment-activity is-${test ? "test" : "live"}`}><header><div><span className={`order-environment order-environment--${test ? "test" : "live"}`}>{environment}</span><h3>{summary.available ? "Persisted Stripe orders" : "Summary unavailable"}</h3></div></header><div className="payment-activity__metrics"><MiniMetric label="Successful payments" value={summary.successfulPayments === null ? "—" : String(summary.successfulPayments)} /><MiniMetric label="Gross" value={paymentMoney(summary.grossAmount, currency)} /><MiniMetric label="Refunded orders" value={summary.refundedPayments === null ? "—" : String(summary.refundedPayments)} /><MiniMetric label="Recorded refunds" value={paymentMoney(summary.refundAmount, currency)} /><MiniMetric label="Net after refunds" value={paymentMoney(summary.netAfterRefunds, currency)} /></div>{test && <p>Sandbox evidence only. These values never roll into LIVE financial summaries.</p>}</article>; }
 function FactList({ title, facts }: { title: string; facts: Array<[string, string]> }) { return <section><h3>{title}</h3><dl>{facts.map(([term, value]) => <Fact key={term} term={term} value={value} />)}</dl></section>; }
 function Fact({ term, value }: { term: string; value: string }) { return <div><dt>{term}</dt><dd>{value}</dd></div>; }
-function CopyValueButton({ label, value }: { label: string; value: string }) { const [copied, setCopied] = useState(false); return <button type="button" className="secondary-button payments-copy-button" onClick={() => { void navigator.clipboard.writeText(value).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(() => setCopied(false)); }}>{copied ? "Copied" : label}</button>; }
+function CopyValueButton({ label, value }: { label: string; value: string }) { const { showToast } = useAdminToast(); return <button type="button" className="secondary-button payments-copy-button" onClick={() => { void navigator.clipboard.writeText(value).then(() => showToast("The value is ready to paste.", { tone: "info", title: "Copied to clipboard" })).catch(() => showToast("Clipboard access was unavailable. Try copying the value manually.", { tone: "warning", title: "Copy unavailable" })); }}>{label}</button>; }
 function Metric({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
 function WorkspaceLink({ to, eyebrow, title, text, icon, index }: { to: string; eyebrow: string; title: string; text: string; icon: "payments" | "business" | "tax" | "emails" | "fulfillment"; index: number }) {
   return <Link className="commerce-workspace-card" to={to}>

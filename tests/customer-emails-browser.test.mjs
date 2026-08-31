@@ -79,7 +79,7 @@ async function exerciseEditor(page, fixture) {
   await page.getByRole("button", { name: "Discard" }).click(); assert.equal(await subject.inputValue(), original);
   await subject.fill("Saved order {{order_reference}}"); await page.getByRole("button", { name: "Save template" }).click(); await page.getByText(/new server revision/i).waitFor(); assert.equal(fixture.templates[0].subject, "Saved order {{order_reference}}");
   await page.getByRole("button", { name: /Fulfillment and shipment update/i }).click(); await page.getByRole("heading", { level: 3, name: "Fulfillment and shipment update" }).waitFor();
-  await page.getByRole("button", { name: "Refresh preview" }).click(); await page.getByText(/Preview refreshed/i).waitFor();
+  await page.getByRole("button", { name: "Refresh preview" }).click(); await page.getByText("Preview refreshed with unmistakably synthetic sample data. No delivery or document record was created.", { exact: true }).waitFor();
   const frame = page.frameLocator(".customer-email-preview iframe"); await frame.getByText("TEST-ORDER-PREVIEW", { exact: true }).waitFor();
   assert.equal(fixture.previewCalls >= 3, true); assert.equal(fixture.sendCalls, 0);
 }

@@ -11,10 +11,7 @@ export async function ingestCommerceProductMedia(env, session, productId, input,
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => key !== "imageUrls")) {
     throw new AuthFailure(400, "commerce_media_request_invalid", "The product-media request is invalid.");
   }
-  const id = cleanText(productId, 160);
-  if (!id || !(await requireCommerceDb(env).prepare("SELECT id FROM commerce_products WHERE id = ?").bind(id).first())) {
-    throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
-  }
+  const id = await requireProduct(env, productId);
   if (!Array.isArray(input.imageUrls) || input.imageUrls.length > MAX_COMMERCE_PRODUCT_IMAGES || input.imageUrls.some((value) => typeof value !== "string" || value.length > 4096)) {
     throw new AuthFailure(400, "commerce_media_urls_invalid", `Supply no more than ${MAX_COMMERCE_PRODUCT_IMAGES} image URLs.`);
   }
@@ -117,9 +114,13 @@ async function storeImage(env, bytes, contentType) {
 
 async function requireProduct(env, productId) {
   const id = cleanText(productId, 160);
-  if (!id || !(await requireCommerceDb(env).prepare("SELECT id FROM commerce_products WHERE id = ?").bind(id).first())) {
+  const db = requireCommerceDb(env);
+  const product = id ? await db.prepare("SELECT id,provider_presence FROM commerce_products WHERE id = ?").bind(id).first() : null;
+  if (!product) {
     throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
   }
+  const current = await db.prepare("SELECT 1 current FROM commerce_products WHERE provider_presence='current' LIMIT 1").first();
+  if (current && product.provider_presence !== "current") throw new AuthFailure(409, "commerce_product_provider_inactive", "Archived provider products are read only.");
   return id;
 }
 

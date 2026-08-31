@@ -4,12 +4,14 @@ import { canonicalPublicMediaUrl } from "./media-origin.js";
 
 export async function publicCataloguePayload(env) {
   const db = requireCommerceDb(env);
-  const [{ products, collections }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env), publicCheckoutEnabled(db)]);
+  const [{ products, collections, currentProviderProducts, reconciliationApplied }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env), publicCheckoutEnabled(db)]);
+  if (reconciliationApplied && products.length > currentProviderProducts) throw new AuthFailure(503, "catalogue_projection_invalid", "The public catalogue exceeds the current provider authority.");
   return {
     ok: true,
     source: "commerce-d1",
     currency: "CAD",
     checkoutEnabled,
+    authority: { currentProducts: currentProviderProducts, reconciled: reconciliationApplied },
     collections,
     products,
     updatedAt: [...products, ...collections].reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, "") || null,
@@ -22,12 +24,15 @@ export async function publicProductPayload(env, slug) {
     throw new AuthFailure(404, "product_not_found", "The product was not found.");
   }
   const db = requireCommerceDb(env);
-  const [{ products }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env, normalizedSlug), publicCheckoutEnabled(db)]);
+  const [{ products, currentProviderProducts, reconciliationApplied }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env, normalizedSlug), publicCheckoutEnabled(db)]);
   if (!products.length) throw new AuthFailure(404, "product_not_found", "The product was not found.");
-  return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled, product: products[0] };
+  return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled, authority: { currentProducts: currentProviderProducts, reconciled: reconciliationApplied }, product: products[0] };
 }
 
 async function loadPublicCatalogue(db, env, slug = null) {
+  const authority = await db.prepare("SELECT COUNT(*) current_products FROM commerce_products WHERE provider_presence='current'").first();
+  const currentProviderProducts = Number(authority?.current_products || 0);
+  const reconciliationApplied = currentProviderProducts > 0;
   const collectionResult = await db.prepare(
     `SELECT id, slug, title, description, display_order, updated_at
      FROM commerce_collections
@@ -39,12 +44,14 @@ async function loadPublicCatalogue(db, env, slug = null) {
     `SELECT id, slug, title, safe_metadata_json, is_featured, featured_order,
             unit_amount, currency_code, max_checkout_quantity, requires_shipping, updated_at
      FROM commerce_products
-     WHERE status = 'active' AND visibility = 'public' ${slug ? "AND slug = ?" : ""}
+     WHERE status = 'active' AND visibility = 'public'
+       AND (NOT EXISTS (SELECT 1 FROM commerce_products current_products WHERE current_products.provider_presence='current') OR provider_presence='current')
+       ${slug ? "AND slug = ?" : ""}
      ORDER BY is_featured DESC, featured_order ASC, slug ASC`,
   );
   const productResult = await (slug ? productStatement.bind(slug) : productStatement).all();
   const rows = productResult?.results || [];
-  if (!rows.length) return { products: [], collections: collectionRows.map((row) => serializePublicCollection(row, [])) };
+  if (!rows.length) return { products: [], collections: collectionRows.map((row) => serializePublicCollection(row, [])), currentProviderProducts, reconciliationApplied };
   const ids = rows.map((row) => row.id);
   const [variantResult, membershipResult] = await Promise.all([db.prepare(
     `SELECT id, product_id, size_label, color_label, option_values_json,
@@ -53,6 +60,7 @@ async function loadPublicCatalogue(db, env, slug = null) {
      WHERE product_id IN (${ids.map(() => "?").join(",")})
        AND status = 'active' AND visibility = 'public' AND is_ignored = 0
        AND is_sellable = 1 AND availability_status = 'active'
+       AND (NOT EXISTS (SELECT 1 FROM commerce_products current_products WHERE current_products.provider_presence='current') OR provider_presence='current')
      ORDER BY product_id, local_variant_key, id`,
   ).bind(...ids).all(),
   db.prepare(`SELECT pc.product_id, c.id, c.slug, c.title
@@ -69,7 +77,7 @@ async function loadPublicCatalogue(db, env, slug = null) {
   const publicProductIds = new Set(products.map((product) => product.id));
   const collectionProducts = new Map(collectionRows.map((row) => [row.id, []]));
   for (const row of membershipResult?.results || []) if (publicProductIds.has(row.product_id)) collectionProducts.get(row.id)?.push(row.product_id);
-  return { products, collections: collectionRows.map((row) => serializePublicCollection(row, collectionProducts.get(row.id) || [])) };
+  return { products, collections: collectionRows.map((row) => serializePublicCollection(row, collectionProducts.get(row.id) || [])), currentProviderProducts, reconciliationApplied };
 }
 
 function serializePublicProduct(row, variants, collections, env) {

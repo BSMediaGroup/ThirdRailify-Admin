@@ -1,5 +1,13 @@
 # Third Railify Admin
 
+## Current Printful catalogue reconciliation (local implementation)
+
+Shop / Products now has an auditable Preview / Apply workflow that reads the explicitly configured `Third Railify API` native store in full, matches only deterministic provider identities, preserves deliberate local curation and historical references, imports current missing rows privately, and archives stale/wrong-store/legacy rows without hard deletion. Migration `commerce-migrations/0026_printful_catalogue_reconciliation.sql` adds current-provider state plus sanitized run/item audit records. Apply is Master-only, CSRF/rate-limited, requires exact typed confirmation, and re-reads both provider and local authority before one D1 batch.
+
+The default Admin product view, Featured/publish controls, Public projection, checkout, and sellability now honor current provider presence after the first reconciliation. See [the operator, rollback, and evidence guide](docs/PRINTFUL_CATALOGUE_RECONCILIATION.md). This work is local only: no remote migration, deployment, provider write, payment, order, or production D1 mutation was performed.
+
+Tree additions: `commerce-migrations/0026_printful_catalogue_reconciliation.sql`, `functions/_shared/current-catalogue-reconciliation.js`, `scripts/verify-current-printful-catalogue.mjs`, `docs/PRINTFUL_CATALOGUE_RECONCILIATION.md`, and `tests/current-catalogue-reconciliation.test.mjs`. Updated authority surfaces include Admin Commerce routes/core/media/launch, Products UI/client/styles, migration tests, and responsive commerce browser fixtures. `npm run verify:printful:current` performs the bounded store read; `npm run preview:printful:reconciliation` compares that read with the checked-in legacy manifest in an ephemeral local D1 database.
+
 ## Automations and Poll authority V1 (local implementation)
 
 Admin Commerce D1 is the sole authority for Poll definitions/options, creator grants, lifecycle, current votes, Rumble event fingerprints, one active Rumble lease per source, bot desired-state revisions, heartbeat/runtime state, and bounded activity. Additive `commerce-migrations/0025_automations_polls_v1.sql` follows `0024`; it must be applied deliberately after backup/ledger inspection and before any V1 code rollout. No remote migration was run.

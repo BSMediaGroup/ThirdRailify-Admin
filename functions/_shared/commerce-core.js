@@ -242,7 +242,9 @@ export async function merchandisingProductsPayload(env, session) {
                        max_checkout_quantity, requires_shipping, is_featured, featured_order,
                        migration_status, safe_metadata_json, source_provider,
                        target_printful_product_id, legacy_printful_source_product_id,
-                       legacy_wix_external_product_id, updated_at
+                       legacy_wix_external_product_id, provider_store_id, provider_presence,
+                       provider_reconciliation_status, provider_last_seen_at, provider_reconciled_at,
+                       provider_snapshot_hash, archived_at, archived_reason, updated_at
                 FROM commerce_products
                 ORDER BY is_featured DESC, featured_order ASC, slug ASC`).all(),
     db.prepare(`SELECT id, product_id, local_variant_key, status, visibility,
@@ -253,6 +255,8 @@ export async function merchandisingProductsPayload(env, session) {
                        target_catalogue_variant_id, legacy_source_product_id,
                        legacy_source_variant_id, legacy_wix_external_product_id,
                        legacy_wix_external_variant_id, safe_metadata_json, updated_at
+                       , provider_store_id, provider_presence, provider_last_seen_at,
+                       provider_reconciled_at, provider_snapshot_hash, archived_at
                 FROM commerce_product_variants ORDER BY product_id, local_variant_key, id`).all(),
     db.prepare(`SELECT pc.product_id, c.id, c.title, c.slug, c.visibility, c.display_order
                 FROM commerce_product_collections pc
@@ -303,13 +307,19 @@ export async function merchandisingProductListPayload(env, session, input = {}) 
     pageSize: options.pageSize,
     totalItems,
     totalPages,
-    filters: { query: options.query, visibility: options.visibility, status: options.status, migration: options.migration, category: options.category, featured: options.featured, sort: options.sort },
+    filters: { query: options.query, visibility: options.visibility, status: options.status, migration: options.migration, category: options.category, featured: options.featured, catalogue: options.catalogue, sort: options.sort },
     facets: { categories, migrationStatuses },
     totals: {
-      products: payload.products.length,
-      publicProducts: payload.products.filter((product) => product.visibility === "public" && product.status === "active").length,
-      variants: payload.products.reduce((total, product) => total + product.variantCount, 0),
-      featuredProducts: payload.featured.length,
+      products: payload.products.some((product) => product.provider.presence === "current") ? payload.products.filter((product) => product.provider.presence === "current").length : payload.products.length,
+      totalProducts: payload.products.length,
+      currentProducts: payload.products.filter((product) => product.provider.presence === "current").length,
+      archivedProducts: payload.products.filter((product) => product.provider.presence !== "current" || product.provider.archivedAt).length,
+      providerMissingProducts: payload.products.filter((product) => product.provider.presence === "provider_missing").length,
+      wrongStoreProducts: payload.products.filter((product) => product.provider.presence === "wrong_store").length,
+      needsReviewProducts: payload.products.filter((product) => ["needs_review", "ambiguous"].includes(product.provider.reconciliationStatus)).length,
+      publicProducts: payload.products.filter((product) => product.provider.presence === "current" && product.visibility === "public" && product.status === "active").length,
+      variants: payload.products.filter((product) => product.provider.presence === "current").reduce((total, product) => total + product.variantCount, 0),
+      featuredProducts: payload.featured.filter((product) => product.provider.presence === "current").length,
     },
     updatedAt: payload.updatedAt,
   };
@@ -325,8 +335,9 @@ export async function merchandisingProductPayload(env, session, productId) {
 export async function updateMerchandisingProduct(env, session, productId, input) {
   const db = requireCommerceDb(env);
   const id = cleanText(productId, 160);
-  const current = await db.prepare("SELECT id, safe_metadata_json, is_featured, featured_order FROM commerce_products WHERE id = ?").bind(id).first();
+  const current = await db.prepare("SELECT id, safe_metadata_json, is_featured, featured_order, provider_presence FROM commerce_products WHERE id = ?").bind(id).first();
   if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
+  await requireCurrentProviderProductWhenReconciled(db, current);
   requireExactFields(input, ["title", "slug", "description", "primaryImageUrl", "additionalImages", "categories", "tags", "featured", "visibility", "status", "displayOrder", "maxQuantity", "unitAmount", "currencyCode"], "commerce_product_fields_invalid");
   const title = requiredPlainText(input.title, 240, "commerce_product_title_invalid");
   const slug = cleanText(input.slug, 180).toLowerCase();
@@ -382,8 +393,9 @@ export async function updateMerchandisingVariant(env, session, productId, varian
   const db = requireCommerceDb(env);
   const product = cleanText(productId, 160);
   const id = cleanText(variantId, 160);
-  const current = await db.prepare("SELECT id, safe_metadata_json FROM commerce_product_variants WHERE id = ? AND product_id = ?").bind(id, product).first();
+  const current = await db.prepare("SELECT v.id, v.safe_metadata_json, p.provider_presence FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id WHERE v.id = ? AND v.product_id = ?").bind(id, product).first();
   if (!current) throw new AuthFailure(404, "commerce_variant_not_found", "The commerce product variant was not found.");
+  await requireCurrentProviderProductWhenReconciled(db, current);
   requireExactFields(input, ["displayLabel", "size", "color", "options", "unitAmount", "currencyCode", "status", "visibility", "sellable", "availability"], "commerce_variant_fields_invalid");
   const displayLabel = plainMerchText(input.displayLabel, 240) || null;
   const size = plainMerchText(input.size, 120) || null;
@@ -417,7 +429,8 @@ export async function updateFeaturedProducts(env, session, input) {
   }
   if (featuredIds.length) {
     const placeholders = featuredIds.map(() => "?").join(",");
-    const found = await db.prepare(`SELECT id FROM commerce_products WHERE id IN (${placeholders}) AND status IN ('active', 'legacy_production')`).bind(...featuredIds).all();
+    const found = await db.prepare(`SELECT id FROM commerce_products WHERE id IN (${placeholders}) AND status IN ('active', 'legacy_production')
+      AND (NOT EXISTS (SELECT 1 FROM commerce_products WHERE provider_presence='current') OR provider_presence='current')`).bind(...featuredIds).all();
     if ((found?.results || []).length !== featuredIds.length) {
       throw new AuthFailure(400, "featured_product_unknown", "Every featured product must be a displayable catalogue product.");
     }
@@ -442,8 +455,9 @@ export async function updateMerchandisingProductFeatured(env, session, productId
   if (!id) throw new AuthFailure(400, "commerce_product_id_invalid", "The commerce product ID is invalid.");
   requireExactFields(input, ["featured"], "commerce_product_featured_fields_invalid");
   const featured = normalizeProductFeatured(input.featured);
-  const current = await db.prepare("SELECT id, status, is_featured, featured_order, updated_at FROM commerce_products WHERE id = ?").bind(id).first();
+  const current = await db.prepare("SELECT id, status, is_featured, featured_order, updated_at, provider_presence, provider_reconciliation_status FROM commerce_products WHERE id = ?").bind(id).first();
   if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
+  await requireCurrentProviderProductWhenReconciled(db, current);
   if (featured === 1 && !["active", "legacy_production"].includes(current.status)) {
     throw new AuthFailure(409, "commerce_product_not_displayable", "Only a displayable catalogue product can be featured.");
   }
@@ -490,7 +504,7 @@ export async function bulkUpdateMerchandisingProducts(env, session, input) {
   let products;
   let selection;
   if (usesMatching) {
-    if (Object.keys(input).some((key) => !["operation", "matching", "confirmMatching", "expectedCount"].includes(key)) || !input.matching || typeof input.matching !== "object" || Array.isArray(input.matching) || Object.keys(input.matching).some((key) => !["query", "search", "visibility", "status", "migration", "category", "featured", "sort"].includes(key))) {
+    if (Object.keys(input).some((key) => !["operation", "matching", "confirmMatching", "expectedCount"].includes(key)) || !input.matching || typeof input.matching !== "object" || Array.isArray(input.matching) || Object.keys(input.matching).some((key) => !["query", "search", "visibility", "status", "migration", "category", "featured", "catalogue", "sort"].includes(key))) {
       throw new AuthFailure(400, "commerce_product_bulk_selection_invalid", "The matching product selection is invalid.");
     }
     if (input.confirmMatching !== true || !Number.isSafeInteger(input.expectedCount) || input.expectedCount < 1) {
@@ -511,6 +525,10 @@ export async function bulkUpdateMerchandisingProducts(env, session, input) {
     if (unknownIds.length) throw new AuthFailure(400, "commerce_product_unknown", "Every bulk product ID must reference an authoritative catalogue product.");
     products = ids.map((id) => byId.get(id));
     selection = "explicit";
+  }
+  if (["show", "feature"].includes(operation) && await hasAppliedCatalogueReconciliation(db)) {
+    const inactive = products.filter((product) => product.provider?.presence !== "current");
+    if (inactive.length) throw new AuthFailure(409, "commerce_product_provider_inactive", "Archived or non-current products cannot be published or featured.");
   }
 
   const timestamp = nowIso();
@@ -640,6 +658,7 @@ export async function collectionProductsListPayload(env, session, collectionId, 
   if (options.query) { const pattern = `%${escapeSqlLike(options.query)}%`; where.push("(p.title LIKE ? ESCAPE '\\' OR p.slug LIKE ? ESCAPE '\\')"); bindings.push(pattern, pattern); }
   if (options.visibility === "public") where.push("p.status = 'active' AND p.visibility = 'public'");
   if (options.visibility === "hidden") where.push("NOT (p.status = 'active' AND p.visibility = 'public')");
+  where.push("(NOT EXISTS (SELECT 1 FROM commerce_catalogue_reconciliation_runs WHERE state = 'applied') OR p.provider_presence = 'current')");
   const membership = "EXISTS (SELECT 1 FROM commerce_product_collections pc WHERE pc.product_id = p.id AND pc.collection_id = ?)";
   if (options.membership === "assigned") { where.push(membership); bindings.push(id); }
   if (options.membership === "available") { where.push(`NOT ${membership}`); bindings.push(id); }
@@ -704,6 +723,10 @@ export async function updateCollectionMemberships(env, session, collectionId, in
   const revision = boundedMerchInteger(input.revision, 1, Number.MAX_SAFE_INTEGER, "commerce_collection_revision_invalid");
   await requireCurrentCollection(db, id, revision);
   await requireKnownProducts(db, productIds);
+  if (operation === "add" && await hasAppliedCatalogueReconciliation(db)) {
+    const current = await db.prepare(`SELECT id FROM commerce_products WHERE provider_presence = 'current' AND id IN (${productIds.map(() => "?").join(",")})`).bind(...productIds).all();
+    if ((current?.results || []).length !== productIds.length) throw new AuthFailure(409, "commerce_collection_product_not_current", "Archived or non-current products cannot be added to storefront collections.");
+  }
   const existingResult = await db.prepare(`SELECT product_id FROM commerce_product_collections WHERE collection_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})`).bind(id, ...productIds).all();
   const existing = new Set((existingResult?.results || []).map((row) => row.product_id));
   const changedIds = operation === "add" ? productIds.filter((productId) => !existing.has(productId)) : productIds.filter((productId) => existing.has(productId));
@@ -1940,6 +1963,16 @@ function serializeMerchandisingProduct(row, variants = [], collections = []) {
       legacyPrintfulSourceProductId: cleanText(row.legacy_printful_source_product_id, 240) || null,
       legacyWixExternalProductId: cleanText(row.legacy_wix_external_product_id, 240) || null,
     },
+    provider: {
+      storeId: cleanText(row.provider_store_id, 40) || null,
+      presence: cleanText(row.provider_presence, 40) || "legacy",
+      reconciliationStatus: cleanText(row.provider_reconciliation_status, 40) || "legacy",
+      lastSeenAt: cleanText(row.provider_last_seen_at, 80) || null,
+      reconciledAt: cleanText(row.provider_reconciled_at, 80) || null,
+      snapshotFingerprint: cleanText(row.provider_snapshot_hash, 64) || null,
+      archivedAt: cleanText(row.archived_at, 80) || null,
+      archivedReason: cleanText(row.archived_reason, 160) || null,
+    },
     variantCount: variants.length,
     activeVariantCount: activeVariants.length,
     sellableVariantCount: sellableVariants.length,
@@ -1972,6 +2005,7 @@ function serializeMerchandisingVariant(row) {
       legacyWixProductId: cleanText(row.legacy_wix_external_product_id, 240) || null,
       legacyWixVariantId: cleanText(row.legacy_wix_external_variant_id, 240) || null,
     },
+    provider: { storeId: cleanText(row.provider_store_id, 40) || null, presence: cleanText(row.provider_presence, 40) || "legacy", lastSeenAt: cleanText(row.provider_last_seen_at, 80) || null, reconciledAt: cleanText(row.provider_reconciled_at, 80) || null, snapshotFingerprint: cleanText(row.provider_snapshot_hash, 64) || null, archivedAt: cleanText(row.archived_at, 80) || null },
     updatedAt: cleanText(row.updated_at, 80),
   };
 }
@@ -1992,10 +2026,12 @@ function normalizeProductListOptions(input = {}) {
     migration: cleanText(value.migration, 80) || "all",
     category: cleanText(value.category, 160) || "all",
     featured: choice(cleanText(value.featured, 40), ["all", "featured", "not_featured"], "all"),
+    catalogue: choice(cleanText(value.catalogue, 40), ["current", "all", "archived", "provider_missing", "wrong_store", "needs_review"], "current"),
     sort: choice(cleanText(value.sort, 40), ["display", "name", "price"], "display"),
   };
 }
 function filterMerchandisingProducts(products, options) {
+  const hasCurrentAuthority = products.some((product) => product.provider.presence === "current");
   const next = products.filter((product) => {
     const searchable = `${product.title} ${product.slug} ${product.categories.join(" ")} ${product.tags.join(" ")}`.toLowerCase();
     return (!options.query || searchable.includes(options.query))
@@ -2003,7 +2039,13 @@ function filterMerchandisingProducts(products, options) {
       && (options.status === "all" || product.status === options.status)
       && (options.migration === "all" || product.migrationStatus === options.migration)
       && (options.category === "all" || product.categories.includes(options.category))
-      && (options.featured === "all" || (options.featured === "featured" ? product.featured : !product.featured));
+      && (options.featured === "all" || (options.featured === "featured" ? product.featured : !product.featured))
+      && (!hasCurrentAuthority || options.catalogue === "all"
+        || (options.catalogue === "current" && product.provider.presence === "current")
+        || (options.catalogue === "archived" && (product.provider.presence !== "current" || Boolean(product.provider.archivedAt)))
+        || (options.catalogue === "provider_missing" && product.provider.presence === "provider_missing")
+        || (options.catalogue === "wrong_store" && product.provider.presence === "wrong_store")
+        || (options.catalogue === "needs_review" && ["needs_review", "ambiguous"].includes(product.provider.reconciliationStatus)));
   });
   next.sort(options.sort === "name"
     ? (a, b) => a.title.localeCompare(b.title) || a.slug.localeCompare(b.slug)
@@ -2014,6 +2056,7 @@ function filterMerchandisingProducts(products, options) {
 }
 function normalizeProductVisibility(value) { return ["private", "public"].includes(value) ? value : invalidMerch("commerce_product_visibility_invalid", "Product visibility is invalid."); }
 function normalizeProductFeatured(value) { return value === true ? 1 : value === false ? 0 : invalidMerch("commerce_product_featured_invalid", "Featured state is invalid."); }
+async function requireCurrentProviderProductWhenReconciled(db, product) { const current = await db.prepare("SELECT 1 current FROM commerce_products WHERE provider_presence='current' LIMIT 1").first(); if (current && product.provider_presence !== "current") throw new AuthFailure(409, "commerce_product_provider_inactive", "This archived or provider-missing product is not eligible for storefront curation."); }
 function requireExactFields(input, allowed, code) { if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.includes(key)) || allowed.some((key) => !(key in input))) throw new AuthFailure(400, code, "The merchandising mutation fields are invalid."); }
 function requiredPlainText(value, maximum, code) { const text = plainMerchText(value, maximum); if (!text) throw new AuthFailure(400, code, "A required merchandising value is invalid."); return text; }
 function plainMerchText(value, maximum) { const text = cleanText(value, maximum); return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ""); }
@@ -2067,6 +2110,7 @@ function emptyCollectionListPayload(access, options) { return { ok: true, databa
 function escapeSqlLike(value) { return String(value).replace(/[\\%_]/g, (character) => `\\${character}`); }
 function validatedIdentifiers(value, maximum, code) { if (!Array.isArray(value) || value.length > maximum) throw new AuthFailure(400, code, "The identity list is invalid."); const ids = value.map((item) => cleanText(item, 160)); if (ids.some((id) => !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id))) throw new AuthFailure(400, code, "The identity list is invalid."); if (new Set(ids).size !== ids.length) throw new AuthFailure(400, code, "Duplicate identities are not allowed."); return ids; }
 async function requireKnownProducts(db, ids) { if (!ids.length) return; const result = await db.prepare(`SELECT id FROM commerce_products WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all(); if ((result?.results || []).length !== ids.length) throw new AuthFailure(400, "commerce_product_unknown", "Every assignment must reference a known product."); }
+async function hasAppliedCatalogueReconciliation(db) { return Boolean(await db.prepare("SELECT 1 applied FROM commerce_catalogue_reconciliation_runs WHERE state='applied' LIMIT 1").first()); }
 async function requireCurrentCollection(db, id, revision) { const row = await db.prepare("SELECT id, revision, status FROM commerce_collections WHERE id=?").bind(id).first(); if (!row || row.status !== "active") throw new AuthFailure(404, "commerce_collection_not_found", "The commerce collection was not found."); if (Number(row.revision) !== Number(revision)) throw new AuthFailure(409, "commerce_collection_revision_conflict", "This collection changed in another session. Reload before saving."); return row; }
 function throwCollectionConflict(error) { if (/unique/i.test(String(error?.message || error))) throw new AuthFailure(409, "commerce_collection_slug_or_title_duplicate", "Collection title and slug must both be unique."); throw error; }
 

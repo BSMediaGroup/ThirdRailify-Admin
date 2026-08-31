@@ -7,6 +7,7 @@ import { adminApi, importAvatarUrl, updateDisplayName, uploadAvatar } from "../a
 import type { AuthAccount } from "../auth/types";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { DetailDrawer } from "../components/DetailDrawer";
+import { useAdminToast } from "../components/AdminToasts";
 import { resetResizableTable } from "../components/resizableTableEvents";
 
 type AccountsPayload = { ok: boolean; accounts: AuthAccount[]; access: { isAdmin: boolean; isMasterAdmin: boolean }; checkedAt: string };
@@ -97,11 +98,11 @@ export function AccountsPage() {
 }
 
 function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccount; csrfToken: string; onUpdated: () => Promise<void> }) {
+  const { showToast } = useAdminToast();
   const [displayName, setDisplayName] = useState(account.displayName);
   const [file, setFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState("");
   const [busy, setBusy] = useState<"name" | "file" | "url" | "">("");
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -113,8 +114,8 @@ function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccoun
     if (!csrfToken || nextName.length < 2 || nextName.length > 80) {
       setError("Enter a display name between 2 and 80 characters."); return;
     }
-    setBusy("name"); setError(""); setMessage("");
-    try { await updateDisplayName(csrfToken, nextName); await onUpdated(); setDisplayName(nextName); setMessage("Display name updated."); }
+    setBusy("name"); setError("");
+    try { await updateDisplayName(csrfToken, nextName); await onUpdated(); setDisplayName(nextName); showToast("Display name updated.", { title: "Profile saved" }); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The display name could not be updated."); }
     finally { setBusy(""); }
   };
@@ -125,9 +126,9 @@ function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccoun
     if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type) || file.size > 5 * 1024 * 1024) {
       setError("Choose a JPG, PNG, or WebP image no larger than 5 MB."); return;
     }
-    setBusy("file"); setError(""); setMessage("");
+    setBusy("file"); setError("");
     try {
-      await uploadAvatar(csrfToken, file); await onUpdated(); setFile(null); if (fileInput.current) fileInput.current.value = ""; setMessage("Avatar updated from your upload.");
+      await uploadAvatar(csrfToken, file); await onUpdated(); setFile(null); if (fileInput.current) fileInput.current.value = ""; showToast("Avatar updated from your upload.", { title: "Profile saved" });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The avatar could not be updated."); }
     finally { setBusy(""); }
   };
@@ -135,8 +136,8 @@ function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccoun
   const saveUrl = async (event: FormEvent) => {
     event.preventDefault();
     if (!imageUrl.trim() || !csrfToken) return;
-    setBusy("url"); setError(""); setMessage("");
-    try { await importAvatarUrl(csrfToken, imageUrl.trim()); await onUpdated(); setImageUrl(""); setMessage("Avatar updated from the image URL."); }
+    setBusy("url"); setError("");
+    try { await importAvatarUrl(csrfToken, imageUrl.trim()); await onUpdated(); setImageUrl(""); showToast("Avatar updated from the image URL.", { title: "Profile saved" }); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The avatar could not be updated."); }
     finally { setBusy(""); }
   };
@@ -144,11 +145,11 @@ function AvatarSettings({ account, csrfToken, onUpdated }: { account: AuthAccoun
   return <section className="avatar-settings" aria-labelledby="admin-avatar-settings-title">
     <div className="avatar-settings__intro"><AdminAvatar account={account} /><div><p className="eyebrow">Account settings</p><h2 id="admin-avatar-settings-title">Your account profile</h2><p>Change your display name or avatar. Profile changes are verified by the Admin account service and persisted to the shared account authority.</p></div></div>
     <div className="avatar-settings__forms">
-      <form className="avatar-settings__name-form" onSubmit={saveDisplayName}><label><span>Display name</span><input type="text" autoComplete="name" minLength={2} maxLength={80} value={displayName} onChange={(event) => { setDisplayName(event.target.value); setError(""); setMessage(""); }} /></label><button className="secondary-button" type="submit" disabled={displayName.replace(/\s+/g, " ").trim() === account.displayName || Boolean(busy)}>{busy === "name" ? "Saving..." : "Save display name"}</button></form>
-      <form onSubmit={saveFile}><label><span>Upload image</span><input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={(event) => { setFile(event.target.files?.[0] || null); setError(""); setMessage(""); }} /></label><button className="secondary-button" type="submit" disabled={!file || Boolean(busy)}>{busy === "file" ? "Uploading..." : "Upload avatar"}</button></form>
-      <form onSubmit={saveUrl}><label><span>Direct image URL</span><input type="url" inputMode="url" value={imageUrl} onChange={(event) => { setImageUrl(event.target.value); setError(""); setMessage(""); }} placeholder="https://example.com/avatar.webp" /></label><button className="secondary-button" type="submit" disabled={!imageUrl.trim() || Boolean(busy)}>{busy === "url" ? "Importing..." : "Use image URL"}</button></form>
+      <form className="avatar-settings__name-form" onSubmit={saveDisplayName}><label><span>Display name</span><input type="text" autoComplete="name" minLength={2} maxLength={80} value={displayName} onChange={(event) => { setDisplayName(event.target.value); setError(""); }} /></label><button className="secondary-button" type="submit" disabled={displayName.replace(/\s+/g, " ").trim() === account.displayName || Boolean(busy)}>{busy === "name" ? "Saving..." : "Save display name"}</button></form>
+      <form onSubmit={saveFile}><label><span>Upload image</span><input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={(event) => { setFile(event.target.files?.[0] || null); setError(""); }} /></label><button className="secondary-button" type="submit" disabled={!file || Boolean(busy)}>{busy === "file" ? "Uploading..." : "Upload avatar"}</button></form>
+      <form onSubmit={saveUrl}><label><span>Direct image URL</span><input type="url" inputMode="url" value={imageUrl} onChange={(event) => { setImageUrl(event.target.value); setError(""); }} placeholder="https://example.com/avatar.webp" /></label><button className="secondary-button" type="submit" disabled={!imageUrl.trim() || Boolean(busy)}>{busy === "url" ? "Importing..." : "Use image URL"}</button></form>
     </div>
-    {(error || message) && <p className={`avatar-settings__status${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error || message}</p>}
+    {error && <p className="avatar-settings__status is-error" role="alert">{error}</p>}
   </section>;
 }
 

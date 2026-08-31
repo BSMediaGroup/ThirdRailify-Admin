@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-01 - Current Printful catalogue reconciliation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added additive migration `0026_printful_catalogue_reconciliation.sql`, sanitized reconciliation runs/items, and a Master-only Preview / typed-confirmation Apply flow for explicit native store `18668025`.
+- Full paginated Sync Product plus detail reads are GET-only, bounded, store-header scoped, fingerprinted, and fail closed on partial/zero/changed/ambiguous authority. Product identity never falls back to title.
+- Current exact rows retain stable local curation and history; provider-new rows start private/unfeatured/unsellable; stale/wrong-store/legacy rows are archived without hard deletion and lose storefront/Featured/sellable eligibility.
+- Products defaults to current rows with archived/review filters, reconciliation counts, per-row provider state, and read-only archived editors. Public and checkout authority consume current rows only after reconciliation.
+- Focused engine/access/public/checkout/idempotency tests, Node 22 builds, and responsive Admin browser evidence are green. No provider write, remote migration, deployment, purchase, fulfillment, or production D1 mutation occurred.
+
 ## 2026-08-31 - Automations and Poll authority V1
 
 CURRENT VER=0.1.0-alpha.0

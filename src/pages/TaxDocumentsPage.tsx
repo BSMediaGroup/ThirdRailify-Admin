@@ -18,6 +18,7 @@ import {
   type TemplatesPayload,
 } from "../commerce/client";
 import { AdminIcon } from "../components/AdminIcon";
+import { useAdminToast } from "../components/AdminToasts";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import "../styles/tax-documents.css";
 
@@ -31,6 +32,7 @@ type RegistrationDraft = {
 
 export function TaxDocumentsPage() {
   const { csrfToken } = useAuth();
+  const { showToast } = useAdminToast();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [tax, setTax] = useState<TaxPayload | null>(null);
   const [templates, setTemplates] = useState<TemplatesPayload | null>(null);
@@ -42,7 +44,6 @@ export function TaxDocumentsPage() {
   const [previewKey, setPreviewKey] = useState("");
   const [registrationEditor, setRegistrationEditor] = useState<TaxRegistration | "new" | null>(null);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
 
   const hydrateTemplates = useCallback((payload: TemplatesPayload) => {
@@ -84,40 +85,40 @@ export function TaxDocumentsPage() {
   const refreshBusiness = async () => setBusiness(await getBusinessProfile());
   const saveRegistration = async (draft: RegistrationDraft, existing: TaxRegistration | null) => {
     if (!csrfToken || !canManageTax) return;
-    setBusy("registration"); setError(""); setMessage("");
+    setBusy("registration"); setError("");
     try {
       const body = registrationMutation(draft, existing);
       const next = existing ? await saveTaxRegistration(csrfToken, existing.id, body) : await createTaxRegistration(csrfToken, body);
       setTax(next); await refreshBusiness(); setRegistrationEditor(null);
-      setMessage(existing ? "Tax registration updated. The identifier remains masked in browser state." : "Tax registration saved with encrypted identifier custody; no external verification is implied.");
+      showToast(existing ? "Tax registration updated. The identifier remains masked in browser state." : "Tax registration saved with encrypted identifier custody; no external verification is implied.", { title: "Tax registration saved" });
     } catch (reason) { setError(errorMessage(reason, "The tax registration could not be saved.")); throw reason; }
     finally { setBusy(""); }
   };
   const deactivate = async (registration: TaxRegistration) => {
     if (!csrfToken || !canManageTax || !window.confirm(`Deactivate ${registrationTypeLabel(registration.registrationType)} for ${registration.jurisdiction}? Historical document records will remain intact.`)) return;
-    setBusy(`deactivate:${registration.id}`); setError(""); setMessage("");
+    setBusy(`deactivate:${registration.id}`); setError("");
     try {
       setTax(await saveTaxRegistration(csrfToken, registration.id, registrationMutation({ ...registrationToDraft(registration), status: "inactive" }, registration)));
-      await refreshBusiness(); setMessage("Tax registration deactivated without deleting history or exposing its identifier.");
+      await refreshBusiness(); showToast("Tax registration deactivated without deleting history or exposing its identifier.", { title: "Tax registration deactivated" });
     } catch (reason) { setError(errorMessage(reason, "The tax registration could not be deactivated.")); }
     finally { setBusy(""); }
   };
   const changeTemplate = <K extends keyof CommerceTemplate>(key: K, value: CommerceTemplate[K]) => {
     if (!selected) return;
     setDrafts((current) => ({ ...current, [selected.templateKey]: { ...current[selected.templateKey], [key]: value } }));
-    setMessage(""); if (previewKey === selected.templateKey) { setPreview(null); setPreviewKey(""); }
+    if (previewKey === selected.templateKey) { setPreview(null); setPreviewKey(""); }
   };
   const discardTemplate = () => {
     const stored = documentTemplates.find((template) => template.templateKey === selected?.templateKey); if (!stored) return;
-    setDrafts((current) => ({ ...current, [stored.templateKey]: stored })); setPreview(null); setPreviewKey(""); setError(""); setMessage("Unsaved document-template changes discarded.");
+    setDrafts((current) => ({ ...current, [stored.templateKey]: stored })); setPreview(null); setPreviewKey(""); setError(""); showToast("Unsaved document-template changes discarded.", { tone: "info", title: "Draft restored" });
   };
   const saveTemplate = async (event: FormEvent) => {
     event.preventDefault(); if (!selected || !csrfToken || !canManageTemplates) return;
     const validation = validateDocumentTemplate(selected); if (validation) { setError(validation); return; }
-    setBusy("template"); setError(""); setMessage("");
+    setBusy("template"); setError("");
     try {
       const next = await saveCommerceTemplate(csrfToken, selected); hydrateTemplates(next); await refreshBusiness(); setPreview(null); setPreviewKey("");
-      setMessage(`${selected.templateKey === "payment_receipt" ? "Receipt" : "Invoice"} template revision ${selected.revision + 1} saved. No document was issued or delivered.`);
+      showToast(`${selected.templateKey === "payment_receipt" ? "Receipt" : "Invoice"} template revision ${selected.revision + 1} saved. No document was issued or delivered.`, { title: "Document template saved" });
     } catch (reason) { setError(errorMessage(reason, "The document template could not be saved.")); }
     finally { setBusy(""); }
   };
@@ -125,7 +126,7 @@ export function TaxDocumentsPage() {
     if (!selected || !csrfToken) return;
     const validation = validateDocumentTemplate(selected); if (validation) { setError(validation); return; }
     setBusy("preview"); setError("");
-    try { setPreview(await previewCommerceTemplate(csrfToken, selected)); setPreviewKey(selected.templateKey); setMessage("Ephemeral SAMPLE / TEST preview rendered. Nothing was persisted or sent."); }
+    try { setPreview(await previewCommerceTemplate(csrfToken, selected)); setPreviewKey(selected.templateKey); showToast("Ephemeral SAMPLE / TEST preview rendered. Nothing was persisted or sent.", { tone: "info", title: "Preview rendered" }); }
     catch (reason) { setError(errorMessage(reason, "The safe document preview could not be rendered.")); }
     finally { setBusy(""); }
   };
@@ -141,7 +142,7 @@ export function TaxDocumentsPage() {
         <Summary label="Production tax / checkout" value={checkout?.details.normalCheckoutEnabled === true ? "Checkout enabled" : "Checkout disabled"} state={checkout?.ready ? "complete" : "disabled"} />
       </div>
     </section>
-    {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
+    {error && <div className="admin-alert" role="alert">{error}</div>}
     {(!canManageTax || !canManageTemplates) && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Partially read-only workspace</strong><p>Tax writes require <code>commerce.business.manage</code>; template writes require <code>commerce.templates.manage</code>. Masked projections remain available with <code>commerce.view</code>.</p></div></div>}
 
     <section className="tax-section" aria-labelledby="tax-registrations-title"><SectionHeading id="tax-registrations-title" eyebrow="Encrypted identifier custody" title="Tax registrations" description="Operator-entered records are configuration only. They do not prove CRA registration, legal obligation, collection authority, remittance, or filing status."><button type="button" className="button-link" onClick={() => setRegistrationEditor("new")} disabled={!canManageTax || !csrfToken}><AdminIcon name="tax" size={16} />Add registration</button></SectionHeading>

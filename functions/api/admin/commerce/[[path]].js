@@ -50,6 +50,11 @@ import {
   readPrintfulCatalogueProductChunk,
 } from "../../../_shared/printful-catalogue.js";
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
+import {
+  applyCurrentCatalogueReconciliation,
+  currentCatalogueReconciliationStatus,
+  previewCurrentCatalogueReconciliation,
+} from "../../../_shared/current-catalogue-reconciliation.js";
 import { PUBLIC_WIX_CATALOGUE } from "../../../_shared/public-wix-catalogue.js";
 import { commerceOrderDetailPayload, commerceOrdersPayload, createStripeCheckoutSession } from "../../../_shared/checkout-core.js";
 import { customerDetailPayload, customerListPayload } from "../../../_shared/commerce-customers.js";
@@ -144,6 +149,9 @@ async function handleGet(request, env, path) {
   } else if (path === "products") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductsPayload(env, session);
+  } else if (path === "products/reconciliation") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await currentCatalogueReconciliationStatus(env, session);
   } else if (path === "collections/options") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await collectionOptionsPayload(env, session);
@@ -201,6 +209,10 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   const isSnapshotStart = snapshotBody?.phase === "begin" && !snapshotBody?.checkpoint;
   const rateCategory = isFeaturedCatalogueMutation(path)
     ? "commerce_catalogue_mutation"
+    : path === "products/reconciliation/apply"
+    ? "commerce_catalogue_mutation"
+    : path === "products/reconciliation/preview"
+    ? "commerce_snapshot"
     : path === "printful/catalogue/migrate"
     ? "commerce_migration"
     : path.endsWith("/send-test") ? "commerce_email"
@@ -273,6 +285,18 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
     payload = { ok: true, ...(await discoverLegacyPrintfulSource(env, fetchImpl)) };
     authEventType = "printful_catalogue_source_verified";
+  } else if (path === "products/reconciliation/preview") {
+    await requireAdminCapability(env, session, "role_permissions.manage");
+    requireCommerceDatabase(env);
+    const body = await readJsonBody(request);
+    if (!body || Object.keys(body).length) throw new AuthFailure(400, "catalogue_reconciliation_preview_fields_invalid", "The reconciliation preview request must not contain client authority.");
+    payload = await previewCurrentCatalogueReconciliation(env, session, fetchImpl, schedulerRuntime);
+    authEventType = "commerce_catalogue_reconciliation_previewed";
+  } else if (path === "products/reconciliation/apply") {
+    await requireAdminCapability(env, session, "role_permissions.manage");
+    requireCommerceDatabase(env);
+    payload = await applyCurrentCatalogueReconciliation(env, session, await readJsonBody(request), fetchImpl, schedulerRuntime);
+    authEventType = "commerce_catalogue_reconciliation_applied";
   } else if (path === "printful/catalogue/snapshot") {
     await requireCommerceCapability(env, session, "commerce.integrations.manage");
     requireCommerceDatabase(env);

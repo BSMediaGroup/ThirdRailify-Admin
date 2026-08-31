@@ -9,6 +9,7 @@ export const LIVE_DONATIONS_CONFIRMATION = "ACTIVATE LIVE PAYPAL DONATIONS";
 
 const ELIGIBLE_VARIANT_PREDICATE = `
   p.status='active' AND p.visibility='public' AND p.requires_shipping=1
+  AND p.provider_presence='current' AND v.provider_presence='current'
   AND v.status='active' AND v.visibility='public' AND v.availability_status='active'
   AND v.is_ignored=0 AND v.unit_amount>0 AND v.currency_code='CAD'
   AND v.fulfillment_provider='printful' AND v.fulfillment_mapping_status='mapped'

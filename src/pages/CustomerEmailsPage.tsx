@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNo
 import { Link, useOutletContext } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { AdminIcon } from "../components/AdminIcon";
+import { useAdminToast } from "../components/AdminToasts";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import {
   getCustomerEmailsControlPlane,
@@ -19,6 +20,7 @@ type FieldErrors = Partial<Record<TextField | "bodyBlocks" | "form", string>>;
 
 export function CustomerEmailsPage() {
   const { csrfToken } = useAuth();
+  const { showToast } = useAdminToast();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CustomerEmailsPayload | null>(null);
   const [selected, setSelected] = useState("");
@@ -28,7 +30,6 @@ export function CustomerEmailsPage() {
   const [activeField, setActiveField] = useState<TextField | "bodyBlocks">("subject");
   const [busy, setBusy] = useState<"load" | "save" | "preview" | "">("");
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   const selectedPersisted = useMemo(() => payload?.templates.find((template) => template.templateKey === selected) || null, [payload, selected]);
   const dirty = Boolean(draft && selectedPersisted && templateFingerprint(draft) !== templateFingerprint(selectedPersisted));
@@ -42,10 +43,10 @@ export function CustomerEmailsPage() {
     try {
       const rendered = await previewCommerceTemplate(csrfToken, template);
       setPreview(rendered); setPreviewRevision(templateFingerprint(template));
-      if (announce) setMessage("Preview refreshed with unmistakably synthetic sample data. No delivery or document record was created.");
+      if (announce) showToast("Preview refreshed with unmistakably synthetic sample data. No delivery or document record was created.", { tone: "info", title: "Preview refreshed" });
     } catch (reason) { setError(errorMessage(reason, "The canonical non-mutating preview could not be rendered.")); }
     finally { setBusy(""); }
-  }, [csrfToken]);
+  }, [csrfToken, showToast]);
 
   const load = useCallback(async () => {
     const stop = startLoading("Loading customer email authority"); setBusy("load"); setError("");
@@ -78,24 +79,24 @@ export function CustomerEmailsPage() {
     if (key === selected || !payload) return;
     if (dirty && !window.confirm("Discard unsaved changes and open another template?")) return;
     const template = payload.templates.find((item) => item.templateKey === key) || null;
-    setSelected(key); setDraft(template); setPreview(null); setPreviewRevision(""); setError(""); setMessage("");
+    setSelected(key); setDraft(template); setPreview(null); setPreviewRevision(""); setError("");
     if (template && template.validity?.state !== "invalid") await renderPreview(template);
   };
 
   const change = <K extends keyof CustomerEmailTemplate>(key: K, value: CustomerEmailTemplate[K]) => setDraft((current) => current ? { ...current, [key]: value } : current);
   const discard = () => {
     if (!selectedPersisted) return;
-    setDraft(selectedPersisted); setError(""); setMessage("Unsaved changes discarded.");
+    setDraft(selectedPersisted); setError(""); showToast("Unsaved changes discarded.", { tone: "info", title: "Draft restored" });
     void renderPreview(selectedPersisted);
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (!draft || !canSave || !csrfToken) return;
-    const stop = startLoading("Saving customer email template"); setBusy("save"); setError(""); setMessage("");
+    const stop = startLoading("Saving customer email template"); setBusy("save"); setError("");
     try {
       await saveCommerceTemplate(csrfToken, draft);
       const next = await getCustomerEmailsControlPlane(); const saved = next.templates.find((item) => item.templateKey === draft.templateKey) || null;
-      setPayload(next); setDraft(saved); setMessage("Template saved with a new server revision. No email was sent.");
+      setPayload(next); setDraft(saved); showToast("Template saved with a new server revision. No email was sent.", { title: "Email template saved" });
       if (saved) await renderPreview(saved);
     } catch (reason) { setError(errorMessage(reason, "The template could not be saved.")); }
     finally { setBusy(""); stop(); }
@@ -105,13 +106,12 @@ export function CustomerEmailsPage() {
     const token = `{{${key}}}`;
     if (activeField === "bodyBlocks") change("bodyBlocks", draft.bodyBlocks.length ? draft.bodyBlocks.map((block, index) => index === draft.bodyBlocks.length - 1 ? `${block}${block ? " " : ""}${token}` : block) : [token]);
     else change(activeField, `${String(draft[activeField] || "")}${draft[activeField] ? " " : ""}${token}`);
-    setMessage(`${token} inserted into ${fieldLabel(activeField)}.`);
+    showToast(`${token} inserted into ${fieldLabel(activeField)}.`, { tone: "info", title: "Variable inserted" });
   };
 
   return <div className="customer-emails-page">
     <EmailHero payload={payload} />
     {error && <div className="admin-alert" role="alert">{error}</div>}
-    {message && <div className="auth-success" role="status">{message}</div>}
     {!payload && !error ? <EmailState title="Loading customer email authority" detail="Reading templates, sender configuration, dependencies, and persisted delivery evidence." /> : payload ? <>
       {!payload.databaseConfigured && <div className="commerce-callout is-unavailable" role="status"><AdminIcon name="shield" /><div><strong>Commerce D1 unavailable</strong><p>Template and delivery authority cannot be verified. All customer delivery remains fail-closed.</p></div></div>}
       <SenderProvider payload={payload} />

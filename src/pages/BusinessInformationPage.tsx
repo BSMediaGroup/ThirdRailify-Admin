@@ -5,6 +5,7 @@ import { AuthClientError } from "../auth/types";
 import { getBusinessProfile, saveBusinessProfile, type BusinessPayload, type BusinessReadinessState, type PublicAddress } from "../commerce/client";
 import { AdminIcon } from "../components/AdminIcon";
 import type { AdminShellOutletContext } from "../components/AdminShell";
+import { useAdminToast } from "../components/AdminToasts";
 import "../styles/business-information.css";
 
 type BusinessDraft = {
@@ -20,12 +21,12 @@ type BusinessDraftUpdater = <K extends keyof BusinessDraft>(key: K, value: Busin
 export function BusinessInformationPage() {
   const { csrfToken } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
+  const { showToast } = useAdminToast();
   const [payload, setPayload] = useState<BusinessPayload | null>(null);
   const [form, setForm] = useState<BusinessDraft | null>(null);
   const [savedSnapshot, setSavedSnapshot] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const dirty = useMemo(() => Boolean(form && savedSnapshot && JSON.stringify(form) !== savedSnapshot), [form, savedSnapshot]);
 
@@ -48,21 +49,21 @@ export function BusinessInformationPage() {
   const canSave = Boolean(canManage && payload?.databaseConfigured && payload.encryptionConfigured && csrfToken && !busy && dirty);
   const update: BusinessDraftUpdater = (key, value) => {
     setForm((current) => current ? { ...current, [key]: value } : current);
-    setFieldErrors((current) => current[key] ? { ...current, [key]: "" } : current); setMessage("");
+    setFieldErrors((current) => current[key] ? { ...current, [key]: "" } : current);
   };
   const discard = () => {
     if (!payload) return; const draft = profileToDraft(payload);
-    setForm(draft); setSavedSnapshot(JSON.stringify(draft)); setFieldErrors({}); setError(""); setMessage("Unsaved changes discarded.");
+    setForm(draft); setSavedSnapshot(JSON.stringify(draft)); setFieldErrors({}); setError(""); showToast("Unsaved business changes discarded.", { tone: "info", title: "Draft discarded" });
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!canSave || !form || !payload || !csrfToken) return;
     const validation = validateDraft(form); setFieldErrors(validation);
     if (Object.keys(validation).length) { setError("Review the highlighted business information before saving."); return; }
-    const stop = startLoading("Saving encrypted business profile"); setBusy(true); setError(""); setMessage("");
+    const stop = startLoading("Saving encrypted business profile"); setBusy(true); setError("");
     try {
       const next = await saveBusinessProfile(csrfToken, mutationPayload(form, payload.profile.revision)); const draft = profileToDraft(next);
       setPayload(next); setForm(draft); setSavedSnapshot(JSON.stringify(draft)); setFieldErrors({});
-      setMessage(`Business profile revision ${next.profile.revision} saved. Sensitive replacement values are no longer present in the browser.`);
+      showToast(`Business profile revision ${next.profile.revision} saved. Sensitive replacement values are no longer present in the browser.`, { title: "Business profile saved" });
     } catch (reason) {
       const field = errorField(reason); if (field) setFieldErrors((current) => ({ ...current, [field]: errorMessage(reason, "Check this field.") }));
       setError(errorMessage(reason, "Business information could not be saved."));
@@ -78,7 +79,7 @@ export function BusinessInformationPage() {
       <div className="business-profile-hero__completion"><span>Profile completion</span><strong>{payload.readiness.completion.percent}%</strong><div role="progressbar" aria-label="Business profile completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={payload.readiness.completion.percent}><i style={{ width: `${payload.readiness.completion.percent}%` }} /></div><small>{payload.readiness.completion.complete} of {payload.readiness.completion.total} required profile gates configured</small></div>
       <div className="business-profile-summary" aria-label="Business profile status summary"><Summary label="Storefront identity" state={summary.coreIdentity} /><Summary label="Public contact" state={summary.publicContact} /><Summary label="Legal identity" state={summary.legalIdentity} /><Summary label="Business address" state={summary.address} /><Summary label="Tax registration" state={summary.tax} /><Summary label="Document identity" state={summary.documents} /></div>
     </section>
-    {error && <div className="admin-alert" role="alert">{error}</div>}{message && <div className="auth-success" role="status">{message}</div>}
+    {error && <div className="admin-alert" role="alert">{error}</div>}
     {!canManage && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Read-only business authority</strong><p>Your session can view commerce. Saving requires <code>commerce.business.manage</code>.</p></div></div>}
     <form className="business-settings-form" onSubmit={(event) => void submit(event)} noValidate>
       <div className="business-settings-grid">
@@ -100,7 +101,7 @@ export function BusinessInformationPage() {
       </div>
       <section className="business-readiness-section" aria-labelledby="business-readiness-title"><div className="business-section-heading"><div><p className="eyebrow">Server-derived · shared with Payments</p><h2 id="business-readiness-title">Readiness &amp; dependencies</h2><p>No browser checklist can override these canonical Commerce D1 gates. Deferred PayPal is explicitly not required.</p></div><StatusChip state={payload.readiness.overallStatus} /></div><div className="business-readiness-grid">{payload.readiness.groups.map((group) => <article key={group.id}><header><strong>{group.label}</strong><StatusChip state={group.state} /></header><ul>{group.items.map((item) => <li key={item.id}><i className={`is-${item.state}`} /><div><strong>{item.label}</strong><span>{item.detail}</span></div><small>{stateLabel(item.state)}</small></li>)}</ul></article>)}</div></section>
       <details className="business-advanced"><summary>Advanced authority, privacy &amp; technical metadata</summary><div className="business-advanced__grid"><FactList title="Authority" facts={[["Source", payload.authority], ["Profile ID", "primary"], ["Revision", String(profile.revision)], ["Updated", formatDate(profile.updatedAt)], ["Read access", "commerce.view"], ["Write access", "commerce.business.manage"]]} /><FactList title="Privacy boundary" facts={[["PUBLIC-SAFE", `${payload.privacy.publicSafe.length} classified fields`], ["ADMIN-ONLY", `${payload.privacy.adminOnly.length} metadata fields`], ["SENSITIVE", `${payload.privacy.sensitive.length} encrypted categories`], ["Browser secret access", "Masked state only"], ["Provider calls", "None"]]} /></div></details>
-      <div className={`business-savebar${dirty ? " is-sticky" : ""}`} role="status"><div><i className={dirty ? "is-dirty" : message ? "is-saved" : ""} /><span>{busy ? "Saving to Commerce D1…" : dirty ? "Unsaved business changes" : message || "All business changes saved"}</span></div><div><button className="button-link" type="button" onClick={discard} disabled={!dirty || busy}>Discard</button><button className="primary-button" type="submit" disabled={!canSave}>{busy ? "Saving…" : "Save changes"}</button></div></div>
+      <div className={`business-savebar${dirty ? " is-sticky" : ""}`} role="status"><div><i className={dirty ? "is-dirty" : "is-saved"} /><span>{busy ? "Saving to Commerce D1…" : dirty ? "Unsaved business changes" : "All business changes saved"}</span></div><div><button className="button-link" type="button" onClick={discard} disabled={!dirty || busy}>Discard</button><button className="primary-button" type="submit" disabled={!canSave}>{busy ? "Saving…" : "Save changes"}</button></div></div>
     </form>
   </div>;
 }

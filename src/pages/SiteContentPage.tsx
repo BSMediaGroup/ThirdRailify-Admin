@@ -3,6 +3,7 @@ import tripleZapMark from "../../assets/icons/trzap-0.svg";
 import { useAuth } from "../auth/AuthProvider";
 import { type BannerConfig, type BannerMessage, readBannerSettings, saveBannerSettings } from "../banner/client";
 import { AdminIcon } from "../components/AdminIcon";
+import { useAdminToast } from "../components/AdminToasts";
 
 const EMPTY_MESSAGE: BannerMessage = { text: "", ctaLabel: null, href: null, newTab: false };
 const FIXTURE_TITLE = "SAMPLE PREVIEW — Third Railify live broadcast title";
@@ -10,6 +11,7 @@ const tripleZapMask = { "--triple-zap-mask": `url("${tripleZapMark}")` } as CSSP
 
 export function SiteContentPage() {
   const { csrfToken, hasCapability } = useAuth();
+  const { showToast } = useAdminToast();
   const canManage = hasCapability("content.manage");
   const [config, setConfig] = useState<BannerConfig | null>(null);
   const [revision, setRevision] = useState(0);
@@ -17,11 +19,10 @@ export function SiteContentPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState("");
   const dirty = useMemo(() => Boolean(config && savedSnapshot && JSON.stringify(config) !== savedSnapshot), [config, savedSnapshot]);
 
   const load = useCallback(async () => {
-    setLoading(true); setError(""); setSaved("");
+    setLoading(true); setError("");
     try { const result = await readBannerSettings(); setConfig(result.config); setRevision(result.revision); setSavedSnapshot(JSON.stringify(result.config)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Banner configuration is unavailable."); }
     finally { setLoading(false); }
@@ -37,8 +38,8 @@ export function SiteContentPage() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!canManage || !config || !csrfToken || saving || !dirty) return;
-    setSaving(true); setError(""); setSaved("");
-    try { const result = await saveBannerSettings(config, revision, csrfToken); setConfig(result.config); setRevision(result.revision); setSavedSnapshot(JSON.stringify(result.config)); setSaved(`Saved revision ${result.revision}.`); }
+    setSaving(true); setError("");
+    try { const result = await saveBannerSettings(config, revision, csrfToken); setConfig(result.config); setRevision(result.revision); setSavedSnapshot(JSON.stringify(result.config)); showToast(`Banner settings saved at revision ${result.revision}.`, { title: "Site content saved" }); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The banner configuration could not be saved."); }
     finally { setSaving(false); }
   };
@@ -53,7 +54,7 @@ export function SiteContentPage() {
         <NormalEditor config={config} setConfig={setConfig} />
         <HomeRailEditor config={config} setConfig={setConfig} />
         <LiveEditor config={config} setConfig={setConfig} />
-        <div className="banner-savebar"><span className={dirty ? "is-dirty" : saved ? "is-saved" : ""}><i />{saving ? "Saving to server…" : dirty ? "Unsaved changes" : saved || "All changes saved"}</span><button className="primary-button" type="submit" disabled={!dirty || saving}>{saving ? "Saving…" : "Save banner settings"}</button></div>
+        <div className="banner-savebar"><span className={dirty ? "is-dirty" : "is-saved"}><i />{saving ? "Saving to server…" : dirty ? "Unsaved changes" : "All changes saved"}</span><button className="primary-button" type="submit" disabled={!dirty || saving}>{saving ? "Saving…" : "Save banner settings"}</button></div>
       </form>}
     </section>
   );

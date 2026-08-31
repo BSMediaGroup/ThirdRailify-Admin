@@ -2610,3 +2610,98 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 @media(max-width:720px){.role-selector__options{grid-template-columns:1fr}.role-option__card{min-height:82px}.selected-role-context{grid-template-columns:46px minmax(0,1fr)}.selected-role-context__icon{width:46px;height:46px}.selected-role-context>b{grid-column:1/-1;justify-self:start}.permission-toolbar{align-items:stretch;flex-direction:column}.permission-toolbar label{max-width:none}.permission-toolbar p{margin:0}}
 @media(max-width:520px){.role-permissions{padding:16px;border-radius:17px}.role-permissions__heading>span{align-self:flex-start;white-space:normal;line-height:1.35}.policy-legend{grid-template-columns:1fr}.permission-group>header{grid-template-columns:38px minmax(0,1fr)}.permission-group>header>b{grid-column:2;justify-self:start}.permission-row{grid-template-columns:1fr;gap:10px;min-height:0}.permission-row__control{display:flex;align-items:center;justify-content:space-between;min-width:0}.role-permissions__savebar>div:last-child{display:grid;grid-template-columns:1fr 1fr}.role-permissions__savebar button{width:100%}}
 @media(max-width:1100px) and (min-width:1001px){.analytics-heading{align-items:start;flex-direction:column}.analytics-heading__controls{width:100%;grid-template-columns:1fr auto;align-items:center}.analytics-kpis,.analytics-region-list{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-map-shell{min-height:430px}}
+.catalogue-reconciliation { display: grid; gap: 14px; }
+.catalogue-reconciliation > p { margin: 0; color: var(--text-muted); }
+.catalogue-reconciliation__counts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.catalogue-reconciliation__counts span { display: grid; gap: 3px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); }
+.catalogue-reconciliation__counts strong { font-size: 1.15rem; color: var(--text); }
+.catalogue-reconciliation__preview { display: grid; gap: 10px; padding: 16px; border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--success) 6%, var(--surface)); }
+.catalogue-reconciliation__preview.is-warning { border-color: color-mix(in srgb, var(--warning) 65%, var(--border)); background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
+.catalogue-reconciliation__preview h3, .catalogue-reconciliation__preview p { margin: 0; }
+.catalogue-reconciliation__preview dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.catalogue-reconciliation__preview dl div { display: flex; justify-content: space-between; gap: 8px; padding: 8px; border-bottom: 1px solid var(--border); }
+@media (max-width: 900px) { .catalogue-reconciliation__counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .catalogue-reconciliation__counts, .catalogue-reconciliation__preview dl { grid-template-columns: 1fr; } }
+
+/* Shared transient feedback: fixed above every Admin workspace and dialog. */
+.admin-toast-region {
+  position: fixed;
+  z-index: 240;
+  top: 78px;
+  right: clamp(14px, 2.4vw, 34px);
+  display: grid;
+  width: min(430px, calc(100vw - 28px));
+  gap: 10px;
+  pointer-events: none;
+}
+.admin-toast {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 13px 12px 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: radial-gradient(circle at 0 50%, rgba(243, 201, 40, .08), transparent 44%), rgba(13, 13, 10, .975);
+  box-shadow: 0 22px 64px rgba(0, 0, 0, .62), 0 0 0 1px rgba(0, 0, 0, .3);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+  animation: admin-toast-in .22s cubic-bezier(.2, .8, .2, 1) both;
+}
+.admin-toast--success { border-color: rgba(114, 215, 165, .42); }
+.admin-toast--info { border-color: rgba(187, 107, 217, .48); background: radial-gradient(circle at 0 50%, rgba(187, 107, 217, .12), transparent 46%), rgba(13, 12, 14, .975); }
+.admin-toast--warning { border-color: rgba(243, 201, 40, .5); }
+.admin-toast__icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(243, 201, 40, .24);
+  border-radius: 10px;
+  background: rgba(243, 201, 40, .07);
+  color: var(--gold);
+}
+.admin-toast--success .admin-toast__icon { border-color: rgba(114, 215, 165, .28); background: rgba(114, 215, 165, .08); color: var(--safe); }
+.admin-toast--info .admin-toast__icon { border-color: rgba(187, 107, 217, .3); background: rgba(187, 107, 217, .09); color: #dba7ef; }
+.admin-toast__copy,.admin-toast__copy strong,.admin-toast__copy span { display: block; min-width: 0; }
+.admin-toast__copy strong { color: var(--ink); font: 700 .64rem "Geist Mono", monospace; letter-spacing: .075em; text-transform: uppercase; }
+.admin-toast__copy span { margin-top: 4px; color: var(--muted); font-size: .79rem; line-height: 1.4; overflow-wrap: anywhere; }
+.admin-toast__dismiss {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--quiet);
+  cursor: pointer;
+}
+.admin-toast__dismiss:hover { border-color: var(--line); background: rgba(255, 255, 255, .035); color: var(--ink); }
+.admin-toast__dismiss:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.admin-toast__timer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--gold), var(--safe));
+  transform-origin: left;
+  animation: admin-toast-timer var(--admin-toast-duration) linear forwards;
+}
+.admin-toast--info .admin-toast__timer { background: linear-gradient(90deg, #7b3ca0, #dda7f5); }
+@keyframes admin-toast-in { from { opacity: 0; transform: translate3d(0, -10px, 0) scale(.985); } }
+@keyframes admin-toast-timer { to { transform: scaleX(0); } }
+@media (max-width: 640px) {
+  .admin-toast-region { top: 76px; right: 12px; width: calc(100vw - 24px); }
+  .admin-toast { grid-template-columns: 34px minmax(0, 1fr) 32px; padding: 11px 10px 13px; }
+  .admin-toast__icon { width: 34px; height: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-toast { animation: none; }
+  .admin-toast__timer { animation: none; transform: none; }
+}
