@@ -10,6 +10,7 @@ import {
   timingSafeEqual,
 } from "./auth-core.js";
 import { normalizePollTrigger, validatePollTrigger } from "./poll-normalization.js";
+import { projectPollMediaAsset } from "./poll-media.js";
 
 const STATES = new Set(["draft", "open", "closed", "archived"]);
 const WEB_MODES = new Set(["anyone", "signed_in"]);
@@ -84,6 +85,25 @@ export async function getPollCreatorAccess(env, accountId) {
   const admin = adminAccess(account);
   const grant = await requirePollDb(env).prepare("SELECT active,may_create_polls FROM poll_creator_grants WHERE account_id=?").bind(accountId).first();
   return { ok: true, authenticated: true, canCreate: admin.canManageAll || Boolean(grant?.active && grant?.may_create_polls), canManageAll: admin.canManageAll };
+}
+
+export async function getCreatorRumbleDiscovery(env, accountId) {
+  await requireCreator(env, accountId);
+  const heartbeat = await requirePollDb(env).prepare("SELECT runtime_json,heartbeat_at FROM bot_runtime_heartbeat WHERE singleton_id=1").first();
+  if (!heartbeat) return { ok: true, provider: "rumble", botState: "offline", freshness: null, source: null, livestreams: [], message: "Rumble source discovery temporarily unavailable." };
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(heartbeat.heartbeat_at)) / 1000));
+  const runtime = safeJson(heartbeat.runtime_json, {});
+  const discovery = sanitizeRumbleDiscovery(runtime.rumbleDiscovery);
+  const botState = ageSeconds <= 45 ? "healthy" : ageSeconds <= 180 ? "stale" : "offline";
+  return {
+    ok: true,
+    provider: "rumble",
+    botState,
+    freshness: { heartbeatAt: heartbeat.heartbeat_at, ageSeconds, providerResponseAt: discovery?.providerResponseAt || null, observedAt: discovery?.observedAt || null },
+    source: discovery?.source || null,
+    livestreams: discovery?.livestreams || [],
+    message: discovery && botState !== "offline" ? null : "Rumble source discovery temporarily unavailable.",
+  };
 }
 
 export async function listCreatorPolls(env, accountId) {
@@ -435,11 +455,16 @@ export async function ingestRumbleVotes(env, input) {
 }
 
 async function projectSummary(env, row) {
-  const options = await optionResults(env, row.id);
+  const publicVisible = Boolean(row.is_public) && new Set(["open", "closed"]).has(row.state);
+  const [options, banner] = await Promise.all([
+    optionResults(env, row.id, publicVisible),
+    requirePollDb(env).prepare("SELECT * FROM poll_media_assets WHERE poll_id=? AND purpose='banner' AND lifecycle='active' LIMIT 1").bind(row.id).first(),
+  ]);
   return { id: row.id, slug: row.public_slug, title: row.title, description: row.description || null, state: row.state,
     public: Boolean(row.is_public), webVotingMode: row.web_voting_mode, rumbleEnabled: Boolean(row.rumble_enabled),
     rumbleSourceScope: row.rumble_source_scope || null, revision: Number(row.revision), totalVotes: Number(row.total_votes ?? options.reduce((sum, item) => sum + item.votes, 0)),
-    options, owner: await accountProjection(env, row.owner_account_id), updatedAt: row.updated_at, openedAt: row.opened_at || null, closedAt: row.closed_at || null };
+    options, owner: await accountProjection(env, row.owner_account_id), theme: projectTheme(safeJson(row.theme_json, {})),
+    media: { banner: projectPollMediaAsset(banner, env, publicVisible) }, updatedAt: row.updated_at, openedAt: row.opened_at || null, closedAt: row.closed_at || null };
 }
 
 async function projectDetail(env, row, accountId = "", voteIdentity = null) {
@@ -450,14 +475,21 @@ async function projectDetail(env, row, accountId = "", voteIdentity = null) {
   else if (accountId) currentVote = await requirePollDb(env).prepare("SELECT option_id FROM poll_votes WHERE poll_id=? AND source_namespace='web_account' AND voter_key_hash=?")
     .bind(row.id, await voterKeyHash(env, "web_account", `account:${accountId}`)).first();
   return { ...summary, livestreamMode: row.rumble_livestream_mode, livestreamId: row.rumble_livestream_id || null,
-    requestedIntervalSeconds: Number(row.requested_interval_seconds), theme: safeJson(row.theme_json, {}), currentVoteOptionId: currentVote?.option_id || null };
+    requestedIntervalSeconds: Number(row.requested_interval_seconds), currentVoteOptionId: currentVote?.option_id || null };
 }
 
-async function optionResults(env, pollId) {
-  const rows = await requirePollDb(env).prepare(`SELECT o.*,(SELECT COUNT(*) FROM poll_votes v WHERE v.poll_id=o.poll_id AND v.option_id=o.id) AS votes
-    FROM poll_options o WHERE o.poll_id=? ORDER BY o.display_position`).bind(pollId).all();
+async function optionResults(env, pollId, publicVisible = false) {
+  const rows = await requirePollDb(env).prepare(`SELECT o.*,a.id AS image_asset_id,a.purpose AS image_purpose,a.poll_option_id AS image_option_id,
+    a.content_type AS image_content_type,a.byte_size AS image_byte_size,a.width AS image_width,a.height AS image_height,
+    a.sha256 AS image_sha256,a.original_filename AS image_original_filename,a.created_at AS image_created_at,
+    (SELECT COUNT(*) FROM poll_votes v WHERE v.poll_id=o.poll_id AND v.option_id=o.id) AS votes
+    FROM poll_options o LEFT JOIN poll_media_assets a ON a.poll_option_id=o.id AND a.purpose='option' AND a.lifecycle='active'
+    WHERE o.poll_id=? ORDER BY o.display_position`).bind(pollId).all();
   return (rows?.results || []).map((row) => ({ id: row.id, position: Number(row.display_position), label: row.label,
-    description: row.short_description || null, trigger: row.trigger_raw, normalizedTrigger: row.trigger_normalized, votes: Number(row.votes || 0) }));
+    description: row.short_description || null, trigger: row.trigger_raw, normalizedTrigger: row.trigger_normalized, votes: Number(row.votes || 0),
+    image: projectPollMediaAsset(row.image_asset_id ? { id: row.image_asset_id, purpose: row.image_purpose, poll_option_id: row.image_option_id,
+      content_type: row.image_content_type, byte_size: row.image_byte_size, width: row.image_width, height: row.image_height,
+      sha256: row.image_sha256, original_filename: row.image_original_filename, created_at: row.image_created_at } : null, env, publicVisible) }));
 }
 
 async function optionsForPoll(env, pollId) { return optionResults(env, pollId); }
@@ -567,10 +599,26 @@ function validateDesiredState(input, current) {
 function sanitizeRuntime(input) {
   const value = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const allowed = ["discordConnected","rumbleConfigured","lastConfigSync","lastRumbleFetch","sourceLabel","sourceScopeType","livestreamId","livestreamTitle","pollLeaseActive","activePollId","activePollRevision","pollingIntervalSeconds","lastProviderTime","lastAcceptedVoteTime","backlogMayBeTruncated","errorCode","providerState","configSyncState","nextPollAt","backoffSeconds","counters"];
-  return Object.fromEntries(allowed.filter((key) => key in value).map((key) => [key, sanitizeRuntimeValue(value[key])]));
+  const result = Object.fromEntries(allowed.filter((key) => key in value).map((key) => [key, sanitizeRuntimeValue(value[key])]));
+  const discovery = sanitizeRumbleDiscovery(value.rumbleDiscovery);
+  if (discovery) result.rumbleDiscovery = discovery;
+  return result;
 }
 function sanitizeRuntimeValue(value) { if (typeof value === "boolean" || typeof value === "number") return value; if (typeof value === "string") return clean(value, 240); if (value && typeof value === "object" && !Array.isArray(value)) return Object.fromEntries(Object.entries(value).slice(0, 20).map(([key, item]) => [clean(key, 40), typeof item === "number" ? item : clean(item, 80)])); return null; }
-function sanitizeTheme(value) { return { accent: /^#[0-9a-f]{6}$/i.test(String(value.accent || "")) ? String(value.accent).toLowerCase() : "#f3c928", layout: new Set(["bars", "compact"]).has(value.layout) ? value.layout : "bars" }; }
+function sanitizeTheme(value) { if ("accent" in value && !/^#[0-9a-f]{6}$/i.test(String(value.accent || ""))) throw new AuthFailure(400, "poll_theme_invalid", "Choose a valid six-digit feature tint."); return projectTheme(value); }
+function projectTheme(value) { return { accent: /^#[0-9a-f]{6}$/i.test(String(value?.accent || "")) ? String(value.accent).toLowerCase() : "#f3c928", layout: new Set(["bars", "compact"]).has(value?.layout) ? value.layout : "bars" }; }
+function sanitizeRumbleDiscovery(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const source = input.source && typeof input.source === "object" && !Array.isArray(input.source) ? input.source : null;
+  const scope = clean(source?.scope, 200); const type = clean(source?.type, 20); const id = clean(source?.id, 180);
+  if (!SOURCE_SCOPE.test(scope) || !new Set(["channel", "user"]).has(type) || scope !== `${type}:${id}`) return null;
+  const livestreams = (Array.isArray(input.livestreams) ? input.livestreams : []).slice(0, 50).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const streamId = clean(item.id, 160); const title = clean(item.title, 240); if (!streamId || !title || typeof item.isLive !== "boolean") return [];
+    const watching = Number(item.watchingNow); return [{ id: streamId, title, isLive: item.isLive, createdOn: optional(item.createdOn, 80), scheduledOn: optional(item.scheduledOn, 80), visibility: optional(item.visibility, 40), watchingNow: Number.isFinite(watching) ? Math.max(0, Math.min(10_000_000, Math.floor(watching))) : null }];
+  });
+  return { provider: "rumble", source: { scope, type, id, displayName: clean(source.displayName, 100) || id }, providerResponseAt: optional(input.providerResponseAt, 80), observedAt: optional(input.observedAt, 80), livestreams };
+}
 
 async function voterKeyHash(env, namespace, key) {
   const secret = String(env?.THIRDRAILIFY_POLL_VOTER_SECRET || env?.THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET || "");

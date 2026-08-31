@@ -6,6 +6,7 @@ import { onRequestGet as catalogueRequest } from "../functions/api/public/commer
 import { onRequestGet as productRequest } from "../functions/api/public/commerce/products/[slug].js";
 import { commerceMediaResponse, MAX_COMMERCE_IMAGE_BYTES } from "../functions/_shared/commerce-media.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
+import { publicCataloguePayload } from "../functions/_shared/public-catalogue.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { applySqlBatches, commerceEnvironment, createCommerceDatabases, importPermanentCatalogue, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
 
@@ -24,6 +25,7 @@ test("Admin product and variant merchandising requires auth, exact origin, CSRF,
   const noCsrf = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, body: productBody() }), env, data: {} }); assert.equal(noCsrf.status, 403);
   const wrongOrigin = await commerceRequest({ request: jsonRequest(url, { origin: "https://evil.example", cookie, csrfToken: created.csrfToken, body: productBody() }), env, data: {} }); assert.equal(wrongOrigin.status, 403);
   const savedResponse = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: productBody() }), env, data: {} }); assert.equal(savedResponse.status, 200); const saved = await savedResponse.json(); assert.equal(saved.product.title, "Authoritative Tee"); assert.equal(saved.product.variants.length, 1);
+  const savedMetadata = JSON.parse((await harness.commerceDb.prepare("SELECT safe_metadata_json FROM commerce_products WHERE id='product-test-001'").first()).safe_metadata_json); assert.equal(savedMetadata.imageAuthority.kind, "editorial_override");
   const variantUrl = `${url}/variants/variant-test-001`; const variantResponse = await commerceRequest({ request: jsonRequest(variantUrl, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: variantBody() }), env, data: {} }); assert.equal(variantResponse.status, 200); assert.equal((await variantResponse.json()).product.variants[0].unitAmount, 3050);
   const stored = await harness.commerceDb.prepare("SELECT target_printful_product_id,target_printful_sync_variant_id,sku,unit_amount FROM commerce_product_variants WHERE id='variant-test-001'").first(); assert.deepEqual(stored, { target_printful_product_id: "target-product-001", target_printful_sync_variant_id: "target-variant-001", sku: "TEST-SKU-001", unit_amount: 3050 });
   for (const [body, code] of [[productBody({ slug: "Bad Slug" }), "commerce_product_slug_invalid"], [productBody({ currencyCode: "USD" }), "commerce_product_currency_invalid"], [{ ...productBody(), targetPrintfulProductId: "overwrite" }, "commerce_product_fields_invalid"]]) { const response = await commerceRequest({ request: jsonRequest(url, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body }), env, data: {} }); assert.equal(response.status, 400); assert.equal((await response.json()).error, code); }
@@ -136,6 +138,27 @@ test("targeted Featured mutation is authoritative, idempotent, bounded, and isol
   const rateRows = await harness.authDb.prepare("SELECT category,attempt_count FROM auth_rate_limits WHERE category IN ('commerce','commerce_catalogue_mutation') ORDER BY category").all();
   assert.deepEqual(rateRows.results, [{ category: "commerce_catalogue_mutation", attempt_count: 25 }]);
   const audit = await harness.commerceDb.prepare("SELECT actor_account_id,metadata_json FROM commerce_audit WHERE action='commerce.product_featured_updated' ORDER BY created_at DESC LIMIT 1").first(); assert.equal(audit.actor_account_id, "env-master-1"); assert.match(audit.metadata_json, /featured/);
+});
+
+test("current Hidden and zero-public-variant products can store Featured while non-current products fail explicitly", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  await insertTestProduct(harness.commerceDb, { id: "current-hidden", slug: "current-hidden", title: "Current Hidden", status: "disabled", visibility: "private", targetPrintfulProductId: "460338949", migrationStatus: "target_verified" });
+  await insertTestProduct(harness.commerceDb, { id: "current-public", slug: "current-public", title: "Current Public", status: "active", visibility: "public", targetPrintfulProductId: "460339030", migrationStatus: "target_verified" });
+  await insertTestProduct(harness.commerceDb, { id: "provider-missing", slug: "provider-missing", title: "Provider Missing", status: "disabled", visibility: "private", targetPrintfulProductId: "old-provider", migrationStatus: "target_verified" });
+  await harness.commerceDb.batch([
+    harness.commerceDb.prepare("UPDATE commerce_products SET provider_store_id='18668025',provider_presence='current',provider_reconciliation_status='current' WHERE id IN ('current-hidden','current-public')"),
+    harness.commerceDb.prepare("UPDATE commerce_products SET provider_store_id='18668025',provider_presence='provider_missing',provider_reconciliation_status='archived',archived_at='2026-09-01T00:00:00.000Z' WHERE id='provider-missing'"),
+  ]);
+  const post = (id, featured) => commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/${id}/featured`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { featured } }), env, data: { commerceFetch: () => { throw new Error("Featured must not call Printful"); } } });
+
+  for (const id of ["current-hidden", "current-public"]) {
+    const enabled = await post(id, true); assert.equal(enabled.status, 200); assert.equal((await enabled.json()).product.featured, true);
+    const disabled = await post(id, false); assert.equal(disabled.status, 200); assert.equal((await disabled.json()).product.featured, false);
+  }
+  const hidden = await harness.commerceDb.prepare("SELECT status,visibility,is_featured FROM commerce_products WHERE id='current-hidden'").first();
+  assert.deepEqual(hidden, { status: "disabled", visibility: "private", is_featured: 0 });
+  const publicPayload = await publicCataloguePayload(env); assert.equal(publicPayload.products.some((product) => product.id === "current-hidden"), false);
+  const rejected = await post("provider-missing", true); assert.equal(rejected.status, 409); assert.equal((await rejected.json()).error, "provider_missing");
 });
 
 test("individual featured toggle appends deterministically and unfeature removes ordering", async (t) => {

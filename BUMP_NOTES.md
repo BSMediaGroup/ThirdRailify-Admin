@@ -1,5 +1,30 @@
 # Bump notes
 
+## 2026-09-01 - Polls V1.1 discovery and media authority
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added creator-authorized, signed Rumble discovery from the existing bot heartbeat with `channel_id`-first/`user_id` fallback, bounded safe livestream metadata, and truthful healthy/stale/offline freshness.
+- Added additive migration `0027_polls_v11_media.sql` for lifecycle-tracked banner and option-image metadata while keeping the existing Poll `theme_json` column as the one appearance authority.
+- Reused the Admin-owned R2 binding for bounded JPG/PNG/WebP uploads with decoded image validation, opaque keys, owner/Admin scope, replacement/removal audit, and no Public upload credential.
+- Extended the canonical CDN worker so only active media attached to public open/closed Polls is publicly readable; draft/private media remains behind the signed relay.
+- Added migration, ownership, mixed-media projection, invalid-media, removal, discovery sanitization, invalid-theme, and CDN visibility coverage. No remote migration, D1/R2 write, deployment, provider request, secret, or DNS change was performed.
+
+## 2026-09-01 - Current-product imagery, Featured curation, and Products status semantics
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Repaired current-product image reconciliation by selecting only customer-safe Sync Product thumbnails, `preview` derivatives, and variant product images; raw artwork/production files are excluded. Legacy Admin commerce-media URLs are canonicalized to `cdn.thirdrailify.com`, and selected provider provenance is stored in existing safe metadata.
+- Added per-product image completeness comparison so an unchanged provider fingerprint cannot hide a missing/stale local image. Explicit valid Admin editorial overrides remain authoritative; a fully synchronized second Preview is a no-op. Native browser image failures now render a compact review/unavailable fallback.
+- Decoupled local Featured curation from Public eligibility. Provider-current Hidden, disabled, and zero-public-variant products can store Featured ON/OFF without Printful requests; archived, provider-missing, wrong-store, ambiguous, and review states fail with explicit reasons. Public still excludes products until all existing storefront and purchasable-variant gates pass.
+- Added centralized semantic presentation for Storefront, Fulfillment mapping, migration, Featured, warning, error, and archived values while retaining readable text and compact responsive rows.
+- Added focused image-selection/completeness/idempotency, current Hidden Featured, Public exclusion, non-current rejection, rapid-toggle, structured-error, fallback-image, semantic-colour, and 1920/1440/tablet/390px browser coverage. The read-only provider verification still reports 17 products, 262 variants, zero missing imagery, and zero products without valid variants.
+- No migration was added or changed. Production rollout requires an Admin deployment followed by a Master-authorized reconciliation Preview and typed-confirmation Apply to repair persisted image metadata; no Public deployment is required by this change. No deployment, remote migration, D1 write, Printful write, purchase, payment, or fulfillment action was performed locally.
+
 ## 2026-09-01 - Wheel Mechanics V2 authority and diagnostics
 
 CURRENT VER=0.1.0-alpha.0

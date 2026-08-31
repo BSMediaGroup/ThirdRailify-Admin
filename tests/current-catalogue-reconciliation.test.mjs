@@ -5,9 +5,11 @@ import {
   buildCurrentCataloguePlan,
   previewCurrentCatalogueReconciliation,
   readCurrentPrintfulSnapshot,
+  selectCustomerSafeProductImages,
 } from "../functions/_shared/current-catalogue-reconciliation.js";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
+import { merchandisingProductsPayload } from "../functions/_shared/commerce-core.js";
 import { publicCataloguePayload } from "../functions/_shared/public-catalogue.js";
 import { authoritativeCartLines } from "../functions/_shared/shipping-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
@@ -44,6 +46,51 @@ test("zero, partial, and identity-mismatched provider reads fail closed", async 
 
   const wrong = providerFixture(1, { storeName: "Wrong store" });
   await assert.rejects(readCurrentPrintfulSnapshot(environment(), wrong.response, { intervalMs: 0 }), (error) => error.code === "printful_store_identity_invalid");
+});
+
+test("customer-safe image selection canonicalizes current thumbnails, prefers previews, and rejects artwork files", async () => {
+  const provider = providerFixture(1);
+  const snapshot = await readCurrentPrintfulSnapshot(environment(), provider.response, { intervalMs: 0 });
+  assert.equal(snapshot.products[0].images[0], `https://cdn.thirdrailify.com/commerce-media/${"1".repeat(64)}.png`);
+  assert.equal(snapshot.products[0].imageSelection.primarySource, "sync_product_thumbnail");
+
+  provider.products[0].sync_product.thumbnail_url = null;
+  const variantFallback = await readCurrentPrintfulSnapshot(environment(), provider.response, { intervalMs: 0 });
+  assert.equal(variantFallback.products[0].images[0], "https://files.cdn.printful.com/files/preview-1.png");
+  assert.equal(variantFallback.products[0].imageSelection.primarySource, "sync_variant_preview");
+  assert.equal(variantFallback.products[0].images.includes("https://files.cdn.printful.com/files/source-1.png"), false);
+
+  const preview = "https://files.cdn.printful.com/files/safe/customer-preview.png";
+  const rawArtwork = "https://files.cdn.printful.com/files/private/source-artwork.png";
+  const selection = selectCustomerSafeProductImages({}, [{
+    customerPreviewUrls: [preview],
+    catalogueImageUrl: "https://files.cdn.printful.com/products/catalogue-variant.png",
+    files: [{ type: "front", url: rawArtwork }],
+  }]);
+  assert.equal(selection.images[0], preview);
+  assert.equal(selection.primarySource, "sync_variant_preview");
+  assert.equal(selection.images.includes(rawArtwork), false);
+});
+
+test("local image completeness repairs null and stale Wix images while preserving explicit editorial overrides", () => {
+  const snapshot = normalizedSnapshot(1);
+  snapshot.products[0].images = ["https://files.cdn.printful.com/files/current-provider.png"];
+  snapshot.products[0].imageSelection = { primarySource: "sync_product_thumbnail", sources: ["sync_product_thumbnail"] };
+  const base = localFromSnapshot(snapshot.products[0], snapshot);
+  const missing = buildCurrentCataloguePlan(snapshot, { products: [{ ...base, id: "missing", slug: "missing", metadata: {} }] }).items[0];
+  assert.equal(missing.action, "update");
+  assert.equal(missing.detail.imageChange, true);
+  assert.equal(missing.desired.metadata.publicImage, snapshot.products[0].images[0]);
+
+  const wix = buildCurrentCataloguePlan(snapshot, { products: [{ ...base, id: "wix", slug: "wix", metadata: { publicImage: "https://static.wixstatic.com/media/stale.png" } }] }).items[0];
+  assert.equal(wix.action, "update");
+  assert.equal(wix.desired.metadata.publicImage, snapshot.products[0].images[0]);
+
+  const editorialUrl = "https://cdn.thirdrailify.com/commerce-media/" + "e".repeat(64) + ".png";
+  const editorial = buildCurrentCataloguePlan(snapshot, { products: [{ ...base, id: "editorial", slug: "editorial", metadata: { publicImage: editorialUrl, publicImages: [], imageAuthority: { kind: "editorial_override", source: "admin_product_editor" } } }] }).items[0];
+  assert.equal(editorial.action, "keep");
+  assert.equal(editorial.desired.metadata.publicImage, editorialUrl);
+  assert.equal(editorial.desired.metadata.imageAuthority.kind, "editorial_override");
 });
 
 test("matching is deterministic, never title-only, and preserves historical rows for archival", () => {
@@ -128,6 +175,9 @@ test("preview/apply archives stale rows, imports current rows, records audit, an
   assert.equal(publicCatalogue.authority.reconciled, true);
   assert.equal(publicCatalogue.authority.currentProducts, 2);
   assert.deepEqual(publicCatalogue.products.map((product) => product.id), ["local-current"]);
+  const adminProduct = (await merchandisingProductsPayload(env, session)).products.find((product) => product.id === "local-current");
+  assert.equal(adminProduct.displayData.imageProvenance, "current_provider");
+  assert.match(adminProduct.primaryImageUrl, /^https:\/\/cdn\.thirdrailify\.com\/commerce-media\//);
   await assert.rejects(authoritativeCartLines(harness.commerceDb, [{ productId: "local-stale", variantId: null, quantity: 1 }]), (error) => error.code === "checkout_product_provider_inactive");
 
   const second = await previewCurrentCatalogueReconciliation(env, session, provider.response, { intervalMs: 0 });
@@ -193,8 +243,8 @@ function providerFixture(count, options = {}) {
 }
 
 function rawProduct(id) { return {
-  sync_product: { id, external_id: `external-${id}`, name: `Provider product ${id}`, thumbnail_url: `https://cdn.example.com/product-${id}.jpg`, is_ignored: false, status: "synced" },
-  sync_variants: [{ id: id * 100, external_id: `variant-external-${id}`, sync_product_id: id, product_id: id + 1000, variant_id: id + 2000, name: "M / Black", sku: `SKU-${id}`, size: "M", color: "Black", options: [{ id: "Size", value: "M" }], synced: true, is_ignored: false, availability_status: "active", retail_price: "25.00", currency: "CAD", product: { image: `https://cdn.example.com/variant-${id}.jpg` } }],
+  sync_product: { id, external_id: `external-${id}`, name: `Provider product ${id}`, thumbnail_url: `https://thirdrailify-admin.pages.dev/commerce-media/${String(id % 10).repeat(64)}.png`, is_ignored: false, status: "synced" },
+  sync_variants: [{ id: id * 100, external_id: `variant-external-${id}`, sync_product_id: id, product_id: id + 1000, variant_id: id + 2000, name: "M / Black", sku: `SKU-${id}`, size: "M", color: "Black", options: [{ id: "Size", value: "M" }], synced: true, is_ignored: false, availability_status: "active", retail_price: "25.00", currency: "CAD", product: { image: `https://files.cdn.printful.com/products/variant-${id}.jpg` }, files: [{ type: "front", status: "ok", mime_type: "image/png", url: `https://files.cdn.printful.com/files/source-${id}.png` }, { type: "preview", status: "ok", mime_type: "image/png", preview_url: `https://files.cdn.printful.com/files/preview-${id}.png`, thumbnail_url: `https://files.cdn.printful.com/files/preview-${id}-thumb.png` }] }],
 }; }
 
 function normalizedSnapshot(count) { return {
@@ -204,4 +254,5 @@ function normalizedSnapshot(count) { return {
 }; }
 
 function localProduct(overrides = {}) { return { id: "local", slug: "local", title: "Local", status: "active", visibility: "public", isFeatured: false, unitAmount: 2500, externalProductId: null, targetPrintfulProductId: null, targetPrintfulExternalId: null, providerStoreId: null, providerPresence: "legacy", providerReconciliationStatus: "legacy", providerSnapshotHash: null, archivedAt: null, metadata: {}, variants: [], collectionCount: 0, orderReferences: 0, communityReferences: 0, ...overrides }; }
+function localFromSnapshot(provider, snapshot) { return localProduct({ title: provider.name, targetPrintfulProductId: provider.id, targetPrintfulExternalId: provider.externalId, providerStoreId: snapshot.store.id, providerPresence: "current", providerReconciliationStatus: "current", providerSnapshotHash: snapshot.fingerprint, variants: provider.variants.map((variant) => ({ id: `local-${variant.id}`, localVariantKey: `printful-${variant.id}`, status: "active", visibility: "public", isSellable: false, unitAmount: variant.unitAmount, targetPrintfulExternalId: variant.externalId, targetPrintfulSyncVariantId: variant.id, providerStoreId: snapshot.store.id, providerPresence: "current", providerSnapshotHash: snapshot.fingerprint, metadata: {} })) }); }
 function json(body, status = 200) { return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }); }

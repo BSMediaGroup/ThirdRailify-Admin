@@ -11,6 +11,10 @@ const DETAIL_CONCURRENCY = 4;
 const REQUEST_TIMEOUT_MS = 20_000;
 const CONTRACT = "printful-v1-sync-products";
 const CURRENT = "current";
+const MAX_PRODUCT_IMAGES = 25;
+const CANONICAL_MEDIA_ORIGIN = "https://cdn.thirdrailify.com";
+const LEGACY_MEDIA_HOSTS = new Set(["thirdrailify-admin.pages.dev", "admin.thirdrailify.com"]);
+const PRINTFUL_IMAGE_HOSTS = new Set(["files.cdn.printful.com", "images-api.printful.com", "mockup-api.printful.com"]);
 
 export async function currentCatalogueReconciliationStatus(env, session) {
   const db = requireCommerceDb(env);
@@ -178,7 +182,7 @@ export function buildCurrentCataloguePlan(snapshot, local) {
     if (match) {
       matchedProviderIds.add(match.id);
       const desired = desiredExistingProduct(product, match, snapshot);
-      const incomplete = match.reviewReasons.length > 0 || productIncomplete(product, match);
+      const incomplete = match.reviewReasons.length > 0 || productIncomplete(product, match, desired);
       const changed = productNeedsUpdate(product, desired, match, snapshot.fingerprint);
       items.push({ kind: "local", classification: incomplete ? "current_incomplete_local_data" : "current_exact_match", action: changed ? "update" : "keep", localProductId: product.id, providerProductId: match.id, history, desired, provider: match, detail: itemDetail(product, match, incomplete) });
       continue;
@@ -305,11 +309,12 @@ function desiredExistingProduct(local, provider, snapshot) {
   const variants = desiredVariants(local, provider, snapshot);
   const eligible = provider.variants.filter(providerVariantEligible);
   const reconciliationStatus = provider.reviewReasons.length ? "needs_review" : "current";
-  const metadata = { ...local.metadata, publicImage: provider.images[0] || null, publicImages: provider.images.slice(1), providerCatalogue: providerMetadata(snapshot.store, provider) };
+  const imageState = desiredProductImages(local, provider, snapshot);
+  const metadata = { ...local.metadata, publicImage: imageState.images[0] || null, publicImages: imageState.images.slice(1), imageAuthority: imageState.authority, providerCatalogue: providerMetadata(snapshot.store, provider, snapshot.fingerprint) };
   return {
     id: local.id, slug: local.slug, title: local.title, externalProductId: local.externalProductId,
     providerProductId: provider.id, providerExternalId: provider.externalId, unitAmount: eligible.length ? Math.min(...eligible.map((variant) => variant.unitAmount)) : local.unitAmount,
-    reconciliationStatus, metadata, variants, imagesChanged: !sameStrings([local.metadata.publicImage, ...array(local.metadata.publicImages)].filter(Boolean), provider.images),
+    reconciliationStatus, metadata, variants, imagesChanged: !sameStrings(localProductImages(local), imageState.images),
     variantChanges: variantChanges(local.variants, variants), provenance: { contract: CONTRACT, storeId: snapshot.store.id, syncProductId: provider.id, reconciledFrom: "current_store_read_only" },
   };
 }
@@ -323,7 +328,7 @@ function desiredNewProduct(provider, snapshot, usedSlugs) {
     id, slug, title: provider.name, externalProductId: provider.externalId, providerProductId: provider.id, providerExternalId: provider.externalId,
     unitAmount: eligible.length ? Math.min(...eligible.map((variant) => variant.unitAmount)) : 1,
     reconciliationStatus: provider.reviewReasons.length ? "needs_review" : "current",
-    metadata: { description: "", publicImage: provider.images[0] || null, publicImages: provider.images.slice(1), categories: [], tags: [], displayOrder: 1000, providerCatalogue: providerMetadata(snapshot.store, provider) },
+    metadata: { description: "", publicImage: provider.images[0] || null, publicImages: provider.images.slice(1), categories: [], tags: [], displayOrder: 1000, imageAuthority: providerImageAuthority(provider, snapshot), providerCatalogue: providerMetadata(snapshot.store, provider, snapshot.fingerprint) },
     variants, imagesChanged: provider.images.length > 0, variantChanges: { inserted: variants.length, updated: 0, archived: 0 },
     provenance: { contract: CONTRACT, storeId: snapshot.store.id, syncProductId: provider.id, reconciledFrom: "current_store_read_only" },
   };
@@ -344,7 +349,7 @@ function desiredVariants(local, provider, snapshot) {
       unitAmount: variant.unitAmount || existing?.unitAmount || 1, sku: variant.sku, size: variant.size, color: variant.color, options: variant.options,
       catalogueProductId: variant.catalogueProductId, catalogueVariantId: variant.catalogueVariantId,
       mappingStatus: eligible && variant.catalogueVariantId ? "mapped" : "manual_review",
-      metadata: { ...(existing?.metadata || {}), displayLabel: existing?.metadata?.displayLabel || variant.name || [variant.size, variant.color].filter(Boolean).join(" / ") || "Standard", providerImage: variant.catalogueImageUrl || null },
+      metadata: { ...(existing?.metadata || {}), displayLabel: existing?.metadata?.displayLabel || variant.name || [variant.size, variant.color].filter(Boolean).join(" / ") || "Standard", providerImage: variant.customerPreviewUrls?.[0] || variant.catalogueImageUrl || null },
       provenance: { contract: CONTRACT, storeId: snapshot.store.id, syncProductId: provider.id, syncVariantId: variant.id, snapshotHash: snapshot.fingerprint },
     };
   });
@@ -383,14 +388,15 @@ function normalizeProduct(result, summary) {
   const id = providerId(rawProduct.id ?? summary.id, "printful_product_id_invalid");
   if (id !== summary.id) throw new AuthFailure(502, "printful_product_identity_mismatch", "Printful returned mismatched Sync Product detail.");
   const variants = requiredArray(result.sync_variants, "printful_variants_invalid").map((variant) => normalizeVariant(variant, id)).sort(compareProvider);
-  const images = uniqueStrings([safeHttps(rawProduct.thumbnail_url ?? rawProduct.thumbnail), ...variants.map((variant) => variant.catalogueImageUrl)].filter(Boolean));
+  const imageSelection = selectCustomerSafeProductImages(rawProduct, variants);
+  const images = imageSelection.images;
   const reviewReasons = [];
   if (rawProduct.is_ignored === true) reviewReasons.push("product_ignored");
   if (!images.length) reviewReasons.push("missing_customer_safe_image");
   if (!variants.some(providerVariantEligible)) reviewReasons.push("no_valid_current_variants");
   if (variants.some((variant) => variant.currency !== "CAD" || !variant.unitAmount)) reviewReasons.push("price_or_currency_review");
   return { id, externalId: optionalText(rawProduct.external_id, 240), name: requiredText(rawProduct.name ?? summary.name, 300, "printful_product_name_invalid"),
-    isIgnored: rawProduct.is_ignored === true, status: optionalText(rawProduct.status, 80), images, variants, reviewReasons: uniqueStrings(reviewReasons) };
+    isIgnored: rawProduct.is_ignored === true, status: optionalText(rawProduct.status, 80), images, imageSelection, variants, reviewReasons: uniqueStrings(reviewReasons) };
 }
 
 function normalizeVariant(raw, productId) {
@@ -403,7 +409,7 @@ function normalizeVariant(raw, productId) {
     catalogueProductId: optionalProviderId(raw.product_id ?? raw.product?.product_id ?? raw.product?.id), catalogueVariantId: optionalProviderId(raw.variant_id),
     name: optionalText(raw.name, 300), sku: optionalText(raw.sku, 240), size: optionalText(raw.size, 120), color: optionalText(raw.color, 120),
     options: optionObject(raw.options), synced: raw.synced === true, isIgnored: raw.is_ignored === true, availabilityStatus: optionalText(raw.availability_status, 80),
-    unitAmount, currency, catalogueImageUrl: safeHttps(raw.product?.image) };
+    unitAmount, currency, catalogueImageUrl: customerSafeImageUrl(raw.product?.image), customerPreviewUrls: previewFileImages(raw.files) };
 }
 
 function normalizeSummary(raw) { return { id: providerId(raw?.id, "printful_product_id_invalid"), externalId: optionalText(raw?.external_id, 240), name: requiredText(raw?.name, 300, "printful_product_name_invalid") }; }
@@ -456,12 +462,58 @@ function deterministicProductMatch(local, storeId, byId, byExternal) {
   if (local.targetPrintfulProductId) return byId.get(local.targetPrintfulProductId) || null;
   return local.targetPrintfulExternalId ? byExternal.get(local.targetPrintfulExternalId) || null : null;
 }
-function productIncomplete(local, provider) { const ids = new Set(local.variants.map((variant) => variant.targetPrintfulSyncVariantId).filter(Boolean)); return provider.variants.some((variant) => !ids.has(variant.id)) || [...ids].some((id) => !provider.variants.some((variant) => variant.id === id)) || !sameStrings([local.metadata.publicImage, ...array(local.metadata.publicImages)].filter(Boolean), provider.images); }
-function productNeedsUpdate(local, desired, provider, fingerprint) { return local.providerStoreId !== desired.provenance.storeId || local.providerPresence !== CURRENT || local.providerSnapshotHash !== fingerprint || local.targetPrintfulProductId !== provider.id || local.targetPrintfulExternalId !== provider.externalId || productIncomplete(local, provider) || local.providerReconciliationStatus !== desired.reconciliationStatus; }
-function itemDetail(local, provider, incomplete) { return { title: local.title, providerTitle: provider.name, localVariants: local.variants.length, providerVariants: provider.variants.length, imageChange: !sameStrings([local.metadata.publicImage, ...array(local.metadata.publicImages)].filter(Boolean), provider.images), incomplete, reviewReasons: provider.reviewReasons, orderReferences: local.orderReferences, communityReferences: local.communityReferences }; }
-function desiredDigest(value) { return { id: value.id, p: value.providerProductId, e: value.providerExternalId, s: value.reconciliationStatus, u: value.unitAmount, i: [value.metadata.publicImage, ...array(value.metadata.publicImages)], v: value.variants.map((variant) => [variant.id, variant.providerVariantId, variant.externalId, variant.catalogueVariantId, variant.unitAmount, variant.status, variant.visibility, variant.sellable]) }; }
+function desiredProductImages(local, provider, snapshot) {
+  if (hasValidEditorialImageOverride(local)) return { images: localProductImages(local), authority: local.metadata.imageAuthority };
+  return { images: provider.images, authority: providerImageAuthority(provider, snapshot) };
+}
+function providerImageAuthority(provider, snapshot) { return provider.images.length ? { kind: "current_provider", source: provider.imageSelection?.primarySource || "printful_customer_safe_image", storeId: snapshot.store.id, syncProductId: provider.id, snapshotHash: snapshot.fingerprint } : { kind: "missing", source: "printful_current_snapshot", storeId: snapshot.store.id, syncProductId: provider.id, snapshotHash: snapshot.fingerprint }; }
+function hasValidEditorialImageOverride(local) { return local?.metadata?.imageAuthority?.kind === "editorial_override" && Boolean(safeHttps(local?.metadata?.publicImage)); }
+function localProductImages(local) { return uniqueStrings([safeHttps(local?.metadata?.publicImage), ...array(local?.metadata?.publicImages).map(safeHttps)].filter(Boolean)).slice(0, MAX_PRODUCT_IMAGES); }
+function desiredProductImageList(desired) { return uniqueStrings([desired?.metadata?.publicImage, ...array(desired?.metadata?.publicImages)].filter(Boolean)).slice(0, MAX_PRODUCT_IMAGES); }
+
+export function selectCustomerSafeProductImages(rawProduct, variants) {
+  const candidates = [];
+  addImageCandidate(candidates, rawProduct?.thumbnail_url, "sync_product_thumbnail");
+  for (const variant of variants) for (const url of array(variant.customerPreviewUrls)) addImageCandidate(candidates, url, "sync_variant_preview");
+  for (const variant of variants) addImageCandidate(candidates, variant.catalogueImageUrl, "sync_variant_product_image");
+  const unique = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.url)) continue;
+    seen.add(candidate.url); unique.push(candidate);
+    if (unique.length === MAX_PRODUCT_IMAGES) break;
+  }
+  return { images: unique.map((candidate) => candidate.url), primarySource: unique[0]?.source || null, sources: unique.map((candidate) => candidate.source) };
+}
+function addImageCandidate(candidates, value, source) { const url = customerSafeImageUrl(value); if (url) candidates.push({ url, source }); }
+function previewFileImages(files) {
+  const images = [];
+  for (const file of array(files)) {
+    if (String(file?.type || "").toLowerCase() !== "preview" || file?.visible === false) continue;
+    const status = String(file?.status || "ok").toLowerCase();
+    const mime = String(file?.mime_type || "").toLowerCase();
+    if (status !== "ok" || (mime && !mime.startsWith("image/"))) continue;
+    for (const value of [file?.preview_url, file?.thumbnail_url]) { const url = customerSafeImageUrl(value); if (url) images.push(url); }
+  }
+  return uniqueStrings(images);
+}
+function customerSafeImageUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "https:" || url.username || url.password || url.hash || (url.port && url.port !== "443")) return null;
+    const host = url.hostname.toLowerCase();
+    if (LEGACY_MEDIA_HOSTS.has(host) && /^\/commerce-media\/[a-f0-9]{64}\.(?:jpg|png|webp)$/i.test(url.pathname)) return `${CANONICAL_MEDIA_ORIGIN}${url.pathname}`;
+    if (host === "cdn.thirdrailify.com" && /^\/commerce-media\/[a-f0-9]{64}\.(?:jpg|png|webp)$/i.test(url.pathname)) return url.href;
+    if (PRINTFUL_IMAGE_HOSTS.has(host) && /\.(?:avif|gif|jpe?g|png|webp)(?:$|[/?])/i.test(url.pathname + url.search)) return url.href;
+    return null;
+  } catch { return null; }
+}
+function productIncomplete(local, provider, desired) { const ids = new Set(local.variants.map((variant) => variant.targetPrintfulSyncVariantId).filter(Boolean)); return provider.variants.some((variant) => !ids.has(variant.id)) || [...ids].some((id) => !provider.variants.some((variant) => variant.id === id)) || !sameStrings(localProductImages(local), desiredProductImageList(desired)); }
+function productNeedsUpdate(local, desired, provider, fingerprint) { return local.providerStoreId !== desired.provenance.storeId || local.providerPresence !== CURRENT || local.providerSnapshotHash !== fingerprint || local.targetPrintfulProductId !== provider.id || local.targetPrintfulExternalId !== provider.externalId || productIncomplete(local, provider, desired) || local.providerReconciliationStatus !== desired.reconciliationStatus; }
+function itemDetail(local, provider, incomplete) { const providerImages = provider.images || []; return { title: local.title, providerTitle: provider.name, localVariants: local.variants.length, providerVariants: provider.variants.length, imageChange: !sameStrings(localProductImages(local), providerImages) && !hasValidEditorialImageOverride(local), imageSource: provider.imageSelection?.primarySource || null, incomplete, reviewReasons: provider.reviewReasons, orderReferences: local.orderReferences, communityReferences: local.communityReferences }; }
+function desiredDigest(value) { return { id: value.id, p: value.providerProductId, e: value.providerExternalId, s: value.reconciliationStatus, u: value.unitAmount, i: desiredProductImageList(value), ia: value.metadata.imageAuthority || null, v: value.variants.map((variant) => [variant.id, variant.providerVariantId, variant.externalId, variant.catalogueVariantId, variant.unitAmount, variant.status, variant.visibility, variant.sellable]) }; }
 function variantChanges(local, desired) { const localCurrent = new Map(local.map((variant) => [variant.targetPrintfulSyncVariantId, variant]).filter(([id]) => id)); const desiredIds = new Set(desired.map((variant) => variant.providerVariantId)); return { inserted: desired.filter((variant) => !variant.existingId).length, updated: desired.filter((variant) => variant.existingId && localCurrent.get(variant.providerVariantId)?.providerSnapshotHash !== variant.provenance.snapshotHash).length, archived: [...localCurrent.keys()].filter((id) => !desiredIds.has(id)).length }; }
-function providerMetadata(store, provider) { return { contract: CONTRACT, storeId: store.id, syncProductId: provider.id, externalProductId: provider.externalId, providerName: provider.name, status: provider.status, ignored: provider.isIgnored, reviewReasons: provider.reviewReasons, imageProvenance: "printful_sync_product_and_catalogue_mockups" }; }
+function providerMetadata(store, provider, fingerprint) { return { contract: CONTRACT, storeId: store.id, syncProductId: provider.id, externalProductId: provider.externalId, providerName: provider.name, status: provider.status, ignored: provider.isIgnored, reviewReasons: provider.reviewReasons, imageProvenance: "current_printful_customer_safe", imageSource: provider.imageSelection?.primarySource || null, imageUrls: provider.images, imageSnapshotHash: fingerprint }; }
 function providerVariantEligible(variant) { return variant.synced === true && variant.isIgnored !== true && normalizeAvailability(variant.availabilityStatus) === "active" && Number.isSafeInteger(variant.unitAmount) && variant.unitAmount > 0 && variant.currency === "CAD" && Boolean(variant.catalogueVariantId); }
 function normalizeAvailability(value) { const text = String(value || "active").toLowerCase(); if (text === "temporary_out_of_stock" || text === "temporarily_out_of_stock" || text === "out_of_stock") return "temporarily_out_of_stock"; if (text === "discontinued") return "discontinued"; return "active"; }
 

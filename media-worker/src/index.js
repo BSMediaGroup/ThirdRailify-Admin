@@ -3,6 +3,7 @@ const PRODUCT = /^\/commerce-media\/([a-f0-9]{64}\.(?:jpg|png|webp))$/;
 const AVATAR = /^\/(u\/[a-f0-9]{20}\/avatar\/[a-f0-9]{64}\.(?:jpg|png|webp))$/;
 const GOAT = /^\/goats-media\/([a-f0-9-]{36})$/;
 const WHEEL = /^\/wheel-media\/([a-f0-9-]{16,80})$/;
+const POLL = /^\/poll-media\/([a-f0-9-]{16,80})$/;
 
 export default {
   async fetch(request, env) {
@@ -17,6 +18,7 @@ export default {
     const avatar = url.pathname.match(AVATAR);
     const goat = url.pathname.match(GOAT);
     const wheel = url.pathname.match(WHEEL);
+    const poll = url.pathname.match(POLL);
     if (product) key = `commerce/catalogue/${product[1]}`;
     else if (avatar) key = avatar[1];
     else if (goat) {
@@ -28,6 +30,11 @@ export default {
       metadata = await env.COMMERCE_DB.prepare(`SELECT a.object_key, a.content_type, a.byte_size, a.sha256
         FROM wheel_media_assets a JOIN wheels w ON w.id = a.wheel_id
         WHERE a.id = ? AND a.lifecycle = 'active' AND w.lifecycle = 'active' AND w.visibility = 'public' LIMIT 1`).bind(wheel[1]).first();
+      key = metadata?.object_key;
+    } else if (poll) {
+      metadata = await env.COMMERCE_DB.prepare(`SELECT a.object_key,a.content_type,a.byte_size,a.sha256
+        FROM poll_media_assets a JOIN polls p ON p.id=a.poll_id
+        WHERE a.id=? AND a.lifecycle='active' AND p.is_public=1 AND p.state IN ('open','closed') LIMIT 1`).bind(poll[1]).first();
       key = metadata?.object_key;
     }
     if (!key) return plain(404, "Not Found");

@@ -3,6 +3,7 @@ import { normalizeOrigin } from "./auth-core.js";
 const PUBLIC_MEDIA_PATHS = [
   /^\/commerce-media\/[a-f0-9]{64}\.(?:jpg|png|webp)$/,
   /^\/u\/[a-f0-9]{20}\/avatar\/[a-f0-9]{64}\.(?:jpg|png|webp)$/,
+  /^\/poll-media\/[a-f0-9-]{16,80}$/,
 ];
 
 export function publicMediaOrigin(env) {

@@ -1535,6 +1535,20 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .commerce-product-row small,.commerce-product-row span { color: var(--quiet); font-size: .65rem; }
 .commerce-product-row__image { width: 66px; height: 66px; display: grid; place-items: center; overflow: hidden; border-radius: 7px; background: #151510; color: var(--gold); }
 .commerce-product-row__image img { width: 100%; height: 100%; object-fit: cover; }
+.commerce-product-row__image.is-fallback { border: 1px solid rgba(255,255,255,.08); background: linear-gradient(145deg,#181814,#0d0d0b); color: var(--quiet); }
+.commerce-product-row__image-fallback { display: grid; place-items: center; gap: 3px; overflow: visible !important; color: inherit !important; }
+.commerce-product-row__image-fallback small { overflow: visible; color: inherit; font: 500 .48rem "Geist Mono",monospace; letter-spacing: .01em; text-align: center; }
+.commerce-operational-status { width: fit-content; max-width: 100%; font-weight: 750; }
+.commerce-operational-status.is-healthy { color: #8cddb0; }
+.commerce-operational-status.is-warning { color: #e9b96a; }
+.commerce-operational-status.is-error { color: #f59a86; }
+.commerce-operational-status.is-muted { color: #8e8e86; }
+.commerce-status-secondary { width: fit-content; max-width: 100%; }
+.commerce-status-secondary.is-featured { color: var(--gold); }
+.commerce-status-secondary.is-healthy { color: #79c99d; }
+.commerce-status-secondary.is-warning { color: #d8a85d; }
+.commerce-status-secondary.is-error { color: #ee8c77; }
+.commerce-status-secondary.is-muted { color: var(--quiet); }
 .commerce-section-heading-actions,.commerce-results-bar,.featured-products-manager__heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .commerce-section-heading-actions .secondary-button,.commerce-section-heading-actions .button-link { margin: 0; flex: 0 0 auto; }
 .commerce-results-bar { margin: 12px 0; }

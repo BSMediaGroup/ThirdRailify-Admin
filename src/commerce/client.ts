@@ -154,7 +154,7 @@ export type MerchandisingProduct = {
   integration: Record<string, string | null>; variantCount: number; activeVariantCount: number; sellableVariantCount: number;
   provider: { storeId: string | null; presence: string; reconciliationStatus: string; lastSeenAt: string | null; reconciledAt: string | null; snapshotFingerprint: string | null; archivedAt: string | null; archivedReason: string | null };
   readiness: { displayable: boolean; checkout: boolean; fulfillment: string }; variants: MerchandisingVariant[];
-  displayData: { hasImage: boolean; hasPrice: boolean; ready: boolean }; updatedAt: string;
+  displayData: { hasImage: boolean; hasPrice: boolean; ready: boolean; imageProvenance: "editorial_override" | "current_provider" | "legacy" | "missing"; imageReview: boolean }; updatedAt: string;
 };
 export type MerchandisingPayload = {
   ok: boolean; databaseConfigured: boolean; access: CommerceAccess | null; products: MerchandisingProduct[];

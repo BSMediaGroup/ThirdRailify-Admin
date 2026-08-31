@@ -6,6 +6,7 @@ import {
   botActivePoll,
   changePollLifecycle,
   createPoll,
+  getCreatorRumbleDiscovery,
   getPollCreatorAccess,
   ingestRumbleVotes,
   listPublicPolls,
@@ -216,19 +217,41 @@ test("creator grants, ownership, option locks, signed voting, and desired/applie
     botVersion: "1.1.0",
     desiredRevision: 2,
     appliedRevision: 2,
-    runtime: { discordConnected: true, counters: { accepted: 4 }, secret: "must-not-project" },
+    runtime: { discordConnected: true, counters: { accepted: 4 }, secret: "must-not-project", rumbleDiscovery: {
+      provider: "rumble", source: { scope: "user:1sl8zm", type: "user", id: "1sl8zm", displayName: "ThirdRailify" },
+      providerResponseAt: "2026-08-31T21:48:24Z", observedAt: new Date().toISOString(),
+      livestreams: [{ id: "safe-live", title: "Third Railify Live", isLive: true, watchingNow: 22, stream_key: "never", server_url: "never" }],
+      stream_key: "never-project",
+    } },
   });
   const status = await automationsStatus(env);
   assert.equal(status.runtime.state, "online");
   assert.equal(status.runtime.appliedRevision, 2);
   assert.equal(status.runtime.secret, undefined);
   assert.equal(JSON.stringify(status).includes("must-not-project"), false);
+  const discovery = await getCreatorRumbleDiscovery(env, "owner");
+  assert.equal(discovery.source.scope, "user:1sl8zm");
+  assert.equal(discovery.livestreams[0].title, "Third Railify Live");
+  assert.equal(JSON.stringify(discovery).includes("stream_key"), false);
+  assert.equal(JSON.stringify(discovery).includes("server_url"), false);
+  await assert.rejects(getCreatorRumbleDiscovery(env, "unapproved"), (error) => error.code === "poll_creator_not_approved");
+  await harness.commerceDb.prepare("UPDATE bot_runtime_heartbeat SET heartbeat_at=? WHERE singleton_id=1")
+    .bind(new Date(Date.now() - 90_000).toISOString()).run();
+  const staleDiscovery = await getCreatorRumbleDiscovery(env, "owner");
+  assert.equal(staleDiscovery.botState, "stale");
+  assert.equal(staleDiscovery.source.scope, "user:1sl8zm");
+  await harness.commerceDb.prepare("UPDATE bot_runtime_heartbeat SET heartbeat_at=? WHERE singleton_id=1")
+    .bind(new Date(Date.now() - 240_000).toISOString()).run();
+  const offlineDiscovery = await getCreatorRumbleDiscovery(env, "owner");
+  assert.equal(offlineDiscovery.botState, "offline");
+  assert.equal(offlineDiscovery.message, "Rumble source discovery temporarily unavailable.");
   const slashSync = await synchronizeBotDesiredConfig(env, { revision: 2, desiredState: { discord: {}, rumble: { enabled: false, intervalSeconds: 90, pollIntervalSeconds: 15 } } });
   assert.equal(slashSync.revision, 3);
   assert.equal(slashSync.desiredState.rumble.intervalSeconds, 90);
   await assert.rejects(synchronizeBotDesiredConfig(env, { revision: 2, desiredState: {} }), (error) => error.code === "config_revision_conflict");
 
   await assert.rejects(createPoll(env, "owner", { ...pollInput("Collision"), options: [{ label: "One", trigger: "Ａ" }, { label: "Two", trigger: "a" }] }), (error) => error.code === "poll_trigger_collision");
+  await assert.rejects(createPoll(env, "owner", { ...pollInput("Bad tint"), theme: { accent: "timestamp-1788174504" } }), (error) => error.code === "poll_theme_invalid");
 });
 
 test("JavaScript Poll normalization follows the canonical cross-language fixture", async () => {

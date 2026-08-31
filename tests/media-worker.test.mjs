@@ -48,14 +48,17 @@ test("CDN returns a bodyless conditional response without an invalid content len
   assert.equal((await worker.fetch(new Request(`https://cdn.thirdrailify.com/commerce-media/${"a".repeat(64)}.png`, { headers: { "If-None-Match": "asset" } }), env)).status, 304);
 });
 
-test("CDN gates GOATS and Wheels through public D1 state", async () => {
+test("CDN gates GOATS, Wheels, and Polls through public D1 state", async () => {
   const goat = `/goats-media/11111111-1111-1111-1111-111111111111`;
   const wheel = `/wheel-media/11111111-1111-1111-1111-111111111111`;
+  const poll = `/poll-media/11111111-1111-1111-1111-111111111111`;
   assert.equal((await worker.fetch(new Request(`https://cdn.thirdrailify.com${goat}`), environment())).status, 404);
   assert.equal((await worker.fetch(new Request(`https://cdn.thirdrailify.com${wheel}`), environment())).status, 404);
+  assert.equal((await worker.fetch(new Request(`https://cdn.thirdrailify.com${poll}`), environment())).status, 404);
   const row = { object_key: "goats/private/key", content_type: "image/png", byte_size: 4, sha256: hash };
   assert.equal((await worker.fetch(new Request(`https://cdn.thirdrailify.com${goat}`), environment({ row }))).status, 200);
   assert.equal((await worker.fetch(new Request(`https://cdn.thirdrailify.com${wheel}`), environment({ row }))).status, 200);
+  assert.equal((await worker.fetch(new Request(`https://cdn.thirdrailify.com${poll}`), environment({ row }))).status, 200);
 });
 
 test("CDN preflight is allowlisted and mutation methods fail closed", async () => {
