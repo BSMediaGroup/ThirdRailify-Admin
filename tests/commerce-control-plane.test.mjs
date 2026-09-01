@@ -57,13 +57,48 @@ test("permanent business profile keeps safe defaults and encrypts private legal 
   await assert.rejects(updateBusinessProfile(env, master, { revision: 1, tradingName: "Stale" }), /changed in another session/i);
 });
 
+test("operator-owned business address and phone text save independently from transaction-disclosure readiness", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness);
+  const address = { line1: "  Happy Birthday  ", line2: "<script>globalThis.businessProfileExecuted=true</script>", city: "", province: "region words", postalCode: "  unconventional postal text ✨  ", country: "" };
+  const saved = await updateBusinessProfile(env, master, {
+    revision: 1, tradingName: "Third Railify Official", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD",
+    publicContactEmail: "info@thirdrailify.com", supportEmail: "", businessPhone: null, websiteUrl: "", businessAddress: address,
+  });
+  assert.deepEqual(saved.profile.businessAddress, { ...address, line1: "Happy Birthday", postalCode: "unconventional postal text ✨" });
+  assert.deepEqual(saved.profile.publicAddress, saved.profile.businessAddress, "legacy Admin alias remains compatible");
+  assert.equal(saved.profile.businessPhone, ""); assert.equal(saved.profile.publicPhone, "");
+  const row = await harness.commerceDb.prepare("SELECT public_address_json,public_phone,revision FROM commerce_business_profiles WHERE id='primary'").first();
+  assert.deepEqual(JSON.parse(row.public_address_json), saved.profile.businessAddress); assert.equal(row.public_phone, null); assert.equal(row.revision, 2);
+  const readiness = await businessInformationPayload(env, master);
+  assert.equal(readiness.canonicalReadiness.domains.business.ready, false);
+  assert.equal(readiness.canonicalReadiness.domains.business.details.status, "transaction_disclosure_incomplete");
+  assert.equal(readiness.canonicalReadiness.domains.business.details.semanticAddressVerification, false);
+  assert.equal(readiness.canonicalReadiness.domains.business.details.globalSiteProjection, false);
+  assert.equal(readiness.readiness.profile.address, "partial");
+  await assert.rejects(updateBusinessProfile(env, master, { revision: 2, businessAddress: { line1: "x".repeat(181) } }), /180 characters or fewer/i);
+  await assert.rejects(updateBusinessProfile(env, master, { revision: 2, businessAddress: { line1: "unsafe\u0000control" } }), /invalid control/i);
+});
+
+test("unauthorized business-profile mutation is rejected without changing operator data", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness);
+  const response = await commerceRequest({
+    request: jsonRequest(`${adminOrigin}/api/admin/commerce/business`, { method: "POST", origin: adminOrigin, body: { revision: 1, businessAddress: { line1: "Happy Birthday" } } }),
+    env,
+    data: { commerceFetch: async () => { throw new Error("provider call forbidden"); } },
+  });
+  assert.equal(response.status, 401);
+  assert.equal((await harness.commerceDb.prepare("SELECT revision,public_address_json FROM commerce_business_profiles WHERE id='primary'").first()).revision, 1);
+});
+
 test("tax registrations validate, encrypt, mask, revise, and never invent rates", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness);
   const created = await createTaxRegistration(env, master, { registrationType: "gst_hst", jurisdiction: "CA", countryCode: "CA", provinceCode: "", identifier: "123456789RT0001", status: "unverified", effectiveDate: "", expiresAt: "", notes: "Operator supplied", documentDisclosureEnabled: false });
   assert.equal(created.registrations.length, 1);
   assert.match(created.registrations[0].maskedIdentifier, /0001$/);
-  assert.equal(created.calculation.provider, "unconfigured");
+  assert.equal(created.calculation.provider, "not_collecting");
   assert.equal(created.calculation.ratesConfigured, false);
   assert.doesNotMatch(JSON.stringify(created), /123456789RT0001|identifierCiphertext/);
   const row = await harness.commerceDb.prepare("SELECT * FROM commerce_tax_registrations").first();
@@ -72,7 +107,7 @@ test("tax registrations validate, encrypt, mask, revise, and never invent rates"
   assert.equal(revised.registrations[0].status, "inactive"); assert.equal(revised.registrations[0].revision, 2);
   await assert.rejects(createTaxRegistration(env, master, { registrationType: "made_up", jurisdiction: "CA", countryCode: "CA", identifier: "x", status: "active" }), /GST\/HST/i);
   await assert.rejects(createTaxRegistration(env, master, { registrationType: "other", jurisdiction: "?", countryCode: "C", identifier: "x", status: "active" }), /country code/i);
-  assert.equal((await taxRegistrationsPayload(env, master)).readiness.ready, false);
+  const taxPayload = await taxRegistrationsPayload(env, master); assert.equal(taxPayload.readiness.ready, true); assert.equal(taxPayload.calculation.provider, "not_collecting"); assert.equal(taxPayload.registrationState.configured, true); assert.equal(taxPayload.calculation.ratesConfigured, false);
 });
 
 test("template variables are allowlisted and preview uses the production renderer", async (t) => {
@@ -135,7 +170,7 @@ test("central readiness is derived and keeps test acceptance separate from produ
   const payload = await productionReadinessPayload(env, master);
   assert.equal(payload.productionReady, false); assert.equal(payload.domains.payments.details.stripeHistoricalAcceptancePassed, true); assert.equal(payload.domains.payments.details.stripeEnabled, false); assert.equal(payload.domains.payments.ready, false);
   assert.equal(payload.domains.catalogue.ready, true); assert.equal(payload.domains.shipping.ready, false); assert.equal(payload.domains.fulfillment.details.migrationPaused, true); assert.equal(payload.domains.fulfillment.details.processedProducts, 40);
-  assert.equal(payload.domains.checkout.details.normalCheckoutEnabled, false); assert.equal(payload.domains.tax.details.calculationProvider, "unconfigured");
+  assert.equal(payload.domains.checkout.details.normalCheckoutEnabled, false); assert.equal(payload.domains.checkout.details.transactionDisclosureEnabled, false); assert.equal(payload.domains.tax.details.calculationProvider, "not_collecting"); assert.equal(payload.domains.tax.ready, true);
   assert.doesNotMatch(JSON.stringify(payload), /secret|identifier_ciphertext|tax_registration/);
   assert.equal("production_ready" in payload, false);
 });

@@ -59,6 +59,9 @@ export async function businessInformationPayload(env, session) {
     db.prepare("SELECT template_key,status,enabled,revision FROM commerce_templates WHERE template_key IN ('payment_receipt','invoice_document','order_confirmation','receipt_notification') ORDER BY template_key").all(),
   ]);
   const profile = business.profile;
+  const businessAddress = profile.businessAddress || profile.publicAddress || {};
+  const businessPhone = profile.businessPhone || profile.publicPhone || "";
+  const transactionDisclosure = transactionDisclosureStatus(profile, businessAddress, businessPhone);
   const templates = Object.fromEntries((templateResult?.results || []).map((row) => [row.template_key, row]));
   const registrations = profile.private.registrations;
   const activeTaxRegistrations = registrations.filter((item) => ["active", "verified"].includes(item.status));
@@ -69,11 +72,18 @@ export async function businessInformationPayload(env, session) {
     readinessItem("commerce_currency", "Commerce currency", profile.currencyCode === "CAD", profile.currencyCode || "Not configured"),
   ];
   const contactItems = [
-    readinessItem("public_contact", "Public contact email", Boolean(profile.publicContactEmail), profile.publicContactEmail || "Not configured"),
+    optionalReadinessItem("business_contact", "Business contact email", Boolean(profile.publicContactEmail), profile.publicContactEmail || "Optional profile metadata"),
     readinessItem("support_contact", "Customer support email", Boolean(profile.supportEmail), profile.supportEmail || "Not configured"),
-    readinessItem("public_phone", "Public supplier phone", Boolean(profile.publicPhone), profile.publicPhone || "Required for internet-sale disclosure"),
-    readinessItem("public_address", "Public business address", publicBusinessAddressConfigured(profile.publicAddress), publicBusinessAddressConfigured(profile.publicAddress) ? "Configured for customer disclosure" : "Required for internet-sale disclosure"),
+    optionalReadinessItem("business_phone", "Business phone metadata", Boolean(businessPhone), businessPhone || "Optional while editing the profile"),
+    optionalReadinessItem("business_address", "Business address metadata", Object.values(businessAddress).some(Boolean), Object.values(businessAddress).some(Boolean) ? "Operator data stored; not globally published" : "Optional while editing the profile"),
     optionalReadinessItem("website", "Website", Boolean(profile.websiteUrl), profile.websiteUrl || "Not configured / not required"),
+  ];
+  const disclosureItems = [
+    statusReadinessItem("internet_agreement_threshold", "Ontario internet-agreement threshold", "unverified", "Applies when the consumer's total potential payment obligation exceeds CAD 50"),
+    readinessItem("transaction_supplier_name", "Supplier legal identity", transactionDisclosure.facts.supplierName, transactionDisclosure.facts.supplierName ? "Configured / operator asserted / not externally verified" : "Required transaction-disclosure fact is absent"),
+    readinessItem("transaction_supplier_phone", "Supplier telephone", transactionDisclosure.facts.supplierPhone, transactionDisclosure.facts.supplierPhone ? "Configured / operator asserted / not externally verified" : "Required transaction-disclosure fact is absent"),
+    readinessItem("transaction_business_address", "Business-premises address", transactionDisclosure.facts.businessPremisesAddress, transactionDisclosure.facts.businessPremisesAddress ? "Required components are present; content is not semantically verified" : "Required transaction-disclosure components are absent"),
+    readinessItem("transaction_other_contact", "Other customer contact", transactionDisclosure.facts.otherContact, transactionDisclosure.facts.otherContact ? "Email contact configured" : "Required transaction-disclosure fact is absent"),
   ];
   const legalItems = [
     storedReadinessItem("legal_name", "Legal business name", profile.private.legalBusinessNameStored),
@@ -85,10 +95,11 @@ export async function businessInformationPayload(env, session) {
   const invoiceTemplateReady = templates.invoice_document?.status === "ready" && Number(templates.invoice_document?.enabled) === 1;
   const readiness = {
     overallStatus: canonicalReadiness.domains.business.ready ? "complete" : "action_required",
-    completion: businessCompletion([...coreItems, ...contactItems, ...legalItems]),
+    completion: businessCompletion([...coreItems, ...disclosureItems]),
     groups: [
       readinessGroup("core", "Core merchant identity", coreItems),
       readinessGroup("contact", "Customer contact", contactItems),
+      readinessGroup("transaction_disclosure", "Transaction disclosure (over CAD 50)", disclosureItems),
       readinessGroup("legal", "Legal / document identity", legalItems),
       readinessGroup("tax", "Tax", [statusReadinessItem("tax_registration", "Tax registration status", taxState, activeTaxRegistrations.length ? `${activeTaxRegistrations.length} active or verified registration${activeTaxRegistrations.length === 1 ? "" : "s"}` : registrations.length ? "Stored registrations remain unverified or inactive" : "Not configured in Tax & documents")]),
       readinessGroup("communications", "Customer communications", [canonicalDomainItem("transactional_email", "Transactional sender", canonicalReadiness.domains.communications)]),
@@ -97,9 +108,9 @@ export async function businessInformationPayload(env, session) {
     ],
     profile: {
       coreIdentity: coreItems.every((item) => item.state === "complete") ? "complete" : "action_required",
-      publicContact: profile.publicContactEmail && profile.supportEmail && profile.publicPhone ? "complete" : profile.publicContactEmail || profile.supportEmail || profile.publicPhone ? "partial" : "not_configured",
+      publicContact: profile.publicContactEmail && profile.supportEmail ? "complete" : profile.publicContactEmail || profile.supportEmail ? "partial" : "not_configured",
       legalIdentity: profile.private.legalBusinessNameStored ? "complete" : "not_configured",
-      address: publicBusinessAddressConfigured(profile.publicAddress) ? "complete" : "not_configured",
+      address: transactionDisclosure.facts.businessPremisesAddress ? "complete" : Object.values(businessAddress).some(Boolean) ? "partial" : "not_configured",
       tax: taxState,
       documents: canonicalReadiness.domains.documents.ready ? "complete" : receiptTemplateReady ? "partial" : "action_required",
       productionCommerce: canonicalReadiness.productionReady ? "complete" : "action_required",
@@ -116,7 +127,7 @@ export async function businessInformationPayload(env, session) {
     documentIdentity: {
       tradingName: profile.tradingName,
       legalNameStored: profile.private.legalBusinessNameStored,
-      addressStored: publicBusinessAddressConfigured(profile.publicAddress),
+      addressStored: Object.values(businessAddress).some(Boolean),
       contactEmail: profile.supportEmail || profile.publicContactEmail || null,
       taxRegistrationState: taxState,
       receiptTemplate: templateState(templates.payment_receipt),
@@ -144,7 +155,7 @@ export async function taxRegistrationsPayload(env, session) {
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
   const activeRegistrationCount = registrations.filter((registration) => ["active", "verified"].includes(registration.status)).length;
   const calculationProvider = cleanText(settings.tax_calculation_provider, 40) || "unconfigured";
-  const ready = calculationProvider !== "unconfigured" && activeRegistrationCount > 0;
+  const ready = calculationProvider === "not_collecting" || (calculationProvider !== "unconfigured" && activeRegistrationCount > 0);
   const counts = Object.fromEntries((documentCounts?.results || []).map((row) => [cleanText(row.status, 30), Number(row.count || 0)]));
   return {
     ok: true,
@@ -164,7 +175,7 @@ export async function taxRegistrationsPayload(env, session) {
       lastGeneratedType: cleanText(latestDocument?.document_type, 20) || null,
       lastGeneratedStatus: cleanText(latestDocument?.status, 20) || null,
     },
-    readiness: { ready, status: ready ? "ready" : "blocked", reason: ready ? "An operator-approved registration and explicit calculation strategy are configured." : "An explicit tax calculation strategy and operator-approved registrations are required." },
+    readiness: { ready, status: ready ? "ready" : "blocked", reason: calculationProvider === "not_collecting" ? "The operator explicitly selected not collecting; no registration, identifier, or rate is inferred." : ready ? "An operator-approved registration and explicit calculation strategy are configured." : "An explicit tax calculation strategy and operator-approved registrations are required." },
   };
 }
 
@@ -234,7 +245,7 @@ export async function productionReadinessPayload(env, session) {
       'checkout_enabled','live_payment_capture_enabled','fulfillment_submission_enabled','stripe_api_configured','stripe_webhook_configured',
       'stripe_test_checkout_enabled','tax_calculation_provider','stripe_tax_enabled','shipping_strategy','transactional_email_enabled',
       'customer_document_access_enabled','preferred_payment_provider','stripe_enabled','paypal_live_configured',
-      'paypal_live_webhook_configured','paypal_store_checkout_enabled','paypal_live_capture_enabled','paypal_donations_enabled')`).all(),
+      'paypal_live_webhook_configured','paypal_store_checkout_enabled','paypal_live_capture_enabled','paypal_donations_enabled','internet_agreement_disclosure_enabled')`).all(),
     db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN visibility='public' AND status='active' THEN 1 ELSE 0 END) public_count FROM commerce_products").first(),
     db.prepare("SELECT status,phase,products_verified,variants_mapped,safe_state_json FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08'").first(),
     templatesPayload(env, session),
@@ -250,9 +261,12 @@ export async function productionReadinessPayload(env, session) {
   const emailReadyCount = readableTemplates.filter((template) => template.templateKind === "email" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
   const receiptTemplateReady = readableTemplates.some((template) => template.templateKind === "document" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled);
   const legalIdentity = Boolean(profile?.legal_business_name_ciphertext);
-  const address = publicBusinessAddressConfigured(profile?.public_address_json);
+  const businessAddress = json(profile?.public_address_json, {});
+  const address = transactionDisclosureAddressPresent(businessAddress);
   const merchantIdentity = Boolean(profile?.trading_name && profile?.country_code === "CA" && profile?.province_code === "ON" && profile?.currency_code === "CAD");
-  const contact = Boolean(profile?.public_contact_email && profile?.support_email && profile?.public_phone);
+  const supplierPhone = Boolean(cleanText(profile?.public_phone, 80));
+  const otherContact = Boolean(cleanText(profile?.support_email || profile?.public_contact_email, 254));
+  const contact = supplierPhone && otherContact;
   const stripeTestConnected = providers.stripe?.status === "connected" && providers.stripe?.environment === "test" && providers.stripe?.metadata?.api_configured === true && settings.stripe_api_configured === true && providers.stripe?.metadata?.webhook_configured === true && settings.stripe_webhook_configured === true;
   const testAcceptancePassed = Boolean(acceptedOrder?.payment_status === "paid" && acceptedOrder?.environment === "test" && acceptedOrder?.customer_gross_amount === 1500 && acceptedOrder?.stripe_checkout_session_id === "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC" && acceptedWebhook?.provider_event_id === "evt_1U9OysB2jGrq9Tn1apdsFgi2" && !acceptedOrder?.printful_order_id);
   const liveTechnical = paypalTechnicalReadiness({credentials:paypalLive,metadata:providers.paypal?.metadata?.live,configured:settings.paypal_live_configured===true,webhookConfigured:settings.paypal_live_webhook_configured===true});
@@ -261,7 +275,7 @@ export async function productionReadinessPayload(env, session) {
   const taxStrategyReady = settings.tax_calculation_provider === "not_collecting" || (settings.tax_calculation_provider !== "unconfigured" && activeTaxCount > 0);
   const migrationComplete = migration?.status === "complete" && migrationState.manualPause !== true;
   const domains = {
-    business: domain(businessReady, businessReady ? "Supplier identity, public business address, public phone, and support contact are configured." : "Supplier legal name, public business address, public phone, or support contact remains incomplete; private phone, private address, and business number are optional metadata.", { merchantIdentity, legalIdentity, businessAddress: address, contact }),
+    business: domain(businessReady, businessReady ? "Required Ontario transaction-disclosure facts are configured but remain operator-asserted and externally unverified." : "One or more required transaction-disclosure facts are absent. Profile storage remains valid and independently editable.", { status: businessReady ? "transaction_disclosure_configured_unverified" : "transaction_disclosure_incomplete", threshold: { currency: "CAD", amountMinor: 5000, comparison: "consumer_obligation_exceeds" }, merchantIdentity, legalIdentity, businessPremisesAddress: address, supplierPhone, otherContact, semanticAddressVerification: false, globalSiteProjection: false }),
     tax: domain(taxStrategyReady, settings.tax_calculation_provider === "not_collecting" ? "The operator explicitly configured a server-authoritative not-collecting policy; no registration or rate is inferred." : taxStrategyReady ? "Tax registrations and calculation strategy are configured." : "Tax calculation policy is unconfigured; absence of a registration row is not treated as proof that collection is unnecessary.", { registrationsConfigured: activeTaxCount > 0, calculationProvider: String(settings.tax_calculation_provider || "unconfigured"), stripeTax: settings.stripe_tax_enabled === true ? "enabled_unverified" : "not_enabled_unverified", ratesConfigured: false }),
     payments: domain(livePaymentsReady, livePaymentsReady ? "PayPal LIVE API credentials, OAuth, and exact webhook readback are verified for the direct merchant app." : "PayPal LIVE credentials, OAuth verification, webhook registration/readback, or preferred-provider state remains incomplete. Stripe is excluded from readiness.", { preferredProvider:settings.preferred_payment_provider||"unconfigured",paypalLiveCredentialsConfigured:liveTechnical.credentialsConfigured,paypalLiveOAuthVerified:liveTechnical.oauthVerified,paypalLiveWebhookConfigured:liveTechnical.webhookReadbackVerified,paypalLiveCaptureEnabled:settings.paypal_live_capture_enabled===true,stripeEnabled:settings.stripe_enabled===true,stripeHistoricalTestConnected:stripeTestConnected,stripeHistoricalAcceptancePassed:testAcceptancePassed }),
     catalogue: domain(Number(catalogue?.public_count || 0) > 0, `${Number(catalogue?.public_count || 0)} public products are served from permanent Commerce D1 authority.`, { totalProducts: Number(catalogue?.total || 0), publicProducts: Number(catalogue?.public_count || 0), merchandisingReady: Number(catalogue?.public_count || 0) > 0 }),
@@ -269,7 +283,7 @@ export async function productionReadinessPayload(env, session) {
     fulfillment: domain(migrationComplete && settings.fulfillment_submission_enabled === true, migrationState.manualPause === true ? "Printful is connected; catalogue migration is manually paused and fulfillment is disabled." : "Printful catalogue migration or fulfillment activation remains incomplete.", { printfulConnected: providers.printful?.status === "connected", migrationPaused: migrationState.manualPause === true, migrationStatus: cleanText(migration?.status, 30) || "not_started", processedProducts: Number(migration?.products_verified || 0) + (Array.isArray(migrationState.blockedProducts) ? migrationState.blockedProducts.length : 0), plannedProducts: Number(migrationState.plannedProducts || 0), verifiedProducts: Number(migration?.products_verified || 0), blockedProducts: Array.isArray(migrationState.blockedProducts) ? migrationState.blockedProducts.length : 0, variantsMapped: Number(migration?.variants_mapped || 0), enabled: settings.fulfillment_submission_enabled === true }),
     communications: domain(Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM && emailReadyCount >= 2 && settings.transactional_email_enabled === true), "Resend custody is server-side; required customer templates and the production send gate are not all enabled.", { providerConfigured: Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM), readyTemplates: emailReadyCount, sendEnabled: settings.transactional_email_enabled === true }),
     documents: domain(receiptTemplateReady && businessReady && taxStrategyReady, receiptTemplateReady ? "Payment receipts are renderable; invoice readiness is blocked by business or tax configuration." : "Receipt and invoice document templates are incomplete.", { receiptTemplateReady, receiptReady: receiptTemplateReady, invoiceReady: receiptTemplateReady && businessReady && taxStrategyReady, customerAccessEnabled: settings.customer_document_access_enabled === true }),
-    checkout: domain(settings.paypal_store_checkout_enabled === true, settings.paypal_store_checkout_enabled === true ? "PayPal store checkout is enabled." : "PayPal store checkout is disabled.", { normalCheckoutEnabled: settings.paypal_store_checkout_enabled === true, donationsEnabled:settings.paypal_donations_enabled===true,controlledTestCheckoutEnabled: false }),
+    checkout: domain(settings.paypal_store_checkout_enabled === true && settings.internet_agreement_disclosure_enabled === true, settings.paypal_store_checkout_enabled !== true ? "PayPal store checkout is disabled." : settings.internet_agreement_disclosure_enabled === true ? "Checkout and scoped internet-agreement disclosure are enabled." : "Checkout cannot launch until the scoped pre-agreement and retainable-copy disclosure path is implemented and enabled.", { normalCheckoutEnabled: settings.paypal_store_checkout_enabled === true, transactionDisclosureEnabled: settings.internet_agreement_disclosure_enabled === true, disclosureThresholdMinor: 5000, donationsEnabled:settings.paypal_donations_enabled===true,controlledTestCheckoutEnabled: false }),
   };
   const mandatory = ["business", "tax", "payments", "catalogue", "shipping", "fulfillment", "communications", "documents", "checkout"];
   return { ok: true, access, authority: "Commerce D1", phase: "pre_cutover", productionReady: mandatory.every((key) => domains[key].ready), mandatoryDomains: mandatory, domains, checkedAt: nowIso() };
@@ -1530,17 +1544,26 @@ function businessCompletion(items) {
 function templateState(row) { return !row ? { state: "not_configured", revision: null } : { state: row.status === "ready" && Number(row.enabled) === 1 ? "complete" : row.status === "disabled" ? "disabled" : "incomplete", revision: Number(row.revision) }; }
 function businessPrivacyBoundary() {
   return {
-    publicSafe: ["trading_name", "public_contact_email", "support_email", "public_phone", "website_url", "public_address"],
-    adminOnly: ["profile_revision", "updated_at", "readiness", "template_status"],
+    publicSafe: ["trading_name", "website_url"],
+    adminOnly: ["business_contact_email", "support_email", "business_phone", "business_address", "profile_revision", "updated_at", "readiness", "template_status"],
     sensitive: ["legal_business_name", "legal_business_address", "private_phone", "business_registration_number"],
   };
 }
-function publicBusinessAddressConfigured(value) {
+function transactionDisclosureAddressPresent(value) {
   const address = typeof value === "string" ? json(value, null) : value;
   return Boolean(address && typeof address === "object" && !Array.isArray(address)
     && cleanText(address.line1, 160) && cleanText(address.city, 120)
-    && cleanText(address.province, 3) && cleanText(address.postalCode, 24)
-    && cleanText(address.country, 2) === "CA");
+    && cleanText(address.province, 120) && cleanText(address.postalCode, 64)
+    && cleanText(address.country, 120));
+}
+function transactionDisclosureStatus(profile, businessAddress, businessPhone) {
+  const facts = {
+    supplierName: Boolean(profile?.private?.legalBusinessNameStored),
+    supplierPhone: Boolean(String(businessPhone || "").trim()),
+    businessPremisesAddress: transactionDisclosureAddressPresent(businessAddress),
+    otherContact: Boolean(String(profile?.supportEmail || profile?.publicContactEmail || "").trim()),
+  };
+  return { status: Object.values(facts).every(Boolean) ? "transaction_disclosure_configured_unverified" : "transaction_disclosure_incomplete", facts };
 }
 function emptyBusinessReadiness() {
   return {

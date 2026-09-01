@@ -9,10 +9,11 @@ export type ProviderStatus = {
   accountCreated?: boolean; apiConfigured?: boolean; webhookEndpointReady?: boolean; webhookSigningConfigured?: boolean; webhookConfigured?: boolean; checkoutEnabled?: boolean; livePaymentsEnabled?: boolean; livePayoutReadiness?: string;
   metadata?: Record<string, unknown>; lastSynchronizedAt?: string | null;
 };
-export type PublicAddress = { line1?: string; line2?: string; city?: string; province?: string; postalCode?: string; country?: string };
+export type BusinessAddress = { line1?: string; line2?: string; city?: string; province?: string; postalCode?: string; country?: string };
+export type PublicAddress = BusinessAddress;
 export type BusinessProfile = {
-  tradingName: string; countryCode: string; provinceCode: string; currencyCode: string; publicAddress: PublicAddress;
-  publicContactEmail: string; supportEmail: string; publicPhone: string; websiteUrl: string; invoicePrefix: string; documentFooter: string;
+  tradingName: string; countryCode: string; provinceCode: string; currencyCode: string; businessAddress: BusinessAddress; publicAddress: BusinessAddress;
+  publicContactEmail: string; supportEmail: string; businessPhone: string; publicPhone: string; websiteUrl: string; invoicePrefix: string; documentFooter: string;
   taxProviderState: string; invoiceAccentColor: string; receiptAccentColor: string; revision: number; updatedAt: string | null;
   private: { legalBusinessNameStored: boolean; privateAddressStored: boolean; privatePhoneStored: boolean; businessRegistrationNumberStored: boolean; legalBusinessNameMasked: string; privateAddressMasked: string; privatePhoneMasked: string; businessRegistrationNumberMasked: string; registrations: Array<{ type: string; jurisdiction: string; maskedIdentifier: string; status: string }> };
 };
