@@ -126,7 +126,7 @@ test("Admin overview fails soft per authority and disables nonessential motion",
   await restrictedPage.route("**/api/**", (route) => routeFixture(route, () => {}, { restrictedAutomations: true, onAutomation: () => { restrictedAutomationReads += 1; } }));
   await restrictedPage.goto(ORIGIN); await restrictedPage.getByText("6/6", { exact: true }).waitFor();
   await restrictedPage.getByRole("heading", { level: 2, name: "Bot heartbeat is unavailable" }).waitFor();
-  assert.equal(await restrictedPage.locator('.bot-heartbeat[data-heartbeat-tone="info"]').count(), 1, "restricted heartbeat state uses the informational signal treatment");
+  assert.equal(await restrictedPage.locator('.bot-heartbeat[data-heartbeat-tone="unknown"]').count(), 1, "restricted heartbeat state uses the explicit unknown signal treatment");
   assert.equal(restrictedAutomationReads, 0, "restricted Overview does not request the Automations authority");
   assert.equal(await restrictedPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
   await restrictedContext.close();

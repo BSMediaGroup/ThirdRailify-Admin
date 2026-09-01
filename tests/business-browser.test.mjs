@@ -9,7 +9,7 @@ const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 test("Business Information is responsive, accessible, validation-safe, and supports explicit save/discard", async (t) => {
   const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4204"], { stdio: "ignore" }); t.after(() => server.kill()); await waitForServer();
   const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
-  for (const [width, height] of [[1440, 1000], [768, 1024], [390, 844]]) {
+  for (const [width, height] of [[1920, 1080], [1440, 900], [1024, 768], [768, 1024], [430, 932], [390, 844]]) {
     const savedBodies = []; let payload = fixture(); const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" }); const page = await context.newPage(); const errors = [];
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); }); page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/**", async (route) => {
@@ -25,13 +25,21 @@ test("Business Information is responsive, accessible, validation-safe, and suppo
     assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
     assert.doesNotMatch(await page.locator("body").innerText(), /Sensitive Legal Entity|1 Private Way|CORP-PRIVATE|A256GCM|ciphertext/);
+    const businessCountry = page.getByLabel("Country").first(); const businessRegion = page.getByLabel("Province / territory").first();
+    assert.equal(await businessCountry.inputValue(), "CA"); assert.equal(await businessRegion.inputValue(), "ON");
+    assert.equal(await businessCountry.locator("option:checked").textContent(), "Canada"); assert.equal(await businessRegion.locator("option:checked").textContent(), "Ontario");
+    assert.equal(await page.getByLabel("Country text").count(), 0); assert.equal(await page.getByLabel("Region", { exact: true }).count(), 0);
+    await businessCountry.selectOption("US"); assert.equal(await page.getByLabel("State / territory").first().inputValue(), "");
+    await page.getByLabel("State / territory").first().selectOption("NY"); await businessCountry.selectOption("CA"); assert.equal(await page.getByLabel("Province / territory").first().inputValue(), ""); await page.getByLabel("Province / territory").first().selectOption("ON");
+    await page.getByRole("button", { name: "Add legal address" }).click(); assert.equal(await page.getByLabel("Country").count(), 2); await page.getByRole("button", { name: "Cancel replacement" }).click(); assert.equal(await page.getByLabel("Country").count(), 1);
+    await page.screenshot({ path: `output/business-information-address-v2-${width}x${height}.png`, fullPage: true });
     assert.equal(await page.getByRole("button", { name: "Save changes" }).isDisabled(), true);
     const support = page.getByLabel("Customer support email"); await support.fill("draft@thirdrailify.com"); assert.equal(await page.getByText("Unsaved business changes", { exact: true }).count(), 1);
     await page.getByRole("button", { name: "Discard" }).click(); assert.equal(await support.inputValue(), "");
     await page.getByLabel("Business contact email").fill("invalid-email"); await page.getByRole("button", { name: "Save changes" }).click();
     assert.equal(await page.getByText("Enter a valid business contact email.", { exact: true }).count(), 1); assert.equal(savedBodies.length, 0);
     const scriptText = "<script>globalThis.businessProfileExecuted=true</script>";
-    await page.getByLabel("Business contact email").fill("info@thirdrailify.com"); await support.fill("support@thirdrailify.com"); await page.getByLabel("Address line 1").first().fill("Happy Birthday"); await page.getByLabel("Address line 2").first().fill(scriptText); await page.getByLabel("Postal text").first().fill("not a postal pattern ✨"); await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByLabel("Business contact email").fill("info@thirdrailify.com"); await support.fill("support@thirdrailify.com"); await page.getByLabel("Address line 1").first().fill("Happy Birthday"); await page.getByLabel("Address line 2").first().fill(scriptText); await page.getByLabel("Postal code").first().fill("not a postal pattern ✨"); await page.getByRole("button", { name: "Save changes" }).click();
     await page.locator(".admin-toast").getByText(/Business profile revision 2 saved/).waitFor(); assert.equal(savedBodies.length, 1); assert.equal(savedBodies[0].revision, 1); assert.equal(savedBodies[0].countryCode, "CA"); assert.equal(savedBodies[0].currencyCode, "CAD"); assert.equal(savedBodies[0].businessAddress.line1, "Happy Birthday"); assert.equal(savedBodies[0].businessAddress.postalCode, "not a postal pattern ✨"); assert.equal(savedBodies[0].businessPhone, ""); assert.equal("publicAddress" in savedBodies[0], false); assert.equal("publicPhone" in savedBodies[0], false); assert.equal("legalBusinessName" in savedBodies[0], false); assert.equal("privateAddress" in savedBodies[0], false);
     assert.equal(await page.getByLabel("Address line 2").first().inputValue(), scriptText); assert.equal(await page.locator("script").evaluateAll((nodes) => nodes.some((node) => node.textContent?.includes("businessProfileExecuted"))), false); assert.equal(await page.evaluate(() => "businessProfileExecuted" in globalThis), false);
     assert.equal(await page.getByRole("link", { name: /Tax & documents/ }).getAttribute("href"), "/commerce/tax"); assert.equal(await page.getByRole("link", { name: /Manage Customer Emails/ }).getAttribute("href"), "/commerce/emails");
@@ -42,7 +50,7 @@ test("Business Information is responsive, accessible, validation-safe, and suppo
 });
 
 function fixture(overrides = {}) {
-  const supportEmail = overrides.supportEmail || ""; const revision = overrides.revision || 1; const completeContact = Boolean(supportEmail); const businessAddress = overrides.businessAddress || {}; const businessPhone = overrides.businessPhone || "";
+  const supportEmail = overrides.supportEmail || ""; const revision = overrides.revision || 1; const completeContact = Boolean(supportEmail); const businessAddress = overrides.businessAddress || { line1: "46 Middleton street", line2: "", city: "Thamesford", province: "ON", postalCode: "N0M 2M0", country: "CA" }; const businessPhone = overrides.businessPhone || "";
   const blocked = (summary, details = {}) => ({ ready: false, status: "blocked", summary, details });
   const domains = { business: blocked("Legal identity remains incomplete."), tax: blocked("Tax calculation provider is unconfigured."), communications: blocked("Transactional sending is disabled.", { providerConfigured: true, readyTemplates: 1, sendEnabled: false }), documents: blocked("Invoice readiness is blocked.", { receiptTemplateReady: true, invoiceReady: false }), fulfillment: blocked("Fulfillment is disabled.", { enabled: false }), payments: blocked("Stripe TEST acceptance only."), checkout: blocked("Normal checkout is disabled.", { normalCheckoutEnabled: false }) };
   const groups = [{ id: "core", label: "Core merchant identity", state: "complete", items: [{ id: "trading", label: "Trading name", state: "complete", detail: "Third Railify Official" }] }, { id: "contact", label: "Customer contact", state: completeContact ? "complete" : "action_required", items: [{ id: "public", label: "Public contact email", state: "complete", detail: "info@thirdrailify.com" }, { id: "support", label: "Customer support email", state: completeContact ? "complete" : "incomplete", detail: supportEmail || "Not configured" }] }, { id: "legal", label: "Legal / document identity", state: "action_required", items: [{ id: "legal", label: "Legal business name", state: "incomplete", detail: "Not configured" }] }];

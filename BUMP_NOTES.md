@@ -1,5 +1,28 @@
 # Bump notes
 
+## 2026-09-01 - Address UX V2 human-readable geography
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced Business Information's manual Region and Country text fields in both business and encrypted legal-address editors with reusable native selectors showing human-readable names.
+- Pinned the same offline `country-region-data@4.1.0` dataset as Public while retaining canonical `CA` / `ON` save payloads, bounded server validation, encrypted storage, optimistic revisions, capability/CSRF/origin/rate-limit/audit boundaries, and masked legal-address reads.
+- Added legacy name/code hydration, unknown-region preservation, country-change invalidation, country-aware postal labels, six-width controlled-fixture browser proof, and representative dataset tests. No runtime geography service or migration was added.
+
+## 2026-09-01 - Bot runtime health V2 dimensional status
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced the shared Overview/Automations heartbeat card's coarse fault roll-up with one pure classifier for heartbeat liveness, the Poll event pipeline, Discord connectivity, configuration revision, publication delivery, and Poll-processing evidence. The heartbeat headline now remains controlled by signed-pulse freshness while secondary dimensions retain their own truthful labels.
+- Proved the former `BACKLOG` signal is `backlogMayBeTruncated`: current Rumble `recent_messages` provider-window saturation, not local outbox depth. It updates only during an active Poll and can remain latched after the lease ends, so inactive Polls now ignore the stale flag; one active saturated sample is `CATCHING UP`, with warning/degraded escalation requiring three/six cadence-spaced signed observations.
+- Added Discord disconnect hysteresis: a current single disconnect is isolated to the provider dimension, 180 seconds of signed disconnected observations is degraded, and reconnection remains recovering for one sample before returning connected. Existing 45/180-second heartbeat freshness boundaries remain unchanged.
+- Added semantic emerald, Third Rail gold, violet, orange, crimson, offline, and neutral pulse tokens with state-specific cadence, smooth colour transitions, a static offline trace, reduced-motion completeness, and forced-colour fallbacks. Bare `BACKLOG` language was replaced with bounded event-window semantics.
+- Publication remains explicitly `Not reported` because the current signed Bot heartbeat has no publish attempt/success/failure timestamps or counters. No delivery event, queue depth, oldest-event age, input/process rate, retry count, or dropped-event count is fabricated.
+- Added classifier and browser regression coverage for burst/drain, sustained saturation, stuck retry processing, transient/sustained Discord disconnect, revision drift, stale/offline heartbeat, publication fallback, pulse tones, transitions, reduced motion, and responsive geometry. Poll vote eligibility, deduplication, persistence, totals, close semantics, Bot runtime code, schema, migrations, provider configuration, and Public code remain unchanged.
+
 ## 2026-09-01 - Critical Gaming artwork delivery repair
 
 CURRENT VER=0.1.0-alpha.0
