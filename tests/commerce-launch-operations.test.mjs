@@ -32,12 +32,13 @@ test("activation fails atomically when any hard gate is blocked and pause is rev
 test("donation launch excludes store, shipping, Printful, fulfilment, and email gates and activates independently", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const timestamp = "2026-08-30T04:00:00.000Z";
-  const metadata = { preferred: true, live: { oauth_verified: true, webhook_configured: true, webhook_readback_verified: true, webhook_events: PAYPAL_WEBHOOK_EVENTS } };
+  const metadata = { preferred: true, live: { oauth_verified: true, webhook_configured: true, webhook_readback_verified: true, webhook_url: "https://thirdrailify-admin.pages.dev/api/webhooks/paypal", webhook_events: PAYPAL_WEBHOOK_EVENTS } };
   await harness.commerceDb.batch([
     harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true',updated_at=? WHERE setting_key IN ('paypal_live_configured','paypal_live_webhook_configured')").bind(timestamp),
     harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='false',updated_at=? WHERE setting_key='stripe_enabled'").bind(timestamp),
     harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='\"paypal\"',updated_at=? WHERE setting_key='preferred_payment_provider'").bind(timestamp),
     harness.commerceDb.prepare("UPDATE commerce_provider_connections SET status='connected',environment='live',integration_mode='direct_merchant',country_code='CA',currency_code='CAD',safe_metadata_json=?,updated_at=? WHERE provider='paypal'").bind(JSON.stringify(metadata),timestamp),
+    harness.commerceDb.prepare("INSERT INTO commerce_donations (id,request_id,request_digest,environment,currency_code,amount_minor,status,donor_display_preference,created_at,updated_at) VALUES ('don_999999999999499989999999999999999999','99999999-9999-4999-8999-999999999999','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','sandbox','CAD',1500,'completed','private',?,?)").bind(timestamp,timestamp),
   ]);
   const env = { ...commerceEnvironment(harness), PAYPAL_LIVE_CLIENT_ID: "live-client-test", PAYPAL_LIVE_CLIENT_SECRET: "live-secret-test", PAYPAL_LIVE_WEBHOOK_ID: "WHLIVE001" };
   const plan = await paypalDonationLaunchPlan(env);
@@ -46,6 +47,8 @@ test("donation launch excludes store, shipping, Printful, fulfilment, and email 
   const activated = await activatePayPalDonations(env, { confirmation: "ACTIVATE LIVE PAYPAL DONATIONS", expectedRevision: plan.revision }, "master");
   assert.equal(activated.settings.donationsEnabled, true);
   assert.equal(activated.settings.storeCheckoutEnabled, false);
-  const settings = Object.fromEntries((await harness.commerceDb.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled','fulfillment_submission_enabled','paypal_store_checkout_enabled','paypal_donations_enabled','paypal_live_capture_enabled','stripe_enabled')").all()).results.map((row) => [row.setting_key, JSON.parse(row.value_json)]));
-  assert.deepEqual(settings, { checkout_enabled: false, fulfillment_submission_enabled: false, paypal_store_checkout_enabled: false, paypal_live_capture_enabled: true, paypal_donations_enabled: true, stripe_enabled: false });
+  assert.equal(activated.settings.storeLiveCaptureEnabled, false);
+  assert.equal(activated.settings.donationLiveCaptureEnabled, true);
+  const settings = Object.fromEntries((await harness.commerceDb.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('checkout_enabled','fulfillment_submission_enabled','paypal_store_checkout_enabled','paypal_donations_enabled','paypal_live_capture_enabled','paypal_donation_live_capture_enabled','stripe_enabled')").all()).results.map((row) => [row.setting_key, JSON.parse(row.value_json)]));
+  assert.deepEqual(settings, { checkout_enabled: false, fulfillment_submission_enabled: false, paypal_store_checkout_enabled: false, paypal_live_capture_enabled: false, paypal_donation_live_capture_enabled: true, paypal_donations_enabled: true, stripe_enabled: false });
 });

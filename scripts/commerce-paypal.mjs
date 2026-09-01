@@ -129,6 +129,7 @@ async function loadStatus(runtime, webhookUrl) {
     donationsEnabled: parseJson(row.paypal_donations_enabled, false),
     storeCheckoutEnabled: parseJson(row.paypal_store_checkout_enabled, false),
     liveCaptureEnabled: parseJson(row.paypal_live_capture_enabled, false),
+    donationLiveCaptureEnabled: parseJson(row.paypal_donation_live_capture_enabled, false),
     emergencyPaused: parseJson(row.commerce_emergency_paused, false),
     providerCalls: { oauth: 0, webhookListRead: 0, webhookCreate: 0, webhookPatch: 0, orders: 0, captures: 0 },
   };
@@ -167,6 +168,7 @@ async function remoteStatusRow(wrangler) {
     ${setting("paypal_donations_enabled")} paypal_donations_enabled,
     ${setting("paypal_store_checkout_enabled")} paypal_store_checkout_enabled,
     ${setting("paypal_live_capture_enabled")} paypal_live_capture_enabled,
+    ${setting("paypal_donation_live_capture_enabled")} paypal_donation_live_capture_enabled,
     ${setting("commerce_emergency_paused")} commerce_emergency_paused,
     (SELECT COUNT(*) FROM commerce_payment_attempts WHERE provider='paypal' AND environment='sandbox' AND commerce_order_id IS NOT NULL AND normalized_state='completed') sandbox_store_completed,
     (SELECT COUNT(*) FROM commerce_payment_attempts WHERE provider='paypal' AND environment='live' AND commerce_order_id IS NOT NULL AND normalized_state='completed') live_store_completed,

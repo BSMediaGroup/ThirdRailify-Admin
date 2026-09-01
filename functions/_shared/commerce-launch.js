@@ -1,7 +1,7 @@
 import { AuthFailure, cleanText, nowIso, randomId } from "./auth-core.js";
 import { requireCommerceDb, writeCommerceAudit } from "./commerce-core.js";
 import { paypalCredentials } from "./paypal-client.js";
-import { paypalTechnicalReadiness } from "./paypal-onboarding.js";
+import { paypalTechnicalReadiness, paypalWebhookUrl } from "./paypal-onboarding.js";
 
 export const LIVE_ACTIVATION_CONFIRMATION = "ACTIVATE LIVE COMMERCE";
 export const EMERGENCY_PAUSE_CONFIRMATION = "PAUSE LIVE COMMERCE";
@@ -126,19 +126,23 @@ export async function applyEligibleVariantSellability(env, actorAccountId = null
 
 export async function paypalDonationLaunchPlan(env) {
   const db = requireCommerceDb(env);
-  const [settingsResult, provider, state] = await Promise.all([
-    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('preferred_payment_provider','stripe_enabled','paypal_live_configured','paypal_live_webhook_configured','paypal_live_capture_enabled','paypal_donations_enabled','paypal_store_checkout_enabled','commerce_emergency_paused')").all(),
+  const [settingsResult, provider, state, sandboxDonationAcceptance] = await Promise.all([
+    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('preferred_payment_provider','stripe_enabled','paypal_live_configured','paypal_live_webhook_configured','paypal_live_capture_enabled','paypal_donation_live_capture_enabled','paypal_donations_enabled','paypal_store_checkout_enabled','commerce_emergency_paused')").all(),
     db.prepare("SELECT status,environment,integration_mode,country_code,currency_code,safe_metadata_json FROM commerce_provider_connections WHERE provider='paypal'").first(),
     db.prepare("SELECT * FROM commerce_payment_provider_state WHERE id='primary'").first(),
+    db.prepare("SELECT COUNT(*) count FROM commerce_donations WHERE environment='sandbox' AND status='completed'").first(),
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
   const metadata = json(provider?.safe_metadata_json, {});
   const credentials = paypalCredentials(env, "live");
   const technical = paypalTechnicalReadiness({ credentials, metadata: metadata.live, configured: settings.paypal_live_configured === true, webhookConfigured: settings.paypal_live_webhook_configured === true });
+  let canonicalWebhookUrl = null;
+  try { canonicalWebhookUrl = paypalWebhookUrl(env); } catch {}
   const hardGates = [
     gate("paypal_preferred", settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && state?.preferred_provider === "paypal" && Number(state?.stripe_enabled || 0) === 0, "PayPal is preferred and Stripe is retained but disabled."),
     gate("paypal_live_oauth", technical.credentialsConfigured && technical.oauthVerified, "PayPal LIVE credentials authenticated successfully against the LIVE OAuth endpoint."),
-    gate("paypal_live_webhook", technical.webhookReadbackVerified, "The exact LIVE webhook URL and event set were read back."),
+    gate("paypal_live_webhook", technical.webhookReadbackVerified && metadata.live?.webhook_url === canonicalWebhookUrl, "The exact LIVE webhook URL and seven-event set were read back."),
+    gate("paypal_sandbox_donation_acceptance", Number(sandboxDonationAcceptance?.count || 0) > 0, "A completed Sandbox donation proves the donation-specific local-first create and capture architecture."),
     gate("paypal_direct_merchant", provider?.status === "connected" && provider?.environment === "live" && provider?.integration_mode === "direct_merchant" && provider?.country_code === "CA" && String(provider?.currency_code || "").toUpperCase() === "CAD", "The configured connection is the Canadian CAD direct merchant app."),
     gate("emergency_pause_clear", settings.commerce_emergency_paused !== true && Number(state?.emergency_paused || 0) === 0, "Emergency pause is clear."),
   ];
@@ -150,7 +154,7 @@ export async function paypalDonationLaunchPlan(env) {
     ready: hardGates.every((entry) => entry.ready),
     hardGates,
     excludedDependencies: ["catalogue", "shipping", "printful", "fulfillment", "transactional_email"],
-    settings: { donationsEnabled: settings.paypal_donations_enabled === true, storeCheckoutEnabled: settings.paypal_store_checkout_enabled === true, liveCaptureEnabled: settings.paypal_live_capture_enabled === true, stripeEnabled: settings.stripe_enabled === true },
+    settings: { donationsEnabled: settings.paypal_donations_enabled === true, storeCheckoutEnabled: settings.paypal_store_checkout_enabled === true, storeLiveCaptureEnabled: settings.paypal_live_capture_enabled === true, donationLiveCaptureEnabled: settings.paypal_donation_live_capture_enabled === true, stripeEnabled: settings.stripe_enabled === true },
     checkedAt: nowIso(),
   };
 }
@@ -168,14 +172,14 @@ export async function activatePayPalDonations(env, input, actorAccountId) {
     setting(db, "commerce_environment", "production", timestamp, actorAccountId),
     setting(db, "paypal_live_configured", true, timestamp, actorAccountId),
     setting(db, "paypal_live_webhook_configured", true, timestamp, actorAccountId),
-    setting(db, "paypal_live_capture_enabled", true, timestamp, actorAccountId),
+    setting(db, "paypal_donation_live_capture_enabled", true, timestamp, actorAccountId),
     setting(db, "paypal_donations_enabled", true, timestamp, actorAccountId),
     setting(db, "commerce_emergency_paused", false, timestamp, actorAccountId),
     db.prepare(`UPDATE commerce_payment_provider_state SET preferred_provider='paypal',stripe_enabled=0,paypal_live_configured=1,
-      paypal_live_capture_enabled=1,paypal_donations_enabled=1,emergency_paused=0,revision=revision+1,
+      paypal_live_capture_enabled=0,paypal_donations_enabled=1,emergency_paused=0,revision=revision+1,
       transition_reason='Authorized independent PayPal LIVE donation activation.',updated_by_actor=?,updated_at=? WHERE id='primary' AND revision=?`).bind(cleanText(actorAccountId,160)||"deployment-cli",timestamp,plan.revision),
     db.prepare(`UPDATE commerce_provider_connections SET status='connected',environment='live',safe_metadata_json=json_set(safe_metadata_json,
-      '$.preferred',json('true'),'$.donations_enabled',json('true'),'$.live_capture_enabled',json('true')),updated_at=? WHERE provider='paypal'`).bind(timestamp),
+      '$.preferred',json('true'),'$.donations_enabled',json('true'),'$.donation_live_capture_enabled',json('true'),'$.store_live_capture_enabled',json('false'),'$.live_capture_enabled',json('false')),updated_at=? WHERE provider='paypal'`).bind(timestamp),
     db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,?,?,?,'success',?,?)")
       .bind(randomId(), cleanText(actorAccountId,160)||null, "commerce.paypal_donations_activated", "commerce_payment_provider_state", "primary", JSON.stringify({ revision: plan.revision + 1, storeCheckoutEnabled: false, stripeEnabled: false }), timestamp),
   ]);
@@ -204,12 +208,13 @@ export async function activateCommerceLaunch(env, input, actorAccountId) {
     setting(db, "paypal_store_checkout_enabled", true, timestamp, actorAccountId),
     setting(db, "paypal_donations_enabled", true, timestamp, actorAccountId),
     setting(db, "paypal_live_capture_enabled", true, timestamp, actorAccountId),
+    setting(db, "paypal_donation_live_capture_enabled", true, timestamp, actorAccountId),
     setting(db, "stripe_enabled", false, timestamp, actorAccountId),
     db.prepare(`UPDATE commerce_payment_provider_state SET preferred_provider='paypal',stripe_enabled=0,paypal_live_configured=1,
       paypal_store_checkout_enabled=1,paypal_live_capture_enabled=1,paypal_donations_enabled=1,emergency_paused=0,
       revision=revision+1,transition_reason='Authorized PayPal production commerce activation.',updated_by_actor=?,updated_at=? WHERE id='primary'`).bind(cleanText(actorAccountId,160)||"deployment-cli",timestamp),
     db.prepare(`UPDATE commerce_provider_connections SET environment='live',status='connected',safe_metadata_json=json_set(safe_metadata_json,
-      '$.preferred',json('true'),'$.store_checkout_enabled',json('true'),'$.donations_enabled',json('true'),'$.live_capture_enabled',json('true')),updated_at=? WHERE provider='paypal'`).bind(timestamp),
+      '$.preferred',json('true'),'$.store_checkout_enabled',json('true'),'$.donations_enabled',json('true'),'$.store_live_capture_enabled',json('true'),'$.donation_live_capture_enabled',json('true'),'$.live_capture_enabled',json('true')),updated_at=? WHERE provider='paypal'`).bind(timestamp),
     db.prepare(`UPDATE commerce_provider_connections SET environment='production',safe_metadata_json=json_set(safe_metadata_json,
       '$.fulfillment_enabled',json('true'),'$.order_mode','draft_then_confirm'),updated_at=? WHERE provider='printful'`).bind(timestamp),
     db.prepare("UPDATE commerce_products SET checkout_environment='live',updated_at=? WHERE status='active' AND visibility='public'").bind(timestamp),
@@ -219,7 +224,7 @@ export async function activateCommerceLaunch(env, input, actorAccountId) {
       .bind(auditId, cleanText(actorAccountId, 160) || null, "commerce.production_activated", "commerce_launch_state", "production", JSON.stringify({ revision: nextRevision, planDigest: plan.digest, transactionalEmailEnabled: emailEnabled }), timestamp),
   ];
   const updates = await db.batch(statements);
-  if (changes(updates[15]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during activation.");
+  if (changes(updates[16]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during activation.");
   return commerceLaunchPlan(env);
 }
 
@@ -241,17 +246,18 @@ export async function pauseCommerceLaunch(env, input, actorAccountId) {
     setting(db, "paypal_store_checkout_enabled", false, timestamp, actorAccountId),
     setting(db, "paypal_donations_enabled", false, timestamp, actorAccountId),
     setting(db, "paypal_live_capture_enabled", false, timestamp, actorAccountId),
+    setting(db, "paypal_donation_live_capture_enabled", false, timestamp, actorAccountId),
     setting(db, "stripe_enabled", false, timestamp, actorAccountId),
     db.prepare(`UPDATE commerce_payment_provider_state SET stripe_enabled=0,paypal_store_checkout_enabled=0,paypal_live_capture_enabled=0,
       paypal_donations_enabled=0,emergency_paused=1,revision=revision+1,transition_reason=?,updated_by_actor=?,updated_at=? WHERE id='primary'`).bind(reason,cleanText(actorAccountId,160)||"deployment-cli",timestamp),
-    db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.store_checkout_enabled',json('false'),'$.donations_enabled',json('false'),'$.live_capture_enabled',json('false')),updated_at=? WHERE provider='paypal'").bind(timestamp),
+    db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.store_checkout_enabled',json('false'),'$.donations_enabled',json('false'),'$.store_live_capture_enabled',json('false'),'$.donation_live_capture_enabled',json('false'),'$.live_capture_enabled',json('false')),updated_at=? WHERE provider='paypal'").bind(timestamp),
     db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.fulfillment_enabled',json('false')),updated_at=? WHERE provider='printful'").bind(timestamp),
     db.prepare("UPDATE commerce_launch_state SET state='paused',revision=?,paused_at=?,pause_reason=?,updated_by_actor=?,updated_at=? WHERE id='production' AND revision=?")
       .bind(nextRevision, timestamp, reason, cleanText(actorAccountId, 160) || "deployment-cli", timestamp, revision),
     db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,?,?,?,'success',?,?)")
       .bind(randomId(), cleanText(actorAccountId, 160) || null, "commerce.emergency_paused", "commerce_launch_state", "production", JSON.stringify({ revision: nextRevision, reason }), timestamp),
   ]);
-  if (changes(updates[12]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during the emergency pause.");
+  if (changes(updates[13]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during the emergency pause.");
   return commerceLaunchPlan(env);
 }
 

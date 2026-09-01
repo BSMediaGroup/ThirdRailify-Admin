@@ -27,7 +27,7 @@ export async function paypalPublicConfiguration(env) {
     db.prepare(`SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN (
       'commerce_environment','commerce_emergency_paused','paypal_sandbox_configured','paypal_live_configured',
       'paypal_sandbox_webhook_configured','paypal_live_webhook_configured','paypal_store_checkout_enabled',
-      'paypal_live_capture_enabled','paypal_donations_enabled','preferred_payment_provider','stripe_enabled')`).all(),
+      'paypal_live_capture_enabled','paypal_donation_live_capture_enabled','paypal_donations_enabled','preferred_payment_provider','stripe_enabled')`).all(),
   ]);
   const settings = settingsMap(settingsResult);
   const environment = settings.commerce_environment === "production" ? "live" : "sandbox";
@@ -46,7 +46,7 @@ export async function paypalPublicConfiguration(env) {
     configured: credentialReady,
     webhookConfigured: webhookReady,
     storeCheckoutEnabled: !paused && credentialReady && webhookReady && settings.paypal_store_checkout_enabled === true && (environment !== "live" || settings.paypal_live_capture_enabled === true),
-    donationsEnabled: !paused && credentialReady && webhookReady && settings.paypal_donations_enabled === true && (environment !== "live" || settings.paypal_live_capture_enabled === true),
+    donationsEnabled: !paused && credentialReady && webhookReady && settings.paypal_donations_enabled === true && (environment !== "live" || settings.paypal_donation_live_capture_enabled === true),
     emergencyPaused: paused,
     stripe: { configured: Number(state?.stripe_configured || 0) === 1, enabled: settings.stripe_enabled === true && Number(state?.stripe_enabled || 0) === 1, preferred: false },
     message: !credentialReady ? "PayPal credentials are not configured." : !webhookReady ? "PayPal webhook verification is not configured." : paused ? "Payments are temporarily paused." : null,
@@ -330,7 +330,8 @@ async function requirePayPalConfiguration(env,target,forcedEnvironment=null,opti
   if(!options.allowDisabled){ if(settings.commerce_emergency_paused===true||Number(state?.emergency_paused||0)===1) throw new AuthFailure(409,"commerce_emergency_paused","Payments are temporarily paused."); const enabled=target==="store"?settings.paypal_store_checkout_enabled===true:settings.paypal_donations_enabled===true; if(!enabled) throw new AuthFailure(409,target==="store"?"checkout_disabled":"donations_disabled",target==="store"?"Store checkout is not enabled.":"Donations are not enabled."); }
   if(!configured||!creds.configured) throw new AuthFailure(503,"paypal_credentials_unavailable",`PayPal ${environment.toUpperCase()} credentials are not configured.`);
   if(!webhook) throw new AuthFailure(503,"paypal_webhook_not_configured",`PayPal ${environment.toUpperCase()} webhook verification is not configured.`);
-  if(environment==="live"&&settings.paypal_live_capture_enabled!==true&&!options.allowDisabled) throw new AuthFailure(409,"paypal_live_capture_disabled","PayPal LIVE capture is not enabled.");
+  const liveCaptureEnabled=target==="store"?settings.paypal_live_capture_enabled===true:settings.paypal_donation_live_capture_enabled===true;
+  if(environment==="live"&&!liveCaptureEnabled&&!options.allowDisabled) throw new AuthFailure(409,target==="store"?"paypal_store_live_capture_disabled":"paypal_donation_live_capture_disabled",target==="store"?"PayPal LIVE store capture is not enabled.":"PayPal LIVE donation capture is not enabled.");
   let taxStatus="not_calculated",taxReason=null,taxAmount=0;
   if(target==="store") { if(settings.tax_calculation_provider!=="not_collecting") throw new AuthFailure(409,"commerce_tax_policy_unresolved","The store tax policy is not configured for PayPal checkout."); taxStatus="not_collecting"; taxReason="configured_not_collecting"; }
   return {environment,expectedMerchantId:creds.expectedMerchantId||null,turnstileRequired:settings.checkout_turnstile_required===true,taxStatus,taxReason,taxAmount};

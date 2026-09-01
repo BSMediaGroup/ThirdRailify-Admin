@@ -11,7 +11,7 @@ function statusResult(metadata = {}) {
     safe_metadata_json: JSON.stringify(metadata), stripe_configured: 1,
     preferred_payment_provider: '"paypal"', stripe_enabled: "false",
     paypal_donations_enabled: "false", paypal_store_checkout_enabled: "false",
-    paypal_live_capture_enabled: "false", commerce_emergency_paused: "false",
+    paypal_live_capture_enabled: "false", paypal_donation_live_capture_enabled: "false", commerce_emergency_paused: "false",
     sandbox_store_completed: 0, live_store_completed: 0, sandbox_donation_completed: 0, live_donation_completed: 0,
   }] }]);
 }

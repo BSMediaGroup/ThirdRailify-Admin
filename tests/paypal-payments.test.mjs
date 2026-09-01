@@ -5,7 +5,7 @@ import { onRequest as captureRoute } from "../functions/api/commerce/paypal/capt
 import { onRequest as storeRoute } from "../functions/api/commerce/paypal/store.js";
 import { handlePayPalWebhook } from "../functions/api/webhooks/paypal.js";
 import { createPayPalOrder, minorUnitsToPayPal, paypalAmountToMinor, PAYPAL_WEBHOOK_EVENTS } from "../functions/_shared/paypal-client.js";
-import { createPayPalDonationPayment, createPayPalStorePayment } from "../functions/_shared/paypal-commerce.js";
+import { createPayPalDonationPayment, createPayPalStorePayment, paypalPublicConfiguration } from "../functions/_shared/paypal-commerce.js";
 import { accountInboxMessages } from "../functions/_shared/account-commerce.js";
 import { commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestShippingQuote, insertTestVariant, TEST_DELIVERY_RECIPIENT } from "./commerce-test-helpers.mjs";
 
@@ -62,6 +62,25 @@ test("emergency pause blocks donation creation before local or provider mutation
   await harness.commerceDb.batch([harness.commerceDb.prepare("UPDATE commerce_payment_provider_state SET emergency_paused=1 WHERE id='primary'"),harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key='commerce_emergency_paused'")]);let calls=0;
   const response=await donationRoute({request:post("/api/commerce/paypal/donation",{donationRequestId:"33333333-3333-4333-8333-333333333333",amountMinor:500}),env:envFor(harness),data:{paypalFetch:async()=>{calls+=1;}}});
   assert.equal(response.status,409);assert.equal((await response.json()).error,"commerce_emergency_paused");assert.equal(calls,0);assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_donations").first()).count,0);
+});
+
+test("LIVE donation capture authority projects Live configuration while store creation remains structurally closed",async(t)=>{
+  const harness=await createCommerceDatabases();t.after(harness.dispose);
+  await harness.commerceDb.batch([
+    harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='\"production\"' WHERE setting_key='commerce_environment'"),
+    harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key IN ('paypal_live_configured','paypal_live_webhook_configured','paypal_donations_enabled','paypal_donation_live_capture_enabled')"),
+    harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='false' WHERE setting_key IN ('paypal_store_checkout_enabled','paypal_live_capture_enabled','fulfillment_submission_enabled')"),
+    harness.commerceDb.prepare("UPDATE commerce_payment_provider_state SET paypal_live_configured=1,paypal_donations_enabled=1,paypal_store_checkout_enabled=0,paypal_live_capture_enabled=0 WHERE id='primary'"),
+  ]);
+  const env=commerceEnvironment(harness,{PAYPAL_LIVE_CLIENT_ID:"live-browser-client-id",PAYPAL_LIVE_CLIENT_SECRET:"live-server-secret-value",PAYPAL_LIVE_WEBHOOK_ID:"WHLIVE001"});
+  const configuration=await paypalPublicConfiguration(env);
+  assert.equal(configuration.environment,"live");assert.equal(configuration.clientId,"live-browser-client-id");assert.equal(configuration.donationsEnabled,true);assert.equal(configuration.storeCheckoutEnabled,false);
+  assert.doesNotMatch(JSON.stringify(configuration),/live-server-secret-value|WHLIVE001/);
+  let providerCalls=0;
+  const storeResponse=await storeRoute({request:post("/api/commerce/paypal/store",{}),env,data:{paypalFetch:async()=>{providerCalls+=1;throw new Error("store provider call forbidden");}}});
+  assert.equal(storeResponse.status,409);assert.equal((await storeResponse.json()).error,"checkout_disabled");assert.equal(providerCalls,0);
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_orders").first()).count,0);
+  assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_fulfillment_orders").first()).count,0);
 });
 
 test("one-time donation is local-first, idempotent, server-created, and server-captured", async (t) => {
