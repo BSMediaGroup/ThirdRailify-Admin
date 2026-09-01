@@ -1102,7 +1102,7 @@ export async function customerEmailsControlPlanePayload(env, session) {
       provider: providerProjection(env, sender, null, null), sender,
       templates: [],
       mergeVariables: CUSTOMER_EMAIL_VARIABLES,
-      readiness: { state: "action_required", configurationReady: false, configuredTemplates: 0, totalTemplates: 0, minimumReadyTemplates: 2, customerSendsEnabled: false, productionLifecycleImplemented: false },
+      readiness: { state: "action_required", configurationReady: false, configuredTemplates: 0, totalTemplates: 0, minimumReadyTemplates: 1, requiredTemplateKeys: ["order_confirmation"], customerSendsEnabled: false, productionLifecycleImplemented: false },
       dependencies: emptyEmailDependencies(),
       deliveries: emptyEmailDeliveries(),
       canonicalReadiness: null,
@@ -1142,7 +1142,8 @@ export async function customerEmailsControlPlanePayload(env, session) {
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, false)]));
   const customerSendsEnabled = settings.transactional_email_enabled === true;
   const configuredTemplates = emailTemplates.filter((template) => template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
-  const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && settings.resend_domain_verified === true && configuredTemplates >= 2;
+  const orderConfirmationReady = emailTemplates.some((template) => template.templateKey === "order_confirmation" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled);
+  const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && settings.resend_domain_verified === true && orderConfirmationReady;
   const manageSensitiveEvidence = access.isMasterAdmin || access.capabilities.includes("commerce.templates.manage");
   const recent = (recentResult?.results || []).map((row) => serializeEmailDelivery(row, manageSensitiveEvidence));
   const counts = { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 };
@@ -1161,7 +1162,7 @@ export async function customerEmailsControlPlanePayload(env, session) {
     mergeVariables: CUSTOMER_EMAIL_VARIABLES,
     readiness: {
       state: customerSendsEnabled ? (communications.ready ? "ready" : "action_required") : configurationReady ? "ready_but_disabled" : "incomplete",
-      configurationReady, configuredTemplates, totalTemplates: emailTemplates.length, minimumReadyTemplates: 2,
+      configurationReady, configuredTemplates, totalTemplates: emailTemplates.length, minimumReadyTemplates: 1, requiredTemplateKeys: ["order_confirmation"],
       customerSendsEnabled, productionLifecycleImplemented: true,
     },
     dependencies: {

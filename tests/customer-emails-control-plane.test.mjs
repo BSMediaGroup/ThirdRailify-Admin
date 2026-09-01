@@ -13,7 +13,7 @@ const master = { accountId: "email-master", account: { adminLevel: "master" } };
 test("Customer Emails projects server sender state, actual template kinds, canonical readiness, and masked bounded delivery evidence", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness, { RESEND_API_KEY: "resend-server-secret", MAIL_FROM: "Third Railify Official <receipts@notify.example.test>", MAIL_REPLY_TO: "support@example.test" });
-  await harness.commerceDb.prepare("UPDATE commerce_templates SET status='ready',enabled=1 WHERE template_key IN ('order_confirmation','receipt_notification')").run();
+  await harness.commerceDb.prepare("UPDATE commerce_templates SET status='ready',enabled=1 WHERE template_key='order_confirmation'").run();
   await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key='resend_domain_verified'").run();
   await harness.commerceDb.prepare("INSERT INTO commerce_orders (id,payment_status,fulfillment_status,currency_code,customer_gross_amount,environment,checkout_status,created_at,updated_at) VALUES ('ord-email-live','paid','disabled','CAD',2500,'live','checkout_created','2026-08-29T01:00:00Z','2026-08-29T01:00:00Z')").run();
   await harness.commerceDb.batch([
@@ -27,7 +27,7 @@ test("Customer Emails projects server sender state, actual template kinds, canon
   assert.deepEqual(payload.templates.map((item) => item.templateKey).sort(), ["cancellation", "invoice_notification", "order_confirmation", "payment_failure", "receipt_notification", "refund", "shipment_notification"]);
   assert.equal(payload.provider.name, "Resend"); assert.equal(payload.provider.configured, true); assert.equal(payload.provider.externalVerification, "verified");
   assert.equal(payload.sender.fromAddress, "receipts@notify.example.test"); assert.equal(payload.sender.sendingDomain, "notify.example.test"); assert.equal(payload.sender.replyToAddress, "support@example.test"); assert.equal(payload.sender.externallyVerified, false);
-  assert.equal(payload.readiness.configurationReady, true); assert.equal(payload.readiness.state, "ready_but_disabled"); assert.equal(payload.readiness.customerSendsEnabled, false); assert.equal(payload.readiness.productionLifecycleImplemented, true);
+  assert.equal(payload.readiness.configurationReady, true); assert.equal(payload.readiness.state, "ready_but_disabled"); assert.equal(payload.readiness.minimumReadyTemplates, 1); assert.deepEqual(payload.readiness.requiredTemplateKeys, ["order_confirmation"]); assert.equal(payload.readiness.customerSendsEnabled, false); assert.equal(payload.readiness.productionLifecycleImplemented, true);
   assert.equal(payload.dependencies.documents.receipt.configured, true); assert.equal(payload.dependencies.documents.invoice.configured, false); assert.equal(payload.dependencies.paypalRequired, false);
   assert.deepEqual(payload.deliveries.counts, { total: 2, test: 1, live: 1, unknown: 0, sent: 1, failed: 1, pending: 0, sending: 0 });
   assert.equal(payload.deliveries.recent[0].maskedRecipient, "a***@example.test"); assert.equal(payload.deliveries.recent[1].maskedRecipient, "p***@example.test");
