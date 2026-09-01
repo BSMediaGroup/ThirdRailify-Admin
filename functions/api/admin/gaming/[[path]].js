@@ -1,18 +1,32 @@
-import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
+import { AuthFailure, corsHeaders, enforceRateLimit, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
 import { accessForSession, requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import { adminGamingPayload, mutateGaming, removeGamingArtwork, uploadGamingArtwork } from "../../../_shared/gaming-core.js";
+import { getSteamGame, parseSteamLookupInput, searchSteamGames } from "../../../_shared/steam-store.js";
 
 const PREFIX = "/api/admin/gaming";
 const MAX_JSON = 64 * 1024;
 const MAX_ARTWORK = 4 * 1024 * 1024;
 
-export async function onRequest({ request, env }) {
+export async function onRequest({ request, env, data }) {
   try {
     if (request.method === "OPTIONS") return options(request, env);
     const path = new URL(request.url).pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g, "");
     requireOriginWhenPresent(request, env);
-    if (request.method === "GET" && !path) {
+    if (request.method === "GET") {
       const session = await requireAdminCapability(env, request, "gaming.view");
+      if (path === "steam/search") {
+        await enforceRateLimit(env, request, "gaming_steam_lookup", session.accountId);
+        const input = new URL(request.url).searchParams.get("q") || "";
+        const parsed = parseSteamLookupInput(input);
+        if (parsed.kind === "app") return response({ ok: true, mode: "app", result: await getSteamGame(parsed.appId, { env, fetchImpl: data?.gamingFetch || fetch, cache: data?.gamingCache ?? globalThis.caches?.default }) }, request, env);
+        return response({ ok: true, mode: "search", ...await searchSteamGames(parsed.query, { fetchImpl: data?.gamingFetch || fetch, cache: data?.gamingCache ?? globalThis.caches?.default }) }, request, env);
+      }
+      const app = path.match(/^steam\/apps\/(\d{1,12})$/);
+      if (app) {
+        await enforceRateLimit(env, request, "gaming_steam_lookup", session.accountId);
+        return response({ ok: true, result: await getSteamGame(app[1], { env, fetchImpl: data?.gamingFetch || fetch, cache: data?.gamingCache ?? globalThis.caches?.default }) }, request, env);
+      }
+      if (path) throw new AuthFailure(404, "gaming_route_not_found", "The Admin Gaming action was not found.");
       return response(await adminGamingPayload(env, await accessForSession(env, session)), request, env);
     }
     if (request.method !== "POST") throw new AuthFailure(405, "method_not_allowed", "This method is not allowed.", { Allow: "GET,POST,OPTIONS" });

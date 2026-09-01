@@ -48,6 +48,7 @@ const RATE_RULES = {
   site_content: { limit: 30, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
   contact: { limit: 6, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   gaming_suggestion: { limit: 6, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
+  gaming_steam_lookup: { limit: 60, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
 };
 
 const ONE_TIME_TABLES = new Set(["email_verification_tokens", "password_reset_tokens"]);

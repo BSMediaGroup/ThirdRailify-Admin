@@ -1,23 +1,31 @@
 import { AuthFailure, cleanText, nowIso, randomId, writeAudit } from "./auth-core.js";
 import { sanitizeWheelMedia } from "./wheel-media.js";
+import { steamProviderStatus } from "./steam-store.js";
 
 const BUCKET = "THIRDRAILIFY_PROFILE_MEDIA";
 const IMAGE_TYPES = new Map([["image/png", "png"], ["image/jpeg", "jpg"], ["image/webp", "webp"], ["image/bmp", "bmp"]]);
+const GAMING_SCHEMA = Object.freeze({
+  gaming_games: ["id", "display_title", "normalized_title", "canonical_slug", "platform_label", "short_description", "genre", "developer", "publisher", "steam_app_id", "steam_store_url", "steam_mapping_state", "metadata_provenance", "artwork_asset_id", "remote_artwork_url", "archived_at", "created_at", "updated_at"],
+  gaming_media_assets: ["id", "game_id", "object_key", "sha256", "content_type", "byte_size", "width", "height", "lifecycle", "created_at"],
+  gaming_rotation: ["game_id", "position", "added_to_rotation_at"],
+});
+const GAMING_INDEXES = ["gaming_games_slug_unique", "gaming_games_steam_app_unique", "gaming_games_title_index", "gaming_games_archive_index", "gaming_rotation_position_unique", "gaming_media_game_index"];
 
 export async function adminGamingPayload(env, access) {
   const db = requireDb(env);
-  const rows = await db.prepare(`SELECT g.*, r.position, r.added_to_rotation_at,
+  await requireGamingSchema(db);
+  const rows = await gamingQuery(() => db.prepare(`SELECT g.*, r.position, r.added_to_rotation_at,
     a.id AS media_id, a.content_type AS media_content_type, a.width AS media_width, a.height AS media_height
     FROM gaming_games g
     LEFT JOIN gaming_rotation r ON r.game_id = g.id
     LEFT JOIN gaming_media_assets a ON a.id = g.artwork_asset_id AND a.lifecycle = 'active'
-    ORDER BY CASE WHEN r.position IS NULL THEN 1 ELSE 0 END, r.position, g.updated_at DESC, g.display_title COLLATE NOCASE`).all();
+    ORDER BY CASE WHEN r.position IS NULL THEN 1 ELSE 0 END, r.position, g.updated_at DESC, g.display_title COLLATE NOCASE`).all());
   const games = (rows.results || []).map((row) => projectGame(row, env, true));
   return {
     ok: true,
     authority: "Commerce D1",
     access,
-    steamCatalogue: { configured: Boolean(String(env?.STEAM_WEB_API_KEY || "")), implemented: false, method: "IStoreService/GetAppList", message: String(env?.STEAM_WEB_API_KEY || "") ? "A server-side Steam key is present, but no local catalogue index is enabled. Use Search Steam, then verify the App ID or Store URL manually." : "Steam catalogue lookup is not configured. Use Search Steam, then paste an App ID or Store URL." },
+    steamCatalogue: steamProviderStatus(env),
     games,
     rotation: games.filter((game) => game.rotation.inRotation).sort((a, b) => a.rotation.position - b.rotation.position),
     summary: {
@@ -31,11 +39,12 @@ export async function adminGamingPayload(env, access) {
 }
 
 export async function publicGamingRotation(env) {
-  const rows = await requireDb(env).prepare(`SELECT g.*, r.position, r.added_to_rotation_at,
+  const db = requireDb(env); await requireGamingSchema(db);
+  const rows = await gamingQuery(() => db.prepare(`SELECT g.*, r.position, r.added_to_rotation_at,
     a.id AS media_id, a.content_type AS media_content_type, a.width AS media_width, a.height AS media_height
     FROM gaming_rotation r JOIN gaming_games g ON g.id = r.game_id
     LEFT JOIN gaming_media_assets a ON a.id = g.artwork_asset_id AND a.lifecycle = 'active'
-    WHERE g.archived_at IS NULL ORDER BY r.position, g.display_title COLLATE NOCASE`).all();
+    WHERE g.archived_at IS NULL ORDER BY r.position, g.display_title COLLATE NOCASE`).all());
   return {
     ok: true,
     schema: "thirdrailify-gaming-rotation-v1",
@@ -48,6 +57,7 @@ export async function publicGamingRotation(env) {
 }
 
 export async function mutateGaming(env, actorAccountId, input) {
+  await requireGamingSchema(requireDb(env));
   const action = cleanText(input?.action, 40);
   if (action === "create") return createGame(env, actorAccountId, input.game || {}, Boolean(input.inRotation));
   if (action === "update") return updateGame(env, actorAccountId, input.game || {});
@@ -59,7 +69,7 @@ export async function mutateGaming(env, actorAccountId, input) {
 }
 
 export async function uploadGamingArtwork(env, actorAccountId, gameIdValue, bytes, contentType, filename = "") {
-  const gameId = identifier(gameIdValue); const db = requireDb(env); const game = await requireGame(db, gameId);
+  const gameId = identifier(gameIdValue); const db = requireDb(env); await requireGamingSchema(db); const game = await requireGame(db, gameId);
   const image = sanitizeWheelMedia(new Uint8Array(bytes || []), contentType, "centre");
   if (!IMAGE_TYPES.has(image.contentType)) throw new AuthFailure(415, "gaming_artwork_format_invalid", "Use PNG, JPG, WebP, or BMP artwork.");
   const bucket = requireBucket(env); const id = randomId(); const stamp = nowIso(); const sha = await digestHex(image.bytes);
@@ -80,7 +90,7 @@ export async function uploadGamingArtwork(env, actorAccountId, gameIdValue, byte
 }
 
 export async function removeGamingArtwork(env, actorAccountId, gameIdValue) {
-  const db = requireDb(env); const game = await requireGame(db, identifier(gameIdValue)); const stamp = nowIso();
+  const db = requireDb(env); await requireGamingSchema(db); const game = await requireGame(db, identifier(gameIdValue)); const stamp = nowIso();
   const asset = game.artwork_asset_id ? await db.prepare("SELECT * FROM gaming_media_assets WHERE id = ? AND lifecycle = 'active'").bind(game.artwork_asset_id).first() : null;
   await db.batch([
     db.prepare("UPDATE gaming_games SET artwork_asset_id = NULL, remote_artwork_url = NULL, updated_at = ? WHERE id = ?").bind(stamp, game.id),
@@ -92,7 +102,7 @@ export async function removeGamingArtwork(env, actorAccountId, gameIdValue) {
 }
 
 export async function gamingMediaResponse(env, assetIdValue, request) {
-  const id = identifier(assetIdValue); const row = await requireDb(env).prepare(`SELECT a.* FROM gaming_media_assets a JOIN gaming_games g ON g.id = a.game_id WHERE a.id = ? AND a.lifecycle = 'active' AND g.artwork_asset_id = a.id LIMIT 1`).bind(id).first();
+  const id = identifier(assetIdValue); const db = requireDb(env); await requireGamingSchema(db); const row = await db.prepare(`SELECT a.* FROM gaming_media_assets a JOIN gaming_games g ON g.id = a.game_id WHERE a.id = ? AND a.lifecycle = 'active' AND g.artwork_asset_id = a.id LIMIT 1`).bind(id).first();
   if (!row) throw new AuthFailure(404, "gaming_artwork_not_found", "This Gaming artwork was not found.");
   const object = await requireBucket(env).get(row.object_key); if (!object) throw new AuthFailure(404, "gaming_artwork_not_found", "This Gaming artwork was not found.");
   return new Response(request.method === "HEAD" ? null : object.body, { headers: { "Cache-Control": "public, max-age=31536000, immutable", "Content-Type": row.content_type, "Cross-Origin-Resource-Policy": "cross-origin", ETag: `\"${row.sha256}\"`, "X-Content-Type-Options": "nosniff" } });
@@ -166,7 +176,7 @@ function validateGame(input, requireId) {
   return { title, normalizedTitle: title.toLocaleLowerCase("en-AU"), slug: slugify(input.slug || title), platform, description, genre, developer, publisher, steamAppId, steamStoreUrl, steamState, provenance, remoteArtworkUrl };
 }
 
-function normalizeSteamUrl(value, appId) { const raw = cleanText(value, 500); if (!raw) return null; let url; try { url = new URL(raw); } catch { throw new AuthFailure(400, "gaming_steam_url_invalid", "Use a valid Steam Store app URL."); } const match = url.pathname.match(/^\/app\/(\d+)(?:\/|$)/); if (url.protocol !== "https:" || url.hostname !== "store.steampowered.com" || !match) throw new AuthFailure(400, "gaming_steam_url_invalid", "Use an official Steam Store app URL."); if (appId && match[1] !== appId) throw new AuthFailure(400, "gaming_steam_mismatch", "Steam App ID and Store URL must refer to the same app."); return `https://store.steampowered.com/app/${match[1]}/`; }
+function normalizeSteamUrl(value, appId) { const raw = cleanText(value, 500); if (!raw) return null; let url; try { url = new URL(raw); } catch { throw new AuthFailure(400, "gaming_steam_url_invalid", "Use a valid Steam Store app URL."); } const match = url.pathname.match(/^\/app\/(\d+)(?:\/|$)/); if (url.protocol !== "https:" || url.hostname !== "store.steampowered.com" || url.username || url.password || url.port || !match) throw new AuthFailure(400, "gaming_steam_url_invalid", "Use an official Steam Store app URL."); if (appId && match[1] !== appId) throw new AuthFailure(400, "gaming_steam_mismatch", "Steam App ID and Store URL must refer to the same app."); return `https://store.steampowered.com/app/${match[1]}/`; }
 function normalizeImageUrl(value) { const raw = cleanText(value, 1000); if (!raw) return null; let url; try { url = new URL(raw); } catch { throw new AuthFailure(400, "gaming_artwork_url_invalid", "Use a valid HTTPS artwork URL."); } const allowedHosts = new Set(["cdn.thirdrailify.com", "shared.fastly.steamstatic.com"]); if (url.protocol !== "https:" || url.username || url.password || !allowedHosts.has(url.hostname.toLowerCase())) throw new AuthFailure(400, "gaming_artwork_url_invalid", "Use an approved public HTTPS artwork URL or upload the cover to Media."); return url.toString(); }
 function slugify(value) { const slug = cleanText(value, 120).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 100); return slug || null; }
 function projectGame(row, env, admin) { const mediaUrl = row.media_id ? `${configuredAdminOrigin(env)}/api/gaming/media/${encodeURIComponent(row.media_id)}` : null; return { id: row.id, title: row.display_title, slug: row.canonical_slug, platform: row.platform_label, description: row.short_description, genre: row.genre, developer: row.developer, publisher: row.publisher, steam: { appId: row.steam_app_id, storeUrl: row.steam_store_url, state: row.steam_mapping_state, provenance: row.metadata_provenance }, artwork: { url: mediaUrl || row.remote_artwork_url || null, source: mediaUrl ? "uploaded" : row.remote_artwork_url ? "remote" : "fallback", assetId: admin ? row.media_id || null : undefined, width: admin ? row.media_width || null : undefined, height: admin ? row.media_height || null : undefined }, rotation: { inRotation: row.position != null, position: row.position == null ? null : Number(row.position), addedAt: row.added_to_rotation_at || null }, archived: Boolean(row.archived_at), archivedAt: row.archived_at || null, createdAt: row.created_at, updatedAt: row.updated_at }; }
@@ -174,6 +184,27 @@ function configuredAdminOrigin(env) { const value = String(env?.THIRDRAILIFY_ADM
 function identifier(value) { const id = cleanText(value, 120); if (!/^[a-z0-9][a-z0-9-]{2,119}$/i.test(id)) throw new AuthFailure(400, "gaming_id_invalid", "The game identifier is invalid."); return id; }
 async function requireGame(db, id) { const row = await db.prepare("SELECT * FROM gaming_games WHERE id = ?").bind(id).first(); if (!row) throw new AuthFailure(404, "gaming_game_not_found", "This game was not found."); return row; }
 function requireDb(env) { if (!env?.THIRDRAILIFY_COMMERCE_DB?.prepare) throw new AuthFailure(503, "gaming_database_not_configured", "Gaming catalogue storage is not configured."); return env.THIRDRAILIFY_COMMERCE_DB; }
+export async function gamingSchemaState(envOrDb) {
+  const db = envOrDb?.prepare ? envOrDb : requireDb(envOrDb);
+  try {
+    const objects = await db.prepare(`SELECT name, type FROM sqlite_master WHERE (type = 'table' AND name IN ('gaming_games','gaming_media_assets','gaming_rotation')) OR (type = 'index' AND name IN (${GAMING_INDEXES.map(() => "?").join(",")}))`).bind(...GAMING_INDEXES).all();
+    const present = new Set((objects.results || []).map((row) => `${row.type}:${row.name}`));
+    const missingTables = Object.keys(GAMING_SCHEMA).filter((name) => !present.has(`table:${name}`));
+    const missingIndexes = GAMING_INDEXES.filter((name) => !present.has(`index:${name}`));
+    const missingColumns = [];
+    for (const [table, required] of Object.entries(GAMING_SCHEMA)) {
+      if (missingTables.includes(table)) continue;
+      const columns = await db.prepare(`PRAGMA table_info(${table})`).all();
+      const names = new Set((columns.results || []).map((row) => row.name));
+      for (const column of required) if (!names.has(column)) missingColumns.push(`${table}.${column}`);
+    }
+    return { compatible: !missingTables.length && !missingIndexes.length && !missingColumns.length, migration: "0028_gaming_catalogue.sql", missingTables, missingIndexes, missingColumns };
+  } catch {
+    throw new AuthFailure(503, "gaming_query_failed", "The Gaming database could not be inspected. Try again shortly.");
+  }
+}
+async function requireGamingSchema(db) { const state = await gamingSchemaState(db); if (!state.compatible) throw new AuthFailure(503, "gaming_migration_required", "Gaming database migration required."); return state; }
+async function gamingQuery(operation) { try { return await operation(); } catch (error) { if (error instanceof AuthFailure) throw error; throw new AuthFailure(503, "gaming_query_failed", "The Gaming database query failed. Try again shortly."); } }
 function requireBucket(env) { if (!env?.[BUCKET]?.put || !env?.[BUCKET]?.get || !env?.[BUCKET]?.delete) throw new AuthFailure(503, "gaming_media_not_configured", "Gaming artwork storage is not configured."); return env[BUCKET]; }
 async function accessForActor(env, actor) { const { loadAccountById } = await import("./auth-core.js"); const { effectiveAdminAccess } = await import("./admin-capabilities.js"); return effectiveAdminAccess(env, await loadAccountById(env, actor)); }
 async function audit(env, actor, eventType, gameId, metadata) { await writeAudit(env, { actorAccountId: actor, targetAccountId: null, eventType, provider: "gaming", result: "success", metadata: { gameId, ...metadata } }); }
