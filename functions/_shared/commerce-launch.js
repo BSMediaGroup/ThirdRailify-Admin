@@ -40,7 +40,7 @@ export async function commerceLaunchPlan(env) {
     db.prepare("SELECT template_key,status,enabled FROM commerce_templates WHERE template_kind='email'").all(),
     db.prepare("SELECT state,COUNT(*) count FROM commerce_operation_jobs GROUP BY state").all(),
     db.prepare("SELECT COUNT(*) count FROM commerce_provider_webhook_events WHERE provider='printful' AND processing_status='processed'").first(),
-    db.prepare("SELECT trading_name,country_code,currency_code,support_email,legal_business_name_ciphertext,private_address_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
+    db.prepare("SELECT trading_name,country_code,currency_code,public_contact_email,support_email,public_phone,public_address_json,legal_business_name_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
   const providers = Object.fromEntries((providersResult?.results || []).map((row) => [row.provider, { ...row, metadata: json(row.safe_metadata_json, {}) }]));
@@ -52,23 +52,26 @@ export async function commerceLaunchPlan(env) {
   const activeMarkets = markets.filter((market) => market.status === "active" && market.strategy === "printful_dynamic");
   const migrationState = json(migration?.safe_state_json, {});
   const configuredEmailTemplates = (templates?.results || []).filter((template) => template.status === "ready" && Number(template.enabled) === 1).length;
+  const orderConfirmationReady = (templates?.results || []).some((template) => template.template_key === "order_confirmation" && template.status === "ready" && Number(template.enabled) === 1);
+  const orderConfirmationDeliveryReady = settings.resend_domain_verified === true && Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM) && orderConfirmationReady;
   const hardGates = [
-    gate("merchant_identity", Boolean(cleanText(business?.trading_name, 160) && business?.country_code === "CA" && business?.currency_code === "CAD" && cleanText(business?.support_email, 254) && business?.legal_business_name_ciphertext && business?.private_address_ciphertext), "The Canadian merchant identity, support contact, encrypted legal name, and encrypted private address are configured."),
+    gate("merchant_identity", Boolean(cleanText(business?.trading_name, 160) && business?.country_code === "CA" && business?.currency_code === "CAD" && cleanText(business?.public_contact_email, 254) && cleanText(business?.support_email, 254) && cleanText(business?.public_phone, 32) && publicBusinessAddressReady(business?.public_address_json) && business?.legal_business_name_ciphertext), "The Canadian supplier name, public business address, public phone, and support contact required for the internet sale are configured; optional private metadata is excluded."),
     gate("paypal_preferred", settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && paypal?.integration_mode === "direct_merchant", "PayPal is preferred and Stripe is retained but disabled."),
     gate("paypal_live_credential", paypalLiveTechnical.credentialsConfigured && paypalLiveTechnical.oauthVerified, "Distinct server-only PayPal LIVE credentials authenticated successfully against the LIVE OAuth endpoint."),
     gate("paypal_live_account", paypal?.status === "connected" && paypal?.environment === "live" && paypal?.integration_mode === "direct_merchant" && paypal?.country_code === "CA" && String(paypal?.currency_code || "").toUpperCase() === "CAD", "The configured PayPal connection is the Canadian CAD direct merchant app; no stronger merchant-onboarding claim is inferred."),
     gate("paypal_live_webhook", paypalLiveTechnical.webhookReadbackVerified, "The exact PayPal LIVE webhook URL and event set were read back and its identifier is stored as a server secret."),
     gate("tax_policy", settings.tax_calculation_provider === "not_collecting", "An explicit server-authoritative tax policy is configured without inventing registrations."),
     gate("printful_store", printful?.status === "connected" && printful?.integration_mode === "fulfillment" && String(printful?.external_account_id || "") === "18668025" && printful?.metadata?.api_configured === true && hasPrintfulSecret(env), "The native Printful target store 18668025 is verified."),
-    gate("printful_v2_webhook", settings.printful_v2_webhook_configured === true && hasPrintfulWebhookSecrets(env), "The signed Printful V2 webhook is configured and read back."),
     gate("catalogue", Number(counts?.eligible_variants || 0) > 0 && Number(counts?.eligible_sellable_variants || 0) === Number(counts?.eligible_variants || 0) && Number(counts?.ineligible_sellable_variants || 0) === 0, "Every eligible target-verified variant is sellable and blocked variants remain unavailable."),
     gate("catalogue_migration_terminal", new Set(["completed", "completed_with_blocked_products"]).has(migration?.status) && migration?.phase === "completed" && !migration?.step_lease_token && new Set(["completed", "completed_with_blocked_products"]).has(migrationState.finalStatus || migration?.status), "The permanent catalogue migration is terminal with no active lease and remains outside the launch workflow."),
     gate("shipping", settings.shipping_strategy === "printful_dynamic" && activeMarkets.length > 0, "Printful dynamic rates are active for an explicit market allowlist."),
     gate("operations_worker", settings.commerce_operations_worker_configured === true, "The scheduled Commerce Operations Worker and D1 job authority are configured."),
+    gate("order_confirmation_delivery", orderConfirmationDeliveryReady, "A retainable Third Railify order confirmation can be delivered after a paid LIVE internet order; shipment email and invoices are separate optional features."),
     gate("emergency_pause_clear", settings.commerce_emergency_paused !== true, "Emergency pause is clear."),
   ];
   const advisories = [
-    gate("transactional_email", settings.resend_domain_verified === true && configuredEmailTemplates >= 2, "Resend sender/domain and required templates are ready. Email may remain disabled without blocking checkout."),
+    gate("shipment_email", settings.resend_domain_verified === true && configuredEmailTemplates >= 2, "Shipment notification delivery is ready. It is useful post-purchase communication, not payment or fulfillment authority."),
+    gate("printful_v2_webhook", settings.printful_v2_webhook_configured === true && hasPrintfulWebhookSecrets(env) && (settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0), "Incoming Printful webhooks remain fail-closed without verified signing-secret custody and real signed-delivery evidence. Scheduled authenticated order reconciliation supplies the production lifecycle authority."),
     gate("printful_signed_delivery", settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0, "At least one real signed Printful delivery has been processed. Absence is reported as no delivery evidence yet."),
   ];
   const ready = hardGates.every((entry) => entry.ready);
@@ -195,7 +198,7 @@ export async function activateCommerceLaunch(env, input, actorAccountId) {
   const db = requireCommerceDb(env);
   const timestamp = nowIso();
   const nextRevision = plan.revision + 1;
-  const emailEnabled = plan.advisories.find((entry) => entry.id === "transactional_email")?.ready === true;
+  const emailEnabled = plan.hardGates.find((entry) => entry.id === "order_confirmation_delivery")?.ready === true;
   const auditId = randomId();
   const statements = [
     setting(db, "checkout_enabled", true, timestamp, actorAccountId),
@@ -284,6 +287,7 @@ function setting(db, key, value, timestamp, actor) {
 function gate(id, ready, detail) { return { id, ready: Boolean(ready), state: ready ? "ready" : "blocked", detail }; }
 function hasPrintfulSecret(env) { const value = String(env?.PRINTFUL_API_TOKEN || "").trim(); return value.length >= 16 && value.length <= 4096; }
 function hasPrintfulWebhookSecrets(env) { const publicKey = String(env?.PRINTFUL_WEBHOOK_V2_PUBLIC_KEY || "").trim(); const secret = String(env?.PRINTFUL_WEBHOOK_V2_SECRET_HEX || "").trim(); return /^[A-Za-z0-9+/_=-]{4,512}$/.test(publicKey) && /^[0-9a-fA-F]{64,1024}$/.test(secret) && secret.length % 2 === 0; }
+function publicBusinessAddressReady(value) { const address = json(value, null); return Boolean(address && typeof address === "object" && !Array.isArray(address) && cleanText(address.line1, 160) && cleanText(address.city, 120) && cleanText(address.province, 3) && cleanText(address.postalCode, 24) && address.country === "CA"); }
 function changes(result) { return Number(result?.meta?.changes || 0); }
 function number(value) { const result = Number(value); return Number.isSafeInteger(result) && result >= 0 ? result : 0; }
 function json(value, fallback) { try { return JSON.parse(String(value ?? "")); } catch { return fallback; } }

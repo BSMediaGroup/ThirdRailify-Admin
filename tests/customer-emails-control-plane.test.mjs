@@ -33,6 +33,10 @@ test("Customer Emails projects server sender state, actual template kinds, canon
   assert.equal(payload.deliveries.recent[0].maskedRecipient, "a***@example.test"); assert.equal(payload.deliveries.recent[1].maskedRecipient, "p***@example.test");
   assert.equal(payload.deliveries.lastFailed.failure, "Provider delivery failed; no raw provider response is exposed.");
   assert.equal(payload.deliveries.lastSuccessful.providerMessageReference, "provider-safe-reference");
+  await ensureEnvironmentMasters(env);
+  const policyMaster = await harness.authDb.prepare("SELECT id FROM accounts WHERE source='env_master' ORDER BY created_at LIMIT 1").first();
+  const now = new Date().toISOString();
+  await harness.authDb.prepare("INSERT INTO admin_role_capability_denials (role,capability,denied_by_account_id,created_at,updated_at) VALUES ('full','commerce.templates.manage',?,?,?)").bind(policyMaster.id, now, now).run();
   const viewOnly = await customerEmailsControlPlanePayload(env, { accountId: "view-only", account: { adminLevel: "full" } });
   assert.equal(viewOnly.access.capabilities.includes("commerce.templates.manage"), false); assert.equal(viewOnly.deliveries.lastSuccessful.providerMessageReference, null);
   const serialized = JSON.stringify(payload);

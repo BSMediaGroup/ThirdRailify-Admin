@@ -43,6 +43,10 @@ test("receipt and invoice templates enforce structured allowlists and optimistic
 test("view-only admins can read masked tax/templates and render a CSRF-protected preview but cannot mutate either authority", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); await ensureEnvironmentMasters(env); const now = new Date().toISOString();
   await harness.authDb.prepare("INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES ('tax-viewer','tax-viewer@example.test','Tax Viewer','admin','full','active',?,?,?,'test')").bind(now, now, now).run();
+  const policyMaster = await harness.authDb.prepare("SELECT id FROM accounts WHERE source='env_master' ORDER BY created_at LIMIT 1").first();
+  for (const capability of ["commerce.business.manage", "commerce.templates.manage"]) {
+    await harness.authDb.prepare("INSERT INTO admin_role_capability_denials (role,capability,denied_by_account_id,created_at,updated_at) VALUES ('full',?,?,?,?)").bind(capability, policyMaster.id, now, now).run();
+  }
   const account = await loadAccountByEmail(env, "tax-viewer@example.test"); const session = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), account, ADMIN_ORIGIN); const cookie = cookiePair(session.cookie);
   for (const path of ["tax", "templates"]) { const response = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/${path}`, { method: "GET", origin: ADMIN_ORIGIN, cookie }), env, data: {} }); assert.equal(response.status, 200); }
   const template = serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='payment_receipt'").first());

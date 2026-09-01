@@ -71,20 +71,21 @@ export async function businessInformationPayload(env, session) {
   const contactItems = [
     readinessItem("public_contact", "Public contact email", Boolean(profile.publicContactEmail), profile.publicContactEmail || "Not configured"),
     readinessItem("support_contact", "Customer support email", Boolean(profile.supportEmail), profile.supportEmail || "Not configured"),
-    optionalReadinessItem("public_phone", "Public phone", Boolean(profile.publicPhone), profile.publicPhone || "Not configured / not required"),
+    readinessItem("public_phone", "Public supplier phone", Boolean(profile.publicPhone), profile.publicPhone || "Required for internet-sale disclosure"),
+    readinessItem("public_address", "Public business address", publicBusinessAddressConfigured(profile.publicAddress), publicBusinessAddressConfigured(profile.publicAddress) ? "Configured for customer disclosure" : "Required for internet-sale disclosure"),
     optionalReadinessItem("website", "Website", Boolean(profile.websiteUrl), profile.websiteUrl || "Not configured / not required"),
   ];
   const legalItems = [
     storedReadinessItem("legal_name", "Legal business name", profile.private.legalBusinessNameStored),
-    storedReadinessItem("business_address", "Legal business address", profile.private.privateAddressStored),
-    storedReadinessItem("business_registration", "Business registration number", profile.private.businessRegistrationNumberStored),
+    optionalReadinessItem("private_address", "Private legal address", profile.private.privateAddressStored, profile.private.privateAddressStored ? "Encrypted value configured" : "Optional private metadata"),
+    optionalReadinessItem("business_registration", "Business registration number", profile.private.businessRegistrationNumberStored, profile.private.businessRegistrationNumberStored ? "Encrypted value configured" : "Optional private metadata"),
   ];
   const taxState = activeTaxRegistrations.length ? "complete" : registrations.length ? "unverified" : "not_configured";
   const receiptTemplateReady = templates.payment_receipt?.status === "ready" && Number(templates.payment_receipt?.enabled) === 1;
   const invoiceTemplateReady = templates.invoice_document?.status === "ready" && Number(templates.invoice_document?.enabled) === 1;
   const readiness = {
     overallStatus: canonicalReadiness.domains.business.ready ? "complete" : "action_required",
-    completion: businessCompletion([...coreItems, ...contactItems.slice(0, 2), ...legalItems]),
+    completion: businessCompletion([...coreItems, ...contactItems, ...legalItems]),
     groups: [
       readinessGroup("core", "Core merchant identity", coreItems),
       readinessGroup("contact", "Customer contact", contactItems),
@@ -96,9 +97,9 @@ export async function businessInformationPayload(env, session) {
     ],
     profile: {
       coreIdentity: coreItems.every((item) => item.state === "complete") ? "complete" : "action_required",
-      publicContact: profile.publicContactEmail && profile.supportEmail ? "complete" : profile.publicContactEmail || profile.supportEmail ? "partial" : "not_configured",
-      legalIdentity: legalItems.every((item) => item.state === "unverified") ? "complete" : legalItems.some((item) => item.state === "unverified") ? "partial" : "not_configured",
-      address: profile.private.privateAddressStored ? "complete" : "not_configured",
+      publicContact: profile.publicContactEmail && profile.supportEmail && profile.publicPhone ? "complete" : profile.publicContactEmail || profile.supportEmail || profile.publicPhone ? "partial" : "not_configured",
+      legalIdentity: profile.private.legalBusinessNameStored ? "complete" : "not_configured",
+      address: publicBusinessAddressConfigured(profile.publicAddress) ? "complete" : "not_configured",
       tax: taxState,
       documents: canonicalReadiness.domains.documents.ready ? "complete" : receiptTemplateReady ? "partial" : "action_required",
       productionCommerce: canonicalReadiness.productionReady ? "complete" : "action_required",
@@ -115,7 +116,7 @@ export async function businessInformationPayload(env, session) {
     documentIdentity: {
       tradingName: profile.tradingName,
       legalNameStored: profile.private.legalBusinessNameStored,
-      addressStored: profile.private.privateAddressStored,
+      addressStored: publicBusinessAddressConfigured(profile.publicAddress),
       contactEmail: profile.supportEmail || profile.publicContactEmail || null,
       taxRegistrationState: taxState,
       receiptTemplate: templateState(templates.payment_receipt),
@@ -248,20 +249,20 @@ export async function productionReadinessPayload(env, session) {
   const readableTemplates = templatesResult?.templates || [];
   const emailReadyCount = readableTemplates.filter((template) => template.templateKind === "email" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
   const receiptTemplateReady = readableTemplates.some((template) => template.templateKind === "document" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled);
-  const legalIdentity = Boolean(profile?.legal_business_name_ciphertext && profile?.business_registration_number_ciphertext);
-  const address = Boolean(profile?.private_address_ciphertext);
+  const legalIdentity = Boolean(profile?.legal_business_name_ciphertext);
+  const address = publicBusinessAddressConfigured(profile?.public_address_json);
   const merchantIdentity = Boolean(profile?.trading_name && profile?.country_code === "CA" && profile?.province_code === "ON" && profile?.currency_code === "CAD");
-  const contact = Boolean(profile?.public_contact_email && profile?.support_email);
+  const contact = Boolean(profile?.public_contact_email && profile?.support_email && profile?.public_phone);
   const stripeTestConnected = providers.stripe?.status === "connected" && providers.stripe?.environment === "test" && providers.stripe?.metadata?.api_configured === true && settings.stripe_api_configured === true && providers.stripe?.metadata?.webhook_configured === true && settings.stripe_webhook_configured === true;
   const testAcceptancePassed = Boolean(acceptedOrder?.payment_status === "paid" && acceptedOrder?.environment === "test" && acceptedOrder?.customer_gross_amount === 1500 && acceptedOrder?.stripe_checkout_session_id === "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC" && acceptedWebhook?.provider_event_id === "evt_1U9OysB2jGrq9Tn1apdsFgi2" && !acceptedOrder?.printful_order_id);
   const liveTechnical = paypalTechnicalReadiness({credentials:paypalLive,metadata:providers.paypal?.metadata?.live,configured:settings.paypal_live_configured===true,webhookConfigured:settings.paypal_live_webhook_configured===true});
   const livePaymentsReady = settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && liveTechnical.ready && providers.paypal?.status === "connected" && providers.paypal?.environment === "live" && providers.paypal?.integration_mode === "direct_merchant" && providers.paypal?.country_code === "CA" && String(providers.paypal?.currency_code || "").toUpperCase() === "CAD";
   const businessReady = merchantIdentity && legalIdentity && address && contact;
-  const taxStrategyReady = settings.tax_calculation_provider !== "unconfigured" && activeTaxCount > 0;
+  const taxStrategyReady = settings.tax_calculation_provider === "not_collecting" || (settings.tax_calculation_provider !== "unconfigured" && activeTaxCount > 0);
   const migrationComplete = migration?.status === "complete" && migrationState.manualPause !== true;
   const domains = {
-    business: domain(businessReady, businessReady ? "Merchant, legal identity, address, and contact are configured." : "Operator legal identity, private address, business number, or support contact remains incomplete.", { merchantIdentity, legalIdentity, businessAddress: address, contact }),
-    tax: domain(taxStrategyReady, taxStrategyReady ? "Tax registrations and calculation strategy are configured." : "Tax calculation provider is unconfigured; registrations are not treated as legal advice.", { registrationsConfigured: activeTaxCount > 0, calculationProvider: String(settings.tax_calculation_provider || "unconfigured"), stripeTax: settings.stripe_tax_enabled === true ? "enabled_unverified" : "not_enabled_unverified", ratesConfigured: false }),
+    business: domain(businessReady, businessReady ? "Supplier identity, public business address, public phone, and support contact are configured." : "Supplier legal name, public business address, public phone, or support contact remains incomplete; private phone, private address, and business number are optional metadata.", { merchantIdentity, legalIdentity, businessAddress: address, contact }),
+    tax: domain(taxStrategyReady, settings.tax_calculation_provider === "not_collecting" ? "The operator explicitly configured a server-authoritative not-collecting policy; no registration or rate is inferred." : taxStrategyReady ? "Tax registrations and calculation strategy are configured." : "Tax calculation policy is unconfigured; absence of a registration row is not treated as proof that collection is unnecessary.", { registrationsConfigured: activeTaxCount > 0, calculationProvider: String(settings.tax_calculation_provider || "unconfigured"), stripeTax: settings.stripe_tax_enabled === true ? "enabled_unverified" : "not_enabled_unverified", ratesConfigured: false }),
     payments: domain(livePaymentsReady, livePaymentsReady ? "PayPal LIVE API credentials, OAuth, and exact webhook readback are verified for the direct merchant app." : "PayPal LIVE credentials, OAuth verification, webhook registration/readback, or preferred-provider state remains incomplete. Stripe is excluded from readiness.", { preferredProvider:settings.preferred_payment_provider||"unconfigured",paypalLiveCredentialsConfigured:liveTechnical.credentialsConfigured,paypalLiveOAuthVerified:liveTechnical.oauthVerified,paypalLiveWebhookConfigured:liveTechnical.webhookReadbackVerified,paypalLiveCaptureEnabled:settings.paypal_live_capture_enabled===true,stripeEnabled:settings.stripe_enabled===true,stripeHistoricalTestConnected:stripeTestConnected,stripeHistoricalAcceptancePassed:testAcceptancePassed }),
     catalogue: domain(Number(catalogue?.public_count || 0) > 0, `${Number(catalogue?.public_count || 0)} public products are served from permanent Commerce D1 authority.`, { totalProducts: Number(catalogue?.total || 0), publicProducts: Number(catalogue?.public_count || 0), merchandisingReady: Number(catalogue?.public_count || 0) > 0 }),
     shipping: domain(Boolean(settings.shipping_strategy && settings.shipping_strategy !== "unconfigured"), settings.shipping_strategy && settings.shipping_strategy !== "unconfigured" ? "Shipping strategy is configured." : "Shipping policy and rate calculation are not configured.", { strategy: String(settings.shipping_strategy || "unconfigured") }),
@@ -457,7 +458,7 @@ export async function fulfillmentShippingPayload(env, session) {
       customerData: { state: shippingDataImplemented ? number(orderCounts?.test_shipping_snapshots) + number(orderCounts?.live_shipping_snapshots) > 0 ? "available" : "implemented_no_evidence" : "migration_required", persistedFields: shippingDataImplemented ? ["encrypted_recipient", "destination_country", "destination_region", "shipping_method", "shipping_amount", "currency", "source_quote"] : [], orderSpecificPiiProjectedHere: false },
       rates: { state: !shippingQuoteStorageImplemented ? "migration_required" : shippingStrategy === "unconfigured" ? "implemented_disabled" : "configured", strategy: shippingStrategy, providerQuotePathImplemented: true, providerQuoteCalled: false },
     },
-    tracking: { state: !lifecycleSchemaReady ? "migration_required" : operations.counts.shipments ? "available" : "implemented_no_evidence", persistedFields: trackingColumns, shipmentPollingImplemented: false, providerPollingPerformed: false },
+    tracking: { state: !lifecycleSchemaReady ? "migration_required" : operations.counts.shipments ? "available" : "implemented_no_evidence", persistedFields: trackingColumns, shipmentPollingImplemented: lifecycleSchemaReady, providerPollingPerformed: false },
     lifecycle: {
       schema: { state: lifecycleSchemaReady ? "ready" : "migration_required", migration: "0018_printful_fulfillment_lifecycle.sql" },
       providerOrderModel: { state: lifecycleSchemaReady ? "implemented" : "migration_required", authority: "commerce_fulfillment_orders" },
@@ -468,9 +469,9 @@ export async function fulfillmentShippingPayload(env, session) {
       shipmentNormalization: { state: lifecycleSchemaReady ? "implemented" : "migration_required", authority: "commerce_fulfillment_shipments" },
       partialShipmentHandling: { state: lifecycleSchemaReady ? "implemented" : "migration_required", authority: "normalized item coverage" },
       trackingStorage: { state: lifecycleSchemaReady ? "implemented_encrypted" : "migration_required" },
-      carrierDeliveryPolling: { state: "not_implemented" },
-      reconciliationFallback: { state: "implemented_inactive", automaticPolling: false },
-      fulfillmentSubmission: { state: "disabled" },
+      carrierDeliveryPolling: { state: lifecycleSchemaReady ? "implemented_scheduled" : "migration_required" },
+      reconciliationFallback: { state: lifecycleSchemaReady ? "implemented_scheduled" : "migration_required", automaticPolling: lifecycleSchemaReady, schedule: "every_5_minutes", terminalStates: ["complete", "archived", "canceled"] },
+      fulfillmentSubmission: { state: fulfillmentEnabled ? "enabled" : "disabled" },
     },
     operations,
     draftPreview,
@@ -485,7 +486,7 @@ export async function fulfillmentShippingPayload(env, session) {
       lastAudit: lastAudit ? { action: cleanText(lastAudit.action, 120), result: cleanText(lastAudit.result, 40), createdAt: cleanText(lastAudit.created_at, 80) } : null,
     },
     technical: { builderVersion: PRINTFUL_DRAFT_BUILDER_VERSION, providerCallsOnRead: false, providerCallsOnPreview: false, previewPersists: false, previewAuditedAsMutation: false, shippingDataCapability: shippingDataImplemented ? "implemented" : "migration_required", shippingRateCapability: !shippingQuoteStorageImplemented ? "migration_required" : shippingStrategy === "unconfigured" ? "implemented_disabled" : "configured", trackingCapability: lifecycleSchemaReady ? "implemented" : "migration_required", legacyTrackingColumns },
-    safety: { checkoutEnabled: settings.checkout_enabled === true, controlledTestCheckoutEnabled: settings.stripe_test_checkout_enabled === true, livePaymentCaptureEnabled: settings.live_payment_capture_enabled === true, fulfillmentEnabled, orderMode: orderModeSetting, controlledTestDraftCreationImplemented: true, providerSubmissionAvailable: false, providerConfirmationAvailable: false, previewOnly: true, mutationsAvailableFromThisRoute: false },
+    safety: { checkoutEnabled: settings.checkout_enabled === true, controlledTestCheckoutEnabled: settings.stripe_test_checkout_enabled === true, livePaymentCaptureEnabled: settings.live_payment_capture_enabled === true, fulfillmentEnabled, orderMode: orderModeSetting, controlledTestDraftCreationImplemented: true, providerSubmissionAvailable: fulfillmentEnabled, providerConfirmationAvailable: fulfillmentEnabled, previewOnly: true, mutationsAvailableFromThisRoute: false },
     canonicalReadiness, checkedAt: nowIso(),
   };
 }
@@ -1532,6 +1533,13 @@ function businessPrivacyBoundary() {
     adminOnly: ["profile_revision", "updated_at", "readiness", "template_status"],
     sensitive: ["legal_business_name", "legal_business_address", "private_phone", "business_registration_number"],
   };
+}
+function publicBusinessAddressConfigured(value) {
+  const address = typeof value === "string" ? json(value, null) : value;
+  return Boolean(address && typeof address === "object" && !Array.isArray(address)
+    && cleanText(address.line1, 160) && cleanText(address.city, 120)
+    && cleanText(address.province, 3) && cleanText(address.postalCode, 24)
+    && cleanText(address.country, 2) === "CA");
 }
 function emptyBusinessReadiness() {
   return {

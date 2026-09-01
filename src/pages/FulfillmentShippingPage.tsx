@@ -25,7 +25,7 @@ export function FulfillmentShippingPage() {
 
   return <main className="fulfillment-workspace">
     <header className="fulfillment-heading">
-      <div><p className="eyebrow">Commerce operations control plane</p><h1>Fulfillment &amp; Shipping</h1><p>Local readiness, Printful mapping, delivery dependencies, draft preparation, and production locks. This workspace cannot submit, fulfill, poll, or activate anything.</p></div>
+      <div><p className="eyebrow">Commerce operations control plane</p><h1>Fulfillment &amp; Shipping</h1><p>Local readiness, Printful mapping, delivery dependencies, scheduled reconciliation, and production locks. This read-only workspace cannot submit or activate anything.</p></div>
       <span className="fulfillment-lock"><AdminIcon name="shield" size={16} /> Read only / locked</span>
     </header>
     {error && <div className="admin-alert" role="alert">{error}</div>}
@@ -70,11 +70,11 @@ export function FulfillmentShippingPage() {
           <Capability title="Printful order model" state={payload.lifecycle.providerOrderModel.state} detail="Normalized provider state is stored separately from payment and legacy order fields." />
           <Capability title="Draft recording" state={payload.lifecycle.draftRecording.state} detail="The controlled confirm=false response reconciles idempotently by local external ID and provider order ID." />
           <Capability title="Webhook receiver" state={payload.lifecycle.webhookReceiver.state} detail="Signed V2 beta HMAC receiver is deployed fail-closed; it never relies on an Admin session." />
-          <Capability title="Webhook verification configuration" state={payload.lifecycle.webhookVerification.state} detail="Verification keys are server-only and are not configured or provider-verified in this deployment." />
-          <Capability title="Provider webhook subscription" state={payload.lifecycle.providerSubscription.state} detail="No Printful webhook configuration was created, queried, changed, or simulated in this milestone." />
+          <Capability title="Webhook verification configuration" state={payload.lifecycle.webhookVerification.state} detail="The receiver stays fail-closed unless the server holds the matching signing secret; public-key or subscription readback alone is not signature custody." />
+          <Capability title="Provider webhook subscription" state={payload.lifecycle.providerSubscription.state} detail="Subscription configuration is separate from verified signed delivery and is not production lifecycle authority." />
           <Capability title="Shipment normalization" state={payload.lifecycle.shipmentNormalization.state} detail="Packages, split item coverage, reshipments, returned packages, and delivered evidence remain distinct." />
           <Capability title="Tracking storage" state={payload.lifecycle.trackingStorage.state} detail="Tracking references and URLs are encrypted; list projections expose availability only." />
-          <Capability title="Carrier delivery polling" state={payload.lifecycle.carrierDeliveryPolling.state} detail="No carrier polling or automatic Printful reconciliation loop exists." />
+          <Capability title="Scheduled Printful reconciliation" state={payload.lifecycle.carrierDeliveryPolling.state} detail="The Commerce Operations Worker polls each non-terminal LIVE Printful order every five minutes and normalizes order, shipment, return, and encrypted tracking evidence." />
         </div>
       </section>
 
@@ -94,7 +94,7 @@ export function FulfillmentShippingPage() {
       </section>
 
       <section className="fulfillment-section" aria-labelledby="pipeline-title">
-        <SectionHeading eyebrow="Separated authorities" title="Order fulfillment pipeline" id="pipeline-title" text="A signed Stripe webhook owns payment confirmation. Local Commerce D1 and a future Printful workflow would own fulfillment; a success redirect never does." />
+        <SectionHeading eyebrow="Separated authorities" title="Order fulfillment pipeline" id="pipeline-title" text="Verified PayPal LIVE capture evidence owns payment confirmation. Local Commerce D1 and the scheduled Printful worker own fulfillment; a success redirect and donation authority never do." />
         <ol className="fulfillment-pipeline">
           {payload.pipeline.map((stage, index) => <li key={stage.id} className={stage.implemented ? "is-implemented" : "is-missing"}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{stage.label}</strong><small>{stage.implemented ? "Implemented authority" : "Not implemented"}</small><p>{stage.detail}</p><dl><Fact term="Persisted authority" value={stage.authority} /><Fact term="Transition" value={stage.transition} /></dl></div></li>)}
         </ol>
@@ -118,7 +118,7 @@ export function FulfillmentShippingPage() {
         <div className="fulfillment-draft__grid">
           <article>
             <dl className="fulfillment-facts"><Fact term="Reference" value={payload.draftPreview.reference} /><Fact term="Environment" value={payload.draftPreview.environment.toUpperCase()} /><Fact term="Product" value={payload.draftPreview.item?.product || "No mapped candidate"} /><Fact term="Variant" value={payload.draftPreview.item?.variant || "Unavailable"} /><Fact term="Mapped provider variant" value={payload.draftPreview.item?.mappedProviderVariant || "Unavailable"} /><Fact term="Quantity" value={String(payload.draftPreview.item?.quantity ?? "Unavailable")} /><Fact term="Recipient" value={payload.draftPreview.requirements.recipient.complete ? "Synthetic sample / structurally complete" : "Missing required fields"} /><Fact term="Shipping" value={payload.draftPreview.requirements.shipping.configured ? humanize(payload.draftPreview.requirements.shipping.strategy) : "Not configured"} /></dl>
-            <button type="button" disabled aria-describedby="provider-submit-reason">Submit to Printful — unavailable</button><p id="provider-submit-reason">This workspace exposes no provider-write control. The separate capability-protected acceptance path can create one TEST draft, but confirmation and fulfillment remain unavailable.</p>
+            <button type="button" disabled aria-describedby="provider-submit-reason">Submit to Printful — worker only</button><p id="provider-submit-reason">This workspace exposes no provider-write control. After atomic activation, only a future genuinely paid LIVE merchandise order can enqueue the reconcile-before-create, draft, validate, and confirm workflow.</p>
           </article>
           <article className="fulfillment-draft__preview"><header><div><span>Safe high-level preview</span><strong>{payload.draftPreview.eligible ? "Structurally eligible" : `${payload.draftPreview.blockers.length} blocker${payload.draftPreview.blockers.length === 1 ? "" : "s"}`}</strong></div><StatusChip state={payload.draftPreview.eligible ? "ready" : "blocked"} /></header>
             {payload.draftPreview.blockers.length ? <ul>{payload.draftPreview.blockers.map((blocker) => <li key={blocker.code}><code>{blocker.code}</code><span>{blocker.message}</span></li>)}</ul> : <p>No structural blocker was found in this synthetic fixture; submission authority is still absent.</p>}
@@ -161,7 +161,7 @@ function SectionHeading({ eyebrow, title, id, text, action }: { eyebrow: string;
 function Metric({ label, value, tone: valueTone = "" }: { label: string; value: number; tone?: string }) { return <article className={valueTone ? `is-${valueTone}` : ""}><span>{label}</span><strong>{value.toLocaleString()}</strong></article>; }
 function Gate({ gate }: { gate: FulfillmentGate }) { const content = <><div><strong>{gate.label}</strong><p>{gate.detail}</p></div><StatusChip state={gate.state} /></>; return gate.href ? <Link to={gate.href}>{content}</Link> : <article>{content}</article>; }
 function Dependency({ to, title, text }: { to: string; title: string; text: string }) { return <Link to={to}><div><strong>{title}</strong><p>{text}</p></div><AdminIcon name="arrow" size={15} /></Link>; }
-function tone(state: string) { if (["ready", "configured", "available", "enabled"].includes(state)) return "good"; if (["partial", "incomplete", "unverified", "no_evidence", "implemented_no_evidence", "implemented_disabled", "test_evidence_only", "draft_only"].includes(state)) return "warn"; if (["blocked", "not_implemented", "not_configured", "disabled", "production_disabled", "live"].includes(state)) return "bad"; return "neutral"; }
+function tone(state: string) { if (["ready", "configured", "available", "enabled", "implemented_scheduled"].includes(state)) return "good"; if (["partial", "incomplete", "unverified", "no_evidence", "implemented_no_evidence", "implemented_disabled", "test_evidence_only", "draft_only"].includes(state)) return "warn"; if (["blocked", "not_implemented", "not_configured", "disabled", "production_disabled", "live"].includes(state)) return "bad"; return "neutral"; }
 function humanize(value: string) { return String(value || "Not recorded").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function formatTimestamp(value: string | null) { if (!value) return "No evidence"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? value : date.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }); }
 function errorMessage(reason: unknown, fallback: string) { return reason instanceof Error && reason.message ? reason.message : fallback; }

@@ -365,6 +365,10 @@ async function finalizeCompletedPayment(env, attempt, order, debugId, source) {
         (id,job_kind,event_key,order_id,payment_attempt_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at)
         VALUES (?,'fulfillment_submit',?,?,?,'live',?,'pending',?,?,?)`)
         .bind(`coj_${randomId()}`,`${attempt.id}:fulfillment`,attempt.commerce_order_id,attempt.id,responseDigest,timestamp,timestamp,timestamp));
+      statements.push(db.prepare(`INSERT OR IGNORE INTO commerce_operation_jobs
+        (id,job_kind,event_key,order_id,payment_attempt_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at)
+        VALUES (?,'email_send',?,?,?,'live',?,'pending',?,?,?)`)
+        .bind(`coj_${randomId()}`,`${attempt.id}:order_confirmation`,attempt.commerce_order_id,attempt.id,responseDigest,timestamp,timestamp,timestamp));
     }
   } else {
     statements.push(db.prepare(`UPDATE commerce_donations

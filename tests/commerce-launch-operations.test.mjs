@@ -8,9 +8,15 @@ test("launch planning and sellability use one exact eligibility predicate", asyn
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   await insertTestProduct(harness.commerceDb, { targetPrintfulProductId: "9001", migrationStatus: "target_verified", requiresShipping: 1 });
   await insertTestVariant(harness.commerceDb, { isSellable: 0, targetPrintfulProductId: "9001", targetPrintfulSyncVariantId: "7001", targetCatalogueVariantId: "11576", migrationStatus: "target_verified" });
+  await harness.commerceDb.batch([
+    harness.commerceDb.prepare("UPDATE commerce_products SET provider_presence='current' WHERE id='product-test-001'"),
+    harness.commerceDb.prepare("UPDATE commerce_product_variants SET provider_presence='current' WHERE id='variant-test-001'"),
+  ]);
   const env = commerceEnvironment(harness);
   const before = await commerceLaunchPlan(env);
   assert.equal(before.catalogue.eligibleVariants, 1); assert.equal(before.catalogue.eligibleSellableVariants, 0); assert.equal(before.ready, false);
+  assert.equal(before.hardGates.some((gate) => gate.id === "printful_v2_webhook"), false);
+  assert.equal(before.advisories.some((gate) => gate.id === "printful_v2_webhook"), true);
   const [first, second] = await Promise.all([applyEligibleVariantSellability(env, "master"), applyEligibleVariantSellability(env, "master")]);
   assert.equal(first.after.eligible, 1); assert.equal(second.after.eligible, 1);
   const after = await commerceLaunchPlan(env);
