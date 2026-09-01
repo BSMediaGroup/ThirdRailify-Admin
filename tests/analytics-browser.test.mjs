@@ -75,19 +75,6 @@ test("Audience Analytics renders explicit migration and ready states responsivel
         });
         assert.deepEqual(matrixAlignment, { inside: true, margin: "0px" });
         assert.equal(await page.locator(".analytics-trend__line.is-views").getAttribute("pathLength"), "1");
-        assert.equal(await page.locator(".analytics-trend__y-axis text:not(.analytics-trend__axis-title)").count(), 5, "Trend exposes five labelled value ticks");
-        assert.equal(await page.locator(".analytics-trend__x-axis text:not(.analytics-trend__axis-title)").count(), 3, "Trend labels every retained daily bucket in the fixture");
-        const trendBuckets = page.locator(".analytics-trend__bucket");
-        assert.equal(await trendBuckets.count(), 3, "Every retained bucket has an interactive target");
-        assert.match(await trendBuckets.nth(1).getAttribute("aria-label"), /30 Aug 2026.*3 views, 2 sessions, 1\.50 pages per session/);
-        await trendBuckets.nth(1).focus();
-        const trendTooltip = page.getByRole("tooltip");
-        await trendTooltip.waitFor();
-        assert.match(await trendTooltip.innerText(), /30 Aug 2026/);
-        assert.match(await trendTooltip.innerText(), /Views\s+3\s+Sessions\s+2\s+Pages \/ session\s+1\.50/i);
-        assert.match(await trendTooltip.innerText(), /\+2 views from the previous bucket/);
-        await page.keyboard.press("Escape");
-        assert.equal(await trendTooltip.count(), 0, "Escape dismisses the focused bucket tooltip");
         assert.equal(await page.locator(".analytics-trend__area").evaluate((node) => getComputedStyle(node).animationName), "none", `Analytics gradient remains static for reduced motion at ${viewport.width}px`);
         if (viewport.width === 1440) {
           await page.locator(".analytics-map-marker").nth(1).dispatchEvent("mouseenter");
@@ -104,8 +91,6 @@ test("Audience Analytics renders explicit migration and ready states responsivel
           await page.keyboard.press("Escape");
           assert.equal(await dialog.count(), 0);
           await page.locator(".analytics-trend").scrollIntoViewIfNeeded();
-          await trendBuckets.nth(1).hover();
-          await trendTooltip.waitFor();
           await page.screenshot({ path: join(tmpdir(), "thirdrailify-analytics-trend-v2-1440x900.png") });
         }
       }

@@ -727,28 +727,20 @@ function MetricCell({ value, delta }: { value: number; delta: Delta }) {
   );
 }
 function Trend({ report }: { report: AnalyticsReport }) {
-  const [activePoint, setActivePoint] = useState<number | null>(null);
-  const rawMax = Math.max(
+  const max = Math.max(
     1,
     ...report.series.flatMap((row) => [row.views, row.sessions]),
   );
-  const max = trendAxisMax(rawMax);
   const views = trendPoints(report.series.map((row) => row.views), max);
   const sessions = trendPoints(report.series.map((row) => row.sessions), max);
   const viewsPath = smoothTrendPath(views);
   const sessionsPath = smoothTrendPath(sessions);
   const areaPath = views.length
-    ? `${viewsPath} L ${views.at(-1)!.x} 218 L ${views[0].x} 218 Z`
+    ? `${viewsPath} L ${views.at(-1)!.x} 236 L ${views[0].x} 236 Z`
     : "";
   const peak = Math.max(0, ...report.series.map((row) => row.views));
   const latest = report.series.at(-1);
   const chartKey = report.series.map((row) => `${row.views}:${row.sessions}`).join("|");
-  const yTicks = [0, 1, 2, 3, 4].map((index) => ({ y: 44 + index * 43.5, value: Math.round(max * (1 - index / 4)) }));
-  const xTicks = trendTimeTicks(report.series);
-  const activeRow = activePoint === null ? null : report.series[activePoint] || null;
-  const activeViewPoint = activePoint === null ? null : views[activePoint] || null;
-  const activeSessionPoint = activePoint === null ? null : sessions[activePoint] || null;
-  const activePrevious = activePoint === null || activePoint === 0 ? null : report.series[activePoint - 1] || null;
   return (
     <article className="analytics-card analytics-trend">
       <header>
@@ -761,66 +753,48 @@ function Trend({ report }: { report: AnalyticsReport }) {
           <span className="is-sessions"><i /> Sessions</span>
         </div>
       </header>
-      <div className="analytics-trend__plot">
-        <svg
-          key={chartKey}
-          viewBox="0 0 1000 280"
-          role="img"
-          aria-label={`Views and sessions trend across ${report.series.length} ${report.bucket}ly buckets`}
-          onMouseLeave={() => setActivePoint(null)}
-        >
-          <title>Audience activity trend</title>
-          <desc>Interactive page-view and anonymous-session lines. Focus or hover a bucket for its timestamp and exact values.</desc>
-          <defs>
-            <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#ffd83d" stopOpacity=".46" />
-              <stop offset=".46" stopColor="#d7a900" stopOpacity=".18" />
-              <stop offset="1" stopColor="#f3c928" stopOpacity="0" />
-            </linearGradient>
-            <linearGradient id="trend-line" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0" stopColor="#be8b00" />
-              <stop offset=".45" stopColor="#ffe56f" />
-              <stop offset="1" stopColor="#f3c928" />
-            </linearGradient>
-            <filter id="trend-glow" x="-20%" y="-80%" width="140%" height="260%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
-          </defs>
-          <g className="analytics-trend__grid" aria-hidden="true">
-            {yTicks.map((tick) => <line key={tick.y} x1="72" x2="968" y1={tick.y} y2={tick.y} />)}
-          </g>
-          <g className="analytics-trend__y-axis" aria-hidden="true">
-            <text className="analytics-trend__axis-title" x="14" y="132" transform="rotate(-90 14 132)">Events / bucket</text>
-            {yTicks.map((tick) => <text key={tick.y} x="61" y={tick.y + 3}>{tick.value}</text>)}
-          </g>
-          <path className="analytics-trend__area" d={areaPath} fill="url(#trend-fill)" />
-          <path className="analytics-trend__glow" d={viewsPath} pathLength="1" />
-          <path className="analytics-trend__line is-views" d={viewsPath} pathLength="1" />
-          <path className="analytics-trend__line is-sessions" d={sessionsPath} pathLength="1" />
-          {activeViewPoint ? <g className="analytics-trend__crosshair" aria-hidden="true"><line x1={activeViewPoint.x} x2={activeViewPoint.x} y1="44" y2="218" /><line x1="72" x2="968" y1={activeViewPoint.y} y2={activeViewPoint.y} /></g> : null}
-          <g className="analytics-trend__points">
-            {views.map((point, index) => {
-              const row = report.series[index];
-              const sessionPoint = sessions[index];
-              const selected = activePoint === index;
-              return <g key={row.bucket} className={`analytics-trend__bucket${selected ? " is-active" : ""}`} role="button" tabIndex={0} aria-label={trendPointLabel(row)} aria-describedby={selected ? "analytics-trend-tooltip" : undefined} onMouseEnter={() => setActivePoint(index)} onFocus={() => setActivePoint(index)} onBlur={() => setActivePoint(null)} onClick={() => setActivePoint(index)} onKeyDown={(event) => { if (event.key === "Escape") { setActivePoint(null); event.currentTarget.blur(); } else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActivePoint(index); } }}>
-                <rect className="analytics-trend__hit" x={point.x - 18} y="36" width="36" height="190" rx="9" />
-                <circle className="is-views" cx={point.x} cy={point.y} r={selected ? 6 : 4.5} />
-                <circle className="is-sessions" cx={sessionPoint.x} cy={sessionPoint.y} r={selected ? 5 : 3.5} />
-              </g>;
-            })}
-          </g>
-          <g className="analytics-trend__x-axis" aria-hidden="true">
-            {xTicks.map((tick) => <text key={tick.index} className={tick.position} x={views[tick.index].x} y="252">{formatTrendAxisBucket(tick.bucket, report.bucket)}</text>)}
-            <text className="analytics-trend__axis-title" x="968" y="273">UTC · {report.bucket}ly</text>
-          </g>
-        </svg>
-        {activeRow && activeViewPoint && activeSessionPoint ? <div id="analytics-trend-tooltip" role="tooltip" className={`analytics-trend__tooltip${activeViewPoint.x < 230 ? " is-start" : activeViewPoint.x > 770 ? " is-end" : ""}${activeViewPoint.y < 98 ? " is-below" : ""}`} style={{ left: `${activeViewPoint.x / 10}%`, top: `${activeViewPoint.y / 2.8}%` }}>
-          <strong>{formatDate(activeRow.bucket)}</strong>
-          <dl><div><dt>Views</dt><dd>{number(activeRow.views)}</dd></div><div><dt>Sessions</dt><dd>{number(activeRow.sessions)}</dd></div><div><dt>Pages / session</dt><dd>{activeRow.sessions ? (activeRow.views / activeRow.sessions).toFixed(2) : "—"}</dd></div></dl>
-          <small>{activePrevious ? trendDelta(activeRow.views, activePrevious.views, "view") : "First retained bucket in this window"}</small>
-        </div> : null}
+      <svg
+        key={chartKey}
+        viewBox="0 0 1000 260"
+        role="img"
+        aria-label={`Views and sessions trend across ${report.series.length} ${report.bucket}ly buckets`}
+      >
+        <title>Audience activity trend</title>
+        <desc>Animated page-view and anonymous-session lines over a page-view area gradient.</desc>
+        <defs>
+          <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#ffd83d" stopOpacity=".46" />
+            <stop offset=".46" stopColor="#d7a900" stopOpacity=".18" />
+            <stop offset="1" stopColor="#f3c928" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="trend-line" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#be8b00" />
+            <stop offset=".45" stopColor="#ffe56f" />
+            <stop offset="1" stopColor="#f3c928" />
+          </linearGradient>
+          <filter id="trend-glow" x="-20%" y="-80%" width="140%" height="260%">
+            <feGaussianBlur stdDeviation="5" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        <g className="analytics-trend__grid" aria-hidden="true">
+          {[52, 98, 144, 190, 236].map((y) => <line key={y} x1="32" x2="968" y1={y} y2={y} />)}
+        </g>
+        <path className="analytics-trend__area" d={areaPath} fill="url(#trend-fill)" />
+        <path className="analytics-trend__glow" d={viewsPath} pathLength="1" />
+        <path className="analytics-trend__line is-views" d={viewsPath} pathLength="1" />
+        <path className="analytics-trend__line is-sessions" d={sessionsPath} pathLength="1" />
+        <g className="analytics-trend__points is-views" aria-hidden="true">
+          {views.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r="4.5" />)}
+        </g>
+      </svg>
+      <div className="analytics-trend__axis">
+        <span>
+          {report.series[0] ? shortDate(report.series[0].bucket) : "—"}
+        </span>
+        <span>
+          {report.series.at(-1) ? shortDate(report.series.at(-1)!.bucket) : "—"}
+        </span>
       </div>
       <dl className="analytics-trend__summary">
         <div><dt>Window views</dt><dd>{number(report.selected.views)}</dd></div>
@@ -837,10 +811,10 @@ function trendPoints(values: number[], max: number): TrendPoint[] {
   if (!values.length) return [];
   if (values.length === 1) {
     const y = 218 - (values[0] / max) * 174;
-    return [{ x: 520, y }];
+    return [{ x: 32, y }, { x: 968, y }];
   }
   return values.map((value, index) => ({
-    x: 72 + (index / (values.length - 1)) * 896,
+    x: 32 + (index / (values.length - 1)) * 936,
     y: 218 - (value / max) * 174,
   }));
 }
@@ -852,33 +826,6 @@ function smoothTrendPath(points: TrendPoint[]) {
     const middle = (previous.x + point.x) / 2;
     return `${path} C ${middle} ${previous.y}, ${middle} ${point.y}, ${point.x} ${point.y}`;
   }, `M ${points[0].x} ${points[0].y}`);
-}
-function trendAxisMax(value: number) {
-  const roughStep = Math.max(value, 1) / 4;
-  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
-  const normalized = roughStep / magnitude;
-  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
-  return step * magnitude * 4;
-}
-function trendTimeTicks(series: AnalyticsReport["series"]) {
-  if (!series.length) return [];
-  const count = Math.min(5, series.length);
-  const indices = Array.from({ length: count }, (_, index) => Math.round(index * (series.length - 1) / Math.max(count - 1, 1)));
-  return [...new Set(indices)].map((index) => ({ index, bucket: series[index].bucket, position: index === 0 ? "is-start" : index === series.length - 1 ? "is-end" : "is-secondary" }));
-}
-function formatTrendAxisBucket(value: string, bucket: AnalyticsReport["bucket"]) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return "Unknown";
-  return bucket === "hour"
-    ? new Intl.DateTimeFormat("en-AU", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }).format(date)
-    : new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", timeZone: "UTC" }).format(date);
-}
-function trendPointLabel(row: AnalyticsReport["series"][number]) {
-  return `${formatDate(row.bucket)}: ${row.views} views, ${row.sessions} sessions, ${row.sessions ? (row.views / row.sessions).toFixed(2) : "no"} pages per session`;
-}
-function trendDelta(value: number, previous: number, noun: string) {
-  const delta = value - previous;
-  return delta === 0 ? `No change in ${noun}s from the previous bucket` : `${delta > 0 ? "+" : ""}${delta} ${noun}${Math.abs(delta) === 1 ? "" : "s"} from the previous bucket`;
 }
 function Ranking({
   title,
@@ -1024,6 +971,15 @@ function formatDate(value: string) {
         timeStyle: "short",
         timeZone: "UTC",
       }).format(date) + " UTC";
+}
+function shortDate(value: string) {
+  const date = new Date(value);
+  return new Intl.DateTimeFormat("en-AU", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    timeZone: "UTC",
+  }).format(date);
 }
 function coverage(report: AnalyticsReport) {
   if (!report.coverage.start) return "No history";
