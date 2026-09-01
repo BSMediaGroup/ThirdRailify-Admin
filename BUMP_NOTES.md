@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-09-01 - Critical Gaming artwork delivery repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Proved uploaded Super Mario World artwork persisted as an active `gaming_media_assets` row and non-empty R2 object, while `https://admin.thirdrailify.com/api/gaming/media/<asset-id>` was incorrectly handled by the Pages SPA fallback as `200 text/html` because `_routes.json` omitted the existing media Function path.
+- Added `/api/gaming/media/*` to the Admin Pages Function manifest so saved Gaming artwork is returned by the authoritative media handler with its verified image MIME, immutable cache policy, and stable asset identity.
+- Made Gaming file previews revoke their browser object URLs on replacement/unmount, added an explicit artwork-upload save stage, and retained a newly created game ID after a failed upload so Retry updates the same D1 record instead of creating a duplicate.
+- Added route regression coverage. No migration, R2 rewrite, fake media, secret, DNS, provider, payment, or bot action is required.
+
 ## 2026-09-01 - Admin-owned Gaming catalogue and Current Rotation
 
 CURRENT VER=0.1.0-alpha.0

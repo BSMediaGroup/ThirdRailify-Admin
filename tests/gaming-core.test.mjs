@@ -21,6 +21,7 @@ test("Gaming migration seeds the permanent library and ordered Current Rotation"
 test("Pages routes the public Gaming rotation projection through Functions", async () => {
   const routes = JSON.parse(await readFile(new URL("../public/_routes.json", import.meta.url), "utf8"));
   assert.ok(routes.include.includes("/api/gaming/rotation"));
+  assert.ok(routes.include.includes("/api/gaming/media/*"));
 });
 
 test("missing 0028 reports the explicit Gaming migration state without fake data", async (t) => {
