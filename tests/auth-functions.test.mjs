@@ -36,7 +36,7 @@ test("PBKDF2 credentials use unique salts and reject wrong passwords", async () 
   const first = await hashPassword("long-test-password-one");
   const second = await hashPassword("long-test-password-one");
   assert.equal(first.algorithm, "pbkdf2-sha256-v1");
-  assert.equal(first.workFactor, 120_000);
+  assert.equal(first.workFactor, 100_000, "Cloudflare Workers rejects PBKDF2 iteration counts above 100000");
   assert.notEqual(first.salt, second.salt);
   assert.notEqual(first.passwordHash, "long-test-password-one");
   assert.equal(await verifyPassword("long-test-password-one", first), true);

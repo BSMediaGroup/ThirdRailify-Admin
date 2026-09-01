@@ -8,7 +8,7 @@ export const OAUTH_TRANSACTION_TTL_SECONDS = 60 * 10;
 export const EMAIL_TOKEN_TTL_SECONDS = 60 * 60 * 24;
 export const RESET_TOKEN_TTL_SECONDS = 60 * 30;
 export const PASSWORD_ALGORITHM = "pbkdf2-sha256-v1";
-export const PASSWORD_WORK_FACTOR = 120_000;
+export const PASSWORD_WORK_FACTOR = 100_000;
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 256;
 
