@@ -1,5 +1,15 @@
 # Third Railify Admin
 
+## Gaming catalogue and Current Rotation (local implementation)
+
+Admin `/gaming` owns two distinct Commerce D1 concepts: `gaming_games` is the permanent historical Game Library, while `gaming_rotation` is unique ordered membership referencing those games. Removing a title from Current Rotation deletes only membership, so the same record can be edited and re-added without duplication. Additive migration `commerce-migrations/0028_gaming_catalogue.sql` seeds WITCHER, LUMINARY, SUPER MARIO WORLD, and PARTY ANIMAL in their existing order; only Luminary carries the verified App ID `1648360` and established public artwork.
+
+The workspace provides searchable/filterable library and active-rotation views, explicit keyboard-operable Move Up/Move Down controls, manual metadata/Steam mapping, archive/restore, quality indicators, and an accessible editor. Cover uploads reuse `THIRDRAILIFY_PROFILE_MEDIA` with decoded image validation and lifecycle metadata; public responses expose only a stable media URL, never an R2 object key. A validated public HTTPS artwork URL remains available for established external assets, and absent artwork intentionally renders the Public Gaming fallback.
+
+`gaming.view` and `gaming.manage` participate in the canonical Master/Full Admin denial model. All reads and mutations enforce server capabilities; writes also require exact Admin origin, CSRF, bounded bodies, parameterized D1, and auth audit records. `GET /api/gaming/rotation` is the sanitized public projection consumed through Public's same-origin relay with an effective three-minute edge freshness window. No Steam key is configured and no browser catalogue is faked: the editor provides official encoded Steam Store search plus canonical URL/App ID validation. Focused commands are `npm run test:gaming` and `npm run test:browser:gaming`.
+
+Gaming tree additions are `commerce-migrations/0028_gaming_catalogue.sql`, `functions/_shared/gaming-core.js`, Admin/public Gaming Function routes, `src/gaming/client.ts`, `src/pages/GamingAdminPage.tsx`, `src/styles/gaming-admin.css`, and focused Gaming core/browser tests. Existing capability, routing/navigation/icon, migration harness, package scripts, README, and bump notes are extended in place.
+
 ## Polls V1.2 lifecycle and public listing authority (local implementation)
 
 The existing migration-0025 schema already separates Poll lifecycle (`polls.state`: `draft|open|closed|archived`) from public listing (`polls.is_public`). Closing now changes only lifecycle/timestamps/revision and preserves the current listing flag. Archive remains the deliberate lifecycle removal state and clears listing; restore returns to a private draft. No redundant visibility column or migration is required.

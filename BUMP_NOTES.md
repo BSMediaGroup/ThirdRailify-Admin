@@ -1,5 +1,18 @@
 # Bump notes
 
+## 2026-09-01 - Admin-owned Gaming catalogue and Current Rotation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added `/gaming` as the capability-controlled Gaming workspace with compact operational totals, accessible Move Up/Move Down ordering, a searchable/filterable permanent Game Library, add/edit/archive controls, and add/remove/re-add Current Rotation actions.
+- Added additive Commerce D1 migration `0028_gaming_catalogue.sql` with normalized game records, unique ordered rotation membership, lifecycle-tracked Gaming media metadata, indexes, and the exact four-title initial seed. Rotation removal never deletes the historical game.
+- Added `gaming.view` and `gaming.manage` to the canonical parity/denial registry. Master and unrestricted Full Admin can manage; explicit Full Admin denial produces the established restricted/read-only behavior; regular users fail closed at the server API.
+- Reused the existing Admin-owned R2 binding for bounded validated PNG/JPG/WebP/BMP cover upload and replacement, with stable media IDs, public-safe media delivery, preview/fallback states, CSRF/exact-origin checks, parameterized D1 writes, and auth audit events.
+- Steam catalogue refresh is deliberately not implemented because no secure key/index authority is configured. The editor remains fully manual, validates canonical Store URLs/App IDs, exposes official encoded Search Steam, and never places a provider key in client code.
+- Added the public-safe `/api/gaming/rotation` projection with three-minute edge freshness and focused migration, lifecycle, validation, capability, upload, public-order, and five-width browser coverage. No deployment, remote migration/D1/R2 write, provider request, secret, DNS, or push was performed.
+
 ## 2026-09-01 - Polls V1.2 lifecycle and gallery visibility authority
 
 CURRENT VER=0.1.0-alpha.0

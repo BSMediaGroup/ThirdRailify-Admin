@@ -3,7 +3,7 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "analytics" | "content" | "watch" | "wheels" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "analytics" | "content" | "watch" | "gaming" | "wheels" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -24,6 +24,14 @@ export const adminAreas: AdminArea[] = [
     icon: "watch",
     summary: "Current signal visibility and retained episode controls.",
     futureScope: ["Signed-ingest archive", "24-record retention", "Public visibility controls"],
+  },
+  {
+    path: "/gaming",
+    label: "Gaming",
+    shortLabel: "Gaming",
+    icon: "gaming",
+    summary: "Historical Game Library, artwork, metadata, and ordered Current Rotation.",
+    futureScope: ["Admin-owned catalogue", "Public rotation projection", "Manual Steam mapping"],
   },
   {
     path: "/access",

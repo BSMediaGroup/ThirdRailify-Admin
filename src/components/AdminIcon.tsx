@@ -11,6 +11,7 @@ const paths: Record<Props["name"], ReactNode> = {
   analytics: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><path d="m3 8 6-5 6 7 6-6"/></>,
   content: <><path d="M5 3h10l4 4v14H5z"/><path d="M14 3v5h5M8 12h8M8 16h6"/></>,
   watch: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/><path d="M6 2v3M18 2v3"/></>,
+  gaming: <><path d="M7 9h10c2 0 3.5 1.4 4 3.4l1 4.2c.5 2.1-2 3.5-3.5 2l-2.3-2.3H7.8l-2.3 2.3c-1.5 1.5-4-.1-3.5-2.1l1-4.1C3.5 10.4 5 9 7 9Z"/><path d="M8 12v4M6 14h4M15.5 13h.01M18 15h.01"/></>,
   products: <><path d="m4 7 8-4 8 4-8 4z"/><path d="m4 7 8 4 8-4v10l-8 4-8-4zM12 11v10"/></>,
   orders: <><path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/></>,
   commerce: <><path d="M4 10v10h16V10M3 10l2-6h14l2 6"/><path d="M3 10c0 1.3 1 2 2.3 2s2.3-.7 2.3-2c0 1.3 1 2 2.3 2s2.3-.7 2.3-2c0 1.3 1 2 2.3 2s2.3-.7 2.3-2c0 1.3 1 2 2.3 2s2.3-.7 2.3-2M9 20v-5h6v5"/></>,

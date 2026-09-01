@@ -1,6 +1,6 @@
 export const adminCapabilityIds = [
   "overview.view", "analytics.view", "inbox.view", "inbox.manage", "watch.view", "watch.manage",
-  "content.view", "content.manage", "commerce.view", "commerce.catalogue.manage", "commerce.business.manage",
+  "content.view", "content.manage", "gaming.view", "gaming.manage", "commerce.view", "commerce.catalogue.manage", "commerce.business.manage",
   "commerce.payments.manage", "commerce.integrations.manage", "commerce.templates.manage", "commerce.operations.manage",
   "wheels.view", "wheels.manage", "polls.view", "polls.manage", "automations.view", "automations.manage", "media.view", "goats.view", "goats.manage",
   "membership.view", "users.view", "users.manage", "integrations.view",
@@ -17,6 +17,7 @@ const policies: Record<string, AdminRoutePolicy> = {
   "/inbox": { view: "inbox.view", manage: "inbox.manage" },
   "/watch": { view: "watch.view", manage: "watch.manage" },
   "/content": { view: "content.view", manage: "content.manage" },
+  "/gaming": { view: "gaming.view", manage: "gaming.manage" },
   "/shop": { view: "commerce.view" },
   "/products": { view: "commerce.view", manage: "commerce.catalogue.manage" },
   "/collections": { view: "commerce.view", manage: "commerce.catalogue.manage" },

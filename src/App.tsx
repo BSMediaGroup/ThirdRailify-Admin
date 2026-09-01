@@ -35,10 +35,11 @@ import { WheelAdminDetailPage, WheelsAccessPage, WheelsLibraryPage, WheelsResult
 import { WheelsMechanicsPage, WheelsOverviewPage } from "./pages/WheelsMechanicsPages";
 import { IntegrationsOperationsPage, MediaOperationsPage, MembershipOperationsPage, SettingsOperationsPage } from "./pages/OperationsPages";
 import { AutomationsPage, PollCreatorAccessPage, PollManagementPage } from "./pages/PollsAdminPages";
+import { GamingAdminPage } from "./pages/GamingAdminPage";
 import { AdminCapabilityBoundary } from "./auth/AdminCapabilityBoundary";
 import { adminRoutePolicy } from "./auth/capabilities";
 
-const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/media", "/membership", "/integrations", "/settings", "/goats", "/wheels", "/wheels/library", "/wheels/stages", "/wheels/mechanics", "/wheels/access", "/wheels/results", "/polls", "/polls/access", "/automations"]);
+const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/gaming", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/media", "/membership", "/integrations", "/settings", "/goats", "/wheels", "/wheels/library", "/wheels/stages", "/wheels/mechanics", "/wheels/access", "/wheels/results", "/polls", "/polls/access", "/automations"]);
 
 export function App() {
   return (
@@ -49,6 +50,7 @@ export function App() {
         <Route path="analytics" element={guard("/analytics", <AnalyticsPage />)} />
         <Route path="access" element={guard("/access", <AccountsPage />)} />
         <Route path="watch" element={guard("/watch", <WatchAdminPage />)} />
+        <Route path="gaming" element={guard("/gaming", <GamingAdminPage />)} />
         <Route path="content" element={guard("/content", <SiteContentPage />)} />
         <Route path="media" element={guard("/media", <MediaOperationsPage />)} />
         <Route path="membership" element={guard("/membership", <MembershipOperationsPage />)} />
