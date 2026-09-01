@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createCommerceDatabases, commerceEnvironment } from "./commerce-test-helpers.mjs";
 import { adminGamingPayload, gamingSchemaState, mutateGaming, publicGamingRotation, uploadGamingArtwork } from "../functions/_shared/gaming-core.js";
@@ -15,6 +16,11 @@ test("Gaming migration seeds the permanent library and ordered Current Rotation"
   assert.equal(games.results.find((row) => row.display_title === "LUMINARY").steam_app_id, "1648360");
   assert.deepEqual((await harness.commerceDb.prepare("SELECT game_id FROM gaming_rotation ORDER BY position").all()).results.map((row) => row.game_id), ["gaming-witcher", "gaming-luminary", "gaming-super-mario-world", "gaming-party-animal"]);
   assert.deepEqual((await harness.commerceDb.prepare("PRAGMA foreign_key_check").all()).results, []);
+});
+
+test("Pages routes the public Gaming rotation projection through Functions", async () => {
+  const routes = JSON.parse(await readFile(new URL("../public/_routes.json", import.meta.url), "utf8"));
+  assert.ok(routes.include.includes("/api/gaming/rotation"));
 });
 
 test("missing 0028 reports the explicit Gaming migration state without fake data", async (t) => {
