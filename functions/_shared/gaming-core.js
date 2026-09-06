@@ -2,10 +2,13 @@ import { AuthFailure, cleanText, nowIso, randomId, writeAudit } from "./auth-cor
 import { sanitizeWheelMedia } from "./wheel-media.js";
 import { steamProviderStatus } from "./steam-store.js";
 
+import { igdbProviderStatus } from "./igdb.js";
+import { normalizeIgdbId, normalizeIgdbUrl } from "./igdb-mapping.js";
+
 const BUCKET = "THIRDRAILIFY_PROFILE_MEDIA";
 const IMAGE_TYPES = new Map([["image/png", "png"], ["image/jpeg", "jpg"], ["image/webp", "webp"], ["image/bmp", "bmp"]]);
 const GAMING_SCHEMA = Object.freeze({
-  gaming_games: ["id", "display_title", "normalized_title", "canonical_slug", "platform_label", "short_description", "genre", "developer", "publisher", "steam_app_id", "steam_store_url", "steam_mapping_state", "metadata_provenance", "artwork_asset_id", "remote_artwork_url", "archived_at", "created_at", "updated_at"],
+  gaming_games: ["id", "display_title", "normalized_title", "canonical_slug", "platform_label", "short_description", "genre", "developer", "publisher", "igdb_id", "igdb_url", "steam_app_id", "steam_store_url", "steam_mapping_state", "metadata_provenance", "artwork_asset_id", "remote_artwork_url", "archived_at", "created_at", "updated_at"],
   gaming_media_assets: ["id", "game_id", "object_key", "sha256", "content_type", "byte_size", "width", "height", "lifecycle", "created_at"],
   gaming_rotation: ["game_id", "position", "added_to_rotation_at"],
 });
@@ -26,6 +29,7 @@ export async function adminGamingPayload(env, access) {
     authority: "Commerce D1",
     access,
     steamCatalogue: steamProviderStatus(env),
+    igdb: igdbProviderStatus(env),
     games,
     rotation: games.filter((game) => game.rotation.inRotation).sort((a, b) => a.rotation.position - b.rotation.position),
     summary: {
@@ -50,7 +54,7 @@ export async function publicGamingRotation(env) {
     schema: "thirdrailify-gaming-rotation-v1",
     items: (rows.results || []).map((row) => {
       const game = projectGame(row, env, false);
-      return { id: game.id, title: game.title, platform: game.platform, description: game.description, genre: game.genre, artworkUrl: game.artwork.url, steam: game.steam.state === "verified" ? { appId: game.steam.appId, storeUrl: game.steam.storeUrl } : null, position: game.rotation.position };
+      return { id: game.id, title: game.title, platform: game.platform, description: game.description, genre: game.genre, artworkUrl: game.artwork.url, igdb: game.igdb, steam: game.steam.state === "verified" ? { appId: game.steam.appId, storeUrl: game.steam.storeUrl } : null, position: game.rotation.position };
     }),
     updatedAt: (rows.results || []).reduce((latest, row) => String(row.updated_at) > latest ? String(row.updated_at) : latest, "" ) || null,
   };
@@ -110,8 +114,8 @@ export async function gamingMediaResponse(env, assetIdValue, request) {
 
 async function createGame(env, actor, input, inRotation) {
   const db = requireDb(env); const game = validateGame(input, false); const id = randomId(); const stamp = nowIso();
-  await db.prepare(`INSERT INTO gaming_games (id, display_title, normalized_title, canonical_slug, platform_label, short_description, genre, developer, publisher, steam_app_id, steam_store_url, steam_mapping_state, metadata_provenance, remote_artwork_url, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, game.title, game.normalizedTitle, game.slug, game.platform, game.description, game.genre, game.developer, game.publisher, game.steamAppId, game.steamStoreUrl, game.steamState, game.provenance, game.remoteArtworkUrl, stamp, stamp).run();
+  await db.prepare(`INSERT INTO gaming_games (id, display_title, normalized_title, canonical_slug, platform_label, short_description, genre, developer, publisher, steam_app_id, steam_store_url, steam_mapping_state, metadata_provenance, remote_artwork_url, igdb_id, igdb_url, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, game.title, game.normalizedTitle, game.slug, game.platform, game.description, game.genre, game.developer, game.publisher, game.steamAppId, game.steamStoreUrl, game.steamState, game.provenance, game.remoteArtworkUrl, game.igdbId, game.igdbUrl, stamp, stamp).run();
   await audit(env, actor, "gaming_game_created", id, { title: game.title });
   if (inRotation) await addToRotation(env, actor, id, false);
   return { ...await adminGamingPayload(env, await accessForActor(env, actor)), mutation: { gameId: id } };
@@ -119,9 +123,12 @@ async function createGame(env, actor, input, inRotation) {
 
 async function updateGame(env, actor, input) {
   const db = requireDb(env); const id = identifier(input.id); const before = await requireGame(db, id); const game = validateGame(input, true); const stamp = nowIso();
-  await db.prepare(`UPDATE gaming_games SET display_title=?, normalized_title=?, canonical_slug=?, platform_label=?, short_description=?, genre=?, developer=?, publisher=?, steam_app_id=?, steam_store_url=?, steam_mapping_state=?, metadata_provenance=?, remote_artwork_url=?, updated_at=? WHERE id=?`)
-    .bind(game.title, game.normalizedTitle, game.slug, game.platform, game.description, game.genre, game.developer, game.publisher, game.steamAppId, game.steamStoreUrl, game.steamState, game.provenance, game.remoteArtworkUrl, stamp, id).run();
-  await audit(env, actor, "gaming_game_edited", id, { title: game.title, steamChanged: before.steam_app_id !== game.steamAppId || before.steam_store_url !== game.steamStoreUrl, artworkChanged: before.remote_artwork_url !== game.remoteArtworkUrl });
+  const replaceUploaded = Boolean(input.useRemoteArtwork === true && game.remoteArtworkUrl && before.artwork_asset_id);
+  await db.batch([db.prepare(`UPDATE gaming_games SET display_title=?, normalized_title=?, canonical_slug=?, platform_label=?, short_description=?, genre=?, developer=?, publisher=?, steam_app_id=?, steam_store_url=?, steam_mapping_state=?, metadata_provenance=?, remote_artwork_url=?, igdb_id=?, igdb_url=?, artwork_asset_id=CASE WHEN ? THEN NULL ELSE artwork_asset_id END, updated_at=? WHERE id=?`)
+    .bind(game.title, game.normalizedTitle, game.slug, game.platform, game.description, game.genre, game.developer, game.publisher, game.steamAppId, game.steamStoreUrl, game.steamState, game.provenance, game.remoteArtworkUrl, game.igdbId, game.igdbUrl, Boolean(input.useRemoteArtwork === true && game.remoteArtworkUrl), stamp, id),
+    ...(replaceUploaded ? [db.prepare("UPDATE gaming_media_assets SET lifecycle = 'retired', retired_at = ? WHERE id = ?").bind(stamp, before.artwork_asset_id)] : []),
+  ]);
+  await audit(env, actor, "gaming_game_edited", id, { title: game.title, igdbChanged: before.igdb_id !== game.igdbId || before.igdb_url !== game.igdbUrl, steamChanged: before.steam_app_id !== game.steamAppId || before.steam_store_url !== game.steamStoreUrl, artworkChanged: before.remote_artwork_url !== game.remoteArtworkUrl });
   return adminGamingPayload(env, await accessForActor(env, actor));
 }
 
@@ -173,13 +180,15 @@ function validateGame(input, requireId) {
   const steamState = input.steamState === "verified" && steamAppId ? "verified" : input.steamState === "manual_override" && steamAppId ? "manual_override" : "unverified";
   const provenance = input.provenance === "steam_verified" && steamState === "verified" ? "steam_verified" : input.provenance === "manual_override" ? "manual_override" : "manual";
   const remoteArtworkUrl = normalizeImageUrl(input.remoteArtworkUrl);
-  return { title, normalizedTitle: title.toLocaleLowerCase("en-AU"), slug: slugify(input.slug || title), platform, description, genre, developer, publisher, steamAppId, steamStoreUrl, steamState, provenance, remoteArtworkUrl };
+  const igdbId = normalizeIgdbId(input.igdbId); const igdbUrl = normalizeIgdbUrl(input.igdbUrl);
+  if ((input.igdbId || input.igdbUrl) && (!igdbId || !igdbUrl)) throw new AuthFailure(400, "gaming_igdb_mapping_invalid", "Supply both a numeric IGDB ID and canonical https://www.igdb.com/games/... URL, or clear both.");
+  return { title, normalizedTitle: title.toLocaleLowerCase("en-AU"), slug: slugify(input.slug || title), platform, description, genre, developer, publisher, steamAppId, steamStoreUrl, steamState, provenance, remoteArtworkUrl, igdbId, igdbUrl };
 }
 
 function normalizeSteamUrl(value, appId) { const raw = cleanText(value, 500); if (!raw) return null; let url; try { url = new URL(raw); } catch { throw new AuthFailure(400, "gaming_steam_url_invalid", "Use a valid Steam Store app URL."); } const match = url.pathname.match(/^\/app\/(\d+)(?:\/|$)/); if (url.protocol !== "https:" || url.hostname !== "store.steampowered.com" || url.username || url.password || url.port || !match) throw new AuthFailure(400, "gaming_steam_url_invalid", "Use an official Steam Store app URL."); if (appId && match[1] !== appId) throw new AuthFailure(400, "gaming_steam_mismatch", "Steam App ID and Store URL must refer to the same app."); return `https://store.steampowered.com/app/${match[1]}/`; }
-function normalizeImageUrl(value) { const raw = cleanText(value, 1000); if (!raw) return null; let url; try { url = new URL(raw); } catch { throw new AuthFailure(400, "gaming_artwork_url_invalid", "Use a valid HTTPS artwork URL."); } const allowedHosts = new Set(["cdn.thirdrailify.com", "shared.fastly.steamstatic.com"]); if (url.protocol !== "https:" || url.username || url.password || !allowedHosts.has(url.hostname.toLowerCase())) throw new AuthFailure(400, "gaming_artwork_url_invalid", "Use an approved public HTTPS artwork URL or upload the cover to Media."); return url.toString(); }
+function normalizeImageUrl(value) { const raw = cleanText(value, 1000); if (!raw) return null; let url; try { url = new URL(raw); } catch { throw new AuthFailure(400, "gaming_artwork_url_invalid", "Use a valid HTTPS artwork URL."); } const allowedHosts = new Set(["cdn.thirdrailify.com", "shared.fastly.steamstatic.com", "images.igdb.com"]); if (url.protocol !== "https:" || url.username || url.password || url.port || !allowedHosts.has(url.hostname.toLowerCase()) || (url.hostname === "images.igdb.com" && !/^\/igdb\/image\/upload\/t_cover_big_2x\/[A-Za-z0-9_]{1,100}\.jpg$/.test(url.pathname))) throw new AuthFailure(400, "gaming_artwork_url_invalid", "Use an approved public HTTPS artwork URL or upload the cover to Media."); return url.toString(); }
 function slugify(value) { const slug = cleanText(value, 120).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 100); return slug || null; }
-function projectGame(row, env, admin) { const mediaUrl = row.media_id ? `${configuredAdminOrigin(env)}/api/gaming/media/${encodeURIComponent(row.media_id)}` : null; return { id: row.id, title: row.display_title, slug: row.canonical_slug, platform: row.platform_label, description: row.short_description, genre: row.genre, developer: row.developer, publisher: row.publisher, steam: { appId: row.steam_app_id, storeUrl: row.steam_store_url, state: row.steam_mapping_state, provenance: row.metadata_provenance }, artwork: { url: mediaUrl || row.remote_artwork_url || null, source: mediaUrl ? "uploaded" : row.remote_artwork_url ? "remote" : "fallback", assetId: admin ? row.media_id || null : undefined, width: admin ? row.media_width || null : undefined, height: admin ? row.media_height || null : undefined }, rotation: { inRotation: row.position != null, position: row.position == null ? null : Number(row.position), addedAt: row.added_to_rotation_at || null }, archived: Boolean(row.archived_at), archivedAt: row.archived_at || null, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function projectGame(row, env, admin) { const mediaUrl = row.media_id ? `${configuredAdminOrigin(env)}/api/gaming/media/${encodeURIComponent(row.media_id)}` : null; return { id: row.id, title: row.display_title, slug: row.canonical_slug, platform: row.platform_label, description: row.short_description, genre: row.genre, developer: row.developer, publisher: row.publisher, igdb: normalizeIgdbId(row.igdb_id) && normalizeIgdbUrl(row.igdb_url) ? { id: row.igdb_id, url: row.igdb_url } : null, steam: { appId: row.steam_app_id, storeUrl: row.steam_store_url, state: row.steam_mapping_state, provenance: row.metadata_provenance }, artwork: { url: mediaUrl || row.remote_artwork_url || null, source: mediaUrl ? "uploaded" : row.remote_artwork_url ? "remote" : "fallback", assetId: admin ? row.media_id || null : undefined, width: admin ? row.media_width || null : undefined, height: admin ? row.media_height || null : undefined }, rotation: { inRotation: row.position != null, position: row.position == null ? null : Number(row.position), addedAt: row.added_to_rotation_at || null }, archived: Boolean(row.archived_at), archivedAt: row.archived_at || null, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function configuredAdminOrigin(env) { const value = String(env?.THIRDRAILIFY_ADMIN_ORIGIN || "https://admin.thirdrailify.com"); try { return new URL(value).origin; } catch { return "https://admin.thirdrailify.com"; } }
 function identifier(value) { const id = cleanText(value, 120); if (!/^[a-z0-9][a-z0-9-]{2,119}$/i.test(id)) throw new AuthFailure(400, "gaming_id_invalid", "The game identifier is invalid."); return id; }
 async function requireGame(db, id) { const row = await db.prepare("SELECT * FROM gaming_games WHERE id = ?").bind(id).first(); if (!row) throw new AuthFailure(404, "gaming_game_not_found", "This game was not found."); return row; }

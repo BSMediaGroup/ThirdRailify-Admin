@@ -45,6 +45,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0029_paypal_donation_capture_authority.sql", import.meta.url),
   new URL("../commerce-migrations/0030_business_profile_compliance_separation.sql", import.meta.url),
   new URL("../commerce-migrations/0031_store_activation_and_agreements.sql", import.meta.url),
+  new URL("../commerce-migrations/0032_gaming_igdb_mapping.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

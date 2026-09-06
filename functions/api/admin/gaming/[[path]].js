@@ -3,6 +3,8 @@ import { accessForSession, requireAdminCapability } from "../../../_shared/admin
 import { adminGamingPayload, mutateGaming, removeGamingArtwork, uploadGamingArtwork } from "../../../_shared/gaming-core.js";
 import { getSteamGame, parseSteamLookupInput, searchSteamGames } from "../../../_shared/steam-store.js";
 
+import { searchIgdbGames, getIgdbGame, findIgdbGamesBySteam, enforceIgdbProviderLimit } from "../../../_shared/igdb.js";
+
 const PREFIX = "/api/admin/gaming";
 const MAX_JSON = 64 * 1024;
 const MAX_ARTWORK = 4 * 1024 * 1024;
@@ -14,6 +16,15 @@ export async function onRequest({ request, env, data }) {
     requireOriginWhenPresent(request, env);
     if (request.method === "GET") {
       const session = await requireAdminCapability(env, request, "gaming.view");
+      if (path.startsWith("igdb/")) {
+        await enforceRateLimit(env, request, "gaming_igdb_lookup", session.accountId);
+        const options = { env, fetchImpl: data?.igdbFetch || fetch, cache: data?.gamingCache ?? globalThis.caches?.default, beforeRequest: () => enforceIgdbProviderLimit(env) };
+        const params = new URL(request.url).searchParams;
+        if (path === "igdb/search") return response({ ok: true, ...await (params.has("steamAppId") ? findIgdbGamesBySteam(params.get("steamAppId"), options) : searchIgdbGames(params.get("q"), options)) }, request, env);
+        const match = path.match(/^igdb\/games\/([1-9]\d{0,11})$/);
+        if (match) return response({ ok: true, result: await getIgdbGame(match[1], options) }, request, env);
+        throw new AuthFailure(404, "gaming_route_not_found", "The IGDB lookup was not found.");
+      }
       if (path === "steam/search") {
         await enforceRateLimit(env, request, "gaming_steam_lookup", session.accountId);
         const input = new URL(request.url).searchParams.get("q") || "";

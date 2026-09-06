@@ -1,5 +1,15 @@
 # Bump notes
 
+## 2026-09-06 - IGDB lookup and references (0.1.0-alpha.0)
+
+- Added private IGDB title search/direct detail resolution behind gaming.view, beside the unchanged default Steam tab; candidates remain independently selectable and prefill never saves.
+- Added blank-field metadata/cover prefill, explicit curated text/artwork/mapping replacement, Steam external-record corroboration and existing-resolver verification before accepting suggested Steam mappings.
+- Added server-only IGDB_CLIENT_ID / IGDB_CLIENT_SECRET client-credentials token acquisition, expiry-aware in-memory caching, one auth retry, 20-minute search / 12-hour detail caches, bounded requests and an atomic shared provider rate limit.
+- Added forward-only Commerce migration 0032_gaming_igdb_mapping.sql for nullable mappings. Migration 0028, seeds and rotation membership are unchanged; no remote migration ran.
+- Extended deterministic provider, persistence, authorization and responsive browser tests; maintained fixed editor header/footer and independently scrollable body. README documents technical configuration and file changes.
+- Local validation (Node 22.16.0): 32 Gaming/provider/core/capability tests and 16 authorization tests passed; all 3 Admin browser cases passed across full/focused runs. TypeScript, ESLint, Vite build and Pages Functions compile passed. Live IGDB acceptance skipped because local credentials are absent.
+
+
 ## 2026-09-06 - Permanent store activation and retained agreements
 
 - Repaired safe private merchant replacement persistence, precise errors, encrypted reload and canonical configured/owner-confirmed readiness.
@@ -17,6 +27,10 @@ PENDING VER=0.1.0-alpha.0
 - Replaced Business Information's manual Region and Country text fields in both business and encrypted legal-address editors with reusable native selectors showing human-readable names.
 - Pinned the same offline `country-region-data@4.1.0` dataset as Public while retaining canonical `CA` / `ON` save payloads, bounded server validation, encrypted storage, optimistic revisions, capability/CSRF/origin/rate-limit/audit boundaries, and masked legal-address reads.
 - Added legacy name/code hydration, unknown-region preservation, country-change invalidation, country-aware postal labels, six-width controlled-fixture browser proof, and representative dataset tests. No runtime geography service or migration was added.
+- Address UX V2 release 2026-09-06: isolated from verified production base `692a3d79f8a8204fbf6d1116255e3d2c2500624f`; restored only the original selector imports, AddressFields and profileToDraft from `73fe405` after later commerce work replaced them with text inputs. Heartbeat/Polls/runtime-health remain unchanged already-production baseline, not newly included work. After deployment, the exact validated Address patch was applied back to the unchanged shared BusinessInformationPage source; all concurrent work was preserved.
+- Admin deployment `a2f04591-7e88-427b-bd33-f424b73b3db9`: https://a2f04591.thirdrailify-admin.pages.dev . Immutable fixture acceptance and authenticated https://admin.thirdrailify.com/commerce/business passed at 1440/390px: existing CA/ON displayed Canada/Ontario, native accessible selectors, no horizontal overflow, no Save action. Existing Cloudflare beacon CSP console noise remains; no application exception.
+- Dataset: 249 countries, 4,387 regions; ESM data module 130,488 bytes raw / 45,947 gzip / 36,923 Brotli. Pinned country-region-data@4.1.0; no geocoding, runtime geography network, geolocation permission, new consent category, migration or resource change. Public Account/Checkout share their geography component; this release restores Admin Business integration and canonical country/province payloads.
+- Final isolated gates: Node 22.16.0 typecheck/build/scoped Address lint/diff check; geography 1/1, focused business-address mutation 1/1, one focused Business acceptance at desktop/mobile. No broad matrix rerun. No live address save, payment, order, fulfilment, provider, D1/R2, secret, binding, DNS or custom-domain changes.
 
 ## 2026-09-01 - Bot runtime health V2 dimensional status
 

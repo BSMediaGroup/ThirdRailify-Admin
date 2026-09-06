@@ -5,6 +5,47 @@ import { createCommerceDatabases, commerceEnvironment } from "./commerce-test-he
 import { adminGamingPayload, gamingSchemaState, mutateGaming, publicGamingRotation, uploadGamingArtwork } from "../functions/_shared/gaming-core.js";
 import { hmacSha256, sha256 } from "../functions/_shared/auth-core.js";
 import { onRequest as gamingAdminApi } from "../functions/api/admin/gaming/[[path]].js";
+import { enforceIgdbProviderLimit } from "../functions/_shared/igdb.js";
+
+test("0032 preserves seeds and rotation; IGDB mappings save, clear and reject unsafe URLs", async t => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); await insertMaster(harness.authDb);
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_ADMIN_ORIGIN: "https://thirdrailify-admin.pages.dev" });
+  const before = await publicGamingRotation(env); assert.equal(before.items.length, 4); assert.ok(before.items.every(game => game.igdb === null));
+  const game = { id: "gaming-witcher", title: "WITCHER", igdbId: "1942", igdbUrl: "https://www.igdb.com/games/the-witcher-3-wild-hunt", steamAppId: "292030", steamState: "verified" };
+  const saved = await mutateGaming(env, "gaming-master", { action: "update", game });
+  assert.deepEqual(saved.games.find(item => item.id === game.id).igdb, { id: "1942", url: game.igdbUrl });
+  const after = await publicGamingRotation(env); assert.deepEqual(after.items.map(item => item.id), before.items.map(item => item.id)); assert.equal(after.items[0].steam.appId, "292030"); assert.equal(after.items[0].igdb.id, "1942");
+  for (const igdbUrl of ["http://www.igdb.com/games/game", "https://u:p@www.igdb.com/games/game", "https://www.igdb.com:444/games/game", "https://www.igdb.com.evil.test/games/game"]) await assert.rejects(mutateGaming(env, "gaming-master", { action: "update", game: { ...game, igdbUrl } }), { code: "gaming_igdb_mapping_invalid" });
+  await assert.rejects(mutateGaming(env, "gaming-master", { action: "update", game: { ...game, igdbId: "" } }), { code: "gaming_igdb_mapping_invalid" });
+  await mutateGaming(env, "gaming-master", { action: "update", game: { ...game, igdbId: "", igdbUrl: "" } });
+  assert.equal((await publicGamingRotation(env)).items[0].igdb, null);
+  const png = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==", "base64"));
+  env.THIRDRAILIFY_PROFILE_MEDIA = memoryBucket();
+  await uploadGamingArtwork(env, "gaming-master", game.id, png, "image/png", "curated.png");
+  const remoteArtworkUrl = "https://images.igdb.com/igdb/image/upload/t_cover_big_2x/co1234.jpg";
+  let payload = await mutateGaming(env, "gaming-master", { action: "update", game: { ...game, remoteArtworkUrl } });
+  assert.equal(payload.games.find(item => item.id === game.id).artwork.source, "uploaded");
+  payload = await mutateGaming(env, "gaming-master", { action: "update", game: { ...game, remoteArtworkUrl, useRemoteArtwork: true } });
+  assert.equal(payload.games.find(item => item.id === game.id).artwork.url, remoteArtworkUrl);
+  assert.equal((await harness.commerceDb.prepare("SELECT lifecycle FROM gaming_media_assets WHERE game_id=?").bind(game.id).first()).lifecycle, "retired");
+});
+
+test("IGDB routes enforce gaming.view, private responses, soft configuration failure and atomic shared throttling", async t => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); await insertMaster(harness.authDb); await insertAccount(harness.authDb, "gaming-user", "user", "none");
+  const env = commerceEnvironment(harness, { THIRDRAILIFY_ADMIN_ORIGIN: "https://thirdrailify-admin.pages.dev" });
+  const auth = await sessionRequest(harness.authDb, env, "gaming-master", "igdb-master-token");
+  const request = cookie => new Request(`${env.THIRDRAILIFY_ADMIN_ORIGIN}/api/admin/gaming/igdb/search?q=witcher`, { headers: { Cookie: cookie } });
+  const missing = await gamingAdminApi({ env, request: request(auth.cookie) }); assert.equal(missing.status, 503); assert.equal((await missing.json()).error, "igdb_not_configured");
+  const regular = await sessionRequest(harness.authDb, env, "gaming-user", "igdb-user-token");
+  assert.equal((await gamingAdminApi({ env, request: request(regular.cookie), data: { igdbFetch: () => assert.fail("unauthorized provider request") } })).status, 403);
+  assert.equal((await gamingAdminApi({ env, request: request(""), data: { igdbFetch: () => assert.fail("anonymous provider request") } })).status, 401);
+  env.IGDB_CLIENT_ID = "fixture-client"; env.IGDB_CLIENT_SECRET = "fixture-secret";
+  const data = { gamingCache: memoryCache(), igdbFetch: async url => url.includes("oauth2/token") ? Response.json({ access_token: "fixture-token", expires_in: 3600, token_type: "bearer" }) : Response.json([{ id: 1942, name: "Witcher", url: "https://www.igdb.com/games/witcher" }]) };
+  const result = await gamingAdminApi({ env, request: request(auth.cookie), data }); assert.equal(result.status, 200); assert.equal(result.headers.get("cache-control"), "no-store"); const body = await result.text(); assert.doesNotMatch(body, /fixture-token|fixture-secret|access_token/);
+  await harness.authDb.prepare("DELETE FROM auth_rate_limits WHERE category='gaming_igdb_provider'").run();
+  const attempts = await Promise.allSettled([enforceIgdbProviderLimit(env), enforceIgdbProviderLimit(env), enforceIgdbProviderLimit(env)]);
+  assert.equal(attempts.filter(value => value.status === "fulfilled").length, 2); assert.equal(attempts.find(value => value.status === "rejected").reason.code, "igdb_rate_limited");
+});
 
 test("Gaming migration seeds the permanent library and ordered Current Rotation", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
