@@ -50,7 +50,8 @@ async function requestJson(url, init, { fetchImpl = fetch, timeoutMs = 4500 }) {
   let providerStatus = null;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(url, { ...init, method: "POST", redirect: "error", signal: controller.signal });
+    // Workers supports manual/follow; reject 3xx below without forwarding credentials.
+    const response = await fetchImpl(url, { ...init, method: "POST", redirect: "manual", signal: controller.signal });
     providerStatus = response.status;
     if (response.status === 401 || response.status === 403) throw fail(502, "auth_failed", "IGDB authentication was rejected.");
     if (response.status === 429) throw fail(429, "rate_limited", "IGDB is busy. Try again shortly.");

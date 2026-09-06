@@ -1,5 +1,11 @@
 # Bump notes
 
+## 2026-09-06 - IGDB Workers transport repair and external search
+
+- Live activation exposed authentication transport failure before an HTTP response. Reproduced the exact defect in the pinned Workers runtime: `redirect: "error"` is rejected by Request construction. IGDB now uses `manual` and rejects 3xx without following or forwarding credentials; no endpoint or credential authority changed.
+- Added real-runtime request-option and redirect rejection regressions, plus safe server diagnostics limited to token-acquisition success and failure stage/status/code. No credential or provider response values are logged.
+- Added External Search IGDB beside the lookup heading with Steam's existing layout/icon/new-tab behavior, using the entered query or draft title. The link stays available when the API is unconfigured.
+
 ## 2026-09-06 - Admin-only IGDB production prerequisites
 
 - Verified encrypted production `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` on `thirdrailify-admin`; neither exists on Public `thirdrailify`. Secret values remain outside source/configuration. Pinned Wrangler 4.60.0 does not support `secrets.required` for Pages, so the existing `wrangler.jsonc` remains unchanged.

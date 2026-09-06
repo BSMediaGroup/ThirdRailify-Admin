@@ -14,7 +14,7 @@ test("missing credentials fail softly without network access", async () => {
 });
 test("application tokens are acquired, coalesced, cached and renewed before expiry", async () => {
   const env = environment(); let calls = 0; let now = 1000;
-  const options = { env, now: () => now, fetchImpl: async (url, init) => { calls++; assert.equal(url, "https://id.twitch.tv/oauth2/token"); assert.equal(init.redirect, "error"); const body = new URLSearchParams(init.body); assert.equal(body.get("grant_type"), "client_credentials"); assert.equal(body.get("client_secret"), env.IGDB_CLIENT_SECRET); return token(); } };
+  const options = { env, now: () => now, fetchImpl: async (url, init) => { calls++; assert.equal(url, "https://id.twitch.tv/oauth2/token"); assert.equal(init.redirect, "manual"); const body = new URLSearchParams(init.body); assert.equal(body.get("grant_type"), "client_credentials"); assert.equal(body.get("client_secret"), env.IGDB_CLIENT_SECRET); return token(); } };
   assert.deepEqual(await Promise.all([getIgdbAccessToken(options), getIgdbAccessToken(options)]), ["fixture-bearer", "fixture-bearer"]);
   now = 89000; await getIgdbAccessToken(options); assert.equal(calls, 1);
   now = 92000; await getIgdbAccessToken(options); assert.equal(calls, 2);
@@ -65,4 +65,31 @@ test("timeouts, malformed data, oversized data and provider throttling fail boun
 test("canonical URLs reject deceptive hosts, credentials, ports, query strings and non-listings", () => {
   assert.equal(normalizeIgdbUrl("https://www.igdb.com/games/the-witcher-3-wild-hunt"), "https://www.igdb.com/games/the-witcher-3-wild-hunt");
   for (const value of ["http://www.igdb.com/games/game", "https://user:pass@www.igdb.com/games/game", "https://www.igdb.com:444/games/game", "https://www.igdb.com.evil.test/games/game", "https://igdb.com/games/game", "https://www.igdb.com/search?q=game", "https://www.igdb.com/games/game?x=y", "https://www.igdb.com/games/game#hash"]) assert.equal(normalizeIgdbUrl(value), null, value);
+});
+
+test("real Workers Request accepts IGDB transport options and redirects never forward credentials", async t => {
+  const { Miniflare } = await import("miniflare");
+  const mf = new Miniflare({ modules: true, compatibilityDate: "2026-08-11", script: `export default { async fetch(request) { const { url, init } = await request.json(); try { const outgoing = new Request(url, init); return Response.json({ redirect: outgoing.redirect }); } catch { return Response.json({ error: "request_construction_failed" }, { status: 500 }); } } }` });
+  t.after(() => mf.dispose());
+  let calls = 0;
+  const options = { env: environment(), fetchImpl: async (url, init) => {
+    calls++;
+    const { signal: _signal, ...transport } = init;
+    const response = await mf.dispatchFetch("http://localhost/", { method: "POST", body: JSON.stringify({ url, init: transport }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { redirect: "manual" });
+    return url.includes("oauth2/token") ? token() : Response.json([fixture()]);
+  } };
+  assert.equal((await searchIgdbGames("witcher", options)).results.length, 1);
+  assert.equal(calls, 2);
+  for (const redirectStage of ["authentication", "games"]) {
+    let redirectedCalls = 0;
+    await assert.rejects(searchIgdbGames("witcher", { env: environment(), fetchImpl: async (url, init) => {
+      redirectedCalls++;
+      assert.equal(init.redirect, "manual");
+      if (redirectStage === "games" && url.includes("oauth2/token")) return token();
+      return new Response(null, { status: 302, headers: { Location: "https://untrusted.invalid/" } });
+    } }), { code: "igdb_unavailable" });
+    assert.equal(redirectedCalls, redirectStage === "authentication" ? 1 : 2);
+  }
 });
