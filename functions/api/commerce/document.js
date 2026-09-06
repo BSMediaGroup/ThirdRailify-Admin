@@ -1,4 +1,4 @@
-import { errorResponse, jsonResponse } from "../../_shared/auth-core.js";
+import { errorResponse, jsonResponse, readJsonBody } from "../../_shared/auth-core.js";
 import { customerDocumentByToken } from "../../_shared/commerce-control-plane.js";
 
 export async function onRequestGet({ request, env }) {
@@ -9,4 +9,12 @@ export async function onRequestGet({ request, env }) {
   } catch (error) {
     return errorResponse(error, request, env);
   }
+}
+
+export async function onRequestPost({request,env}) {
+  try {
+    const {token}=await readJsonBody(request);
+    const payload=await customerDocumentByToken(env,token);
+    return jsonResponse(payload,{headers:{"Cache-Control":"no-store, private","Referrer-Policy":"no-referrer","X-Robots-Tag":"noindex, nofollow"}});
+  } catch(error) { return errorResponse(error,request,env); }
 }

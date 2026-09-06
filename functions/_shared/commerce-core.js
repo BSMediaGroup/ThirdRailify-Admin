@@ -1,3 +1,4 @@
+import { transactionGuard } from "./commerce-transaction-guards.js";
 import {
   AuthFailure,
   cleanText,
@@ -1249,19 +1250,55 @@ export async function businessProfilePayload(env, session) {
   };
 }
 
+export async function revealPrivateBusinessProfile(env) {
+  const profile = await requireCommerceDb(env).prepare("SELECT revision,legal_business_name_ciphertext,private_phone_ciphertext,private_address_ciphertext FROM commerce_business_profiles WHERE id='primary'").first();
+  if (!profile) throw new AuthFailure(503,"business_profile_unavailable","The merchant profile is unavailable.");
+  const [legalBusinessName,privatePhone,privateAddress] = await Promise.all([
+    profile.legal_business_name_ciphertext ? decryptCommerceSecret(env,profile.legal_business_name_ciphertext,"business:legal-name") : "",
+    profile.private_phone_ciphertext ? decryptCommerceSecret(env,profile.private_phone_ciphertext,"business:private-phone") : "",
+    profile.private_address_ciphertext ? decryptCommerceSecret(env,profile.private_address_ciphertext,"business:private-address") : "{}",
+  ]);
+  return {ok:true,revision:Number(profile.revision),legalBusinessName,privatePhone,privateAddress:JSON.parse(privateAddress)};
+}
+
 export async function updateBusinessProfile(env, session, input) {
+  const db = requireCommerceDb(env);
+  const mutation = await prepareBusinessProfileMutation(env, session, input);
+  const timestamp = mutation.timestamp;
+  let updates;
+  try { updates = await db.batch([
+    transactionGuard(db, "EXISTS (SELECT 1 FROM commerce_business_profiles WHERE id='primary' AND revision=?)", [mutation.currentRevision]),
+    mutation.statement,
+    ...profileRevisionInvalidationStatements(db, timestamp, session.accountId),
+  ]); } catch (error) {
+    if (/commerce_transaction_conflict|malformed JSON/i.test(String(error?.message))) throw new AuthFailure(409, "business_profile_revision_conflict", "This business profile changed in another session. Reload before saving.");
+    throw new AuthFailure(503, "business_profile_write_failed", "The business profile could not be saved. No changes were persisted.");
+  }
+  if (Number(updates?.[1]?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "business_profile_revision_conflict", "This business profile changed in another session. Reload before saving.");
+
+  await writeCommerceAudit(env, {
+    actorAccountId: session.accountId,
+    action: "business_profile_updated",
+    targetType: "commerce_business_profile",
+    targetId: "primary",
+    result: "success",
+    metadata: { changedFields: mutation.changedFieldNames, launchAuthorizationInvalidated: true },
+  });
+  return businessProfilePayload(env, session);
+}
+
+export async function prepareBusinessProfileMutation(env, session, input, options = {}) {
   const db = requireCommerceDb(env);
   await importEncryptionKey(env);
   const current = await db.prepare("SELECT * FROM commerce_business_profiles WHERE id = 'primary'").first();
-  const values = validateBusinessProfile(input, current || defaultBusinessProfile());
-  if (current && values.revision !== Number(current.revision)) {
-    throw new AuthFailure(409, "business_profile_revision_conflict", "This business profile changed in another session. Reload before saving.");
-  }
-  const timestamp = nowIso();
+  if (!current) throw new AuthFailure(503, "business_profile_unavailable", "The canonical business profile is unavailable.");
+  const values = validateBusinessProfile(input, current);
+  if (values.revision !== Number(current.revision)) throw new AuthFailure(409, "business_profile_revision_conflict", "This business profile changed in another session. Reload before saving.");
+  const timestamp = options.timestamp || nowIso();
   const legalCiphertext = values.legalBusinessName
     ? await encryptCommerceSecret(env, values.legalBusinessName, "business:legal-name")
     : current?.legal_business_name_ciphertext || null;
-  const privateAddressCiphertext = values.privateAddress
+  const privateAddressCiphertext = values.privateAddress && Object.values(values.privateAddress).some(Boolean)
     ? await encryptCommerceSecret(env, JSON.stringify(values.privateAddress), "business:private-address")
     : current?.private_address_ciphertext || null;
   const privatePhoneCiphertext = values.privatePhone
@@ -1271,39 +1308,18 @@ export async function updateBusinessProfile(env, session, input) {
     ? await encryptCommerceSecret(env, values.businessRegistrationNumber, "business:registration-number")
     : current?.business_registration_number_ciphertext || null;
 
-  await db
-    .prepare(
-      `INSERT INTO commerce_business_profiles (
-         id, trading_name, legal_business_name_ciphertext, country_code, province_code, currency_code,
-         public_address_json, private_address_ciphertext, public_contact_email, support_email,
-         public_phone, website_url, invoice_prefix, document_footer, tax_provider_state,
-         invoice_accent_color, receipt_accent_color, private_phone_ciphertext,
-         business_registration_number_ciphertext, revision,
-         created_at, updated_at, updated_by_account_id
-       ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         trading_name = excluded.trading_name,
-         legal_business_name_ciphertext = excluded.legal_business_name_ciphertext,
-         country_code = excluded.country_code,
-         province_code = excluded.province_code,
-         currency_code = excluded.currency_code,
-         public_address_json = excluded.public_address_json,
-         private_address_ciphertext = excluded.private_address_ciphertext,
-         public_contact_email = excluded.public_contact_email,
-         support_email = excluded.support_email,
-         public_phone = excluded.public_phone,
-         website_url = excluded.website_url,
-         invoice_prefix = excluded.invoice_prefix,
-         document_footer = excluded.document_footer,
-         tax_provider_state = excluded.tax_provider_state,
-         invoice_accent_color = excluded.invoice_accent_color,
-         receipt_accent_color = excluded.receipt_accent_color,
-         private_phone_ciphertext = excluded.private_phone_ciphertext,
-         business_registration_number_ciphertext = excluded.business_registration_number_ciphertext,
-         revision = commerce_business_profiles.revision + 1,
-         updated_at = excluded.updated_at,
-         updated_by_account_id = excluded.updated_by_account_id`,
-    )
+  const nextRevision = Number(current.revision) + 1;
+  const attest = options.attest === true;
+  const statement = db.prepare(
+      `UPDATE commerce_business_profiles SET
+         trading_name=?,legal_business_name_ciphertext=?,country_code=?,province_code=?,currency_code=?,
+         public_address_json=?,private_address_ciphertext=?,public_contact_email=?,support_email=?,
+         public_phone=?,website_url=?,invoice_prefix=?,document_footer=?,tax_provider_state=?,
+         invoice_accent_color=?,receipt_accent_color=?,private_phone_ciphertext=?,business_registration_number_ciphertext=?,
+         revision=?,updated_at=?,updated_by_account_id=?,
+         owner_attested_revision=?,owner_attested_at=?,owner_attested_by_account_id=?,
+         transaction_disclosure_authorized_revision=?,transaction_disclosure_authorized_at=?
+       WHERE id='primary' AND revision=?`)
     .bind(
       values.tradingName,
       legalCiphertext,
@@ -1323,21 +1339,26 @@ export async function updateBusinessProfile(env, session, input) {
       values.receiptAccentColor,
       privatePhoneCiphertext,
       businessRegistrationNumberCiphertext,
-      current?.created_at || timestamp,
+      nextRevision,
       timestamp,
       session.accountId,
-    )
-    .run();
-
-  await writeCommerceAudit(env, {
-    actorAccountId: session.accountId,
-    action: "business_profile_updated",
-    targetType: "commerce_business_profile",
-    targetId: "primary",
-    result: "success",
-    metadata: { changedFields: values.changedFieldNames },
-  });
-  return businessProfilePayload(env, session);
+      attest ? nextRevision : null,
+      attest ? timestamp : null,
+      attest ? session.accountId : null,
+      attest ? nextRevision : null,
+      attest ? timestamp : null,
+      Number(current.revision),
+    );
+  let merchantComplete = false;
+  try {
+    const [name,phone,address] = await Promise.all([
+      decryptCommerceSecret(env,legalCiphertext,"business:legal-name"),
+      decryptCommerceSecret(env,privatePhoneCiphertext,"business:private-phone"),
+      decryptCommerceSecret(env,privateAddressCiphertext,"business:private-address"),
+    ]);
+    merchantComplete = Boolean(name?.trim() && phone?.trim() && Object.values(JSON.parse(address)).some(Boolean));
+  } catch { /* Incomplete profiles can still be saved; activation requires readable values. */ }
+  return { statement, current, values, currentRevision: Number(current.revision), nextRevision, timestamp, changedFieldNames: values.changedFieldNames, merchantComplete: merchantComplete && Boolean(values.tradingName && (values.supportEmail || values.publicContactEmail)) };
 }
 
 export async function templatesPayload(env, session) {
@@ -1430,7 +1451,8 @@ export async function updateTemplate(env, session, templateKey, input) {
 export async function encryptCommerceSecret(env, plaintext, purpose = "secret") {
   const value = String(plaintext ?? "");
   const bytes = encoder.encode(value);
-  if (!bytes.length || bytes.length > MAX_SECRET_BYTES) throw new AuthFailure(400, "secret_size_invalid", "The private value is empty or too large.");
+  const limit = /^(checkout-agreement|order-document):[A-Za-z0-9_-]+$/.test(String(purpose)) ? 768 * 1024 : MAX_SECRET_BYTES;
+  if (!bytes.length || bytes.length > limit) throw new AuthFailure(400, "secret_size_invalid", "The private value is empty or too large.");
   const key = await importEncryptionKey(env);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const context = cleanPurpose(purpose);
@@ -1473,8 +1495,8 @@ export async function importEncryptionKey(env) {
 }
 
 export function browserSafeBusinessProjection(profile) {
-  const businessAddress = safeJson(profile?.public_address_json ?? profile?.businessAddress ?? profile?.publicAddress, {});
-  const businessPhone = String(profile?.public_phone ?? profile?.businessPhone ?? profile?.publicPhone ?? "");
+  const businessAddress = {};
+  const businessPhone = "";
   return {
     tradingName: cleanText(profile?.trading_name ?? profile?.tradingName, 160),
     countryCode: cleanText(profile?.country_code ?? profile?.countryCode, 2),
@@ -1502,8 +1524,21 @@ export function browserSafeBusinessProjection(profile) {
 export const publicBusinessProjection = browserSafeBusinessProjection;
 
 export function businessProjection(profile, registrations = [], maskedValues = {}) {
+  const revision = Number(profile?.revision || 1);
   return {
     ...browserSafeBusinessProjection(profile),
+    businessAddress:safeJson(profile?.public_address_json,{}),
+    publicAddress:safeJson(profile?.public_address_json,{}),
+    businessPhone:String(profile?.public_phone||""),
+    publicPhone:String(profile?.public_phone||""),
+    attestation: {
+      ownerConfirmed: Number(profile?.owner_attested_revision || 0) === revision && Boolean(profile?.owner_attested_at),
+      ownerAttestedRevision: Number(profile?.owner_attested_revision || 0) || null,
+      ownerAttestedAt: cleanText(profile?.owner_attested_at, 80) || null,
+      ownerAttestedByAccountId: cleanText(profile?.owner_attested_by_account_id, 160) || null,
+      transactionDisclosureAuthorized: Number(profile?.transaction_disclosure_authorized_revision || 0) === revision && Boolean(profile?.transaction_disclosure_authorized_at),
+      transactionDisclosureAuthorizedAt: cleanText(profile?.transaction_disclosure_authorized_at, 80) || null,
+    },
     private: {
       legalBusinessNameStored: Boolean(profile?.legal_business_name_ciphertext),
       privateAddressStored: Boolean(profile?.private_address_ciphertext),
@@ -1863,6 +1898,20 @@ function safeSettingStatement(db, settingKey, value, timestamp, accountId) {
   ).bind(settingKey, JSON.stringify(value), timestamp, cleanText(accountId, 160) || null);
 }
 
+function profileRevisionInvalidationStatements(db, timestamp, accountId) {
+  const actor = cleanText(accountId, 160) || null;
+  return [
+    safeSettingStatement(db, "checkout_enabled", false, timestamp, actor),
+    safeSettingStatement(db, "live_payment_capture_enabled", false, timestamp, actor),
+    safeSettingStatement(db, "fulfillment_submission_enabled", false, timestamp, actor),
+    safeSettingStatement(db, "paypal_store_checkout_enabled", false, timestamp, actor),
+    safeSettingStatement(db, "paypal_live_capture_enabled", false, timestamp, actor),
+    safeSettingStatement(db, "internet_agreement_disclosure_enabled", false, timestamp, actor),
+    db.prepare("UPDATE commerce_payment_provider_state SET paypal_store_checkout_enabled=0,paypal_live_capture_enabled=0,revision=revision+1,transition_reason='Business profile revision changed; owner re-attestation required.',updated_by_actor=?,updated_at=? WHERE id='primary'").bind(actor, timestamp),
+    db.prepare("UPDATE commerce_launch_state SET state='preflight',activated_at=NULL,updated_by_actor=?,updated_at=? WHERE id='production'").bind(actor, timestamp),
+  ];
+}
+
 function providerBlueprints(env) {
   return PROVIDER_BLUEPRINTS.map((provider) => {
     if (provider.provider === "stripe") return { ...provider, webhookSigningConfigured: isStripeWebhookSigningConfigured(env) };
@@ -2170,6 +2219,8 @@ function validateBusinessProfile(input, current) {
   const businessPhoneInput = Object.hasOwn(input, "businessPhone") ? input.businessPhone : Object.hasOwn(input, "publicPhone") ? input.publicPhone : current?.public_phone;
   const publicPhone = validateBusinessPhone(businessPhoneInput, "business_phone_invalid");
   const privatePhone = validateBusinessPhone(input?.privatePhone, "private_phone_invalid");
+  if (Object.hasOwn(input, "privatePhone") && !privatePhone) throw new AuthFailure(400, "private_phone_required", "Enter the replacement private phone or cancel its replacement.");
+  if (privateAddress && !Object.values(privateAddress).some(Boolean)) throw new AuthFailure(400, "private_address_required", "Enter the replacement address or cancel its replacement.");
   return {
     revision,
     tradingName,
@@ -2289,10 +2340,7 @@ function validatePrivateAddress(value) {
 }
 
 function plainPrivateValue(value, maxLength) {
-  const text = String(value ?? "").trim().slice(0, maxLength);
-  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text)) throw new AuthFailure(400, "private_value_invalid", "The private value contains invalid characters.");
-  if (/<\/?[a-z][^>]*>|javascript\s*:|on[a-z]+\s*=|<script/i.test(text)) throw new AuthFailure(400, "private_value_invalid", "Private business values accept plain text only.");
-  return text;
+  return validateOperatorText(value, maxLength, "private_value_invalid");
 }
 
 function validateCtaUrl(value) {
@@ -2348,8 +2396,9 @@ function validateAddress(value, prefix = "public_address") {
 }
 
 function validateOperatorText(value, maxLength, code) {
+  if (value !== undefined && value !== null && typeof value !== "string") throw new AuthFailure(400, code, "The field must be plain text.");
   const raw = String(value ?? "");
-  if (raw.length > maxLength) throw new AuthFailure(400, `${code}_too_long`, `The field must be ${maxLength} characters or fewer.`);
+  if (raw.trim().length > maxLength) throw new AuthFailure(400, `${code}_too_long`, `The field must be ${maxLength} characters or fewer.`);
   if (/[\u0000-\u001F\u007F]/u.test(raw) || hasUnpairedSurrogate(raw)) throw new AuthFailure(400, code, "The field contains invalid control or malformed characters.");
   return raw.trim();
 }

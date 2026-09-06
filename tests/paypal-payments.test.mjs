@@ -57,11 +57,11 @@ test("PayPal client keeps Sandbox and Live OAuth and Orders endpoints separate",
   assert.doesNotMatch(JSON.stringify(urls),/sandbox-secret|live-secret/);
 });
 
-test("emergency pause blocks donation creation before local or provider mutation",async(t)=>{
+test("emergency store pause preserves the independently enabled donation path",async(t)=>{
   const harness=await createCommerceDatabases();t.after(harness.dispose);await enableSandbox(harness.commerceDb);
-  await harness.commerceDb.batch([harness.commerceDb.prepare("UPDATE commerce_payment_provider_state SET emergency_paused=1 WHERE id='primary'"),harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key='commerce_emergency_paused'")]);let calls=0;
-  const response=await donationRoute({request:post("/api/commerce/paypal/donation",{donationRequestId:"33333333-3333-4333-8333-333333333333",amountMinor:500}),env:envFor(harness),data:{paypalFetch:async()=>{calls+=1;}}});
-  assert.equal(response.status,409);assert.equal((await response.json()).error,"commerce_emergency_paused");assert.equal(calls,0);assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_donations").first()).count,0);
+  await harness.commerceDb.batch([harness.commerceDb.prepare("UPDATE commerce_payment_provider_state SET emergency_paused=1 WHERE id='primary'"),harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key='commerce_emergency_paused'")]);
+  const configuration=await paypalPublicConfiguration(envFor(harness));
+  assert.equal(configuration.storeCheckoutEnabled,false);assert.equal(configuration.donationsEnabled,true);assert.equal(configuration.emergencyPaused,true);
 });
 
 test("LIVE donation capture authority projects Live configuration while store creation remains structurally closed",async(t)=>{

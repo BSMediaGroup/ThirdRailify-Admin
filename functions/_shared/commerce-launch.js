@@ -1,9 +1,11 @@
+import { worldwideShippingMarkets } from "./shipping-core.js";
+import { transactionGuard, LAUNCH_AUTHORITY_SQL } from "./commerce-transaction-guards.js";
 import { AuthFailure, cleanText, nowIso, randomId } from "./auth-core.js";
-import { requireCommerceDb, writeCommerceAudit } from "./commerce-core.js";
+import { prepareBusinessProfileMutation, requireCommerceDb, writeCommerceAudit, decryptCommerceSecret } from "./commerce-core.js";
 import { paypalCredentials } from "./paypal-client.js";
 import { paypalTechnicalReadiness, paypalWebhookUrl } from "./paypal-onboarding.js";
 
-export const LIVE_ACTIVATION_CONFIRMATION = "ACTIVATE LIVE COMMERCE";
+export const LIVE_ACTIVATION_CONFIRMATION = "SAVE, CONFIRM & ENABLE STORE";
 export const EMERGENCY_PAUSE_CONFIRMATION = "PAUSE LIVE COMMERCE";
 export const LIVE_DONATIONS_CONFIRMATION = "ACTIVATE LIVE PAYPAL DONATIONS";
 
@@ -23,7 +25,8 @@ const ELIGIBLE_VARIANT_PREDICATE = `
 
 export async function commerceLaunchPlan(env) {
   const db = requireCommerceDb(env);
-  const [settingsResult, providersResult, launch, marketsResult, migration, counts, templates, jobs, printfulDeliveries, business] = await Promise.all([
+  const authorityBefore = (await db.prepare(LAUNCH_AUTHORITY_SQL).first()).fingerprint;
+  const [settingsResult, providersResult, launch, marketsResult, migration, counts, templates, jobs, printfulDeliveries, business, agreementSchema] = await Promise.all([
     db.prepare("SELECT setting_key,value_json FROM commerce_settings").all(),
     db.prepare("SELECT provider,status,environment,integration_mode,external_account_id,country_code,currency_code,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider IN ('paypal','stripe','printful')").all(),
     db.prepare("SELECT * FROM commerce_launch_state WHERE id='production'").first(),
@@ -37,10 +40,11 @@ export async function commerceLaunchPlan(env) {
       SUM(CASE WHEN v.is_sellable=1 AND NOT (${ELIGIBLE_VARIANT_PREDICATE}) THEN 1 ELSE 0 END) ineligible_sellable_variants,
       SUM(CASE WHEN NOT (${ELIGIBLE_VARIANT_PREDICATE}) THEN 1 ELSE 0 END) blocked_variants
       FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id`).first(),
-    db.prepare("SELECT template_key,status,enabled FROM commerce_templates WHERE template_kind='email'").all(),
+    db.prepare("SELECT * FROM commerce_templates").all(),
     db.prepare("SELECT state,COUNT(*) count FROM commerce_operation_jobs GROUP BY state").all(),
     db.prepare("SELECT COUNT(*) count FROM commerce_provider_webhook_events WHERE provider='printful' AND processing_status='processed'").first(),
-    db.prepare("SELECT trading_name,country_code,currency_code,public_contact_email,support_email,public_phone,public_address_json,legal_business_name_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
+    db.prepare("SELECT revision,trading_name,country_code,currency_code,public_contact_email,support_email,legal_business_name_ciphertext,private_phone_ciphertext,private_address_ciphertext,owner_attested_revision,owner_attested_at,transaction_disclosure_authorized_revision,transaction_disclosure_authorized_at FROM commerce_business_profiles WHERE id='primary'").first(),
+    db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='commerce_order_agreements'").first(),
   ]);
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
   const providers = Object.fromEntries((providersResult?.results || []).map((row) => [row.provider, { ...row, metadata: json(row.safe_metadata_json, {}) }]));
@@ -51,12 +55,25 @@ export async function commerceLaunchPlan(env) {
   const markets = marketsResult?.results || [];
   const activeMarkets = markets.filter((market) => market.status === "active" && market.strategy === "printful_dynamic");
   const migrationState = json(migration?.safe_state_json, {});
-  const configuredEmailTemplates = (templates?.results || []).filter((template) => template.status === "ready" && Number(template.enabled) === 1).length;
-  const orderConfirmationReady = (templates?.results || []).some((template) => template.template_key === "order_confirmation" && template.status === "ready" && Number(template.enabled) === 1);
-  const orderConfirmationDeliveryReady = settings.resend_domain_verified === true && Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM) && orderConfirmationReady;
+  const emailTemplates = (templates?.results || []).filter((t) => t.template_kind === "email");
+  const configuredEmailTemplates = emailTemplates.filter((template) => template.status === "ready" && Number(template.enabled) === 1).length;
+  const requiredCustomerTemplates = ["order_confirmation"];
+  const requiredTemplatesReady = requiredCustomerTemplates.every((key) => (templates?.results || []).some((template) => template.template_key === key && template.status === "ready" && Number(template.enabled) === 1));
+  const allLifecycleTemplatesReady = emailTemplates.length === 7 && configuredEmailTemplates === 7;
+  const orderConfirmationDeliveryReady = settings.resend_domain_verified === true && Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM) && requiredTemplatesReady;
+  let merchantDecryptable = false;
+  try {
+    const [name, phone, address] = await Promise.all([
+      decryptCommerceSecret(env, business?.legal_business_name_ciphertext, "business:legal-name"),
+      decryptCommerceSecret(env, business?.private_phone_ciphertext, "business:private-phone"),
+      decryptCommerceSecret(env, business?.private_address_ciphertext, "business:private-address"),
+    ]);
+    merchantDecryptable = Boolean(name?.trim() && phone?.trim() && Object.values(JSON.parse(address)).some((value) => typeof value === "string" && value.trim()));
+  } catch { /* Safe configured-state projection; never log the encrypted payload. */ }
+  const receiptReady = (templates?.results || []).some((t) => t.template_key === "payment_receipt" && t.status === "ready" && Number(t.enabled) === 1);
   const hardGates = [
-    gate("merchant_identity", Boolean(cleanText(business?.trading_name, 160) && business?.country_code === "CA" && business?.currency_code === "CAD" && cleanText(business?.support_email || business?.public_contact_email, 254) && cleanText(business?.public_phone, 80) && transactionDisclosureAddressPresent(business?.public_address_json) && business?.legal_business_name_ciphertext), "Required Ontario transaction-disclosure facts are present as operator-asserted data; no address or telephone-format validator claims legal or real-world verification."),
-    gate("transaction_disclosure_checkout", settings.internet_agreement_disclosure_enabled === true, "Scoped pre-agreement disclosure above CAD 50 and retainable agreement-copy delivery must be implemented and explicitly enabled; business data is not projected site-wide."),
+    gate("merchant_identity", merchantDecryptable && Boolean(cleanText(business?.trading_name, 160) && business?.country_code === "CA" && business?.currency_code === "CAD" && cleanText(business?.support_email || business?.public_contact_email, 254) && business?.private_phone_ciphertext && business?.private_address_ciphertext && business?.legal_business_name_ciphertext), "Required transaction-disclosure facts are stored encrypted as operator-entered data. No address or telephone-format validator claims legal or real-world verification."),
+    gate("transaction_disclosure_checkout", Boolean(agreementSchema?.name) && Number(settings.commerce_agreement_schema_version) >= 1, "The scoped pre-agreement disclosure and immutable accepted-agreement schema are installed; activation enables the transaction-only projection atomically."),
     gate("paypal_preferred", settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && paypal?.integration_mode === "direct_merchant", "PayPal is preferred and Stripe is retained but disabled."),
     gate("paypal_live_credential", paypalLiveTechnical.credentialsConfigured && paypalLiveTechnical.oauthVerified, "Distinct server-only PayPal LIVE credentials authenticated successfully against the LIVE OAuth endpoint."),
     gate("paypal_live_account", paypal?.status === "connected" && paypal?.environment === "live" && paypal?.integration_mode === "direct_merchant" && paypal?.country_code === "CA" && String(paypal?.currency_code || "").toUpperCase() === "CAD", "The configured PayPal connection is the Canadian CAD direct merchant app; no stronger merchant-onboarding claim is inferred."),
@@ -65,9 +82,10 @@ export async function commerceLaunchPlan(env) {
     gate("printful_store", printful?.status === "connected" && printful?.integration_mode === "fulfillment" && String(printful?.external_account_id || "") === "18668025" && printful?.metadata?.api_configured === true && hasPrintfulSecret(env), "The native Printful target store 18668025 is verified."),
     gate("catalogue", Number(counts?.eligible_variants || 0) > 0 && Number(counts?.eligible_sellable_variants || 0) === Number(counts?.eligible_variants || 0) && Number(counts?.ineligible_sellable_variants || 0) === 0, "Every eligible target-verified variant is sellable and blocked variants remain unavailable."),
     gate("catalogue_migration_terminal", new Set(["completed", "completed_with_blocked_products"]).has(migration?.status) && migration?.phase === "completed" && !migration?.step_lease_token && new Set(["completed", "completed_with_blocked_products"]).has(migrationState.finalStatus || migration?.status), "The permanent catalogue migration is terminal with no active lease and remains outside the launch workflow."),
-    gate("shipping", settings.shipping_strategy === "printful_dynamic" && activeMarkets.length > 0, "Printful dynamic rates are active for an explicit market allowlist."),
+    gate("shipping", settings.shipping_strategy === "printful_dynamic" && worldwideShippingMarkets().every(market => activeMarkets.some(active => active.country_code === market.countryCode)), "Worldwide shipping destinations are configured; server-issued Printful rates determine product and destination availability."),
+    gate("customer_documents", receiptReady, "The branded receipt renderer is ready; accepted agreements are retained with completed orders. Tax invoices are not applicable under not_collecting."),
     gate("operations_worker", settings.commerce_operations_worker_configured === true, "The scheduled Commerce Operations Worker and D1 job authority are configured."),
-    gate("order_confirmation_delivery", orderConfirmationDeliveryReady, "A retainable Third Railify order confirmation can be delivered after a paid LIVE internet order; shipment email and invoices are separate optional features."),
+    gate("order_confirmation_delivery", orderConfirmationDeliveryReady, "Resend and the order-confirmation template are ready. Global Customer Sending is enabled atomically with the store."),
     gate("emergency_pause_clear", settings.commerce_emergency_paused !== true, "Emergency pause is clear."),
   ];
   const advisories = [
@@ -80,15 +98,23 @@ export async function commerceLaunchPlan(env) {
     ok: true,
     authority: "Commerce D1",
     state: launch?.state || "preflight",
+    activatedAt: launch?.activated_at || null,
+    activatedBy: launch?.state === "active" ? launch?.updated_by_actor || null : null,
     revision: Number(launch?.revision || 1),
     ready,
     hardGates,
     advisories,
     settings: {
+      printfulOrderMode: settings.printful_order_mode,
+      environment: settings.commerce_environment,
+      taxPolicy: settings.tax_calculation_provider,
+      shippingStrategy: settings.shipping_strategy,
       checkoutEnabled: settings.checkout_enabled === true,
       liveCaptureEnabled: settings.live_payment_capture_enabled === true,
       fulfillmentEnabled: settings.fulfillment_submission_enabled === true,
       transactionalEmailEnabled: settings.transactional_email_enabled === true,
+      internetAgreementDisclosureEnabled: settings.internet_agreement_disclosure_enabled === true,
+      customerDocumentAccessEnabled: settings.customer_document_access_enabled === true,
       stripeTaxEnabled: settings.stripe_tax_enabled === true,
       preferredPaymentProvider: settings.preferred_payment_provider || "paypal",
       paypalStoreCheckoutEnabled: settings.paypal_store_checkout_enabled === true,
@@ -97,6 +123,8 @@ export async function commerceLaunchPlan(env) {
       stripeEnabled: settings.stripe_enabled === true,
       emergencyPaused: settings.commerce_emergency_paused === true,
     },
+    business: { revision: Number(business?.revision || 0), tradingName: business?.trading_name || "", legalNameConfigured: Boolean(business?.legal_business_name_ciphertext), phoneConfigured: Boolean(business?.private_phone_ciphertext), addressConfigured: Boolean(business?.private_address_ciphertext), ownerConfirmed: Number(business?.owner_attested_revision || 0) === Number(business?.revision || 0), disclosureAuthorized: Number(business?.transaction_disclosure_authorized_revision || 0) === Number(business?.revision || 0), ownerAttestedAt: business?.owner_attested_at || null, disclosureAuthorizedAt: business?.transaction_disclosure_authorized_at || null },
+    customerSending: { providerConfigured: Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM), domainVerified: settings.resend_domain_verified === true, configuredTemplates: configuredEmailTemplates, totalTemplates:emailTemplates.length,requiredTemplatesReady,allLifecycleTemplatesReady,globallyEnabled: settings.transactional_email_enabled === true },
     catalogue: {
       totalVariants: number(counts?.total_variants),
       eligibleVariants: number(counts?.eligible_variants),
@@ -109,7 +137,10 @@ export async function commerceLaunchPlan(env) {
     jobs: Object.fromEntries((jobs?.results || []).map((row) => [row.state, number(row.count)])),
     checkedAt: nowIso(),
   };
-  plan.digest = await sha256Hex(JSON.stringify({ ...plan, checkedAt: null }));
+  const authorityAfter = (await db.prepare(LAUNCH_AUTHORITY_SQL).first()).fingerprint;
+  if (authorityBefore !== authorityAfter) throw new AuthFailure(409, "commerce_readiness_changed", "Commerce configuration changed while reading readiness. Reload the current plan.");
+  plan.digest = await sha256Hex(authorityAfter);
+  Object.defineProperty(plan, "authorityFingerprint", { value: authorityAfter, enumerable: false });
   return plan;
 }
 
@@ -191,46 +222,88 @@ export async function activatePayPalDonations(env, input, actorAccountId) {
   return paypalDonationLaunchPlan(env);
 }
 
-export async function activateCommerceLaunch(env, input, actorAccountId) {
+export const STORE_ACTIVATION_SETTINGS = Object.freeze({
+  checkout_enabled: true,
+  live_payment_capture_enabled: true,
+  fulfillment_submission_enabled: true,
+  transactional_email_enabled: true,
+  internet_agreement_disclosure_enabled: true,
+  customer_document_access_enabled: true,
+  commerce_environment: "production",
+  preferred_payment_provider: "paypal",
+  printful_order_mode: "draft_then_confirm",
+  paypal_store_checkout_enabled: true,
+  paypal_live_capture_enabled: true,
+  stripe_enabled: false,
+  stripe_tax_enabled: false,
+});
+
+export async function activateCommerceLaunch(env, input, actorSession) {
   requireTransitionInput(input, LIVE_ACTIVATION_CONFIRMATION);
-  const plan = await commerceLaunchPlan(env);
-  if (Number(input.expectedRevision) !== plan.revision) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed. Review the current plan before activation.");
-  if (!plan.ready) throw new AuthFailure(409, "commerce_launch_blocked", "Production commerce cannot activate while a hard gate is blocked.");
+  const session = typeof actorSession === "string" ? { accountId: actorSession } : actorSession;
+  const actorAccountId = cleanText(session?.accountId, 160);
+  if (!actorAccountId) throw new AuthFailure(403, "commerce_actor_required", "An authenticated owner is required.");
   const db = requireCommerceDb(env);
+  const plan = await commerceLaunchPlan(env);
+  const persistedLaunch = await db.prepare("SELECT last_plan_digest,last_plan_json FROM commerce_launch_state WHERE id='production'").first();
+  const requestDigest = await sha256Hex(JSON.stringify({actorAccountId,businessProfileRevision:input.businessProfileRevision,profile:input.profile||null}));
+  const sameRequest = json(persistedLaunch?.last_plan_json,{}).requestDigest === requestDigest;
+  if (plan.state === "active" && (!input.profile || sameRequest) && plan.business.ownerConfirmed && plan.business.disclosureAuthorized
+      && (Number(input.businessProfileRevision) === plan.business.revision || sameRequest)
+      && (input.expectedDigest === plan.digest || input.expectedDigest === persistedLaunch?.last_plan_digest)) {
+    await verifyActivationReadback(db, plan.business.revision);
+    return { ...plan, activationResult: { before: plan.settings, after: plan.settings, activatedAt: plan.activatedAt, actorAccountId: plan.activatedBy, idempotent: true } };
+  }
+  if (Number(input.expectedRevision) !== plan.revision || input.expectedDigest !== plan.digest) throw new AuthFailure(409, "commerce_launch_revision_conflict", "Readiness changed. Reload the current plan before confirming.");
   const timestamp = nowIso();
+  const profileMutation = input.profile ? await prepareBusinessProfileMutation(env, session, input.profile, { attest: true, timestamp }) : null;
+  if (Number(input.businessProfileRevision) !== (profileMutation?.currentRevision ?? plan.business.revision)) throw new AuthFailure(409, "commerce_business_revision_conflict", "The business profile changed. Review the current merchant facts.");
+  if (!plan.hardGates.every((entry) => entry.ready || (entry.id === "merchant_identity" && profileMutation?.merchantComplete))) throw new AuthFailure(409, "commerce_launch_blocked", "A required launch dependency is unavailable. Review the current hard gates.");
+  const profileTargetRevision = profileMutation?.nextRevision ?? plan.business.revision;
   const nextRevision = plan.revision + 1;
-  const emailEnabled = plan.hardGates.find((entry) => entry.id === "order_confirmation_delivery")?.ready === true;
-  const auditId = randomId();
-  const statements = [
-    setting(db, "checkout_enabled", true, timestamp, actorAccountId),
-    setting(db, "live_payment_capture_enabled", true, timestamp, actorAccountId),
-    setting(db, "fulfillment_submission_enabled", true, timestamp, actorAccountId),
-    setting(db, "transactional_email_enabled", emailEnabled, timestamp, actorAccountId),
-    setting(db, "commerce_environment", "production", timestamp, actorAccountId),
-    setting(db, "printful_order_mode", "draft_then_confirm", timestamp, actorAccountId),
-    setting(db, "commerce_launch_revision", nextRevision, timestamp, actorAccountId),
-    setting(db, "paypal_store_checkout_enabled", true, timestamp, actorAccountId),
-    setting(db, "paypal_donations_enabled", true, timestamp, actorAccountId),
-    setting(db, "paypal_live_capture_enabled", true, timestamp, actorAccountId),
-    setting(db, "paypal_donation_live_capture_enabled", true, timestamp, actorAccountId),
-    setting(db, "stripe_enabled", false, timestamp, actorAccountId),
-    db.prepare(`UPDATE commerce_payment_provider_state SET preferred_provider='paypal',stripe_enabled=0,paypal_live_configured=1,
-      paypal_store_checkout_enabled=1,paypal_live_capture_enabled=1,paypal_donations_enabled=1,emergency_paused=0,
-      revision=revision+1,transition_reason='Authorized PayPal production commerce activation.',updated_by_actor=?,updated_at=? WHERE id='primary'`).bind(cleanText(actorAccountId,160)||"deployment-cli",timestamp),
-    db.prepare(`UPDATE commerce_provider_connections SET environment='live',status='connected',safe_metadata_json=json_set(safe_metadata_json,
-      '$.preferred',json('true'),'$.store_checkout_enabled',json('true'),'$.donations_enabled',json('true'),'$.store_live_capture_enabled',json('true'),'$.donation_live_capture_enabled',json('true'),'$.live_capture_enabled',json('true')),updated_at=? WHERE provider='paypal'`).bind(timestamp),
-    db.prepare(`UPDATE commerce_provider_connections SET environment='production',safe_metadata_json=json_set(safe_metadata_json,
-      '$.fulfillment_enabled',json('true'),'$.order_mode','draft_then_confirm'),updated_at=? WHERE provider='printful'`).bind(timestamp),
-    db.prepare("UPDATE commerce_products SET checkout_environment='live',updated_at=? WHERE status='active' AND visibility='public'").bind(timestamp),
-    db.prepare(`UPDATE commerce_launch_state SET state='active',revision=?,last_plan_digest=?,last_plan_json=?,activated_at=?,paused_at=NULL,pause_reason=NULL,updated_by_actor=?,updated_at=?
-      WHERE id='production' AND revision=?`).bind(nextRevision, plan.digest, JSON.stringify(plan).slice(0, 32768), timestamp, cleanText(actorAccountId, 160) || "deployment-cli", timestamp, plan.revision),
-    db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,?,?,?,'success',?,?)")
-      .bind(auditId, cleanText(actorAccountId, 160) || null, "commerce.production_activated", "commerce_launch_state", "production", JSON.stringify({ revision: nextRevision, planDigest: plan.digest, transactionalEmailEnabled: emailEnabled }), timestamp),
-  ];
-  const updates = await db.batch(statements);
-  if (changes(updates[16]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during activation.");
-  return commerceLaunchPlan(env);
+  const afterBooleans = { ...plan.settings, checkoutEnabled:true, liveCaptureEnabled:true, fulfillmentEnabled:true, transactionalEmailEnabled:true, internetAgreementDisclosureEnabled:true, customerDocumentAccessEnabled:true, paypalStoreCheckoutEnabled:true, paypalLiveCaptureEnabled:true, stripeEnabled:false, stripeTaxEnabled:false };
+  const audit = { readinessRevision:plan.digest, revision:nextRevision, businessProfileRevision:profileTargetRevision,
+    before: booleanSettings(plan.settings), after: booleanSettings(afterBooleans) };
+  try {
+    await db.batch([
+      transactionGuard(db, `(${LAUNCH_AUTHORITY_SQL}) = ?`, [plan.authorityFingerprint]),
+      profileMutation?.statement || db.prepare(`UPDATE commerce_business_profiles SET owner_attested_revision=revision,owner_attested_at=?,owner_attested_by_account_id=?,transaction_disclosure_authorized_revision=revision,transaction_disclosure_authorized_at=? WHERE id='primary' AND revision=?`).bind(timestamp,actorAccountId,timestamp,plan.business.revision),
+      transactionGuard(db, "changes()=1"),
+      ...Object.entries(STORE_ACTIVATION_SETTINGS).map(([key,value]) => setting(db,key,value,timestamp,actorAccountId)),
+      setting(db,"commerce_launch_revision",nextRevision,timestamp,actorAccountId),
+      db.prepare("UPDATE commerce_payment_provider_state SET preferred_provider='paypal',stripe_enabled=0,paypal_live_configured=1,paypal_store_checkout_enabled=1,paypal_live_capture_enabled=1,revision=revision+1,transition_reason='Owner authorized production store.',updated_by_actor=?,updated_at=? WHERE id='primary' AND emergency_paused=0").bind(actorAccountId,timestamp),
+      transactionGuard(db, "changes()=1"),
+      db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.preferred',json('true'),'$.store_checkout_enabled',json('true'),'$.store_live_capture_enabled',json('true'),'$.live_capture_enabled',json('true')),updated_at=? WHERE provider='paypal'").bind(timestamp),
+      db.prepare("UPDATE commerce_provider_connections SET environment='live',safe_metadata_json=json_set(safe_metadata_json,'$.fulfillment_enabled',json('true'),'$.order_mode','draft_then_confirm'),updated_at=? WHERE provider='printful'").bind(timestamp),
+      db.prepare("UPDATE commerce_products SET checkout_environment='live',updated_at=? WHERE status='active' AND visibility='public'").bind(timestamp),
+      db.prepare("UPDATE commerce_launch_state SET state='active',revision=?,last_plan_digest=?,last_plan_json=?,activated_at=?,paused_at=NULL,pause_reason=NULL,updated_by_actor=?,updated_at=? WHERE id='production' AND revision=?").bind(nextRevision,plan.digest,JSON.stringify({before:plan.settings,after:afterBooleans,requestDigest}),timestamp,actorAccountId,timestamp,plan.revision),
+      transactionGuard(db, "changes()=1"),
+      db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?, 'commerce.production_activated','commerce_launch_state','production','success',?,?)").bind(randomId(),actorAccountId,JSON.stringify(audit),timestamp),
+    ]);
+  } catch (error) {
+    if (/commerce_transaction_conflict|malformed JSON/i.test(String(error?.message))) throw new AuthFailure(409,"commerce_launch_revision_conflict","Commerce changed during activation; every activation write was rolled back. Reload and review.");
+    const failure=new AuthFailure(503,"commerce_activation_write_failed","Activation could not be saved; the transaction was rolled back.");
+    failure.cause=error;
+    throw failure;
+  }
+  await verifyActivationReadback(db, profileTargetRevision);
+  const activated = await commerceLaunchPlan(env);
+  return { ...activated, activationResult:{before:plan.settings,after:activated.settings,activatedAt:timestamp,actorAccountId,businessProfileRevision:profileTargetRevision,profileSaved:Boolean(profileMutation),idempotent:false} };
 }
+
+async function verifyActivationReadback(db, revision) {
+  const rows = await db.prepare("SELECT setting_key,value_json FROM commerce_settings").all();
+  const settings = Object.fromEntries(rows.results.map((r)=>[r.setting_key,json(r.value_json,null)]));
+  const profile = await db.prepare("SELECT revision,owner_attested_revision,transaction_disclosure_authorized_revision FROM commerce_business_profiles WHERE id='primary'").first();
+  const state = await db.prepare("SELECT preferred_provider,stripe_enabled,paypal_store_checkout_enabled,paypal_live_capture_enabled,emergency_paused FROM commerce_payment_provider_state WHERE id='primary'").first();
+  if (!Object.entries(STORE_ACTIVATION_SETTINGS).every(([key,value])=>settings[key]===value)
+      || settings.commerce_emergency_paused === true || settings.tax_calculation_provider !== "not_collecting" || settings.shipping_strategy !== "printful_dynamic"
+      || Number(profile?.revision)!==revision || Number(profile?.owner_attested_revision)!==revision || Number(profile?.transaction_disclosure_authorized_revision)!==revision
+      || state?.preferred_provider!=="paypal" || Number(state?.stripe_enabled)!==0 || Number(state?.paypal_store_checkout_enabled)!==1 || Number(state?.paypal_live_capture_enabled)!==1 || Number(state?.emergency_paused)!==0) {
+    throw new AuthFailure(503,"commerce_activation_readback_failed","Persisted activation readback differs. Refresh store status before retrying.");
+  }
+}
+function booleanSettings(settings) { return Object.fromEntries(Object.entries(settings).filter(([,value])=>typeof value==="boolean")); }
 
 export async function pauseCommerceLaunch(env, input, actorAccountId) {
   requireTransitionInput(input, EMERGENCY_PAUSE_CONFIRMATION, true);
@@ -242,33 +315,33 @@ export async function pauseCommerceLaunch(env, input, actorAccountId) {
   const nextRevision = revision + 1;
   const reason = cleanText(input.reason, 300) || "Emergency pause requested by an authorized operator.";
   const updates = await db.batch([
+    transactionGuard(db, "EXISTS (SELECT 1 FROM commerce_launch_state WHERE id='production' AND revision=?)", [revision]),
     setting(db, "checkout_enabled", false, timestamp, actorAccountId),
     setting(db, "live_payment_capture_enabled", false, timestamp, actorAccountId),
     setting(db, "fulfillment_submission_enabled", false, timestamp, actorAccountId),
     setting(db, "commerce_emergency_paused", true, timestamp, actorAccountId),
     setting(db, "commerce_launch_revision", nextRevision, timestamp, actorAccountId),
     setting(db, "paypal_store_checkout_enabled", false, timestamp, actorAccountId),
-    setting(db, "paypal_donations_enabled", false, timestamp, actorAccountId),
     setting(db, "paypal_live_capture_enabled", false, timestamp, actorAccountId),
-    setting(db, "paypal_donation_live_capture_enabled", false, timestamp, actorAccountId),
     setting(db, "stripe_enabled", false, timestamp, actorAccountId),
     db.prepare(`UPDATE commerce_payment_provider_state SET stripe_enabled=0,paypal_store_checkout_enabled=0,paypal_live_capture_enabled=0,
-      paypal_donations_enabled=0,emergency_paused=1,revision=revision+1,transition_reason=?,updated_by_actor=?,updated_at=? WHERE id='primary'`).bind(reason,cleanText(actorAccountId,160)||"deployment-cli",timestamp),
-    db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.store_checkout_enabled',json('false'),'$.donations_enabled',json('false'),'$.store_live_capture_enabled',json('false'),'$.donation_live_capture_enabled',json('false'),'$.live_capture_enabled',json('false')),updated_at=? WHERE provider='paypal'").bind(timestamp),
+      emergency_paused=1,revision=revision+1,transition_reason=?,updated_by_actor=?,updated_at=? WHERE id='primary'`).bind(reason,cleanText(actorAccountId,160)||"deployment-cli",timestamp),
+    db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.store_checkout_enabled',json('false'),'$.store_live_capture_enabled',json('false'),'$.live_capture_enabled',json('false')),updated_at=? WHERE provider='paypal'").bind(timestamp),
     db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.fulfillment_enabled',json('false')),updated_at=? WHERE provider='printful'").bind(timestamp),
     db.prepare("UPDATE commerce_launch_state SET state='paused',revision=?,paused_at=?,pause_reason=?,updated_by_actor=?,updated_at=? WHERE id='production' AND revision=?")
       .bind(nextRevision, timestamp, reason, cleanText(actorAccountId, 160) || "deployment-cli", timestamp, revision),
     db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,?,?,?,'success',?,?)")
       .bind(randomId(), cleanText(actorAccountId, 160) || null, "commerce.emergency_paused", "commerce_launch_state", "production", JSON.stringify({ revision: nextRevision, reason }), timestamp),
   ]);
-  if (changes(updates[13]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during the emergency pause.");
+  if (changes(updates[12]) !== 1) throw new AuthFailure(409, "commerce_launch_revision_conflict", "The launch state changed during the emergency pause.");
   return commerceLaunchPlan(env);
 }
 
 function requireTransitionInput(input, confirmation, reasonAllowed = false) {
-  const allowed = new Set(["confirmation", "expectedRevision", ...(reasonAllowed ? ["reason"] : [])]);
-  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.has(key)) || input.confirmation !== confirmation) {
-    throw new AuthFailure(400, "commerce_launch_confirmation_required", `Type ${confirmation} exactly to continue.`);
+  const allowed = new Set(["confirmation", "expectedRevision", ...(reasonAllowed ? ["reason"] : ["expectedDigest","businessProfileRevision","ownerAttestation","transactionDisclosureAuthorization","productionEnvironment","profile"])]);
+  const authorizationMissing = confirmation === LIVE_ACTIVATION_CONFIRMATION && (input?.ownerAttestation !== true || input?.transactionDisclosureAuthorization !== true || input?.productionEnvironment !== "production" || !Number.isSafeInteger(Number(input?.businessProfileRevision)) || !/^[a-f0-9]{64}$/.test(String(input?.expectedDigest || "")));
+  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.has(key)) || input.confirmation !== confirmation || authorizationMissing) {
+    throw new AuthFailure(400, "commerce_launch_confirmation_required", reasonAllowed ? `Type ${confirmation} exactly to continue.` : "Explicit owner attestation and production transaction-disclosure authorization are required.");
   }
 }
 

@@ -20,11 +20,13 @@ export async function createAuthDatabase() {
 }
 
 export async function applyMigration(db, migration) {
-  const statements = migration
+  const triggers=[];
+  const withoutTriggers=migration.replace(/CREATE TRIGGER[\s\S]*?\bEND;/g, statement=>{triggers.push(statement);return "";});
+  const statements = withoutTriggers
     .split(/;\s*(?:\r?\n|$)/)
     .map((statement) => statement.trim())
     .filter(Boolean);
-  for (const statement of statements) await db.prepare(statement).run();
+  for (const statement of [...statements,...triggers]) await db.prepare(statement).run();
 }
 
 export function authEnvironment(db, overrides = {}) {

@@ -1,0 +1,37 @@
+[
+  {
+    "origin": "https://admin.thirdrailify.com",
+    "status": 200,
+    "exactEntryAssets": true,
+    "assets": [
+      "/assets/index-CpAmD_IE.js",
+      "/assets/index-DmXxOnZD.css"
+    ]
+  },
+  {
+    "origin": "https://thirdrailify.com",
+    "status": 200,
+    "exactEntryAssets": true,
+    "assets": [
+      "/assets/index-BRq10TZW.js",
+      "/assets/index-sJi9VNVm.css"
+    ]
+  },
+  {
+    "environment": "live",
+    "canonicalReadiness": {
+      "ready": true,
+      "hardBlockerCount": 0
+    },
+    "storeCheckoutEnabled": false,
+    "donationsEnabled": true,
+    "stripe": {
+      "configured": true,
+      "enabled": false,
+      "preferred": false
+    }
+  },
+  {
+    "worldwideDestinations": 242
+  }
+]

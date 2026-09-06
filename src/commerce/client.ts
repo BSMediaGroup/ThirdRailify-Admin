@@ -15,6 +15,7 @@ export type BusinessProfile = {
   tradingName: string; countryCode: string; provinceCode: string; currencyCode: string; businessAddress: BusinessAddress; publicAddress: BusinessAddress;
   publicContactEmail: string; supportEmail: string; businessPhone: string; publicPhone: string; websiteUrl: string; invoicePrefix: string; documentFooter: string;
   taxProviderState: string; invoiceAccentColor: string; receiptAccentColor: string; revision: number; updatedAt: string | null;
+  attestation: { ownerConfirmed: boolean; ownerAttestedRevision: number | null; ownerAttestedAt: string | null; ownerAttestedByAccountId: string | null; transactionDisclosureAuthorized: boolean; transactionDisclosureAuthorizedAt: string | null };
   private: { legalBusinessNameStored: boolean; privateAddressStored: boolean; privatePhoneStored: boolean; businessRegistrationNumberStored: boolean; legalBusinessNameMasked: string; privateAddressMasked: string; privatePhoneMasked: string; businessRegistrationNumberMasked: string; registrations: Array<{ type: string; jurisdiction: string; maskedIdentifier: string; status: string }> };
 };
 export type ReadinessDomain = { ready: boolean; status: "ready" | "blocked"; summary: string; details: Record<string, unknown> };
@@ -46,11 +47,14 @@ export type CommerceTemplate = {
 };
 export type CommerceLaunchGate = { id: string; ready: boolean; detail: string };
 export type CommerceLaunchPlan = {
+  activatedAt: string | null; activatedBy: string | null;
   ok: true; state: "preflight" | "active" | "paused"; revision: number; ready: boolean; digest: string;
   hardGates: CommerceLaunchGate[]; advisories: CommerceLaunchGate[];
   catalogue: { totalVariants: number; eligibleVariants: number; sellableVariants: number; eligibleSellableVariants: number; ineligibleSellableVariants: number };
   shippingMarkets: Array<{ countryCode: string; displayName: string; status: string; strategy: string; revision: number }>;
-  settings: { checkoutEnabled: boolean; liveCaptureEnabled: boolean; fulfillmentEnabled: boolean; transactionalEmailEnabled: boolean; stripeTaxEnabled: boolean; emergencyPaused: boolean };
+  settings: { customerDocumentAccessEnabled: boolean; checkoutEnabled: boolean; liveCaptureEnabled: boolean; fulfillmentEnabled: boolean; transactionalEmailEnabled: boolean; stripeTaxEnabled: boolean; emergencyPaused: boolean };
+  business: { tradingName:string; revision:number;legalNameConfigured:boolean;phoneConfigured:boolean;addressConfigured:boolean;ownerConfirmed:boolean;disclosureAuthorized:boolean;ownerAttestedAt:string|null;disclosureAuthorizedAt:string|null };
+  customerSending:{providerConfigured:boolean;domainVerified:boolean;configuredTemplates:number;totalTemplates:number;requiredTemplatesReady:boolean;allLifecycleTemplatesReady:boolean;globallyEnabled:boolean};
 };
 export type CustomerEmailTemplate = CommerceTemplate & { purpose: string; updatedAt: string | null; productionTriggerImplemented: boolean };
 export type CustomerEmailDelivery = {
@@ -353,7 +357,7 @@ type SnapshotContinuationPayload = {
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
 export function getCommerceLaunchPlan() { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch"); }
 export function applyCommerceCatalogueSellability(csrfToken: string) { return adminApi<{ ok: true }>("/api/admin/commerce/launch/catalogue-apply", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmation: "APPLY ELIGIBLE SELLABILITY" }) }); }
-export function activateCommerceLaunch(csrfToken: string, expectedRevision: number, confirmation: string) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/activate", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedRevision, confirmation }) }); }
+export function activateCommerceLaunch(csrfToken: string, plan: CommerceLaunchPlan, profile?: Record<string, unknown>) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/activate", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedDigest:plan.digest,profile,expectedRevision:plan.revision,businessProfileRevision:plan.business.revision,confirmation:"SAVE, CONFIRM & ENABLE STORE",ownerAttestation:true,transactionDisclosureAuthorization:true,productionEnvironment:"production" }) }); }
 export function pauseCommerceLaunch(csrfToken: string, expectedRevision: number, reason: string) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/pause", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedRevision, confirmation: "PAUSE LIVE COMMERCE", reason }) }); }
 export function getPaymentsControlPlane() { return adminApi<PaymentsControlPlanePayload>("/api/admin/commerce/payments"); }
 export function getFulfillmentShipping() { return adminApi<FulfillmentShippingPayload>("/api/admin/commerce/fulfillment"); }
@@ -596,3 +600,5 @@ function chunks<T>(values: T[], size: number) {
   for (let offset = 0; offset < values.length; offset += size) result.push(values.slice(offset, offset + size));
   return result;
 }
+
+export function revealPrivateBusinessProfile(csrfToken:string) { return adminApi<{ok:true;revision:number;legalBusinessName:string;privatePhone:string;privateAddress:Record<string,string>}>("/api/admin/commerce/business/reveal",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:"{}"}); }

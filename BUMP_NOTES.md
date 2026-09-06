@@ -1,5 +1,13 @@
 # Bump notes
 
+## 2026-09-06 - Permanent store activation and retained agreements
+
+- Repaired safe private merchant replacement persistence, precise errors, encrypted reload and canonical configured/owner-confirmed readiness.
+- Added migration 0031 for revision-bound owner/disclosure authorization, immutable encrypted agreements and encrypted receipt snapshots/tokens.
+- Added Master SAVE, CONFIRM & ENABLE STORE: one guarded atomic save/attest/enable batch, complete readback and idempotent retry. Donations preserved; Stripe disabled; Printful draft/validate/confirm and polling fallback retained.
+- Implemented scoped review before PayPal and full retained agreement in order confirmation and protected branded receipt. Deployment creates no payment, shipment, email or owner attestation.
+
+
 ## 2026-09-01 - Address UX V2 human-readable geography
 
 CURRENT VER=0.1.0-alpha.0
@@ -735,3 +743,5 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 - Deployed only the two auth-maintenance runtime files from an isolated clean release tree. Production deployment `2ce3b918` is live at `https://2ce3b918.thirdrailify-admin.pages.dev`; both the immutable and stable Admin origins return `401 unauthenticated` for the cleanup route without a valid session, and no cleanup was executed during acceptance.
 - Polished the Site Content banner editor: the `Open Public site` label and external-link icon now share a centred flex row with balanced padding and a full-width mobile treatment; panels, fields, empty/loading states, toggles, previews and the save rail received scoped visual refinement; checkbox labels stay inline; and destructive message removal no longer inherits the gold primary fill.
 - Deployed the isolated Content-page polish as Admin Production deployment `a603f8eb` (`https://a603f8eb.thirdrailify-admin.pages.dev`). The immutable and stable `/content` routes return `200` with matching `index-t2baMVKy.js` and `index-Qrrq_Twt.css` assets, and the previously released auth-cleanup route still fails closed with `401` when unauthenticated.
+
+Shipping correction (6 September 2026): the owner explicitly superseded the earlier Canada-only instruction. Worldwide destination selection is enabled in the existing D1 shipping-market authority, subject to Printful published exclusions and destination/product rate availability. Canadian merchant identity and CAD charging do not restrict customer geography. No provider API call or order was made to configure markets.

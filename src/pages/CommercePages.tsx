@@ -1,3 +1,4 @@
+import { StoreLaunchWorkspace } from "../commerce/StoreLaunchWorkspace";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useOutletContext } from "react-router-dom";
@@ -11,9 +12,6 @@ import { OrdersManagementPage } from "./OrdersManagementPage";
 import {
   getCommerceOverview,
   getCommerceLaunchPlan,
-  applyCommerceCatalogueSellability,
-  activateCommerceLaunch,
-  pauseCommerceLaunch,
   getPaymentsControlPlane,
   getMerchandisingProductList,
   getCatalogueReconciliationStatus,
@@ -61,14 +59,6 @@ import {
   type CatalogueReconciliationStatus,
 } from "../commerce/client";
 
-const REQUIRED_POSTURE = [
-  ["Commerce environment", "Staging"],
-  ["Checkout engine", "Implemented / gated"],
-  ["Public checkout", "Disabled"],
-  ["Live payment capture", "Disabled"],
-  ["Fulfillment submission", "Disabled"],
-] as const;
-
 const COMMERCE_WORKSPACES = [
   { to: "/commerce/payments", eyebrow: "Processor control", title: "Payments & payouts", text: "Preferred PayPal direct-merchant authority, donation activity, verified webhook evidence, and retained Stripe history.", icon: "payments" },
   { to: "/commerce/business", eyebrow: "Merchant profile", title: "Business information", text: "Public storefront details kept separate from encrypted private Canadian fields.", icon: "business" },
@@ -78,14 +68,10 @@ const COMMERCE_WORKSPACES = [
 ] as const;
 
 export function CommerceOverviewPage() {
-  const { csrfToken, hasCapability } = useAuth();
-  const canManage = hasCapability("commerce.operations.manage");
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<CommerceOverviewPayload | null>(null);
   const [launch, setLaunch] = useState<CommerceLaunchPlan | null>(null);
   const [error, setError] = useState("");
-  const [confirmation, setConfirmation] = useState("");
-  const [busy, setBusy] = useState("");
   const load = useCallback(async () => {
     const stop = startLoading("Loading commerce posture"); setError("");
     try { const [overview, launchPlan] = await Promise.all([getCommerceOverview(), getCommerceLaunchPlan()]); setPayload(overview); setLaunch(launchPlan); }
@@ -93,28 +79,11 @@ export function CommerceOverviewPage() {
     finally { stop(); }
   }, [startLoading]);
   useEffect(() => { void load(); }, [load]);
-  const mutateLaunch = async (action: "catalogue" | "activate" | "pause") => {
-    if (!csrfToken || !launch || !canManage) return;
-    const stop = startLoading(action === "activate" ? "Activating production commerce" : action === "pause" ? "Pausing production commerce" : "Applying catalogue sellability");
-    setBusy(action); setError("");
-    try {
-      if (action === "catalogue") await applyCommerceCatalogueSellability(csrfToken);
-      if (action === "activate") await activateCommerceLaunch(csrfToken, launch.revision, confirmation);
-      if (action === "pause") await pauseCommerceLaunch(csrfToken, launch.revision, "Authorized operator emergency pause.");
-      setConfirmation(""); await load();
-    } catch (reason) { setError(errorMessage(reason, "The launch operation failed closed.")); }
-    finally { setBusy(""); stop(); }
-  };
 
   return <>
-    <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary="PayPal is the preferred direct-merchant provider for store purchases and one-time donations. Stripe remains configured, disabled, and historically readable; every PayPal production gate remains fail-closed until verified." status="disabled" />
+    <CommerceHeading eyebrow="Admin-only control plane" title="Commerce overview" summary="PayPal is the preferred direct-merchant provider for store purchases and one-time donations. Stripe remains configured, disabled, and historically readable; every PayPal production gate remains fail-closed until verified." status={launch?.state === "active" ? "connected" : "disabled"} />
     {error && <div className="admin-alert" role="alert">{error}</div>}
-    {launch && <section className="commerce-section" aria-labelledby="launch-authority-title">
-      <SectionTitle id="launch-authority-title" eyebrow="Atomic production authority" title="Launch, pause &amp; eligibility" />
-      <div className={`commerce-callout ${launch.ready ? "is-connected" : "is-pending"}`}><AdminIcon name="shield" /><div><strong>{launch.state.toUpperCase()} · revision {launch.revision} · {launch.ready ? "all hard gates ready" : "activation blocked"}</strong><p>{launch.catalogue.eligibleSellableVariants}/{launch.catalogue.eligibleVariants} eligible variants are sellable; {launch.catalogue.ineligibleSellableVariants} ineligible variants are exposed. Shipping markets: {launch.shippingMarkets.filter((market) => market.status === "active").map((market) => market.countryCode).join(", ") || "none"}.</p></div></div>
-      <div className="payments-gate-grid">{launch.hardGates.map((gate) => <article className={`payment-gate is-${gate.ready ? "ready" : "action_required"}`} key={gate.id}><div><PaymentStateChip state={gate.ready ? "verified" : "unverified"} /><strong>{humanize(gate.id)}</strong></div><p>{gate.detail}</p></article>)}</div>
-      <div className="commerce-form__actions"><button className="secondary-button" type="button" disabled={!canManage || !csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("catalogue")}>{busy === "catalogue" ? "Applying…" : "Apply eligible sellability"}</button>{launch.state !== "active" ? <><input aria-label="Production activation confirmation" disabled={!canManage} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="ACTIVATE LIVE COMMERCE" /><button className="primary-button" type="button" disabled={!canManage || !csrfToken || !launch.ready || confirmation !== "ACTIVATE LIVE COMMERCE" || Boolean(busy)} onClick={() => void mutateLaunch("activate")}>{busy === "activate" ? "Activating…" : "Activate LIVE commerce"}</button></> : <button className="secondary-button" type="button" disabled={!canManage || !csrfToken || Boolean(busy)} onClick={() => void mutateLaunch("pause")}>{busy === "pause" ? "Pausing…" : "Emergency pause"}</button>}</div>
-    </section>}
+    <StoreLaunchWorkspace onActivated={()=>void load()} />
     <section className="commerce-section commerce-workspace-section" aria-labelledby="workspace-title">
       <SectionTitle id="workspace-title" eyebrow="Governed workspaces" title="Commerce control rooms" />
       <div className="commerce-link-grid">
@@ -122,9 +91,9 @@ export function CommerceOverviewPage() {
       </div>
     </section>
     {!payload && !error ? <CommerceState>Loading truthful commerce status…</CommerceState> : payload ? <>
-      <section className="commerce-posture" aria-label="Required safe posture">{REQUIRED_POSTURE.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
+      <section className="commerce-posture" aria-label="Required safe posture">{[["Commerce environment", "Production"],["Store checkout",launch?.settings.checkoutEnabled?"ACTIVE":"Ready to enable"],["Fulfillment",launch?.settings.fulfillmentEnabled?"ACTIVE":"Enabled with launch"]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
       <div className={`commerce-callout ${payload.databaseConfigured ? "is-pending" : "is-unavailable"}`} role="status">
-        <AdminIcon name="shield" /><div><strong>{payload.databaseConfigured ? "Permanent commerce authority: Connected" : "Commerce D1 is not bound"}</strong><p>{payload.databaseConfigured ? "The replacement shop catalogue, order records, business controls, templates, and derived readiness gates use permanent Commerce D1 authority. This remains PRE-CUTOVER." : "Safe defaults are visible. Private fields and every mutation fail closed until the separate Admin-only database and encryption key are configured."}</p></div>
+        <AdminIcon name="shield" /><div><strong>{payload.databaseConfigured ? "Permanent commerce authority: Connected" : "Commerce D1 is not bound"}</strong><p>{payload.databaseConfigured ? "The replacement shop catalogue, order records, business controls, templates, and derived readiness gates use permanent Commerce D1 authority. The permanent store control above manages production activation." : "Safe defaults are visible. Private fields and every mutation fail closed until the separate Admin-only database and encryption key are configured."}</p></div>
       </div>
       <section className="commerce-section" aria-labelledby="provider-status-title"><SectionTitle id="provider-status-title" eyebrow="Provider truth" title="Connections" /><div className="provider-card-grid">{payload.providers.map((provider) => <ProviderCard key={provider.provider} provider={provider} />)}</div></section>
       <section className="commerce-section" aria-labelledby="readiness-title"><SectionTitle id="readiness-title" eyebrow="Derived from actual configuration" title="Production readiness" />

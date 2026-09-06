@@ -28,7 +28,7 @@ test("activation fails atomically when any hard gate is blocked and pause is rev
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const env = commerceEnvironment(harness);
   const plan = await commerceLaunchPlan(env);
-  await assert.rejects(activateCommerceLaunch(env, { confirmation: "ACTIVATE LIVE COMMERCE", expectedRevision: plan.revision }, "master"), (error) => error.code === "commerce_launch_blocked");
+  await assert.rejects(activateCommerceLaunch(env, { confirmation: "SAVE, CONFIRM & ENABLE STORE", expectedDigest: plan.digest, expectedRevision: plan.revision, businessProfileRevision: plan.business.revision, ownerAttestation: true, transactionDisclosureAuthorization: true, productionEnvironment: "production" }, "master"), (error) => error.code === "commerce_launch_blocked");
   assert.deepEqual(await harness.commerceDb.prepare("SELECT state,revision FROM commerce_launch_state WHERE id='production'").first(), { state: "preflight", revision: 1 });
   await assert.rejects(pauseCommerceLaunch(env, { confirmation: "PAUSE LIVE COMMERCE", expectedRevision: 99, reason: "test" }, "master"), (error) => error.code === "commerce_launch_revision_conflict");
   const paused = await pauseCommerceLaunch(env, { confirmation: "PAUSE LIVE COMMERCE", expectedRevision: 1, reason: "test emergency pause" }, "master");

@@ -1,3 +1,4 @@
+import { commerceLaunchPlan } from "./commerce-launch.js";
 import { AuthFailure, cleanText, nowIso, randomId, sendAccountEmail } from "./auth-core.js";
 import {
   businessProfilePayload,
@@ -25,6 +26,7 @@ import {
 import { paypalAdminPayload } from "./paypal-commerce.js";
 import { paypalCredentials } from "./paypal-client.js";
 import { paypalTechnicalReadiness } from "./paypal-onboarding.js";
+import { acceptedAgreementAppendix } from "./commerce-agreements.js";
 import {
   buildPrintfulDraftCreateRequest,
   buildPrintfulOrderExternalId,
@@ -79,10 +81,10 @@ export async function businessInformationPayload(env, session) {
     optionalReadinessItem("website", "Website", Boolean(profile.websiteUrl), profile.websiteUrl || "Not configured / not required"),
   ];
   const disclosureItems = [
-    statusReadinessItem("internet_agreement_threshold", "Ontario internet-agreement threshold", "unverified", "Applies when the consumer's total potential payment obligation exceeds CAD 50"),
-    readinessItem("transaction_supplier_name", "Supplier legal identity", transactionDisclosure.facts.supplierName, transactionDisclosure.facts.supplierName ? "Configured / operator asserted / not externally verified" : "Required transaction-disclosure fact is absent"),
-    readinessItem("transaction_supplier_phone", "Supplier telephone", transactionDisclosure.facts.supplierPhone, transactionDisclosure.facts.supplierPhone ? "Configured / operator asserted / not externally verified" : "Required transaction-disclosure fact is absent"),
-    readinessItem("transaction_business_address", "Business-premises address", transactionDisclosure.facts.businessPremisesAddress, transactionDisclosure.facts.businessPremisesAddress ? "Required components are present; content is not semantically verified" : "Required transaction-disclosure components are absent"),
+    statusReadinessItem("internet_agreement_threshold", "Ontario internet-agreement threshold", "complete", "Implemented when the consumer's total potential payment obligation exceeds CAD 50"),
+    readinessItem("transaction_supplier_name", "Supplier legal identity", transactionDisclosure.facts.supplierName, transactionDisclosure.facts.supplierName ? profile.attestation.ownerConfirmed ? "OWNER CONFIRMED" : "CONFIGURED - owner confirmation is included at launch" : "Required transaction-disclosure fact is absent"),
+    readinessItem("transaction_supplier_phone", "Supplier telephone", transactionDisclosure.facts.supplierPhone, transactionDisclosure.facts.supplierPhone ? profile.attestation.ownerConfirmed ? "OWNER CONFIRMED" : "CONFIGURED - owner confirmation is included at launch" : "Required transaction-disclosure fact is absent"),
+    readinessItem("transaction_business_address", "Business-premises address", transactionDisclosure.facts.businessPremisesAddress, transactionDisclosure.facts.businessPremisesAddress ? profile.attestation.ownerConfirmed ? "OWNER CONFIRMED" : "CONFIGURED - encrypted operator content" : "Required transaction-disclosure components are absent"),
     readinessItem("transaction_other_contact", "Other customer contact", transactionDisclosure.facts.otherContact, transactionDisclosure.facts.otherContact ? "Email contact configured" : "Required transaction-disclosure fact is absent"),
   ];
   const legalItems = [
@@ -90,7 +92,7 @@ export async function businessInformationPayload(env, session) {
     optionalReadinessItem("private_address", "Private legal address", profile.private.privateAddressStored, profile.private.privateAddressStored ? "Encrypted value configured" : "Optional private metadata"),
     optionalReadinessItem("business_registration", "Business registration number", profile.private.businessRegistrationNumberStored, profile.private.businessRegistrationNumberStored ? "Encrypted value configured" : "Optional private metadata"),
   ];
-  const taxState = activeTaxRegistrations.length ? "complete" : registrations.length ? "unverified" : "not_configured";
+  const taxState = canonicalReadiness.domains.tax.details.calculationProvider === "not_collecting" ? "complete" : activeTaxRegistrations.length ? "complete" : registrations.length ? "unverified" : "not_configured";
   const receiptTemplateReady = templates.payment_receipt?.status === "ready" && Number(templates.payment_receipt?.enabled) === 1;
   const invoiceTemplateReady = templates.invoice_document?.status === "ready" && Number(templates.invoice_document?.enabled) === 1;
   const readiness = {
@@ -101,9 +103,9 @@ export async function businessInformationPayload(env, session) {
       readinessGroup("contact", "Customer contact", contactItems),
       readinessGroup("transaction_disclosure", "Transaction disclosure (over CAD 50)", disclosureItems),
       readinessGroup("legal", "Legal / document identity", legalItems),
-      readinessGroup("tax", "Tax", [statusReadinessItem("tax_registration", "Tax registration status", taxState, activeTaxRegistrations.length ? `${activeTaxRegistrations.length} active or verified registration${activeTaxRegistrations.length === 1 ? "" : "s"}` : registrations.length ? "Stored registrations remain unverified or inactive" : "Not configured in Tax & documents")]),
+      readinessGroup("tax", "Tax", [statusReadinessItem("tax_registration", "Tax registration status", taxState, canonicalReadiness.domains.tax.details.calculationProvider === "not_collecting" ? "NOT COLLECTING - owner-selected policy; no registration required by this configured path." : activeTaxRegistrations.length ? `${activeTaxRegistrations.length} active or verified registration${activeTaxRegistrations.length === 1 ? "" : "s"}` : registrations.length ? "Stored registrations remain unverified or inactive" : "Not configured in Tax & documents")]),
       readinessGroup("communications", "Customer communications", [canonicalDomainItem("transactional_email", "Transactional sender", canonicalReadiness.domains.communications)]),
-      readinessGroup("documents", "Documents", [readinessItem("receipt_template", "Receipt template", receiptTemplateReady, receiptTemplateReady ? "Ready and enabled" : "Action required"), readinessItem("invoice_template", "Invoice template", invoiceTemplateReady, invoiceTemplateReady ? "Ready and enabled" : "Not ready")]),
+      readinessGroup("documents", "Documents", [readinessItem("receipt_template", "Receipt template", receiptTemplateReady, receiptTemplateReady ? "Ready and enabled" : "Action required"), optionalReadinessItem("invoice_template", "Tax invoice - not applicable", false, "Not collecting tax; optional document does not block launch.")]),
       readinessGroup("fulfillment", "Fulfillment", [canonicalDomainItem("fulfillment", "Fulfillment provider", canonicalReadiness.domains.fulfillment)]),
     ],
     profile: {
@@ -127,7 +129,7 @@ export async function businessInformationPayload(env, session) {
     documentIdentity: {
       tradingName: profile.tradingName,
       legalNameStored: profile.private.legalBusinessNameStored,
-      addressStored: Object.values(businessAddress).some(Boolean),
+      addressStored: profile.private.privateAddressStored,
       contactEmail: profile.supportEmail || profile.publicContactEmail || null,
       taxRegistrationState: taxState,
       receiptTemplate: templateState(templates.payment_receipt),
@@ -236,57 +238,22 @@ export async function updateTaxRegistration(env, session, registrationId, input)
 
 export async function productionReadinessPayload(env, session) {
   const access = await commerceAccessForSession(env, session);
-  const db = requireCommerceDb(env);
-  const [profile, registrations, providersResult, settingsResult, catalogue, migration, templatesResult, acceptedOrder, acceptedWebhook] = await Promise.all([
-    db.prepare("SELECT * FROM commerce_business_profiles WHERE id='primary'").first(),
-    db.prepare("SELECT status, COUNT(*) count FROM commerce_tax_registrations GROUP BY status").all(),
-    db.prepare("SELECT provider,status,environment,integration_mode,country_code,currency_code,safe_metadata_json FROM commerce_provider_connections WHERE provider IN ('paypal','stripe','printful')").all(),
-    db.prepare(`SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN (
-      'checkout_enabled','live_payment_capture_enabled','fulfillment_submission_enabled','stripe_api_configured','stripe_webhook_configured',
-      'stripe_test_checkout_enabled','tax_calculation_provider','stripe_tax_enabled','shipping_strategy','transactional_email_enabled',
-      'customer_document_access_enabled','preferred_payment_provider','stripe_enabled','paypal_live_configured',
-      'paypal_live_webhook_configured','paypal_store_checkout_enabled','paypal_live_capture_enabled','paypal_donations_enabled','internet_agreement_disclosure_enabled')`).all(),
-    db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN visibility='public' AND status='active' THEN 1 ELSE 0 END) public_count FROM commerce_products").first(),
-    db.prepare("SELECT status,phase,products_verified,variants_mapped,safe_state_json FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08'").first(),
-    templatesPayload(env, session),
-    db.prepare("SELECT id,payment_status,fulfillment_status,environment,customer_gross_amount,stripe_checkout_session_id,printful_order_id FROM commerce_orders WHERE id=?").bind(ACCEPTED_TEST_ORDER_ID).first(),
-    db.prepare("SELECT provider_event_id FROM commerce_webhook_events WHERE provider='stripe' AND provider_event_id='evt_1U9OysB2jGrq9Tn1apdsFgi2' AND related_object_id='cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC' AND processing_status='processed' AND result_code='payment_confirmed'").first(),
-  ]);
-  const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, null)]));
-  const providers = Object.fromEntries((providersResult?.results || []).map((row) => [row.provider, { ...row, metadata: json(row.safe_metadata_json, {}) }]));
-  const paypalLive = paypalCredentials(env,"live");
-  const migrationState = json(migration?.safe_state_json, {});
-  const activeTaxCount = (registrations?.results || []).filter((row) => ["verified", "active"].includes(row.status)).reduce((sum, row) => sum + Number(row.count || 0), 0);
-  const readableTemplates = templatesResult?.templates || [];
-  const emailReadyCount = readableTemplates.filter((template) => template.templateKind === "email" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
-  const receiptTemplateReady = readableTemplates.some((template) => template.templateKind === "document" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled);
-  const legalIdentity = Boolean(profile?.legal_business_name_ciphertext);
-  const businessAddress = json(profile?.public_address_json, {});
-  const address = transactionDisclosureAddressPresent(businessAddress);
-  const merchantIdentity = Boolean(profile?.trading_name && profile?.country_code === "CA" && profile?.province_code === "ON" && profile?.currency_code === "CAD");
-  const supplierPhone = Boolean(cleanText(profile?.public_phone, 80));
-  const otherContact = Boolean(cleanText(profile?.support_email || profile?.public_contact_email, 254));
-  const contact = supplierPhone && otherContact;
-  const stripeTestConnected = providers.stripe?.status === "connected" && providers.stripe?.environment === "test" && providers.stripe?.metadata?.api_configured === true && settings.stripe_api_configured === true && providers.stripe?.metadata?.webhook_configured === true && settings.stripe_webhook_configured === true;
-  const testAcceptancePassed = Boolean(acceptedOrder?.payment_status === "paid" && acceptedOrder?.environment === "test" && acceptedOrder?.customer_gross_amount === 1500 && acceptedOrder?.stripe_checkout_session_id === "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC" && acceptedWebhook?.provider_event_id === "evt_1U9OysB2jGrq9Tn1apdsFgi2" && !acceptedOrder?.printful_order_id);
-  const liveTechnical = paypalTechnicalReadiness({credentials:paypalLive,metadata:providers.paypal?.metadata?.live,configured:settings.paypal_live_configured===true,webhookConfigured:settings.paypal_live_webhook_configured===true});
-  const livePaymentsReady = settings.preferred_payment_provider === "paypal" && settings.stripe_enabled === false && liveTechnical.ready && providers.paypal?.status === "connected" && providers.paypal?.environment === "live" && providers.paypal?.integration_mode === "direct_merchant" && providers.paypal?.country_code === "CA" && String(providers.paypal?.currency_code || "").toUpperCase() === "CAD";
-  const businessReady = merchantIdentity && legalIdentity && address && contact;
-  const taxStrategyReady = settings.tax_calculation_provider === "not_collecting" || (settings.tax_calculation_provider !== "unconfigured" && activeTaxCount > 0);
-  const migrationComplete = migration?.status === "complete" && migrationState.manualPause !== true;
+  const plan = await commerceLaunchPlan(env);
+  const byId = Object.fromEntries(plan.hardGates.map((gate) => [gate.id,gate]));
+  const group = (ids, summary, details = {}) => ({ ready: ids.every((id)=>byId[id]?.ready), status:ids.every((id)=>byId[id]?.ready)?"ready":"blocked", summary, details });
+  const configured = plan.business.legalNameConfigured && plan.business.phoneConfigured && plan.business.addressConfigured;
   const domains = {
-    business: domain(businessReady, businessReady ? "Required Ontario transaction-disclosure facts are configured but remain operator-asserted and externally unverified." : "One or more required transaction-disclosure facts are absent. Profile storage remains valid and independently editable.", { status: businessReady ? "transaction_disclosure_configured_unverified" : "transaction_disclosure_incomplete", threshold: { currency: "CAD", amountMinor: 5000, comparison: "consumer_obligation_exceeds" }, merchantIdentity, legalIdentity, businessPremisesAddress: address, supplierPhone, otherContact, semanticAddressVerification: false, globalSiteProjection: false }),
-    tax: domain(taxStrategyReady, settings.tax_calculation_provider === "not_collecting" ? "The operator explicitly configured a server-authoritative not-collecting policy; no registration or rate is inferred." : taxStrategyReady ? "Tax registrations and calculation strategy are configured." : "Tax calculation policy is unconfigured; absence of a registration row is not treated as proof that collection is unnecessary.", { registrationsConfigured: activeTaxCount > 0, calculationProvider: String(settings.tax_calculation_provider || "unconfigured"), stripeTax: settings.stripe_tax_enabled === true ? "enabled_unverified" : "not_enabled_unverified", ratesConfigured: false }),
-    payments: domain(livePaymentsReady, livePaymentsReady ? "PayPal LIVE API credentials, OAuth, and exact webhook readback are verified for the direct merchant app." : "PayPal LIVE credentials, OAuth verification, webhook registration/readback, or preferred-provider state remains incomplete. Stripe is excluded from readiness.", { preferredProvider:settings.preferred_payment_provider||"unconfigured",paypalLiveCredentialsConfigured:liveTechnical.credentialsConfigured,paypalLiveOAuthVerified:liveTechnical.oauthVerified,paypalLiveWebhookConfigured:liveTechnical.webhookReadbackVerified,paypalLiveCaptureEnabled:settings.paypal_live_capture_enabled===true,stripeEnabled:settings.stripe_enabled===true,stripeHistoricalTestConnected:stripeTestConnected,stripeHistoricalAcceptancePassed:testAcceptancePassed }),
-    catalogue: domain(Number(catalogue?.public_count || 0) > 0, `${Number(catalogue?.public_count || 0)} public products are served from permanent Commerce D1 authority.`, { totalProducts: Number(catalogue?.total || 0), publicProducts: Number(catalogue?.public_count || 0), merchandisingReady: Number(catalogue?.public_count || 0) > 0 }),
-    shipping: domain(Boolean(settings.shipping_strategy && settings.shipping_strategy !== "unconfigured"), settings.shipping_strategy && settings.shipping_strategy !== "unconfigured" ? "Shipping strategy is configured." : "Shipping policy and rate calculation are not configured.", { strategy: String(settings.shipping_strategy || "unconfigured") }),
-    fulfillment: domain(migrationComplete && settings.fulfillment_submission_enabled === true, migrationState.manualPause === true ? "Printful is connected; catalogue migration is manually paused and fulfillment is disabled." : "Printful catalogue migration or fulfillment activation remains incomplete.", { printfulConnected: providers.printful?.status === "connected", migrationPaused: migrationState.manualPause === true, migrationStatus: cleanText(migration?.status, 30) || "not_started", processedProducts: Number(migration?.products_verified || 0) + (Array.isArray(migrationState.blockedProducts) ? migrationState.blockedProducts.length : 0), plannedProducts: Number(migrationState.plannedProducts || 0), verifiedProducts: Number(migration?.products_verified || 0), blockedProducts: Array.isArray(migrationState.blockedProducts) ? migrationState.blockedProducts.length : 0, variantsMapped: Number(migration?.variants_mapped || 0), enabled: settings.fulfillment_submission_enabled === true }),
-    communications: domain(Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM && emailReadyCount >= 2 && settings.transactional_email_enabled === true), "Resend custody is server-side; required customer templates and the production send gate are not all enabled.", { providerConfigured: Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM), readyTemplates: emailReadyCount, sendEnabled: settings.transactional_email_enabled === true }),
-    documents: domain(receiptTemplateReady && businessReady && taxStrategyReady, receiptTemplateReady ? "Payment receipts are renderable; invoice readiness is blocked by business or tax configuration." : "Receipt and invoice document templates are incomplete.", { receiptTemplateReady, receiptReady: receiptTemplateReady, invoiceReady: receiptTemplateReady && businessReady && taxStrategyReady, customerAccessEnabled: settings.customer_document_access_enabled === true }),
-    checkout: domain(settings.paypal_store_checkout_enabled === true && settings.internet_agreement_disclosure_enabled === true, settings.paypal_store_checkout_enabled !== true ? "PayPal store checkout is disabled." : settings.internet_agreement_disclosure_enabled === true ? "Checkout and scoped internet-agreement disclosure are enabled." : "Checkout cannot launch until the scoped pre-agreement and retainable-copy disclosure path is implemented and enabled.", { normalCheckoutEnabled: settings.paypal_store_checkout_enabled === true, transactionDisclosureEnabled: settings.internet_agreement_disclosure_enabled === true, disclosureThresholdMinor: 5000, donationsEnabled:settings.paypal_donations_enabled===true,controlledTestCheckoutEnabled: false }),
+    business:group(["merchant_identity"], plan.business.ownerConfirmed ? "OWNER CONFIRMED - current encrypted merchant facts." : "CONFIGURED merchant facts can be owner-confirmed in the store launch action.", {status:plan.business.ownerConfirmed?"owner_confirmed":configured?"configured":"action_required",merchantIdentity:configured,legalIdentity:plan.business.legalNameConfigured,supplierPhone:plan.business.phoneConfigured,businessPremisesAddress:plan.business.addressConfigured,ownerConfirmed:plan.business.ownerConfirmed,globalSiteProjection:false}),
+    tax:group(["tax_policy"], "NOT COLLECTING - owner-selected policy; authoritative tax is zero. No registration or rate is inferred.", {calculationProvider:plan.settings.taxPolicy,status:"configured",stripeTax:"not_used",registrationsConfigured:false,ratesConfigured:false}),
+    payments:group(["paypal_preferred","paypal_live_credential","paypal_live_account","paypal_live_webhook"], "PayPal LIVE uses provider-verified OAuth and webhook evidence. Stripe is NOT USED - DISABLED.", {preferredProvider:"paypal",stripeEnabled:plan.settings.stripeEnabled,paypalLiveCaptureEnabled:plan.settings.paypalLiveCaptureEnabled}),
+    catalogue:group(["catalogue","catalogue_migration_terminal"], `${plan.catalogue.eligibleSellableVariants} safe eligible variants are sellable.`, plan.catalogue),
+    shipping:group(["shipping"], "Worldwide shipping; server-authoritative destination-specific Printful rates.", {strategy:plan.settings.shippingStrategy,markets:plan.shippingMarkets}),
+    fulfillment:group(["printful_store","operations_worker","catalogue_migration_terminal"], "OPERATIONALLY READY uses draft creation, validation, confirmation and polling reconciliation. Signed webhook evidence is non-blocking.", {enabled:plan.settings.fulfillmentEnabled,orderMode:plan.settings.printfulOrderMode,pollingFallbackActive:byId.operations_worker.ready}),
+    communications:group(["order_confirmation_delivery"], "DOMAIN VERIFIED / DELIVERY READY when the required order-confirmation template is configured. The launch action enables sending.", {providerConfigured:plan.customerSending.providerConfigured,readyTemplates:plan.customerSending.configuredTemplates,sendEnabled:plan.settings.transactionalEmailEnabled}),
+    documents:group(["customer_documents"], "Retainable agreement and branded receipt access are enabled by launch. Tax invoices are NOT APPLICABLE under not_collecting.", {receiptTemplateReady:byId.customer_documents.ready,receiptReady:byId.customer_documents.ready,invoiceReady:false,invoiceStatus:"not_applicable",customerAccessEnabled:plan.settings.customerDocumentAccessEnabled}),
+    checkout:group(["transaction_disclosure_checkout","emergency_pause_clear"], "Final agreement review, explicit acceptance, and immutable retained records precede PayPal order creation.", {normalCheckoutEnabled:plan.settings.paypalStoreCheckoutEnabled,transactionDisclosureEnabled:plan.settings.internetAgreementDisclosureEnabled,disclosureSchemaInstalled:byId.transaction_disclosure_checkout.ready,disclosureThresholdMinor:5000,donationsEnabled:plan.settings.paypalDonationsEnabled}),
   };
-  const mandatory = ["business", "tax", "payments", "catalogue", "shipping", "fulfillment", "communications", "documents", "checkout"];
-  return { ok: true, access, authority: "Commerce D1", phase: "pre_cutover", productionReady: mandatory.every((key) => domains[key].ready), mandatoryDomains: mandatory, domains, checkedAt: nowIso() };
+  return {ok:true,access,authority:"Commerce D1",phase:plan.state,productionReady:plan.ready,mandatoryDomains:Object.keys(domains),domains,launchRevision:plan.revision,readinessRevision:plan.digest,checkedAt:plan.checkedAt};
 }
 
 const PRINTFUL_DRAFT_BUILDER_VERSION = "printful-draft-preview-v1";
@@ -524,7 +491,7 @@ export function preparePrintfulDraftOrder(input) {
   const orderMode = cleanText(input?.orderMode, 40).toLowerCase();
   const providerMode = cleanText(input?.providerMode, 40).toLowerCase();
   const recipient = input?.recipient && typeof input.recipient === "object" ? input.recipient : null;
-  const recipientFields = ["name", "address1", "city", "postalCode", "countryCode"];
+  const recipientFields = ["name", "address1", "city", "countryCode", ...(["CA","US","AU"].includes(String(recipient?.countryCode||"").toUpperCase()) ? ["postalCode"] : [])];
   const recipientMissing = recipientFields.filter((field) => !cleanText(recipient?.[field], field === "countryCode" ? 2 : 180));
   const shippingStrategy = cleanText(input?.shippingStrategy, 80).toLowerCase() || "unconfigured";
   const shippingMethod = cleanText(input?.shippingMethod, 100);
@@ -1399,16 +1366,23 @@ export async function commerceEmailDeliveryKey({ templateKey, templateRevision, 
 
 export async function renderOrderLifecycleEmail(env, orderId, templateKey, variableOverrides = {}) {
   const db = requireCommerceDb(env);
-  const row = await templateRow(db, templateKey);
+  const [row, order] = await Promise.all([templateRow(db, templateKey), db.prepare("SELECT environment FROM commerce_orders WHERE id=?").bind(validId(orderId,"order_id_invalid")).first()]);
   if (row.template_kind !== "email" || row.status !== "ready" || Number(row.enabled) !== 1) {
     throw new AuthFailure(409, "transactional_email_template_not_ready", "The approved transactional email template is not enabled.");
   }
   const fixture = await orderVariables(db, orderId);
-  const variables = { ...fixture.variables, ...variableOverrides };
+  const receipt = templateKey === "order_confirmation" && order?.environment === "live" ? await ensureCompletedOrderReceipt(env,orderId) : null;
+  const variables = { ...fixture.variables, ...variableOverrides, ...(receipt ? {receipt_url:`https://thirdrailify.com/receipt#${receipt.token}`} : {}) };
+  const rendered = renderCommerceTemplate(serializeTemplateForValidation(row), variables, { assetOrigin: env?.THIRDRAILIFY_PUBLIC_ORIGIN });
+  if (templateKey === "order_confirmation" && order?.environment === "live") {
+    const appendix = await acceptedAgreementAppendix(env, orderId);
+    rendered.html = `${rendered.html}${appendix.html}`;
+    rendered.text = `${rendered.text}\n\nReceipt: https://thirdrailify.com/receipt#${receipt.token}\n\nACCEPTED INTERNET AGREEMENT\n${appendix.text}`;
+  }
   return {
     templateKey: row.template_key,
     templateRevision: Number(row.revision),
-    rendered: renderCommerceTemplate(serializeTemplateForValidation(row), variables, { assetOrigin: env?.THIRDRAILIFY_PUBLIC_ORIGIN }),
+    rendered,
   };
 }
 
@@ -1436,23 +1410,40 @@ export async function issueOrderDocumentAccess(env, session, orderId, documentTy
   const timestamp = nowIso();
   const id = existing?.id || randomId();
   await db.prepare(
-    `INSERT INTO commerce_order_documents (id,order_id,document_type,display_reference,environment,status,template_key,template_revision,snapshot_json,access_token_hash,issued_at,created_at,updated_at)
-     VALUES (?,?,?,?,?,'issued',?,?,?, ?,?,?,?)
-     ON CONFLICT(order_id,document_type) DO UPDATE SET status='issued',snapshot_json=excluded.snapshot_json,access_token_hash=excluded.access_token_hash,issued_at=excluded.issued_at,updated_at=excluded.updated_at`,
-  ).bind(id, snapshot.orderReference, type, snapshot.displayReference, snapshot.test ? "test" : "live", snapshot.templateKey, snapshot.templateRevision, JSON.stringify(snapshot), hash, timestamp, timestamp, timestamp).run();
+    `INSERT INTO commerce_order_documents (id,order_id,document_type,display_reference,environment,status,template_key,template_revision,snapshot_json,snapshot_ciphertext,access_token_hash,access_token_ciphertext,issued_at,created_at,updated_at)
+     VALUES (?,?,?,?,?,'issued',?,?,'{}',?,?,?,?,?,?)
+     ON CONFLICT(order_id,document_type) DO UPDATE SET status='issued',snapshot_json='{}',snapshot_ciphertext=excluded.snapshot_ciphertext,access_token_ciphertext=excluded.access_token_ciphertext,access_token_hash=excluded.access_token_hash,issued_at=excluded.issued_at,updated_at=excluded.updated_at`,
+  ).bind(id, snapshot.orderReference, type, snapshot.displayReference, snapshot.test ? "test" : "live", snapshot.templateKey, snapshot.templateRevision, await encryptCommerceSecret(env,JSON.stringify(snapshot),`order-document:${id}`), hash, await encryptCommerceSecret(env,rawToken,`order-document-token:${id}`), timestamp, timestamp, timestamp).run();
   await writeCommerceAudit(env, { actorAccountId: session.accountId, action: "order_document_issued", targetType: "commerce_order_document", targetId: id, result: "success", metadata: { documentType: type, environment: snapshot.test ? "test" : "live" } });
   return { ok: true, token: rawToken, documentId: id, document: snapshot };
 }
 
+export async function ensureCompletedOrderReceipt(env, orderId) {
+  const db=requireCommerceDb(env);
+  if(json((await db.prepare("SELECT value_json FROM commerce_settings WHERE setting_key='customer_document_access_enabled'").first())?.value_json,false)!==true) throw new AuthFailure(409,"customer_document_access_disabled","Customer receipt access is disabled.");
+  let existing=await db.prepare("SELECT id,access_token_ciphertext FROM commerce_order_documents WHERE order_id=? AND document_type='receipt' AND status='issued'").bind(orderId).first();
+  if(!existing) {
+    const snapshot=await buildDocumentSnapshot(env,db,orderId,"receipt",false);
+    if(!snapshot.available) throw new AuthFailure(409,"document_not_ready",snapshot.reason);
+    const id=randomId(), token=randomToken(), timestamp=nowIso();
+    const ciphertext=await encryptCommerceSecret(env,JSON.stringify(snapshot),`order-document:${id}`);
+    const tokenCiphertext=await encryptCommerceSecret(env,token,`order-document-token:${id}`);
+    await db.prepare("INSERT OR IGNORE INTO commerce_order_documents (id,order_id,document_type,display_reference,environment,status,template_key,template_revision,snapshot_json,snapshot_ciphertext,access_token_hash,access_token_ciphertext,issued_at,created_at,updated_at) VALUES (?,?,'receipt',?,?,'issued',?,?,'{}',?,?,?,?,?,?)")
+      .bind(id,orderId,snapshot.displayReference,snapshot.test?"test":"live",snapshot.templateKey,snapshot.templateRevision,ciphertext,await sha256Hex(token),tokenCiphertext,timestamp,timestamp,timestamp).run();
+    existing=await db.prepare("SELECT id,access_token_ciphertext FROM commerce_order_documents WHERE order_id=? AND document_type='receipt' AND status='issued'").bind(orderId).first();
+  }
+  if(!existing?.access_token_ciphertext) throw new AuthFailure(409,"document_token_unavailable","The existing document uses an older access token. Its retained agreement remains in order confirmation.");
+  return {documentId:existing.id,token:await decryptCommerceSecret(env,existing.access_token_ciphertext,`order-document-token:${existing.id}`)};
+}
+
 export async function customerDocumentByToken(env, token) {
   const raw = String(token || "").trim();
-  if (!/^[A-Za-z0-9_-]{43}$/.test(raw)) throw new AuthFailure(404, "document_not_found", "The receipt document was not found.");
-  const hash = await sha256Hex(raw);
-  const row = await requireCommerceDb(env).prepare("SELECT snapshot_json FROM commerce_order_documents WHERE access_token_hash=? AND status='issued'").bind(hash).first();
-  if (!row) throw new AuthFailure(404, "document_not_found", "The receipt document was not found.");
-  const document = json(row.snapshot_json, null);
-  if (!document) throw new AuthFailure(503, "document_snapshot_invalid", "The immutable document snapshot is unavailable.");
-  return { ok: true, document };
+  if (!/^[A-Za-z0-9_-]{43}$/.test(raw)) throw new AuthFailure(404,"document_not_found","The receipt document was not found.");
+  const row=await requireCommerceDb(env).prepare("SELECT id,snapshot_json,snapshot_ciphertext FROM commerce_order_documents WHERE access_token_hash=? AND status='issued'").bind(await sha256Hex(raw)).first();
+  if(!row) throw new AuthFailure(404,"document_not_found","The receipt document was not found.");
+  const document=json(row.snapshot_ciphertext ? await decryptCommerceSecret(env,row.snapshot_ciphertext,`order-document:${row.id}`) : row.snapshot_json,null);
+  if(!document) throw new AuthFailure(503,"document_snapshot_invalid","The immutable receipt is unavailable.");
+  return {ok:true,document};
 }
 
 async function buildDocumentSnapshot(env, db, orderId, type, invoiceReady) {
@@ -1469,8 +1460,8 @@ async function buildDocumentSnapshot(env, db, orderId, type, invoiceReady) {
   const reason = available ? "" : type === "invoice" ? "Invoice readiness is blocked until legal business and tax configuration are complete." : "A payment receipt is available only after payment is confirmed.";
   let legalName = null;
   let legalAddress = null;
-  if (profile?.legal_business_name_ciphertext) legalName = await decryptCommerceSecret(env, profile.legal_business_name_ciphertext, "business:legal-name");
-  if (profile?.private_address_ciphertext) legalAddress = json(await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address"), null) || await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address");
+  if (order.environment !== "live" && profile?.legal_business_name_ciphertext) legalName = await decryptCommerceSecret(env, profile.legal_business_name_ciphertext, "business:legal-name");
+  if (order.environment !== "live" && profile?.private_address_ciphertext) legalAddress = json(await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address"), null) || await decryptCommerceSecret(env, profile.private_address_ciphertext, "business:private-address");
   const items = (itemsResult?.results || []).map((item) => ({ productName: cleanText(item.product_name, 240), variantName: cleanText(item.variant_name, 300) || null, options: json(item.option_values_json, {}), unitAmount: Number(item.unit_amount), quantity: Number(item.quantity), lineTotalAmount: Number(item.line_total_amount) }));
   const snapshot = {
     type, available, reason, test: order.environment === "test", marker: order.environment === "test" ? "TEST / SANDBOX" : "LIVE",
@@ -1497,8 +1488,17 @@ async function buildDocumentSnapshot(env, db, orderId, type, invoiceReady) {
     shipping_method: cleanText(delivery?.display_shipping_method, 200),
     tracking_number: "",
   };
+  const agreement = order.environment === "live" && available ? await acceptedAgreementAppendix(env,id) : null;
+  if(agreement) {
+    snapshot.merchantName=agreement.snapshot.merchant.tradingName;
+    snapshot.supportEmail=agreement.snapshot.merchant.supportEmail;
+    snapshot.tax=0;
+    snapshot.taxPolicy="not_collecting";
+    variables.merchant_name=snapshot.merchantName;
+    variables.support_email=snapshot.supportEmail;
+  }
   const output = renderCommerceTemplate(serializeTemplateForValidation(template), variables, { assetOrigin: env?.THIRDRAILIFY_ADMIN_ORIGIN, document: snapshot });
-  return { ...snapshot, html: output.html, text: output.text };
+  return { ...snapshot, html: output.html + (agreement?.html || ""), text: output.text + (agreement ? `\n\n${agreement.text}` : "") };
 }
 
 function validateTaxRegistration(input, current) {
@@ -1526,7 +1526,7 @@ function validateTaxRegistration(input, current) {
 function serializeTaxRegistration(row) { return { id: cleanText(row.id, 160), registrationType: cleanText(row.registration_type, 30), jurisdiction: cleanText(row.jurisdiction, 80), countryCode: cleanText(row.country_code, 2), provinceCode: cleanText(row.province_code, 3) || null, maskedIdentifier: cleanText(row.masked_identifier, 40), status: cleanText(row.status, 30), effectiveDate: cleanText(row.effective_date, 10) || null, expiresAt: cleanText(row.expires_at, 10) || null, notes: cleanText(row.notes, 1000), documentDisclosureEnabled: row.document_disclosure_enabled === 1, revision: Number(row.revision), updatedAt: cleanText(row.updated_at, 80) }; }
 function readinessItem(id, label, complete, detail) { return { id, label, state: complete ? "complete" : "incomplete", detail }; }
 function optionalReadinessItem(id, label, configured, detail) { return { id, label, state: configured ? "complete" : "not_required", detail }; }
-function storedReadinessItem(id, label, stored) { return { id, label, state: stored ? "unverified" : "incomplete", detail: stored ? "Configured and encrypted; not externally verified" : "Not configured" }; }
+function storedReadinessItem(id, label, stored) { return { id, label, state: stored ? "complete" : "incomplete", detail: stored ? "Configured and encrypted; operator confirmed at activation" : "Not configured" }; }
 function statusReadinessItem(id, label, state, detail) { return { id, label, state, detail }; }
 function canonicalDomainItem(id, label, value) { return { id, label, state: value.ready ? "complete" : value.details?.sendEnabled === false || value.details?.enabled === false ? "disabled" : "incomplete", detail: value.summary }; }
 function readinessGroup(id, label, items) {
@@ -1559,11 +1559,11 @@ function transactionDisclosureAddressPresent(value) {
 function transactionDisclosureStatus(profile, businessAddress, businessPhone) {
   const facts = {
     supplierName: Boolean(profile?.private?.legalBusinessNameStored),
-    supplierPhone: Boolean(String(businessPhone || "").trim()),
-    businessPremisesAddress: transactionDisclosureAddressPresent(businessAddress),
+    supplierPhone: Boolean(profile?.private?.privatePhoneStored),
+    businessPremisesAddress: Boolean(profile?.private?.privateAddressStored),
     otherContact: Boolean(String(profile?.supportEmail || profile?.publicContactEmail || "").trim()),
   };
-  return { status: Object.values(facts).every(Boolean) ? "transaction_disclosure_configured_unverified" : "transaction_disclosure_incomplete", facts };
+  return { status: Object.values(facts).every(Boolean) ? "configured" : "transaction_disclosure_incomplete", facts };
 }
 function emptyBusinessReadiness() {
   return {

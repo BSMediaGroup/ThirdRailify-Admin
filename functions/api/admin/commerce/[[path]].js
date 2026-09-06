@@ -10,7 +10,7 @@ import {
   requireCsrf,
   writeAudit,
 } from "../../../_shared/auth-core.js";
-import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
+import { accessForSession, requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import {
   archiveCollection,
   bulkUpdateCollections,
@@ -29,6 +29,7 @@ import {
   requireCommerceCapability,
   templatesPayload,
   updateBusinessProfile,
+  revealPrivateBusinessProfile,
   updateCollection,
   updateCollectionOrder,
   updateCollectionMemberships,
@@ -113,6 +114,11 @@ async function handleGet(request, env, path) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOverview(env, session);
     if (payload.databaseConfigured) payload.readiness = await productionReadinessPayload(env, session);
+  } else if (path === "business/reveal") {
+    await requireCommerceCapability(env,session,"commerce.business.manage");
+    if (!(await accessForSession(env,session)).isMasterAdmin) throw new AuthFailure(403,"master_admin_required","Only Master Admin can reveal private merchant records.");
+    payload = await revealPrivateBusinessProfile(env);
+    authEventType = "commerce_private_business_revealed";
   } else if (path === "business") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await businessInformationPayload(env, session);
@@ -235,7 +241,9 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     authEventType = "commerce_catalogue_sellability_applied";
   } else if (path === "launch/activate") {
     await requireAdminCapability(env, session, "commerce.operations.manage");
-    payload = await activateCommerceLaunch(env, await readJsonBody(request), session.accountId);
+    if (!(await accessForSession(env, session)).isMasterAdmin) throw new AuthFailure(403, "master_admin_required", "Only Master Admin can attest merchant facts and enable the production store.");
+    if (new URL(request.url).origin !== "https://admin.thirdrailify.com" || request.headers.get("Origin") !== "https://admin.thirdrailify.com") throw new AuthFailure(403,"production_origin_required","Store activation requires the exact production Admin origin.");
+    payload = await activateCommerceLaunch(env, await readJsonBody(request), session);
     authEventType = "commerce_production_activated";
   } else if (path === "launch/donations-activate") {
     await requireAdminCapability(env, session, "commerce.operations.manage");
@@ -334,6 +342,11 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     }
     await resumeManuallyPausedPermanentPrintfulMigration(env);
     payload = await runPermanentPrintfulMigrationStep(env, session, fetchImpl, schedulerRuntime);
+  } else if (path === "business/reveal") {
+    await requireCommerceCapability(env,session,"commerce.business.manage");
+    if (!(await accessForSession(env,session)).isMasterAdmin) throw new AuthFailure(403,"master_admin_required","Only Master Admin can reveal private merchant records.");
+    payload = await revealPrivateBusinessProfile(env);
+    authEventType = "commerce_private_business_revealed";
   } else if (path === "business") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.business.manage");

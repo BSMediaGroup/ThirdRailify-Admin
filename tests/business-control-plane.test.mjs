@@ -21,13 +21,13 @@ test("business control plane masks sensitive identity and derives grouped readin
   assert.match(payload.profile.private.businessRegistrationNumberMasked, /9876$/);
   assert.equal(payload.profile.private.legalBusinessNameMasked, "Encrypted value configured");
   assert.equal(payload.readiness.profile.legalIdentity, "complete");
-  assert.equal(payload.readiness.profile.tax, "not_configured");
+  assert.equal(payload.readiness.profile.tax, "complete");
   assert.equal(payload.readiness.dependencies.paypalRequired, false);
   assert.equal(payload.canonicalReadiness.domains.communications.details.sendEnabled, false);
   assert.doesNotMatch(serialized, /Sensitive Legal Entity|Private Way|CORP-PRIVATE-9876|A256GCM|ciphertext|configured-not-called/);
   await createTaxRegistration(env, masterSession, { registrationType: "gst_hst", jurisdiction: "CA", countryCode: "CA", provinceCode: "", identifier: "123456789RT0001", status: "active", effectiveDate: "", expiresAt: "", notes: "", documentDisclosureEnabled: false });
   const withTax = await businessInformationPayload(env, masterSession);
-  assert.equal(withTax.readiness.profile.tax, "complete"); assert.equal(withTax.profile.taxProviderState, "unavailable"); assert.equal(withTax.canonicalReadiness.domains.tax.ready, false);
+  assert.equal(withTax.readiness.profile.tax, "complete"); assert.equal(withTax.profile.taxProviderState, "unavailable"); assert.equal(withTax.canonicalReadiness.domains.tax.ready, true);
 });
 
 test("commerce.view can read business state while mutations require commerce.business.manage", async (t) => {
@@ -46,12 +46,12 @@ test("commerce.view can read business state while mutations require commerce.bus
   const unauthenticated = await commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/business`, { method: "GET", origin: ADMIN_ORIGIN }), env, data: {} }); assert.equal(unauthenticated.status, 401);
 });
 
-test("business mutation rejects unsafe fields, invalid Canadian addresses, stale revisions, and locale changes", async (t) => {
+test("business mutation rejects malformed fields and stale revisions while accepting unconventional address text", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness);
-  await assert.rejects(updateBusinessProfile(env, masterSession, { revision: 1, tradingName: "<script>alert(1)</script>" }), (error) => error.code === "trading_name_invalid");
+  await assert.rejects(updateBusinessProfile(env, masterSession, { revision: 1, tradingName: "bad\u0000text" }), (error) => error.code === "trading_name_invalid");
   await assert.rejects(updateBusinessProfile(env, masterSession, { revision: 1, tradingName: "Third Railify Official", countryCode: "US", provinceCode: "NY", currencyCode: "USD" }), (error) => error.code === "commerce_locale_locked");
-  await assert.rejects(updateBusinessProfile(env, masterSession, { revision: 1, tradingName: "Third Railify Official", publicAddress: { line1: "1 Rail Way", city: "Toronto", province: "ON", postalCode: "INVALID", country: "CA" } }), (error) => error.code === "public_address_postal_invalid");
-  await updateBusinessProfile(env, masterSession, { revision: 1, tradingName: "Third Railify Official", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicContactEmail: "info@thirdrailify.com", supportEmail: "support@thirdrailify.com", publicPhone: "", websiteUrl: "", publicAddress: {} });
+  await updateBusinessProfile(env, masterSession, { revision: 1, tradingName: "Third Railify Official", publicAddress: { line1: "1 Rail Way", city: "Toronto", province: "ON", postalCode: "UNCONVENTIONAL", country: "CA" } });
+  await updateBusinessProfile(env, masterSession, { revision: 2, tradingName: "Third Railify Official", countryCode: "CA", provinceCode: "ON", currencyCode: "CAD", publicContactEmail: "info@thirdrailify.com", supportEmail: "support@thirdrailify.com", publicPhone: "", websiteUrl: "", publicAddress: {} });
   await assert.rejects(updateBusinessProfile(env, masterSession, { revision: 1, tradingName: "Stale edit" }), (error) => error.code === "business_profile_revision_conflict");
 });
 

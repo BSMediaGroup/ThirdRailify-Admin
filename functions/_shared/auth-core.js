@@ -40,6 +40,7 @@ const RATE_RULES = {
   printful_webhook: { limit: 240, windowSeconds: 60 * 60, blockSeconds: 15 * 60 },
   checkout: { limit: 12, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   shipping_quote: { limit: 8, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
+  "commerce-agreement": { limit: 12, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   "paypal-store-create": { limit: 8, windowSeconds: 15 * 60, blockSeconds: 30 * 60 },
   "paypal-donation-create": { limit: 8, windowSeconds: 15 * 60, blockSeconds: 30 * 60 },
   "paypal-capture": { limit: 16, windowSeconds: 15 * 60, blockSeconds: 30 * 60 },

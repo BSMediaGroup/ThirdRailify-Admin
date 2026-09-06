@@ -1,3 +1,4 @@
+import { commerceLaunchPlan } from "./commerce-launch.js";
 import { AuthFailure, cleanText, enforceRateLimit, nowIso, randomId, verifyTurnstile } from "./auth-core.js";
 import { commerceAccessForSession, decryptCommerceSecret, encryptCommerceSecret, requireCommerceDb } from "./commerce-core.js";
 import { prepareCheckoutCustomer, validateCheckoutCustomer } from "./commerce-customers.js";
@@ -15,6 +16,7 @@ import {
   PAYPAL_WEBHOOK_EVENTS,
 } from "./paypal-client.js";
 import { paypalAcceptanceStatus, paypalTechnicalReadiness, paypalWebhookUrl } from "./paypal-onboarding.js";
+import { checkoutAgreementRequestDigest, prepareAgreementAcceptance } from "./commerce-agreements.js";
 
 const MAX_TOTAL = 2_147_483_647;
 const DONATION_MIN = 100;
@@ -27,13 +29,18 @@ export async function paypalPublicConfiguration(env) {
     db.prepare(`SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN (
       'commerce_environment','commerce_emergency_paused','paypal_sandbox_configured','paypal_live_configured',
       'paypal_sandbox_webhook_configured','paypal_live_webhook_configured','paypal_store_checkout_enabled',
-      'paypal_live_capture_enabled','paypal_donation_live_capture_enabled','paypal_donations_enabled','preferred_payment_provider','stripe_enabled')`).all(),
+      'checkout_enabled','live_payment_capture_enabled','internet_agreement_disclosure_enabled','paypal_live_capture_enabled','paypal_donation_live_capture_enabled','paypal_donations_enabled','preferred_payment_provider','stripe_enabled')`).all(),
   ]);
   const settings = settingsMap(settingsResult);
   const environment = settings.commerce_environment === "production" ? "live" : "sandbox";
   const browser = paypalBrowserConfiguration(env, environment);
   const credentialReady = environment === "live" ? settings.paypal_live_configured === true : settings.paypal_sandbox_configured === true;
   const webhookReady = environment === "live" ? settings.paypal_live_webhook_configured === true : settings.paypal_sandbox_webhook_configured === true;
+  let storeReadiness = { ready: environment !== "live", hardBlockerCount: null };
+  if (environment === "live") {
+    try { const plan = await commerceLaunchPlan(env); storeReadiness = { ready: plan.ready, hardBlockerCount: plan.hardGates.filter(gate => !gate.ready).length }; }
+    catch { /* A store readiness failure must not interrupt existing donation authority. */ }
+  }
   const paused = settings.commerce_emergency_paused === true || Number(state?.emergency_paused || 0) === 1;
   return {
     ok: true,
@@ -45,8 +52,9 @@ export async function paypalPublicConfiguration(env) {
     clientId: credentialReady && browser.clientId ? browser.clientId : null,
     configured: credentialReady,
     webhookConfigured: webhookReady,
-    storeCheckoutEnabled: !paused && credentialReady && webhookReady && settings.paypal_store_checkout_enabled === true && (environment !== "live" || settings.paypal_live_capture_enabled === true),
-    donationsEnabled: !paused && credentialReady && webhookReady && settings.paypal_donations_enabled === true && (environment !== "live" || settings.paypal_donation_live_capture_enabled === true),
+    storeReadiness,
+    storeCheckoutEnabled: storeReadiness.ready && !paused && credentialReady && webhookReady && settings.paypal_store_checkout_enabled === true && (environment !== "live" || (settings.paypal_live_capture_enabled === true && settings.checkout_enabled === true && settings.live_payment_capture_enabled === true && settings.internet_agreement_disclosure_enabled === true && Number(state?.paypal_store_checkout_enabled) === 1 && Number(state?.paypal_live_capture_enabled) === 1)),
+    donationsEnabled: credentialReady && webhookReady && settings.paypal_donations_enabled === true && (environment !== "live" || settings.paypal_donation_live_capture_enabled === true),
     emergencyPaused: paused,
     stripe: { configured: Number(state?.stripe_configured || 0) === 1, enabled: settings.stripe_enabled === true && Number(state?.stripe_enabled || 0) === 1, preferred: false },
     message: !credentialReady ? "PayPal credentials are not configured." : !webhookReady ? "PayPal webhook verification is not configured." : paused ? "Payments are temporarily paused." : null,
@@ -59,12 +67,13 @@ export async function createPayPalStorePayment(env, request, input, session, fet
   const checkout = validateStoreInput(input, session);
   if (configuration.turnstileRequired) await verifyTurnstile(env, request, input.turnstileToken, "commerce_checkout", fetchImpl);
   await enforceRateLimit(env, request, "paypal-store-create", checkout.checkoutRequestId);
-  const requestDigest = await sha256Hex(JSON.stringify({ items: checkout.items, recipient: checkout.recipient, customer: checkout.customer, quoteId: checkout.quoteId, shippingOptionId: checkout.shippingOptionId }));
+  const requestDigest = await checkoutAgreementRequestDigest(checkout);
   let order = await db.prepare("SELECT * FROM commerce_orders WHERE checkout_request_id=? LIMIT 1").bind(checkout.checkoutRequestId).first();
   let lines;
   let shipping;
   if (order) {
     if (order.customer_payment_provider !== "paypal" || order.checkout_request_digest !== requestDigest) throw new AuthFailure(409, "checkout_request_conflict", "This checkout request identifier is already associated with another payment.");
+    if (order.environment === "live") await requireAcceptedAgreement(db, checkout, order.id);
     lines = await loadOrderItems(db, order.id);
     shipping = await loadDelivery(env, db, order.id);
   } else {
@@ -75,9 +84,11 @@ export async function createPayPalStorePayment(env, request, input, session, fet
     const total = checkedTotal(subtotal, shipping.option.amount, configuration.taxAmount);
     const orderId = `ord_${randomId()}`;
     const customer = await prepareCheckoutCustomer(env, db, checkout.customer);
+    const agreement = configuration.environment === "live" ? await prepareAgreementAcceptance(env, checkout, orderId, customer.id, lines, shipping) : null;
     const recipientCiphertext = await encryptCommerceSecret(env, JSON.stringify({ ...shipping.recipient, customerContact: { name: checkout.customer.name, email: checkout.customer.email } }), `order-delivery:${orderId}`);
     const timestamp = nowIso();
     await db.batch([
+      ...(agreement ? [agreement.guard] : []),
       customer.statement,
       ...(customer.auditStatement ? [customer.auditStatement] : []),
       db.prepare(`INSERT INTO commerce_orders (
@@ -95,6 +106,7 @@ export async function createPayPalStorePayment(env, request, input, session, fet
         order_id,recipient_ciphertext,destination_country_code,destination_region_code,shipping_strategy,provider,
         provider_shipping_method_id,display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at,updated_at
       ) VALUES (?,?,?,?,?,?,?,?,?,'CAD',?,?,?,?)`).bind(orderId,recipientCiphertext,shipping.recipient.countryCode,shipping.recipient.region,shipping.strategy,shipping.provider,shipping.option.providerRateId,shipping.option.name,shipping.option.amount,shipping.quoteId,shipping.quotedAt,timestamp,timestamp),
+      ...(agreement ? [agreement.statement] : []),
       ...(customer.accountId ? [accountTransactionalMessageStatement(db, customer.accountId, {
         category:"orders",sourceType:"order.created",sourceId:orderId,title:"Order started",
         preview:"Your Third Railify order has been recorded.",
@@ -103,6 +115,7 @@ export async function createPayPalStorePayment(env, request, input, session, fet
         details:{environment:configuration.environment === "live" ? "live" : "test",amount:total,currencyCode:"CAD"},createdAt:timestamp,
       })] : []),
     ]);
+    if (configuration.environment === "live") await requireAcceptedAgreement(db, checkout, orderId);
     order = await db.prepare("SELECT * FROM commerce_orders WHERE id=?").bind(orderId).first();
   }
   return createProviderOrderForTarget(env, { target: "store", order, lines, shipping, configuration }, fetchImpl);
@@ -327,17 +340,25 @@ async function requirePayPalConfiguration(env,target,forcedEnvironment=null,opti
   if(!new Set(["sandbox","live"]).has(environment)) throw new AuthFailure(503,"paypal_environment_invalid","The PayPal environment is invalid.");
   const creds=paypalCredentials(env,environment); const configured=environment==="live"?settings.paypal_live_configured===true:settings.paypal_sandbox_configured===true; const webhook=environment==="live"?settings.paypal_live_webhook_configured===true:settings.paypal_sandbox_webhook_configured===true;
   if(state?.preferred_provider!=="paypal"||settings.preferred_payment_provider!=="paypal") throw new AuthFailure(409,"paypal_not_preferred","PayPal is not the preferred payment provider.");
-  if(!options.allowDisabled){ if(settings.commerce_emergency_paused===true||Number(state?.emergency_paused||0)===1) throw new AuthFailure(409,"commerce_emergency_paused","Payments are temporarily paused."); const enabled=target==="store"?settings.paypal_store_checkout_enabled===true:settings.paypal_donations_enabled===true; if(!enabled) throw new AuthFailure(409,target==="store"?"checkout_disabled":"donations_disabled",target==="store"?"Store checkout is not enabled.":"Donations are not enabled."); }
+  if(!options.allowDisabled){ if(target==="store"&&(settings.commerce_emergency_paused===true||Number(state?.emergency_paused||0)===1)) throw new AuthFailure(409,"commerce_emergency_paused","Store payments are temporarily paused."); const enabled=target==="store"?settings.paypal_store_checkout_enabled===true:settings.paypal_donations_enabled===true; if(!enabled) throw new AuthFailure(409,target==="store"?"checkout_disabled":"donations_disabled",target==="store"?"Store checkout is not enabled.":"Donations are not enabled."); }
   if(!configured||!creds.configured) throw new AuthFailure(503,"paypal_credentials_unavailable",`PayPal ${environment.toUpperCase()} credentials are not configured.`);
   if(!webhook) throw new AuthFailure(503,"paypal_webhook_not_configured",`PayPal ${environment.toUpperCase()} webhook verification is not configured.`);
   const liveCaptureEnabled=target==="store"?settings.paypal_live_capture_enabled===true:settings.paypal_donation_live_capture_enabled===true;
   if(environment==="live"&&!liveCaptureEnabled&&!options.allowDisabled) throw new AuthFailure(409,target==="store"?"paypal_store_live_capture_disabled":"paypal_donation_live_capture_disabled",target==="store"?"PayPal LIVE store capture is not enabled.":"PayPal LIVE donation capture is not enabled.");
   let taxStatus="not_calculated",taxReason=null,taxAmount=0;
+  if(target==="store" && environment==="live" && !options.allowDisabled) {
+    if(settings.checkout_enabled!==true || settings.live_payment_capture_enabled!==true || settings.internet_agreement_disclosure_enabled!==true || Number(state?.paypal_store_checkout_enabled)!==1 || Number(state?.paypal_live_capture_enabled)!==1) throw new AuthFailure(409,"store_activation_incomplete","Production store activation is incomplete.");
+  }
   if(target==="store") { if(settings.tax_calculation_provider!=="not_collecting") throw new AuthFailure(409,"commerce_tax_policy_unresolved","The store tax policy is not configured for PayPal checkout."); taxStatus="not_collecting"; taxReason="configured_not_collecting"; }
   return {environment,expectedMerchantId:creds.expectedMerchantId||null,turnstileRequired:settings.checkout_turnstile_required===true,taxStatus,taxReason,taxAmount};
 }
 
-function validateStoreInput(input,session){if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).some((k)=>!new Set(["checkoutRequestId","items","recipient","quoteId","shippingOptionId","turnstileToken","customer"]).has(k))) throw new AuthFailure(400,"checkout_request_invalid","The checkout request is invalid."); return {checkoutRequestId:uuid(input.checkoutRequestId,"checkout_request_id_invalid"),items:normalizeCartItems(input.items),recipient:normalizeDeliveryRecipient(input.recipient),quoteId:cleanText(input.quoteId,80),shippingOptionId:cleanText(input.shippingOptionId,40),customer:validateCheckoutCustomer(input.customer,session)};}
+function validateStoreInput(input,session){if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).some((k)=>!new Set(["checkoutRequestId","items","recipient","quoteId","shippingOptionId","turnstileToken","customer","agreementId","agreementToken","agreementAccepted"]).has(k))) throw new AuthFailure(400,"checkout_request_invalid","The checkout request is invalid."); return {checkoutRequestId:uuid(input.checkoutRequestId,"checkout_request_id_invalid"),items:normalizeCartItems(input.items),recipient:normalizeDeliveryRecipient(input.recipient),quoteId:cleanText(input.quoteId,80),shippingOptionId:cleanText(input.shippingOptionId,40),customer:validateCheckoutCustomer(input.customer,session),agreementId:cleanText(input.agreementId,80),agreementToken:String(input.agreementToken||"").trim(),agreementAccepted:input.agreementAccepted===true};}
+
+async function requireAcceptedAgreement(db, checkout, orderId) {
+  const agreement = await db.prepare("SELECT id,order_id,status,request_digest,acceptance_token_hash FROM commerce_order_agreements WHERE id=? AND checkout_request_id=?").bind(cleanText(checkout.agreementId,80),checkout.checkoutRequestId).first();
+  if (checkout.agreementAccepted !== true || !agreement || agreement.acceptance_token_hash !== await sha256Hex(checkout.agreementToken || "") || agreement.status !== "accepted" || agreement.order_id !== orderId || agreement.request_digest !== await checkoutAgreementRequestDigest(checkout)) throw new AuthFailure(409,"agreement_acceptance_not_recorded","The accepted internet agreement was not attached to this order.");
+}
 function storeOrderBody({order,lines,shipping,configuration}){const subtotal=Number(order.product_subtotal_amount),shippingAmount=Number(order.shipping_amount),tax=Number(order.tax_amount),total=Number(order.customer_gross_amount);return {intent:"CAPTURE",payment_source:{paypal:{experience_context:{payment_method_preference:"IMMEDIATE_PAYMENT_REQUIRED",shipping_preference:"SET_PROVIDED_ADDRESS",user_action:"PAY_NOW",brand_name:"Third Railify Official"}}},purchase_units:[{reference_id:order.id,custom_id:order.id,invoice_id:`TR-${order.id.slice(-32)}`,description:"Third Railify store purchase",amount:{currency_code:"CAD",value:minorUnitsToPayPal(total),breakdown:{item_total:{currency_code:"CAD",value:minorUnitsToPayPal(subtotal)},shipping:{currency_code:"CAD",value:minorUnitsToPayPal(shippingAmount)},tax_total:{currency_code:"CAD",value:minorUnitsToPayPal(tax)}}},items:lines.map((line)=>({name:cleanText(line.productName,127),description:cleanText(line.variantName,127)||undefined,sku:cleanText(line.sku,127)||undefined,unit_amount:{currency_code:"CAD",value:minorUnitsToPayPal(line.unitAmount)},quantity:String(line.quantity),category:"PHYSICAL_GOODS"})),shipping:{name:{full_name:shipping.recipient.recipientName},address:{address_line_1:shipping.recipient.address1,address_line_2:shipping.recipient.address2||undefined,admin_area_2:shipping.recipient.city,admin_area_1:shipping.recipient.region,postal_code:shipping.recipient.postalCode,country_code:shipping.recipient.countryCode}}}]};}
 function donationOrderBody({donation}){return {intent:"CAPTURE",payment_source:{paypal:{experience_context:{payment_method_preference:"IMMEDIATE_PAYMENT_REQUIRED",shipping_preference:"NO_SHIPPING",user_action:"PAY_NOW",brand_name:"Third Railify Official"}}},purchase_units:[{reference_id:donation.id,custom_id:donation.id,invoice_id:`DON-${donation.id.slice(-32)}`,description:"One-time support for Third Railify",amount:{currency_code:"CAD",value:minorUnitsToPayPal(Number(donation.amount_minor))}}]};}
 

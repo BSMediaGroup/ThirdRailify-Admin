@@ -162,7 +162,7 @@ function normalizeRecipient(value) {
     const normalized = cleanText(value[field], maximum);
     if (normalized) recipient[field] = field === "country_code" ? normalized.toUpperCase() : normalized;
   }
-  for (const required of ["name", "address1", "city", "country_code", "zip"]) {
+  for (const required of ["name", "address1", "city", "country_code", ...(["CA","US","AU"].includes(recipient.country_code) ? ["zip"] : [])]) {
     if (!recipient[required]) throw new AuthFailure(409, "printful_recipient_incomplete", "The encrypted delivery recipient is incomplete.");
   }
   return recipient;

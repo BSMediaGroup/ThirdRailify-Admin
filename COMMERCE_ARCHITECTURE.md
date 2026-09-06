@@ -230,3 +230,36 @@ Migration `0010_commerce_production_control_plane.sql` extends the existing auth
 Paid-order receipt and invoice previews are built from immutable D1 order-item snapshots. Customer access uses a one-time returned 256-bit opaque token whose SHA-256 alone is stored in `commerce_order_documents`; order IDs, email addresses, and Stripe IDs are not customer authorization. Formal invoice readiness stays blocked until operator-entered legal identity, address, registration, and tax calculation strategy are complete.
 
 The centralized readiness projection derives BUSINESS, TAX, PAYMENTS, CATALOGUE, SHIPPING, FULFILLMENT, COMMUNICATIONS, DOCUMENTS, and CHECKOUT from stored configuration and evidence. There is no manual `production_ready` override. Merchandising readiness remains independent from fulfillment readiness, so the permanent D1 catalogue stays public while the Printful migration is paused.
+
+
+## Permanent store launch authority - 6 September 2026
+
+This section supersedes earlier pre-activation and TEST-only descriptions. `commerceLaunchPlan` supplies canonical domain readiness. `https://admin.thirdrailify.com/commerce` exposes **SAVE, CONFIRM & ENABLE STORE** to Master Admin. The authenticated mutation requires the exact production URL/Origin, CSRF, rate limits, current readiness digest/launch revision/business revision, owner attestation, scoped disclosure authorization, and emergency pause clear. Deployment does not attest or activate anything.
+
+### Business Information and private projections
+
+Edited legal name/privatePhone/privateAddress replacements use existing purpose-bound encryption; omitted values preserve ciphertext. Safe UTF-8 is trimmed only at the edges; malformed objects, controls, blank replacements and excessive lengths return precise errors. Partial/unconventional address text requires no postal/telephone/geocoding verification. The protected Master reveal POST returns persisted values into form memory, with no browser storage. Optimistic revision conflicts return 409.
+
+CONFIGURED means readable persisted data; OWNER CONFIRMED requires a revision-bound owner attestation; PROVIDER VERIFIED is reserved for actual provider evidence. Migration 0031 adds attested revision/time/Account ID and authorized disclosure revision/time. General browser projections blank legacy public phone/address aliases. Public pages, profiles, catalogue, payment config, SEO, analytics, queries and audits exclude merchant private contact. A later profile save invalidates checkout/capture/submission and owner/disclosure authority. Historical agreements remain unchanged.
+
+### Checkout disclosure and retained documents
+
+Official law reviewed: [Consumer Protection Act, 2002, ss.37-40](https://www.ontario.ca/laws/statute/02c30), [O.Reg.17/05, ss.31-33](https://www.ontario.ca/laws/regulation/050017), and [2023 Act commencement status](https://www.ontario.ca/laws/statute/23c23). The 2023 Act is not yet in force. Under the Ontario merchant policy for worldwide sales, required disclosure is applied to authoritative totals greater than CAD50. Final review contains supplier identity/telephone/premises/contact, item descriptions/prices, shipping/delivery, zero tax, CAD total, payment terms, full policy text/versions and applicable restrictions. There is no invented registration or tax invoice.
+
+The explicit agreement POST requires enabled disclosure, current owner authorization, an eligible cart and server quote. Phone/address are included only in qualifying final review. Offer token, request digest and expiry bind express acceptance before PayPal creation. Corrections invalidate review. The immutable encrypted snapshot binds the local order/customer/guest, profile/tax revisions, items, delivery, totals, policies, acceptance time and environment. SQL triggers prevent accepted snapshot replacement/deletion.
+
+Only authoritative completed live merchandise capture enqueues unique fulfillment and order-confirmation jobs. The email contains the full retainable agreement from its snapshot and an idempotent encrypted branded receipt. Delivery retries reuse the same document/token; the statutory copy deadline is 15 days. Receipt access uses a fragment token removed immediately, then POST; no private facts or access token enter query strings. The receipt is sandbox rendered and downloadable. No document or email is issued during deployment.
+
+### Exact atomic service set
+
+One guarded D1 batch saves current profile edits when supplied, attests/authorizes that revision, updates settings/provider state/eligible product environment/launch revision, and records one bounded audit. Any failed statement rolls back the whole batch. A post-write readback verifies the complete service set; duplicate requests are idempotent.
+
+Set true: `checkout_enabled`, `live_payment_capture_enabled`, `fulfillment_submission_enabled`, `transactional_email_enabled`, `internet_agreement_disclosure_enabled`, `customer_document_access_enabled`, `paypal_store_checkout_enabled`, `paypal_live_capture_enabled`.
+
+Set/preserve: `commerce_environment=production`, `preferred_payment_provider=paypal`, `printful_order_mode=draft_then_confirm`, `stripe_enabled=false`, `stripe_tax_enabled=false`; increment `commerce_launch_revision`. The existing operations implementation requires draft_then_confirm: reconcile before creation, create draft, validate, then confirm idempotently. This retains the safety sequence.
+
+Preserve donation enable/capture settings, `tax_calculation_provider=not_collecting`, `shipping_strategy=printful_dynamic`, worldwide destination markets and five-minute Operations Worker cron. Existing ready shipment template is covered by global sending; missing signed Printful delivery is DEGRADED / POLLING FALLBACK ACTIVE. Stripe is NOT USED; tax invoices NOT APPLICABLE. Neither blocks launch.
+
+Emergency Pause atomically closes store checkout, live merchandise capture and fulfillment submission, preserving donation authority. Active UI shows timestamp/actor/settings and one pause action. Audit contains only IDs, revisions, timestamps and before/after booleans, never phone/address, bodies, secrets or provider payloads.
+
+Shipping correction (6 September 2026): the owner explicitly superseded the earlier Canada-only instruction. Worldwide destination selection is enabled in the existing D1 shipping-market authority, subject to Printful published exclusions and destination/product rate availability. Canadian merchant identity and CAD charging do not restrict customer geography. No provider API call or order was made to configure markets.

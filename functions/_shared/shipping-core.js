@@ -12,6 +12,14 @@ const ISO_COUNTRIES = new Set((
   "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW"
 ).split(" "));
 
+// Official Printful shipping restrictions read 2026-09-06. Regional/product availability
+// remains authoritative in the destination-specific rate response.
+const UNSUPPORTED_SHIPPING_COUNTRIES = new Set(["RU", "BY", "CU", "IR", "SY", "KP", "VE"]);
+export function worldwideShippingMarkets() {
+  const names = new Intl.DisplayNames(["en"], { type: "region" });
+  return [...ISO_COUNTRIES].filter(code => !UNSUPPORTED_SHIPPING_COUNTRIES.has(code)).sort().map(countryCode => ({countryCode,displayName:names.of(countryCode)}));
+}
+
 export function normalizeCartItems(value) {
   if (!Array.isArray(value) || value.length === 0) throw new AuthFailure(400, "checkout_cart_empty", "At least one cart line is required.");
   if (value.length > MAX_LINES) throw new AuthFailure(400, "checkout_cart_too_large", "The cart contains too many lines.");
@@ -42,7 +50,7 @@ export function normalizeDeliveryRecipient(value) {
     address2: safeField(value.address2, 180, "address line 2", false) || null,
     city: safeField(value.city, 120, "city or locality", true),
     region: safeField(value.region, 80, "state, province, or region", false).toUpperCase() || null,
-    postalCode: safeField(value.postalCode, 24, "postal code", true).toUpperCase(),
+    postalCode: safeField(value.postalCode, 24, "postal code", REGION_REQUIRED_COUNTRIES.has(countryCode)).toUpperCase(),
     countryCode,
     phone: safePhone(value.phone),
   };
@@ -63,7 +71,7 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
   const placeholders = items.map(() => "?").join(",");
   const [productResult, variantCountResult, currentAuthority] = await Promise.all([
     db.prepare(
-      `SELECT id,title,currency_code,status,unit_amount,checkout_environment,visibility,max_checkout_quantity,
+      `SELECT id,title,safe_metadata_json,currency_code,status,unit_amount,checkout_environment,visibility,max_checkout_quantity,
               requires_shipping,migration_status,target_printful_product_id,provider_presence
        FROM commerce_products WHERE id IN (${placeholders})`,
     ).bind(...items.map((item) => item.productId)).all(),
@@ -106,7 +114,7 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
     const productName = cleanText(product.title, 240);
     if (!productName) throw new AuthFailure(409, "checkout_product_name_invalid", "A requested product has no valid authoritative name.");
     return {
-      productId: item.productId, variantId: variant?.id || null, productName,
+      productId: item.productId, variantId: variant?.id || null, productName, description:cleanText(parseJson(product.safe_metadata_json,{}).description,12000),
       variantName: variant ? [cleanText(variant.size_label, 120), cleanText(variant.color_label, 120)].filter(Boolean).join(" / ") || null : null,
       sku: variant ? cleanText(variant.sku, 240) || null : null,
       optionValues: variant ? parseJson(variant.option_values_json, {}) : {}, currencyCode: "CAD",
@@ -320,7 +328,7 @@ function parseQuoteOptions(value) {
 function publicRateOption(option) { return { id: option.optionId, name: option.name, amount: option.amount, currency: option.currency, totalAmount: option.totalAmount, delivery: option.minDeliveryDays || option.maxDeliveryDays || option.minDeliveryDate || option.maxDeliveryDate ? { minDays: option.minDeliveryDays, maxDays: option.maxDeliveryDays, minDate: option.minDeliveryDate, maxDate: option.maxDeliveryDate } : null }; }
 function safeField(value, maximum, label, required) { const raw = String(value ?? ""); if (raw.length > maximum * 2) throw new AuthFailure(400, "delivery_field_too_long", `The ${label} is too long.`); const text = raw.trim().replace(/[ \t]+/g, " "); if (required && !text) throw new AuthFailure(400, "delivery_field_required", `The ${label} is required.`); if (text.length > maximum) throw new AuthFailure(400, "delivery_field_too_long", `The ${label} is too long.`); if (/[\u0000-\u001f\u007f<>]/.test(text)) throw new AuthFailure(400, "delivery_field_unsafe", `The ${label} contains unsupported characters.`); return text; }
 function safePhone(value) { const phone = safeField(value, 32, "phone number", false); if (!phone) return null; if (!/^\+?[0-9][0-9 ().-]{5,30}$/.test(phone)) throw new AuthFailure(400, "delivery_phone_invalid", "Enter a valid phone number format."); return phone; }
-function postalCodeValid(value, country) { if (!/^[A-Z0-9][A-Z0-9 -]{1,22}[A-Z0-9]$/.test(value)) return false; if (country === "CA") return /^[A-Z]\d[A-Z][ -]?\d[A-Z]\d$/.test(value); if (country === "US") return /^\d{5}(?:-\d{4})?$/.test(value); if (country === "AU") return /^\d{4}$/.test(value); return true; }
+function postalCodeValid(value, country) { if (!REGION_REQUIRED_COUNTRIES.has(country)) return true; if (!/^[A-Z0-9][A-Z0-9 -]{1,22}[A-Z0-9]$/.test(value)) return false; if (country === "CA") return /^[A-Z]\d[A-Z][ -]?\d[A-Z]\d$/.test(value); if (country === "US") return /^\d{5}(?:-\d{4})?$/.test(value); if (country === "AU") return /^\d{4}$/.test(value); return true; }
 function localId(value, code, message) { const id = cleanText(value, 160); if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id)) throw new AuthFailure(400, code, message); return id; }
 function numericProviderId(value) { const id = cleanText(value, 20); if (!/^[1-9]\d{0,18}$/.test(id)) throw new AuthFailure(409, "shipping_catalogue_variant_unavailable", "The requested physical variant has no authoritative Printful Catalog variant mapping."); return id; }
 function providerMethodId(value) { const id = cleanText(value, 120); if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(id)) throw new AuthFailure(502, "shipping_provider_response_invalid", "The shipping provider returned an invalid method identifier."); return id; }

@@ -1,11 +1,13 @@
+import { buildPrintfulProductionDraftCreateRequest } from "../functions/_shared/printful-api.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest as quoteRequest } from "../functions/api/commerce/shipping-quotes.js";
 import { onRequest as checkoutRequest } from "../functions/api/commerce/checkout.js";
 import { decryptCommerceSecret } from "../functions/_shared/commerce-core.js";
-import { prepareStoredPrintfulDraftOrder } from "../functions/_shared/commerce-control-plane.js";
+import { prepareStoredPrintfulDraftOrder, preparePrintfulDraftOrder } from "../functions/_shared/commerce-control-plane.js";
 import {
   normalizeDeliveryRecipient,
+  worldwideShippingMarkets,
   normalizePrintfulShippingRates,
   printfulShippingRateRequest,
 } from "../functions/_shared/shipping-core.js";
@@ -173,4 +175,21 @@ test("checkout rejects changed cart, recipient, expired quote, selected option, 
   await harness.commerceDb.prepare("UPDATE commerce_shipping_quotes SET expires_at='2099-01-01T00:00:00Z',environment='live' WHERE id=?").bind(payload.quote.id).run();
   const mismatch = await checkoutRequest({ request: post(CHECKOUT_URL, base), env: env(harness), data: { checkoutFetch: async () => { throw new Error("must not call Stripe"); } } });
   assert.equal(mismatch.status, 409); assert.equal((await mismatch.json()).error, "shipping_quote_environment_mismatch");
+});
+
+test("worldwide destinations use authoritative quotes with no Canada-only or universal-postcode restriction",async t=>{
+ const h=await createCommerceDatabases();t.after(h.dispose);await enableShipping(h.commerceDb);await seedPhysicalCart(h);
+ const markets=worldwideShippingMarkets();assert.ok(markets.length>200);assert.ok(!markets.some(m=>m.countryCode==="RU"));
+ await h.commerceDb.batch(markets.map(m=>h.commerceDb.prepare("INSERT OR IGNORE INTO commerce_shipping_markets(country_code,display_name,status,strategy,created_at,updated_at) VALUES (?,?,'active','printful_dynamic','fixture','fixture')").bind(m.countryCode,m.displayName)));
+ for(const [countryCode,region,postalCode] of [["US","NY","10001"],["GB","","SW1A 1AA"],["AU","NSW","2000"],["DE","","10115"],["JP","","100-0001"],["HK","",""]]){
+  const result=await createQuote(h,{recipient:{...RECIPIENT,countryCode,region,postalCode}});assert.equal(result.response.status,201,JSON.stringify(result.payload));assert.equal(result.calls.length,1);assert.equal(result.calls[0].body.recipient.country_code,countryCode);assert.equal(result.payload.quote.currency,"CAD");
+ }
+});
+
+test("international no-postcode recipients survive draft validation and production payload construction",async()=>{
+ const recipient={name:"Synthetic recipient",address1:"Synthetic address",city:"Hong Kong",countryCode:"HK",postalCode:""};
+ const preview=preparePrintfulDraftOrder({recipient});assert.ok(!preview.blockers.some(b=>b.code==="recipient_incomplete"));
+ const input={localOrderId:"ord_77777777-7777-4777-8777-777777777777",targetStoreId:"18668025",shippingCode:"STANDARD",recipient:{name:recipient.name,address1:recipient.address1,city:recipient.city,country_code:"HK"},items:[{sync_variant_id:7001,quantity:1}]};
+ const built=await buildPrintfulProductionDraftCreateRequest(input);assert.equal(built.body.recipient.country_code,"HK");assert.equal(built.body.recipient.zip,undefined);
+ await assert.rejects(buildPrintfulProductionDraftCreateRequest({...input,recipient:{...input.recipient,country_code:"CA"}}),e=>e.code==="printful_recipient_incomplete");
 });

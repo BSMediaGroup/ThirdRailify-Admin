@@ -14,6 +14,7 @@ if (command === "plan" || command === "donations-plan" || !execute) {
   if (!planOnly) process.stdout.write("No mutation was made. Add --execute with the protected CSRF environment value after reviewing this plan.\n");
   process.exit(current.ready ? 0 : 2);
 }
+if (command === "activate") fail("Owner attestation and transaction disclosure authorization must be completed at https://admin.thirdrailify.com/commerce using SAVE, CONFIRM & ENABLE STORE.");
 if (!csrf) fail("COMMERCE_ADMIN_CSRF_TOKEN is required for an executed mutation.");
 
 const body = command === "catalogue-apply"
@@ -31,7 +32,7 @@ async function request(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     redirect: "manual",
-    headers: { Accept: "application/json", Cookie: cookie, ...(options.method === "POST" ? { "Content-Type": "application/json", "X-CSRF-Token": csrf } : {}) },
+    headers: { Accept: "application/json", Cookie: cookie, Origin: baseUrl, ...(options.method === "POST" ? { "Content-Type": "application/json", "X-CSRF-Token": csrf } : {}) },
   });
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : null;

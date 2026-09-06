@@ -78,7 +78,6 @@ export function TaxDocumentsPage() {
   const canManageTemplates = templates.access.capabilities.includes("commerce.templates.manage");
   const canonical = business.canonicalReadiness;
   const receipt = documentTemplates.find((template) => template.templateKey === "payment_receipt");
-  const invoice = documentTemplates.find((template) => template.templateKey === "invoice_document");
   const communications = canonical?.domains.communications;
   const checkout = canonical?.domains.checkout;
 
@@ -133,11 +132,11 @@ export function TaxDocumentsPage() {
 
   return <div className="tax-documents-page">
     <section className="tax-documents-hero" aria-labelledby="tax-documents-title">
-      <div className="tax-documents-hero__copy"><div className="area-icon"><AdminIcon name="tax" size={28} /></div><p className="eyebrow">Commerce D1 control plane</p><h1 id="tax-documents-title">Tax &amp; documents</h1><p>Configure merchant tax-registration records and safe receipt/invoice presentation. Configuration, TEST preview evidence, and external verification remain deliberately separate.</p><div className="tax-documents-hero__chips"><StatusChip state={tax.registrationState.configured ? "configured" : "not_configured"} label={tax.registrationState.configured ? "Registration configured" : "No registration"} /><StatusChip state="unverified" label="Externally unverified" /><StatusChip state="disabled" label="Production tax disabled" /></div></div>
+      <div className="tax-documents-hero__copy"><div className="area-icon"><AdminIcon name="tax" size={28} /></div><p className="eyebrow">Commerce D1 control plane</p><h1 id="tax-documents-title">Tax &amp; documents</h1><p>Configure merchant tax-registration records and safe receipt/invoice presentation. Configuration, TEST preview evidence, and external verification remain deliberately separate.</p><div className="tax-documents-hero__chips"><StatusChip state={tax.registrationState.configured ? "configured" : "not_configured"} label={tax.registrationState.configured ? "Registration configured" : "No registration"} /><StatusChip state={tax.calculation.provider === "not_collecting" ? "configured" : "unverified"} label={tax.calculation.provider === "not_collecting" ? "NOT COLLECTING ? owner-selected policy" : "External verification not recorded"} /></div></div>
       <div className="tax-readiness-summary" aria-label="Tax and document readiness summary">
         <Summary label="Tax profile" value={`${business.profile.countryCode || "—"} · ${business.profile.provinceCode || "—"}`} state={tax.registrationState.configured ? "configured" : "not_configured"} />
         <Summary label="Receipts" value={templateSummary(receipt)} state={templateState(receipt)} />
-        <Summary label="Invoices" value={templateSummary(invoice)} state={templateState(invoice)} />
+        <Summary label="Invoices" value="NOT APPLICABLE / OPTIONAL" state="not_required" />
         <Summary label="Customer communications" value={communications?.summary || "Readiness unavailable"} state={domainState(communications)} />
         <Summary label="Production tax / checkout" value={checkout?.details.normalCheckoutEnabled === true ? "Checkout enabled" : "Checkout disabled"} state={checkout?.ready ? "complete" : "disabled"} />
       </div>
