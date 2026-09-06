@@ -277,17 +277,24 @@ export async function processPrintfulWebhookEvidence(env, envelope, payloadSha25
   const eventId = `pwe_${payloadSha256}`;
   const providerShipmentId = envelope.orderEvidence.shipments[0]?.providerShipmentId || null;
   const existing = await db.prepare("SELECT processing_status,result_code,retry_count FROM commerce_provider_webhook_events WHERE id=?").bind(eventId).first();
-  if (existing) {
+  if (existing && new Set(["processed", "unresolved"]).has(existing.processing_status)) {
     await db.prepare("UPDATE commerce_provider_webhook_events SET retry_count=MAX(retry_count,?) WHERE id=?").bind(envelope.retries, eventId).run();
     return { duplicate: true, status: existing.processing_status, resultCode: existing.result_code || "duplicate" };
   }
-  await db.prepare(`INSERT INTO commerce_provider_webhook_events (
+  if (existing?.processing_status === "received") throw new AuthFailure(503, "printful_event_processing", "The event is still processing; retry delivery.");
+  const inserted = await db.prepare(`INSERT OR IGNORE INTO commerce_provider_webhook_events (
     id,provider,event_type,occurred_at,provider_store_id,provider_order_id,provider_shipment_id,
     payload_sha256,processing_status,retry_count,received_at
   ) VALUES (?,'printful',?,?,?,?,?,?,'received',?,?)`).bind(
     eventId, envelope.type, envelope.occurredAt, envelope.storeId, envelope.orderEvidence.providerOrderId,
     providerShipmentId, payloadSha256, envelope.retries, receivedAt,
   ).run();
+  if (existing?.processing_status === "error") {
+    const claimed = await db.prepare("UPDATE commerce_provider_webhook_events SET processing_status='received',retry_count=MAX(retry_count,?) WHERE id=? AND processing_status='error'").bind(envelope.retries, eventId).run();
+    if (Number(claimed.meta?.changes) !== 1) throw new AuthFailure(503, "printful_event_processing", "The event is processing; retry delivery.");
+  } else if (Number(inserted.meta?.changes) !== 1) {
+    throw new AuthFailure(503, "printful_event_processing", "The event is processing; retry delivery.");
+  }
   try {
     const result = await reconcilePrintfulOrderEvidence(env, envelope.orderEvidence, { expectedStoreId: envelope.storeId });
     const email = await shipmentNotificationIntent(env, result, envelope.type, payloadSha256);

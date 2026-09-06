@@ -4,6 +4,8 @@ import { AdminIcon } from "../components/AdminIcon";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { getFulfillmentShipping, type FulfillmentGate, type FulfillmentShippingPayload, type FulfillmentStatusProjection } from "../commerce/client";
 import "../styles/fulfillment-shipping.css";
+import { adminApi } from "../auth/client";
+import { useAuth } from "../auth/AuthProvider";
 import { ShippingRatesWorkspace } from "../commerce/ShippingRatesWorkspace";
 
 const READINESS_LABELS: Array<[keyof FulfillmentShippingPayload["readiness"], string]> = [
@@ -13,6 +15,7 @@ const READINESS_LABELS: Array<[keyof FulfillmentShippingPayload["readiness"], st
 ];
 
 export function FulfillmentShippingPage() {
+  const { csrfToken, access } = useAuth();
   const { startLoading } = useOutletContext<AdminShellOutletContext>();
   const [payload, setPayload] = useState<FulfillmentShippingPayload | null>(null);
   const [error, setError] = useState("");
@@ -24,6 +27,11 @@ export function FulfillmentShippingPage() {
   }, [startLoading]);
   useEffect(() => { void load(); }, [load]);
 
+  const ready = payload?.readiness.production.state === "ready";
+  async function reconcileWebhook() {
+    try { await adminApi("/api/admin/commerce/fulfillment/webhook-reconcile", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmation: "RECONCILE WEBHOOK CONFIG" }) }); await load(); }
+    catch (reason) { setError(errorMessage(reason, "Webhook configuration readback failed.")); }
+  }
   return <main className="fulfillment-workspace">
     <header className="fulfillment-heading">
       <div><p className="eyebrow">Commerce operations control plane</p><h1>Fulfillment &amp; Shipping</h1><p>Manage customer shipping rates and review Printful mapping, delivery dependencies and fulfillment readiness.</p></div>
@@ -35,9 +43,9 @@ export function FulfillmentShippingPage() {
     {payload && <>
       <section className="fulfillment-hero" aria-labelledby="fulfillment-readiness-title">
         <div className="fulfillment-hero__intro">
-          <p className="eyebrow">Server-derived readiness</p><h2 id="fulfillment-readiness-title">Production remains blocked</h2>
-          <p>Provider submission is unavailable. A real customer order cannot be fulfilled until customer delivery capture, a shipping-rate strategy, eligible sellable mappings, and the canonical activation gates are complete.</p>
-          <div className="fulfillment-hero__answers"><Answer label="Create a provider order?" value="Controlled TEST draft only" /><Answer label="Fulfill a customer order?" value="No — confirmation unavailable" /><Answer label="Provider evidence" value={payload.operations.counts.total ? `${payload.operations.counts.total} normalized provider order(s)` : "No provider orders recorded"} /></div>
+          <p className="eyebrow">Server-derived readiness</p><h2 id="fulfillment-readiness-title">{ready ? "Production ready" : "Production blocked"}</h2>
+          <p>{payload.readiness.production.detail}</p>
+          <div className="fulfillment-hero__answers"><Answer label="Create a provider order?" value={ready ? "Paid LIVE order - Worker only" : "Review production gates"} /><Answer label="Fulfill a customer order?" value={ready ? "Draft \u2192 Validate \u2192 Confirm" : "Blocked"} /><Answer label="Provider evidence" value={`${payload.operations.counts.total} normalized provider order(s)`} /></div>
         </div>
         <div className="fulfillment-readiness-grid">
           {READINESS_LABELS.map(([key, label]) => <Readiness key={key} label={label} value={payload.readiness[key]} />)}
@@ -55,7 +63,7 @@ export function FulfillmentShippingPage() {
           </dl>
           <p className="fulfillment-boundary"><AdminIcon name="shield" size={15} /> Page reads never call Printful. No credential, header, encrypted envelope, or raw provider response reaches the browser.</p>
         </Panel>
-        <Panel eyebrow="Delivery dependency" title="Shipping data & rates" state="blocked">
+        <Panel eyebrow="Delivery dependency" title="Shipping data & rates" state={payload.shipping.rates.state}>
           <div className="fulfillment-capability-list">
             <Capability title="Encrypted customer delivery snapshots" state={payload.shipping.customerData.state} detail={payload.shipping.customerData.persistedFields.length ? "Schema capability is implemented; order-specific PII is never projected here." : "No normalized recipient snapshot authority exists."} />
             <Capability title="Shipping-rate strategy" state={payload.shipping.rates.state} detail={payload.shipping.rates.strategy === "unconfigured" ? "The quote adapter is implemented, but the canonical strategy remains unconfigured and fail-closed." : `Configured strategy: ${humanize(payload.shipping.rates.strategy)}.`} />
@@ -71,12 +79,14 @@ export function FulfillmentShippingPage() {
           <Capability title="Lifecycle schema" state={payload.lifecycle.schema.state} detail={`Authority migration: ${payload.lifecycle.schema.migration}.`} />
           <Capability title="Printful order model" state={payload.lifecycle.providerOrderModel.state} detail="Normalized provider state is stored separately from payment and legacy order fields." />
           <Capability title="Draft recording" state={payload.lifecycle.draftRecording.state} detail="The controlled confirm=false response reconciles idempotently by local external ID and provider order ID." />
+          {payload.webhook && <><Capability title="Signing secret" state={payload.webhook.custody} detail="HMAC-SHA256 - Encrypted server secret binding. Public key must match before raw-body verification." /><Capability title="Signed webhook delivery" state={payload.webhook.signedDelivery} detail={payload.webhook.lastEvent ? `${payload.webhook.lastEvent.event_type} - ${payload.webhook.lastEvent.occurred_at}` : "Awaiting first real signed event; scheduled reconciliation remains active."} /><p style={{ overflowWrap: "anywhere" }}>{payload.webhook.url}<br />{payload.webhook.events.join(", ")}</p></>}
           <Capability title="Webhook receiver" state={payload.lifecycle.webhookReceiver.state} detail="Signed V2 beta HMAC receiver is deployed fail-closed; it never relies on an Admin session." />
           <Capability title="Webhook verification configuration" state={payload.lifecycle.webhookVerification.state} detail="The receiver stays fail-closed unless the server holds the matching signing secret; public-key or subscription readback alone is not signature custody." />
           <Capability title="Provider webhook subscription" state={payload.lifecycle.providerSubscription.state} detail="Subscription configuration is separate from verified signed delivery and is not production lifecycle authority." />
+          <button type="button" onClick={() => void reconcileWebhook()} disabled={!access?.isMasterAdmin}>Reconcile webhook config</button>
           <Capability title="Shipment normalization" state={payload.lifecycle.shipmentNormalization.state} detail="Packages, split item coverage, reshipments, returned packages, and delivered evidence remain distinct." />
           <Capability title="Tracking storage" state={payload.lifecycle.trackingStorage.state} detail="Tracking references and URLs are encrypted; list projections expose availability only." />
-          <Capability title="Scheduled Printful reconciliation" state={payload.lifecycle.carrierDeliveryPolling.state} detail="The Commerce Operations Worker polls each non-terminal LIVE Printful order every five minutes and normalizes order, shipment, return, and encrypted tracking evidence." />
+          <Capability title="Scheduled Printful reconciliation" state={payload.lifecycle.reconciliationFallback.automaticPolling ? "backstop_active" : "disabled"} detail="The Commerce Operations Worker polls each non-terminal LIVE Printful order every five minutes and normalizes order, shipment, return, and encrypted tracking evidence." />
         </div>
       </section>
 
@@ -115,22 +125,22 @@ export function FulfillmentShippingPage() {
       </section>
 
       <section className="fulfillment-section fulfillment-draft" aria-labelledby="draft-title">
-        <SectionHeading eyebrow="Pure server preparation" title="Draft order preview" id="draft-title" text="The server selected the preview item from authoritative D1 mappings. The recipient is deterministic synthetic sample data; no browser-provided provider ID is accepted." />
+        <SectionHeading eyebrow="Pure server preparation" title="Draft order preview" id="draft-title" text="Structural preview with a synthetic recipient and server-selected mapping. The real shipping method is supplied by the customer's accepted checkout quote." />
         <div className="fulfillment-draft__labels">{payload.draftPreview.labels.map((label) => <span key={label}>{label}</span>)}</div>
         <div className="fulfillment-draft__grid">
           <article>
-            <dl className="fulfillment-facts"><Fact term="Reference" value={payload.draftPreview.reference} /><Fact term="Environment" value={payload.draftPreview.environment.toUpperCase()} /><Fact term="Product" value={payload.draftPreview.item?.product || "No mapped candidate"} /><Fact term="Variant" value={payload.draftPreview.item?.variant || "Unavailable"} /><Fact term="Mapped provider variant" value={payload.draftPreview.item?.mappedProviderVariant || "Unavailable"} /><Fact term="Quantity" value={String(payload.draftPreview.item?.quantity ?? "Unavailable")} /><Fact term="Recipient" value={payload.draftPreview.requirements.recipient.complete ? "Synthetic sample / structurally complete" : "Missing required fields"} /><Fact term="Shipping" value={payload.draftPreview.requirements.shipping.configured ? humanize(payload.draftPreview.requirements.shipping.strategy) : "Not configured"} /></dl>
+            <dl className="fulfillment-facts"><Fact term="Reference" value={payload.draftPreview.reference} /><Fact term="Environment" value={payload.draftPreview.environment.toUpperCase()} /><Fact term="Product" value={payload.draftPreview.item?.product || "No mapped candidate"} /><Fact term="Variant" value={payload.draftPreview.item?.variant || "Unavailable"} /><Fact term="Mapped provider variant" value={payload.draftPreview.item?.mappedProviderVariant || "Unavailable"} /><Fact term="Quantity" value={String(payload.draftPreview.item?.quantity ?? "Unavailable")} /><Fact term="Recipient" value={payload.draftPreview.requirements.recipient.complete ? "Synthetic sample / structurally complete" : "Missing required fields"} /><Fact term="Shipping" value={"Supplied by accepted checkout quote"} /></dl>
             <button type="button" disabled aria-describedby="provider-submit-reason">Submit to Printful — worker only</button><p id="provider-submit-reason">This workspace exposes no provider-write control. After atomic activation, only a future genuinely paid LIVE merchandise order can enqueue the reconcile-before-create, draft, validate, and confirm workflow.</p>
           </article>
           <article className="fulfillment-draft__preview"><header><div><span>Safe high-level preview</span><strong>{payload.draftPreview.eligible ? "Structurally eligible" : `${payload.draftPreview.blockers.length} blocker${payload.draftPreview.blockers.length === 1 ? "" : "s"}`}</strong></div><StatusChip state={payload.draftPreview.eligible ? "ready" : "blocked"} /></header>
-            {payload.draftPreview.blockers.length ? <ul>{payload.draftPreview.blockers.map((blocker) => <li key={blocker.code}><code>{blocker.code}</code><span>{blocker.message}</span></li>)}</ul> : <p>No structural blocker was found in this synthetic fixture; submission authority is still absent.</p>}
+            {payload.draftPreview.blockers.length ? <ul>{payload.draftPreview.blockers.map((blocker) => <li key={blocker.code}><code>{blocker.code}</code><span>{blocker.message}</span></li>)}</ul> : <p>Structurally ready. Shipping method is supplied by the paid checkout order. This preview makes no provider request.</p>}
             <pre aria-label="Safe Printful draft payload preview">{JSON.stringify(payload.draftPreview.safePayloadPreview, null, 2)}</pre>
           </article>
         </div>
       </section>
 
       <section className="fulfillment-section fulfillment-two-up" aria-label="Production gates and dependencies">
-        <Panel eyebrow="Canonical locks" title="Production gates" state="blocked"><div className="fulfillment-gates">{payload.gates.map((gate) => <Gate key={gate.id} gate={gate} />)}</div></Panel>
+        <Panel eyebrow="Canonical locks" title="Production gates" state={payload.readiness.production.state}><div className="fulfillment-gates">{payload.gates.map((gate) => <Gate key={gate.id} gate={gate} />)}</div></Panel>
         <Panel eyebrow="Adjacent owners" title="Dependencies" state="incomplete">
           <nav className="fulfillment-dependencies" aria-label="Fulfillment dependencies">
             <Dependency to={payload.dependencies.business.href} title="Business Information" text="Merchant identity and address readiness only; no shipping-origin assumption." />
@@ -163,7 +173,7 @@ function SectionHeading({ eyebrow, title, id, text, action }: { eyebrow: string;
 function Metric({ label, value, tone: valueTone = "" }: { label: string; value: number; tone?: string }) { return <article className={valueTone ? `is-${valueTone}` : ""}><span>{label}</span><strong>{value.toLocaleString()}</strong></article>; }
 function Gate({ gate }: { gate: FulfillmentGate }) { const content = <><div><strong>{gate.label}</strong><p>{gate.detail}</p></div><StatusChip state={gate.state} /></>; return gate.href ? <Link to={gate.href}>{content}</Link> : <article>{content}</article>; }
 function Dependency({ to, title, text }: { to: string; title: string; text: string }) { return <Link to={to}><div><strong>{title}</strong><p>{text}</p></div><AdminIcon name="arrow" size={15} /></Link>; }
-function tone(state: string) { if (["ready", "configured", "available", "enabled", "implemented_scheduled"].includes(state)) return "good"; if (["partial", "incomplete", "unverified", "no_evidence", "implemented_no_evidence", "implemented_disabled", "test_evidence_only", "draft_only"].includes(state)) return "warn"; if (["blocked", "not_implemented", "not_configured", "disabled", "production_disabled", "live"].includes(state)) return "bad"; return "neutral"; }
+function tone(state: string) { if (["ready", "active", "verified", "draft_then_confirm", "configured", "available", "enabled", "implemented_scheduled"].includes(state)) return "good"; if (["partial", "incomplete", "unverified", "no_evidence", "implemented_no_evidence", "implemented_disabled", "test_evidence_only", "draft_only"].includes(state)) return "warn"; if (["blocked", "not_implemented", "not_configured", "disabled", "production_disabled", "live"].includes(state)) return "bad"; return "neutral"; }
 function humanize(value: string) { return String(value || "Not recorded").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function formatTimestamp(value: string | null) { if (!value) return "No evidence"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? value : date.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }); }
 function errorMessage(reason: unknown, fallback: string) { return reason instanceof Error && reason.message ? reason.message : fallback; }

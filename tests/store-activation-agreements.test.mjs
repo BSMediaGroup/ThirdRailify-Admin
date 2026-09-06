@@ -1,3 +1,5 @@
+import { fulfillmentShippingPayload } from "../functions/_shared/commerce-control-plane.js";
+import { processCommerceJobs } from "../functions/_shared/commerce-operations.js";
 import { onRequest as commerceRoute } from "../functions/api/admin/commerce/[[path]].js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
@@ -21,6 +23,60 @@ const PHONE="Téléphone ☎ owner extension 四";
 const ADDRESS="Lieu privé — arrière bâtiment";
 const request=()=>new Request("https://thirdrailify.com/api/commerce/agreement",{method:"POST",headers:{Origin:"https://thirdrailify.com"}});
 const confirm=plan=>({confirmation:"SAVE, CONFIRM & ENABLE STORE",expectedRevision:plan.revision,expectedDigest:plan.digest,businessProfileRevision:plan.business.revision,ownerAttestation:true,transactionDisclosureAuthorization:true,productionEnvironment:"production"});
+
+test("fulfillment readiness accepts dynamic shipping without weights and repairs production mode drift", async t => {
+  const {env,db}=await fixture(t);
+  const active=await activateCommerceLaunch(env,confirm(await commerceLaunchPlan(env)),master);
+  await db.prepare("INSERT INTO commerce_settings(setting_key,value_json,classification,updated_at) VALUES ('printful_api_configured','true','safe','fixture') ON CONFLICT(setting_key) DO UPDATE SET value_json='true'").run();
+  const ready=await fulfillmentShippingPayload(env,master);
+  assert.equal(ready.readiness.production.state,"ready",JSON.stringify(ready.gates)); assert.equal(ready.mapping.potentiallyFulfillableVariants,1);
+  assert.equal(ready.draftPreview.eligible,true); assert.equal(ready.webhook.subscription,"not_verified");
+  assert.equal((await shippingManagerPayload(env)).coverage.covered,0);
+  await db.prepare("UPDATE commerce_settings SET value_json='\"disabled\"' WHERE setting_key='printful_order_mode'").run();
+  await db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.order_mode','disabled') WHERE provider='printful'").run();
+  assert.equal((await fulfillmentShippingPayload(env,master)).readiness.production.state,"blocked");
+  const plan=await commerceLaunchPlan(env);
+  const repaired=await reconcileActiveCommerceStore(env,{confirmation:"RECONCILE ACTIVE STORE",expectedRevision:plan.revision,expectedDigest:plan.digest},master);
+  assert.equal(repaired.settings.printfulOrderMode,"draft_then_confirm");assert.equal(repaired.activatedAt,active.activatedAt);
+  assert.equal((await fulfillmentShippingPayload(env,master)).readiness.production.state,"ready");
+  const again=await reconcileActiveCommerceStore(env,{confirmation:"RECONCILE ACTIVE STORE",expectedRevision:repaired.revision,expectedDigest:repaired.digest},master);
+  assert.equal(again.reconciliation.idempotent,true);
+});
+
+test("paid LIVE quote reaches mocked draft and confirm; replay never confirms twice", async t => {
+  const {env,db,body}=await fixture(t);
+  await activateCommerceLaunch(env,confirm(await commerceLaunchPlan(env)),master);
+  const quote=await createShippingQuote(env,request(),{items:body.items,recipient:body.recipient},async()=>Response.json({code:200,result:[{id:"STANDARD",name:"Provider service",rate:"13.50",currency:"CAD"}]}));
+  body.quoteId=quote.quote.id;body.shippingOptionId=quote.quote.options[0].id;
+  const offer=await offerCheckoutAgreement(env,request(),body,null);
+  await createPayPalStorePayment(env,request(),{...body,agreementId:offer.agreement.id,agreementToken:offer.acceptanceToken,agreementAccepted:true},null,async (url,init)=>{
+    if(url.endsWith('/v1/oauth2/token'))return Response.json({access_token:'synthetic-token',token_type:'Bearer',expires_in:3600});
+    const unit=JSON.parse(init.body).purchase_units[0];return Response.json({id:'FULFILLMENTFIXTURE1',intent:'CAPTURE',status:'CREATED',purchase_units:[unit]},{status:201});
+  });
+  const order=await db.prepare("SELECT id FROM commerce_orders WHERE checkout_request_id=?").bind(body.checkoutRequestId).first();
+  await db.prepare("UPDATE commerce_orders SET payment_status='paid' WHERE id=?").bind(order.id).run();
+  await db.prepare("UPDATE commerce_payment_attempts SET normalized_state='completed',provider_capture_id='FIXTURECAPTURE' WHERE commerce_order_id=?").bind(order.id).run();
+  await db.prepare("INSERT INTO commerce_operation_jobs(id,job_kind,event_key,order_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at) VALUES ('coj_12345678-1234-4234-8234-123456789abc','fulfillment_submit','fixture',?,'live',?,'pending','2000-01-01','2000-01-01','2000-01-01')").bind(order.id,'a'.repeat(64)).run();
+  let draft=null,creates=0,confirms=0,pauseBeforeConfirm=true;
+  const provider=async(url,init={})=>{
+    assert.ok(url.startsWith('https://api.printful.com/orders'));
+    if(init.method==='POST'&&url.endsWith('/confirm')){confirms++;draft.status='pending';return Response.json({code:200,result:draft});}
+    if(init.method==='POST'){creates++;draft={...JSON.parse(init.body),id:990001,status:'draft',store_id:18668025};assert.equal(draft.shipping,'STANDARD');assert.deepEqual(draft.items,[{sync_variant_id:7001,quantity:1}]);return Response.json({code:200,result:draft});}
+    if(draft && pauseBeforeConfirm) { pauseBeforeConfirm=false; await db.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key='commerce_emergency_paused'").run(); }
+    return draft?Response.json({code:200,result:draft}):Response.json({code:404},{status:404});
+  };
+  await db.prepare("UPDATE commerce_orders SET payment_status='pending' WHERE id=?").bind(order.id).run();
+  const unpaid=await processCommerceJobs(env,provider);assert.equal(unpaid.results[0].state,'action_required');assert.equal(creates,0);
+  await db.prepare("UPDATE commerce_orders SET payment_status='paid' WHERE id=?").bind(order.id).run();
+  await db.prepare("UPDATE commerce_operation_jobs SET state='pending',next_attempt_at='2000-01-01' WHERE id='coj_12345678-1234-4234-8234-123456789abc'").run();
+  const paused=await processCommerceJobs(env,provider);assert.equal(paused.results[0].state,'action_required');assert.equal(confirms,0);assert.equal(creates,1);
+  await db.prepare("UPDATE commerce_settings SET value_json='false' WHERE setting_key='commerce_emergency_paused'").run();
+  await db.prepare("UPDATE commerce_operation_jobs SET state='pending',next_attempt_at='2000-01-01' WHERE id='coj_12345678-1234-4234-8234-123456789abc'").run();
+  const first=await processCommerceJobs(env,provider);assert.equal(first.results[0].state,'completed',JSON.stringify(first));assert.equal(creates,1);assert.equal(confirms,1);
+  await db.prepare("UPDATE commerce_operation_jobs SET state='pending' WHERE id='coj_12345678-1234-4234-8234-123456789abc'").run();
+  const repeated=await processCommerceJobs(env,provider);assert.ok(repeated.results.every(r=>r.state==='completed'),JSON.stringify(repeated));assert.equal(creates,1);assert.equal(confirms,1);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM commerce_email_deliveries').first()).n,0);
+});
 
 test("merchant shipping agrees across agreement, mocked PayPal, order, receipt and email; established orders never reprice",async t=>{
   const {env,db,body}=await fixture(t);

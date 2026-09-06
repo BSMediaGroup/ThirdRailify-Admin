@@ -52,6 +52,7 @@ import {
   readPrintfulCatalogueFileChunk,
   readPrintfulCatalogueProductChunk,
 } from "../../../_shared/printful-catalogue.js";
+import { reconcilePrintfulWebhookConfiguration } from "../../../_shared/printful-webhook-configuration.js";
 import { reconcileCatalogues } from "../../../_shared/catalogue-reconciliation.js";
 import {
   applyCurrentCatalogueReconciliation,
@@ -269,6 +270,12 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     if (new URL(request.url).origin !== "https://admin.thirdrailify.com" || request.headers.get("Origin") !== "https://admin.thirdrailify.com") throw new AuthFailure(403,"production_origin_required","Store activation requires the exact production Admin origin.");
     payload = await activateCommerceLaunch(env, await readJsonBody(request), session);
     authEventType = "commerce_production_activated";
+  } else if (path === "fulfillment/webhook-reconcile") {
+    await requireAdminCapability(env, session, "commerce.operations.manage");
+    if (!(await accessForSession(env, session)).isMasterAdmin) throw new AuthFailure(403, "master_admin_required", "Only Master Admin can reconcile webhook configuration.");
+    if (new URL(request.url).origin !== request.headers.get("Origin")) throw new AuthFailure(403, "origin_invalid", "A same-origin request is required.");
+    payload = await reconcilePrintfulWebhookConfiguration(env, await readJsonBody(request), session.accountId, fetchImpl);
+    authEventType = "printful_webhook_configuration_reconciled";
   } else if (path === "launch/reconcile") {
     await requireAdminCapability(env, session, "commerce.operations.manage");
     if (!(await accessForSession(env, session)).isMasterAdmin) throw new AuthFailure(403, "master_admin_required", "Only Master Admin can reconcile the active store.");

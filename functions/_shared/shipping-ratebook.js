@@ -120,7 +120,8 @@ export async function shippingManagerPayload(env) {
     db.prepare("SELECT * FROM commerce_shipping_ratebooks WHERE status IN ('draft','published') ORDER BY created_at DESC").all(),
     db.prepare("SELECT country_code,display_name FROM commerce_shipping_markets WHERE status='active' ORDER BY display_name").all(), shippingWeightCoverage(db),
   ]);
-  return { ok: true, policy, books: (books.results || []).map(r => ({ id: r.id, revision: r.revision, status: r.status, provenance: r.provenance, body: JSON.parse(r.body_json) })), markets: markets.results || [], coverage };
+  const strategy = JSON.parse((await db.prepare("SELECT value_json FROM commerce_settings WHERE setting_key='shipping_strategy'").first())?.value_json || '"unconfigured"');
+  return { ok: true, strategy, policy, books: (books.results || []).map(r => ({ id: r.id, revision: r.revision, status: r.status, provenance: r.provenance, body: JSON.parse(r.body_json) })), markets: markets.results || [], coverage };
 }
 export async function mutateShippingRatebook(env, input) {
   const db = requireCommerceDb(env);

@@ -85,7 +85,9 @@ async function submitPaidLiveOrder(env, orderId, fetchImpl) {
     db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('fulfillment_submission_enabled','commerce_emergency_paused','printful_order_mode')").all(),
     db.prepare(`SELECT provider,evidence_id FROM (
       SELECT 'paypal' provider,id evidence_id,updated_at evidence_at FROM commerce_payment_attempts
-        WHERE commerce_order_id=? AND provider='paypal' AND environment='live' AND normalized_state='completed'
+        WHERE commerce_order_id=? AND provider='paypal' AND environment='live' AND normalized_state='completed' AND provider_capture_id IS NOT NULL
+          AND amount_minor=(SELECT customer_gross_amount FROM commerce_orders WHERE id=commerce_order_id)
+          AND currency_code=(SELECT currency_code FROM commerce_orders WHERE id=commerce_order_id)
       UNION ALL
       SELECT 'stripe' provider,provider_event_id evidence_id,processed_at evidence_at FROM commerce_webhook_events
         WHERE provider='stripe' AND livemode=1 AND processing_status='processed' AND result_code='payment_confirmed'
@@ -110,11 +112,19 @@ async function submitPaidLiveOrder(env, orderId, fetchImpl) {
     if (!response.ok) throw await normalizePrintfulApiError(response, { operation: "printful_order_draft_create", payloadDigest: request.payloadDigest });
     providerOrder = await readPrintfulResult(response, "printful_order_draft_response_invalid");
   }
+  if (providerOrder && String(providerOrder.status).toLowerCase() !== "draft") {
+    if (String(providerOrder.external_id) !== request.externalId || !new Set(["pending", "inprocess", "fulfilled", "partial", "inreview"]).has(String(providerOrder.status).toLowerCase())) throw new AuthFailure(409, "printful_existing_order_review_required", "Existing provider order requires review; confirmation was not repeated.");
+    await reconcilePrintfulOrderEvidence(env, normalizePrintfulOrderEvidence(providerOrder, { expectedStoreId: env.PRINTFUL_STORE_ID, expectedExternalId: request.externalId, occurredAt: nowIso() }), { expectedStoreId: env.PRINTFUL_STORE_ID, localOrderId: orderId });
+    return { orderId, providerOrderId: String(providerOrder.id), state: "already_submitted", duplicate: true };
+  }
   validateDraft(providerOrder, request);
   if (String(providerOrder.id) === "174104132") throw new AuthFailure(409, "preserved_printful_order_rejected", "The preserved TEST Printful draft can never enter automatic fulfillment.");
   await reconcilePrintfulOrderEvidence(env, normalizePrintfulOrderEvidence(providerOrder, { expectedStoreId: env.PRINTFUL_STORE_ID, expectedExternalId: request.externalId, occurredAt: nowIso() }), { expectedStoreId: env.PRINTFUL_STORE_ID, localOrderId: orderId });
   const fresh = await getPrintfulOrderByExternalId(fetchImpl, headers, request.externalId, request.payloadDigest);
   validateDraft(fresh, request);
+  const [latestOrder, latestSettings] = await Promise.all([db.prepare("SELECT environment,payment_status FROM commerce_orders WHERE id=?").bind(orderId).first(), db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('fulfillment_submission_enabled','commerce_emergency_paused','printful_order_mode')").all()]);
+  const currentSettings = Object.fromEntries(latestSettings.results.map(r => [r.setting_key, parseJson(r.value_json, null)]));
+  requireLiveOrder({ ...order, ...latestOrder }, paymentAuthority, currentSettings);
   const confirmResponse = await boundedFetch(fetchImpl, `${PRINTFUL_ORDERS_URL}/${encodeURIComponent(String(fresh.id))}/confirm`, { method: "POST", headers });
   if (!confirmResponse.ok) throw await normalizePrintfulApiError(confirmResponse, { operation: "printful_order_confirm", payloadDigest: request.payloadDigest });
   const confirmed = await readPrintfulResult(confirmResponse, "printful_order_confirm_response_invalid");
@@ -185,7 +195,7 @@ async function enqueueDueReconciliationJobs(db, timestamp) {
   const result = await db.prepare(`SELECT order_id,external_id FROM commerce_fulfillment_orders
     WHERE environment='live' AND provider='printful' AND provider_state NOT IN ('complete','archived','canceled') LIMIT ?`).bind(MAX_BATCH).all();
   for (const row of result?.results || []) {
-    const bucket = timestamp.slice(0, 13);
+    const bucket = String(Math.floor(Date.parse(timestamp) / (5 * 60 * 1000)));
     const digest = await sha256Hex(`${row.order_id}:${row.external_id}:${bucket}`);
     await db.prepare(`INSERT OR IGNORE INTO commerce_operation_jobs
       (id,job_kind,event_key,order_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at)
@@ -207,7 +217,7 @@ function validateDraft(providerOrder, request) {
   if (JSON.stringify(expectedItems) !== JSON.stringify(actualItems)) throw new AuthFailure(502, "printful_draft_items_mismatch", "The reconciled Printful draft items do not match the authoritative order.");
   const expectedRecipient = request.body.recipient;
   const actualRecipient = providerOrder.recipient || {};
-  for (const field of ["name", "address1", "city", "country_code", "zip"]) if (String(actualRecipient[field] || "").trim() !== String(expectedRecipient[field] || "").trim()) throw new AuthFailure(502, "printful_draft_recipient_mismatch", "The reconciled Printful draft recipient does not match the encrypted order snapshot.");
+  for (const field of ["name", "address1", "address2", "city", "state_code", "country_code", "zip"]) if (String(actualRecipient[field] || "").trim() !== String(expectedRecipient[field] || "").trim()) throw new AuthFailure(502, "printful_draft_recipient_mismatch", "The reconciled Printful draft recipient does not match the encrypted order snapshot.");
 }
 
 async function getPrintfulOrderByExternalId(fetchImpl, headers, externalId, payloadDigest) {

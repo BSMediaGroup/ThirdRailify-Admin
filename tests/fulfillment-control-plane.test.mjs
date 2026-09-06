@@ -3,7 +3,7 @@ import test from "node:test";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
 import { fulfillmentShippingPayload, preparePrintfulDraftOrder } from "../functions/_shared/commerce-control-plane.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
-import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
+import { applyMigration, cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { applySqlBatches, commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
 
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
@@ -27,12 +27,12 @@ test("Fulfillment & Shipping projects canonical local authority without secrets,
   assert.equal(payload.readiness.paymentAuthority.state, "production_disabled"); assert.equal(payload.readiness.production.state, "blocked"); assert.equal(payload.readiness.fulfillment.state, "disabled");
   assert.equal(payload.shipping.customerData.state, "implemented_no_evidence"); assert.deepEqual(payload.shipping.customerData.persistedFields, ["encrypted_recipient", "destination_country", "destination_region", "shipping_method", "shipping_amount", "currency", "source_quote"]);
   assert.equal(payload.shipping.rates.state, "implemented_disabled"); assert.equal(payload.shipping.rates.providerQuotePathImplemented, true); assert.equal(payload.shipping.rates.providerQuoteCalled, false);
-  assert.equal(payload.tracking.state, "implemented_no_evidence"); assert.ok(payload.tracking.persistedFields.includes("encrypted_tracking_number")); assert.equal(payload.tracking.shipmentPollingImplemented, true); assert.equal(payload.tracking.providerPollingPerformed, false);
+  assert.equal(payload.tracking.state, "awaiting_first_shipment"); assert.ok(payload.tracking.persistedFields.includes("encrypted_tracking_number")); assert.equal(payload.tracking.shipmentPollingImplemented, true); assert.equal(payload.tracking.providerPollingPerformed, false);
   assert.equal(payload.lifecycle.carrierDeliveryPolling.state, "implemented_scheduled"); assert.equal(payload.lifecycle.reconciliationFallback.automaticPolling, true); assert.equal(payload.lifecycle.reconciliationFallback.schedule, "every_5_minutes");
   assert.equal(payload.mapping.mappedProviderProducts, 1); assert.equal(payload.mapping.mappedProviderVariants, 1); assert.equal(payload.mapping.nonSellableVariants, 1); assert.equal(payload.mapping.potentiallyFulfillableVariants, 0);
   assert.equal(payload.migration.manuallyPaused, true); assert.equal(payload.migration.mutableFromThisRoute, false); assert.equal(payload.evidence.counts.providerOrders, 0); assert.deepEqual(payload.evidence.recent, []);
   assert.equal(payload.draftPreview.eligible, false); assert.equal(payload.draftPreview.item.mappedProviderVariant, "target-variant-authority");
-  assert.deepEqual(new Set(payload.draftPreview.blockers.map((item) => item.code)), new Set(["variant_not_sellable", "shipping_strategy_missing", "shipping_method_missing", "fulfillment_disabled"]));
+  assert.deepEqual(new Set(payload.draftPreview.blockers.map((item) => item.code)), new Set(["variant_not_sellable", "shipping_strategy_missing", "fulfillment_disabled"]));
   assert.deepEqual(payload.draftPreview.labels, ["DRAFT PREVIEW", "NO PROVIDER REQUEST", "NOT SUBMITTED"]);
   assert.deepEqual(payload.draftPreview.submission, { available: false, mode: "draft_only", networkRequestMade: false, providerOrderCreated: false, localOrderMutated: false, migrationMutated: false });
   assert.equal(payload.technical.providerCallsOnRead, false); assert.equal(payload.technical.providerCallsOnPreview, false); assert.equal(payload.technical.previewPersists, false);
@@ -50,6 +50,8 @@ test("0015 applies additively after the existing sequence and preserves template
   assert.deepEqual(tables.results.map((row) => row.name), ["commerce_order_delivery_snapshots", "commerce_shipping_quotes"]);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_templates").first()).count), templatesBefore);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_orders WHERE id='ord-before-0015'").first()).count), 1);
+  // Modern readiness also requires the later launch/lifecycle migrations.
+  for (const migration of harness.commerceMigrations.slice(15)) await applyMigration(harness.commerceDb, migration);
   const payload = await fulfillmentShippingPayload(env, master);
   assert.equal(payload.shipping.schema.state, "ready"); assert.equal(payload.shipping.schema.quoteTable, true); assert.equal(payload.shipping.schema.deliverySnapshotTable, true);
 });

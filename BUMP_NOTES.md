@@ -1,5 +1,9 @@
 # Bump notes
 
+## 2026-09-07 - Production fulfillment authority and signed webhooks
+
+Fulfillment now derives its production heading and gates from current authority, recognizes the production `draft_then_confirm` mode, uses checkout-eligible catalogue counts, and distinguishes structural preview inputs from real paid-order shipping methods. Local weights apply only to merchant weight-band pricing. Signed V2 webhook configuration, custody and observed events have separate statuses and a protected Master readback action. Intentional rotation holds delivery disabled until encrypted secrets and the deployed raw-body verifier are ready. Worker confirmation rechecks payment/pause authority; reconciliation uses five-minute buckets and submission retries avoid repeated confirmation. See the fulfillment operations and production acceptance reports in `docs/` for exact validation and deployment evidence.
+
 ## 2026-09-07 - Product showcase and competition prizes
 
 Product editor now has an independent Not for sale switch and Competition prize / Display only status selector. Existing public visibility, prices, variants, provider data and Featured settings remain separate. Published restricted products retain their catalogue pages and receive gold status banners on shared cards and detail pages. Add to Cart is disabled; local cart insertion and new server-authoritative shipping, agreement and checkout requests reject restricted products. Structured product data omits purchasable offers. Metadata uses the existing safe_metadata_json field; no schema changes.

@@ -1,5 +1,7 @@
 # Printful V2 webhook support escalation
 
+This historical support record is superseded operationally by [Printful fulfillment operations](PRINTFUL_FULFILLMENT_OPERATIONS.md). Current deployment and real delivery results are recorded separately in `PRODUCTION_FULFILLMENT_20260907.md`; historical missing-custody claims below describe the earlier incident.
+
 ## Ticket summary
 
 Third Railify needs Printful support guidance for a V2 webhook configuration that now reads back successfully but whose signing secret was not returned through the documented response shape and is not in verified custody.

@@ -1,3 +1,4 @@
+import { publicKeyFingerprint } from "./printful-webhook-configuration.js";
 import { catalogueSellabilityReview, catalogueReviewDigest } from "./catalogue-sellability.js";
 import { worldwideShippingMarkets } from "./shipping-core.js";
 import { activeRatebook, shippingWeightCoverage } from "./shipping-ratebook.js";
@@ -27,7 +28,7 @@ export async function commerceLaunchPlan(env) {
     catalogueSellabilityReview(env),
     db.prepare("SELECT * FROM commerce_templates").all(),
     db.prepare("SELECT state,COUNT(*) count FROM commerce_operation_jobs GROUP BY state").all(),
-    db.prepare("SELECT COUNT(*) count FROM commerce_provider_webhook_events WHERE provider='printful' AND processing_status='processed'").first(),
+    db.prepare("SELECT COUNT(*) count FROM commerce_provider_webhook_events WHERE provider='printful' AND processing_status IN ('processed','unresolved')").first(),
     db.prepare("SELECT revision,trading_name,country_code,currency_code,public_contact_email,support_email,legal_business_name_ciphertext,private_phone_ciphertext,private_address_ciphertext,owner_attested_revision,owner_attested_at,transaction_disclosure_authorized_revision,transaction_disclosure_authorized_at FROM commerce_business_profiles WHERE id='primary'").first(),
     db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='commerce_order_agreements'").first(),
   ]);
@@ -75,12 +76,14 @@ export async function commerceLaunchPlan(env) {
     gate("order_confirmation_delivery", orderConfirmationDeliveryReady, "Resend and the order-confirmation template are ready. Global Customer Sending is enabled atomically with the store."),
     gate("emergency_pause_clear", settings.commerce_emergency_paused !== true, "Emergency pause is clear."),
   ];
+  const webhookConfigured = printful?.metadata?.webhook_v2?.verified === true && printful?.metadata?.webhook_v2?.fingerprint === await publicKeyFingerprint(env) && hasPrintfulWebhookSecrets(env);
   const advisories = [
     gate("shipment_email", settings.resend_domain_verified === true && configuredEmailTemplates >= 2, "Shipment notification delivery is ready. It is useful post-purchase communication, not payment or fulfillment authority."),
-    gate("printful_v2_webhook", settings.printful_v2_webhook_configured === true && hasPrintfulWebhookSecrets(env) && (settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0), "Incoming Printful webhooks remain fail-closed without verified signing-secret custody and real signed-delivery evidence. Scheduled authenticated order reconciliation supplies the production lifecycle authority."),
+    gate("printful_v2_webhook", webhookConfigured, "Signed Printful V2 subscription and secure signing custody are separate from first delivery evidence. Scheduled authenticated reconciliation remains the active backstop."),
     gate("printful_signed_delivery", settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0, (settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0) ? "A real signed Printful delivery has been verified." : "No signed Printful delivery has been verified. Inbound webhooks are optional and remain fail-closed; authenticated scheduled reconciliation supplies delivery lifecycle authority."),
   ];
   const ready = hardGates.every((entry) => entry.ready);
+  const providerModeDrift = printful?.metadata?.order_mode !== STORE_ACTIVATION_SETTINGS.printful_order_mode;
   const activationDrift = Object.entries(STORE_ACTIVATION_SETTINGS).filter(([key, value]) => settings[key] !== value).map(([key]) => key);
   // After activation, publication changes exclude individual items. Checkout
   // still validates every line against current product and variant authority.
@@ -99,6 +102,7 @@ export async function commerceLaunchPlan(env) {
     ready,
     operationalReady,
     operationalState: settings.commerce_emergency_paused === true ? "paused" : launch?.state === "active" ? operationalReady ? "active" : "degraded" : "preflight",
+    providerModeDrift,
     activationDrift: launch?.state === "active" ? activationDrift : [],
     hardGates,
     advisories,
@@ -310,20 +314,21 @@ export async function reconcileActiveCommerceStore(env, input, session) {
   const db = requireCommerceDb(env), plan = await commerceLaunchPlan(env);
   if (input.expectedDigest !== plan.digest || input.expectedRevision !== plan.revision) throw new AuthFailure(409, "commerce_launch_revision_conflict", "Store authority changed. Refresh before reconciling.");
   if (plan.state !== "active" || plan.settings.emergencyPaused || !plan.business.ownerConfirmed || !plan.business.disclosureAuthorized) throw new AuthFailure(409, "commerce_reconcile_blocked", "Reconciliation requires an active, unpaused store with current owner authority.");
-  if (!plan.activationDrift.length) {
+  if (!plan.activationDrift.length && !plan.providerModeDrift) {
     await verifyActivationReadback(db, plan.business.revision);
     return { ...plan, reconciliation: { changedSettings: [], idempotent: true } };
   }
   if (!plan.ready) throw new AuthFailure(409, "commerce_reconcile_blocked", "Restoring activation settings requires ready dependencies.");
   const timestamp = nowIso();
   // Restore only settings already authorized by the retained active-store record.
-  // No provider, catalogue, profile, order, or activation-evidence writes.
+  // Provider mode metadata is derived; catalogue, profile, order and activation evidence are preserved.
   try {
     await db.batch([
       transactionGuard(db, `(${LAUNCH_AUTHORITY_SQL})=?`, [plan.authorityFingerprint]),
       transactionGuard(db, "EXISTS (SELECT 1 FROM commerce_payment_provider_state WHERE id='primary' AND preferred_provider='paypal' AND stripe_enabled=0 AND paypal_store_checkout_enabled=1 AND paypal_live_capture_enabled=1 AND emergency_paused=0)"),
       ...plan.activationDrift.map(key => setting(db, key, STORE_ACTIVATION_SETTINGS[key], timestamp, actor)),
-      db.prepare("INSERT INTO commerce_audit(id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,'commerce.active_store_reconciled','commerce_launch_state','production','success',?,?)").bind(randomId(), actor, JSON.stringify({ changedSettings: plan.activationDrift, revision: plan.revision, activatedAt: plan.activatedAt }), timestamp),
+      ...(plan.providerModeDrift ? [db.prepare("UPDATE commerce_provider_connections SET safe_metadata_json=json_set(safe_metadata_json,'$.order_mode','draft_then_confirm'),updated_at=? WHERE provider='printful'").bind(timestamp)] : []),
+      db.prepare("INSERT INTO commerce_audit(id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,'commerce.active_store_reconciled','commerce_launch_state','production','success',?,?)").bind(randomId(), actor, JSON.stringify({ changedSettings: plan.activationDrift, providerModeRepaired: plan.providerModeDrift, revision: plan.revision, activatedAt: plan.activatedAt }), timestamp),
     ]);
   } catch (error) {
     if (/commerce_transaction_conflict|malformed JSON/i.test(String(error?.message))) throw new AuthFailure(409, "commerce_launch_revision_conflict", "Store authority changed; reconciliation rolled back.");

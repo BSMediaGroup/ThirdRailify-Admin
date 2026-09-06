@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
-import { onRequest as printfulWebhookRequest, PRINTFUL_WEBHOOK_MAX_BODY_BYTES } from "../functions/api/webhooks/printful.js";
+import { onRequest as printfulWebhookRequest, PRINTFUL_WEBHOOK_MAX_BODY_BYTES, verifyPrintfulV2Signature } from "../functions/api/webhooks/printful.js";
 import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-helpers.mjs";
 
 const URL = "https://thirdrailify-admin.pages.dev/api/webhooks/printful";
 const PUBLIC_KEY = "c3ludGhldGljLXByaW50ZnVsLXdlYmhvb2s=";
 const SECRET_HEX = Buffer.from("synthetic-printful-v2-webhook-secret-32-bytes!!").toString("hex");
+
+test("raw bytes are authenticated before parsing, with uppercase signature hex accepted", async () => {
+  const raw = '{ "hello": "world" }';
+  const signature = createHmac("sha256", Buffer.from(SECRET_HEX, "hex")).update(raw).digest("hex").toUpperCase();
+  const headers = new Headers({ "x-pf-webhook-public-key": PUBLIC_KEY, "x-pf-webhook-signature": signature });
+  const config = { publicKey: PUBLIC_KEY, secretHex: SECRET_HEX };
+  await verifyPrintfulV2Signature(config, headers, new TextEncoder().encode(raw));
+  for (const altered of [JSON.stringify(JSON.parse(raw)), raw + " ", raw.replace("world", "other")]) {
+    await assert.rejects(verifyPrintfulV2Signature(config, headers, new TextEncoder().encode(altered)), e => e.code === "printful_webhook_signature_invalid");
+  }
+});
 
 async function seedOrder(db) {
   await db.prepare("INSERT INTO commerce_products (id,source_provider,slug,title,currency_code,status,safe_metadata_json,created_at,updated_at) VALUES ('p-webhook','manual','p-webhook','Webhook product','CAD','active','{}','now','now')").run();

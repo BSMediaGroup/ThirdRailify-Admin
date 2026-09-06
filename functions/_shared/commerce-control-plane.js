@@ -1,3 +1,4 @@
+import { printfulWebhookConfigurationStatus } from "./printful-webhook-configuration.js";
 import { commerceLaunchPlan } from "./commerce-launch.js";
 import { AuthFailure, cleanText, nowIso, randomId, sendAccountEmail } from "./auth-core.js";
 import {
@@ -364,9 +365,10 @@ export async function fulfillmentShippingPayload(env, session) {
   const orderModeSetting = cleanText(settings.printful_order_mode, 40).toLowerCase() || "unconfigured";
   const orderModeProvider = cleanText(providerMetadata.order_mode || providerMetadata.mode, 40).toLowerCase() || "unconfigured";
   const orderModeConsistent = orderModeSetting === orderModeProvider;
-  const fulfillmentEnabled = settings.fulfillment_submission_enabled === true || providerMetadata.fulfillment_enabled === true;
+  const fulfillmentEnabled = settings.fulfillment_submission_enabled === true && providerMetadata.fulfillment_enabled === true;
+  const webhook = await printfulWebhookConfigurationStatus(env, providerMetadata);
   const shippingStrategy = cleanText(settings.shipping_strategy, 80).toLowerCase() || "unconfigured";
-  const targetStoreConfigured = Boolean(cleanText(env?.PRINTFUL_STORE_ID, 40) && cleanText(providerRow?.external_account_id, 40));
+  const targetStoreConfigured = Boolean(cleanText(env?.PRINTFUL_STORE_ID, 40) && cleanText(env?.PRINTFUL_STORE_ID, 40) === cleanText(providerRow?.external_account_id, 40));
   const credentialConfigured = isPrintfulCredentialConfigured(env);
   const providerConfigured = Boolean(providerRow?.status === "connected" && providerRow?.integration_mode === "fulfillment"
     && providerMetadata.api_configured === true && settings.printful_api_configured === true && targetStoreConfigured && credentialConfigured);
@@ -377,7 +379,7 @@ export async function fulfillmentShippingPayload(env, session) {
     mappedProviderProducts: number(productCounts?.mapped), mappedProviderVariants: number(variantCounts?.mapped),
     unmappedVariants: number(variantCounts?.unmapped), blockedProducts: migrationBlockedProducts,
     blockedVariants: number(variantCounts?.blocked), deferredVariants: number(variantCounts?.deferred),
-    nonSellableVariants: number(variantCounts?.non_sellable), potentiallyFulfillableVariants: number(variantCounts?.potentially_fulfillable),
+    nonSellableVariants: number(variantCounts?.non_sellable), potentiallyFulfillableVariants: number(canonicalReadiness.domains.catalogue.details.eligibleSellableVariants),
     contract: "Printful + mapped + target product ID + target Sync Variant ID + target-verified/native migration",
   };
   const paymentTestEvidence = canonicalReadiness.domains.payments.details.testAcceptancePassed === true;
@@ -386,18 +388,20 @@ export async function fulfillmentShippingPayload(env, session) {
     reference: "DRAFT-PREVIEW-NOT-AN-ORDER", environment: "test", paymentStatus: "synthetic_fixture",
     quantity: 1, candidate: candidate ? serializeDraftCandidate(candidate) : null, recipient,
     shippingStrategy, fulfillmentEnabled, orderMode: orderModeSetting, providerMode: orderModeProvider,
-    requireSellable: true, previewOnly: true,
+    requireSellable: true, previewOnly: true, structuralPreview: true,
   });
+  const gates = fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSetting, orderModeConsistent, fulfillmentEnabled, shippingDataImplemented, shippingSchemaReady, shippingStrategy, mapping, settings });
+  const productionReady = canonicalReadiness.phase === "active" && canonicalReadiness.productionReady && lifecycleSchemaReady && gates.every(g => g.state === "ready");
 
   const readiness = {
     provider: statusProjection(providerConfigured ? "configured" : credentialConfigured || targetStoreConfigured ? "incomplete" : "unverified", providerConfigured ? "Persisted Printful configuration is internally consistent." : "Printful configuration is incomplete or not backed by all required local evidence."),
     catalogue: statusProjection(mapping.potentiallyFulfillableVariants > 0 && mapping.blockedProducts === 0 ? "ready" : mapping.mappedProviderVariants > 0 ? "partial" : "blocked", `${mapping.mappedProviderVariants} variants meet the provider mapping contract; ${mapping.potentiallyFulfillableVariants} are currently potentially fulfillable.`),
     customerShippingData: statusProjection(shippingDataImplemented ? number(orderCounts?.test_shipping_snapshots) + number(orderCounts?.live_shipping_snapshots) > 0 ? "available" : "implemented_no_evidence" : "migration_required", shippingDataImplemented ? "Encrypted order delivery snapshots are implemented; customer PII is not projected here." : "Commerce migration 0015 is required before encrypted delivery snapshots are available."),
-    paymentAuthority: statusProjection(paymentTestEvidence ? "test_evidence_only" : settings.live_payment_capture_enabled === true ? "ready" : "production_disabled", paymentTestEvidence ? "One preserved signed-webhook TEST payment exists; it is not production authority." : "Production payment authority is disabled."),
-    printfulOrderMode: statusProjection(orderModeConsistent && orderModeSetting === "draft_only" ? "draft_only" : orderModeSetting === "live" ? "live" : "disabled", orderModeConsistent ? `Canonical mode: ${orderModeSetting}.` : "Provider metadata and the canonical setting disagree."),
+    paymentAuthority: statusProjection(canonicalReadiness.domains.payments.ready ? "ready" : "production_disabled", canonicalReadiness.domains.payments.summary),
+    printfulOrderMode: statusProjection(orderModeConsistent && orderModeSetting === "draft_then_confirm" ? "draft_then_confirm" : orderModeConsistent && orderModeSetting === "draft_only" ? "draft_only" : "disabled", orderModeConsistent ? `Canonical mode: ${orderModeSetting}.` : "Provider metadata and the canonical setting disagree."),
     fulfillment: statusProjection(fulfillmentEnabled ? "enabled" : "disabled", fulfillmentEnabled ? "Fulfillment submission is enabled." : "Fulfillment is intentionally disabled until production activation."),
-    tracking: statusProjection(!lifecycleSchemaReady ? "migration_required" : operations.counts.shipments > 0 ? "available" : "implemented_no_evidence", !lifecycleSchemaReady ? "Commerce migration 0018 is required before normalized shipment authority is available." : operations.counts.shipments > 0 ? "Encrypted tracking and normalized shipment evidence are stored in Commerce D1." : "Normalized encrypted tracking storage is implemented; no shipment evidence exists."),
-    production: statusProjection(canonicalReadiness.productionReady ? "enabled" : "blocked", canonicalReadiness.productionReady ? "All canonical commerce gates are ready." : "Canonical production commerce remains blocked."),
+    tracking: statusProjection(!lifecycleSchemaReady ? "migration_required" : operations.counts.shipments > 0 ? "available" : "awaiting_first_shipment", !lifecycleSchemaReady ? "Commerce migration 0018 is required before normalized shipment authority is available." : operations.counts.shipments > 0 ? "Encrypted tracking and normalized shipment evidence are stored in Commerce D1." : "Ready - Awaiting first real shipment. No shipment is required to accept the first order."),
+    production: statusProjection(productionReady ? "ready" : "blocked", productionReady ? "Paid LIVE merchandise orders use worker-controlled draft, validation and confirmation." : "Review the current production gates below."),
   };
 
   return {
@@ -428,25 +432,25 @@ export async function fulfillmentShippingPayload(env, session) {
     mapping,
     pipeline: [
       pipelineStage("order_record", "Order recorded", shippingDataImplemented, shippingDataImplemented ? "commerce_orders + encrypted delivery snapshot when shipping is required" : "commerce_orders; delivery snapshot schema pending", "Checkout core", shippingDataImplemented ? "Implemented; local order and delivery snapshot precede payment provider creation." : "Commerce migration 0015 is required for delivery snapshots."),
-      pipelineStage("payment_confirmed", "Payment confirmed", true, "commerce_orders.payment_status + signed Stripe webhook receipt", "Signed Stripe webhook", paymentTestEvidence ? "Implemented with TEST-only evidence." : "Implemented; no canonical evidence recorded."),
-      pipelineStage("fulfillment_eligible", "Fulfillment eligibility", true, "Local settings, order, item snapshot, and provider mappings", "Future local workflow", "Preparation logic implemented; submission remains disabled."),
-      pipelineStage("provider_draft", "Provider draft", true, "commerce_fulfillment_orders + fulfillment item correlations", "Controlled draft response normalization", operations.counts.total ? "A normalized provider order is recorded; confirmation remains unavailable." : "Draft recording is implemented; no provider order is recorded."),
-      pipelineStage("submitted", "Submitted / processing", true, "Normalized provider state distinct from local payment", "Verified webhook or bounded reconciliation", "Lifecycle storage is implemented; provider submission remains disabled."),
-      pipelineStage("shipment", "Shipped / delivered", true, "commerce_fulfillment_shipments + item coverage + encrypted tracking", "Verified webhook first; reconciliation fallback", operations.counts.shipments ? "Normalized shipment evidence exists." : "Shipment, partial coverage, return, and reshipment authority is implemented with no current evidence."),
+      pipelineStage("payment_confirmed", "Payment confirmed", true, "commerce_orders.payment_status + verified PayPal LIVE capture evidence", "Verified payment provider", "Provider-confirmed payment evidence is required before fulfillment."),
+      pipelineStage("fulfillment_eligible", "Fulfillment eligibility", true, "Local settings, order, item snapshot, and provider mappings", "Commerce Operations Worker", "Validates paid LIVE order, mappings, delivery snapshot and accepted shipping method."),
+      pipelineStage("provider_draft", "Provider draft", true, "commerce_fulfillment_orders + fulfillment item correlations", "Draft response normalization", "Creates an uncharged draft, validates it, then uses the controlled confirmation step."),
+      pipelineStage("submitted", "Submitted / processing", true, "Normalized provider state distinct from local payment", "Verified webhook or bounded reconciliation", "The worker confirms validated paid LIVE drafts; webhooks never confirm orders."),
+      pipelineStage("shipment", "Shipped / delivered", true, "commerce_fulfillment_shipments + item coverage + encrypted tracking", "Verified webhook plus scheduled reconciliation backstop", operations.counts.shipments ? "Normalized shipment evidence exists." : "Shipment, partial coverage, return, and reshipment authority is implemented with no current evidence."),
     ],
     shipping: {
       schema: { state: shippingSchemaReady ? "ready" : "migration_required", migration: "0015_checkout_shipping_foundation.sql", quoteTable: shippingQuoteStorageImplemented, deliverySnapshotTable: shippingDataImplemented },
       customerData: { state: shippingDataImplemented ? number(orderCounts?.test_shipping_snapshots) + number(orderCounts?.live_shipping_snapshots) > 0 ? "available" : "implemented_no_evidence" : "migration_required", persistedFields: shippingDataImplemented ? ["encrypted_recipient", "destination_country", "destination_region", "shipping_method", "shipping_amount", "currency", "source_quote"] : [], orderSpecificPiiProjectedHere: false },
       rates: { state: !shippingQuoteStorageImplemented ? "migration_required" : shippingStrategy === "unconfigured" ? "implemented_disabled" : "configured", strategy: shippingStrategy, providerQuotePathImplemented: true, providerQuoteCalled: false },
     },
-    tracking: { state: !lifecycleSchemaReady ? "migration_required" : operations.counts.shipments ? "available" : "implemented_no_evidence", persistedFields: trackingColumns, shipmentPollingImplemented: lifecycleSchemaReady, providerPollingPerformed: false },
+    tracking: { state: !lifecycleSchemaReady ? "migration_required" : operations.counts.shipments ? "available" : "awaiting_first_shipment", persistedFields: trackingColumns, shipmentPollingImplemented: lifecycleSchemaReady, providerPollingPerformed: false },
     lifecycle: {
       schema: { state: lifecycleSchemaReady ? "ready" : "migration_required", migration: "0018_printful_fulfillment_lifecycle.sql" },
       providerOrderModel: { state: lifecycleSchemaReady ? "implemented" : "migration_required", authority: "commerce_fulfillment_orders" },
       draftRecording: { state: lifecycleSchemaReady ? "implemented" : "migration_required", idempotent: true },
-      webhookReceiver: { state: "implemented", protocol: "printful_v2_beta_hmac_sha256", route: "/api/webhooks/printful" },
-      webhookVerification: { state: printfulWebhookVerificationConfigured(env) ? "configured_unverified" : "not_configured" },
-      providerSubscription: { state: providerMetadata.webhook_v2_subscription_verified === true ? "verified" : "not_configured_unverified" },
+      webhookReceiver: { state: webhook.verifier === "ready" ? "active" : "implemented", protocol: "printful_v2_beta_hmac_sha256", route: "/api/webhooks/printful" },
+      webhookVerification: { state: webhook.verifier },
+      providerSubscription: { state: webhook.subscription },
       shipmentNormalization: { state: lifecycleSchemaReady ? "implemented" : "migration_required", authority: "commerce_fulfillment_shipments" },
       partialShipmentHandling: { state: lifecycleSchemaReady ? "implemented" : "migration_required", authority: "normalized item coverage" },
       trackingStorage: { state: lifecycleSchemaReady ? "implemented_encrypted" : "migration_required" },
@@ -456,7 +460,7 @@ export async function fulfillmentShippingPayload(env, session) {
     },
     operations,
     draftPreview,
-    gates: fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSetting, orderModeConsistent, fulfillmentEnabled, shippingDataImplemented, shippingSchemaReady, shippingStrategy, mapping, settings }),
+    gates, webhook,
     dependencies: {
       business: { href: "/commerce/business" }, taxDocuments: { href: "/commerce/tax" }, customerEmails: { href: "/commerce/emails", shipmentTemplate: templateDependencyState(shipmentTemplate), sendsEnabled: settings.transactional_email_enabled === true },
       payments: { href: "/commerce/payments" }, products: { href: "/products" }, orders: { href: "/orders" },
@@ -509,11 +513,11 @@ export function preparePrintfulDraftOrder(input) {
   if (candidate && (candidate.productStatus !== "active" || candidate.productVisibility !== "public" || candidate.variantStatus !== "active" || candidate.variantVisibility !== "public" || candidate.availability !== "active")) block("variant_unavailable", "The product or variant is not active, public, and available.");
   if (recipientMissing.length) block("recipient_incomplete", "A complete recipient name and postal address are required.");
   if (candidate?.requiresShipping !== false && shippingStrategy === "unconfigured") block("shipping_strategy_missing", "No authoritative shipping-rate strategy is configured.");
-  if (candidate?.requiresShipping !== false && (!shippingMethod || !providerShippingMethodId)) block("shipping_method_missing", "An authoritative selected shipping method is required.");
+  if (!(input?.structuralPreview === true && input?.previewOnly === true && input?.paymentStatus === "synthetic_fixture") && candidate?.requiresShipping !== false && (!shippingMethod || !providerShippingMethodId)) block("shipping_method_missing", "An authoritative selected shipping method is required.");
   if (providerShippingMethodId && !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(providerShippingMethodId)) block("shipping_method_invalid", "The selected provider shipping method is invalid.");
   if (input?.fulfillmentEnabled !== true) block("fulfillment_disabled", "Fulfillment submission is intentionally disabled.");
   const acceptedOrderMode = input?.environment === "live" ? "draft_then_confirm" : "draft_only";
-  if (orderMode !== acceptedOrderMode) block(orderMode === "live" ? "live_order_mode_rejected" : "printful_order_mode_invalid", `The canonical Printful mode must be ${acceptedOrderMode}.`);
+  if (!(input?.structuralPreview === true && input?.previewOnly === true && input?.paymentStatus === "synthetic_fixture" && orderMode === "draft_then_confirm") && orderMode !== acceptedOrderMode) block(orderMode === "live" ? "live_order_mode_rejected" : "printful_order_mode_invalid", `The canonical Printful mode must be ${acceptedOrderMode}.`);
   if (providerMode && providerMode !== orderMode) block("printful_mode_contradictory", "The provider metadata and canonical Printful order mode disagree.");
   if (input?.environment === "live" && input?.previewOnly === true) block("live_preview_rejected", "A preview-only path cannot prepare a LIVE order.");
   if (input?.paymentStatus && !new Set(["paid", "synthetic_fixture"]).has(input.paymentStatus)) block("payment_not_confirmed", "A real order must have signed-webhook payment authority before fulfillment preparation.");
@@ -1670,9 +1674,9 @@ function fulfillmentGates({ canonicalReadiness, providerConfigured, orderModeSet
     gate("checkout", "Customer checkout", settings.checkout_enabled === true ? "ready" : "disabled", settings.checkout_enabled === true ? "Normal checkout is enabled." : "Normal checkout is intentionally disabled.", "/commerce/payments"),
     gate("customer_shipping", "Customer shipping data", shippingDataImplemented ? "ready" : "blocked", shippingDataImplemented ? "Normalized delivery data is available." : "Commerce migration 0015 is required for encrypted delivery snapshots.", "/orders"),
     gate("shipping_rates", "Shipping rate strategy", !shippingSchemaReady || shippingStrategy === "unconfigured" ? "blocked" : "ready", !shippingSchemaReady ? "Commerce migration 0015 is required for persisted shipping quotes." : shippingStrategy === "unconfigured" ? "The server quote adapter is implemented, but the canonical shipping strategy is unconfigured." : `Configured strategy: ${shippingStrategy}.`, null),
-    gate("product_mapping", "Product mapping", mapping.potentiallyFulfillableVariants > 0 && mapping.blockedProducts === 0 ? "ready" : "blocked", `${mapping.mappedProviderVariants} mapped variants; ${mapping.blockedProducts} blocked products; ${mapping.potentiallyFulfillableVariants} potentially fulfillable variants.`, "/products"),
+    gate("product_mapping", "Product mapping", mapping.potentiallyFulfillableVariants > 0 ? "ready" : "blocked", `${mapping.mappedProviderVariants} mapped variants; ${mapping.blockedProducts} blocked products; ${mapping.potentiallyFulfillableVariants} potentially fulfillable variants.`, "/products"),
     gate("printful_provider", "Printful provider", providerConfigured ? "ready" : "incomplete", providerConfigured ? "Persisted local configuration is internally consistent." : "Provider configuration is incomplete or unverified.", null),
-    gate("printful_order_mode", "Printful order mode", orderModeConsistent && orderModeSetting === "draft_only" ? "disabled" : "blocked", orderModeConsistent && orderModeSetting === "draft_only" ? "Draft-only is the maximum permitted mode; submission remains unavailable." : "The canonical and provider modes are unsafe or contradictory.", null),
+    gate("printful_order_mode", "Printful order mode", orderModeConsistent && orderModeSetting === "draft_then_confirm" ? "ready" : "blocked", orderModeConsistent && orderModeSetting === "draft_then_confirm" ? "Draft creation, validation, then worker-only confirmation after genuine LIVE payment." : "Production requires the canonical draft_then_confirm mode in settings and provider metadata.", null),
     gate("fulfillment", "Fulfillment submission", fulfillmentEnabled ? "ready" : "disabled", fulfillmentEnabled ? "Fulfillment is enabled." : "Fulfillment submission is intentionally disabled.", null),
     gate("live_payments", "Live payment capture", settings.live_payment_capture_enabled === true ? "ready" : "disabled", settings.live_payment_capture_enabled === true ? "Live payment capture is enabled." : "Live payment capture is intentionally disabled.", "/commerce/payments"),
   ];

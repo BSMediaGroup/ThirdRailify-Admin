@@ -1,5 +1,9 @@
 # Commerce architecture
 
+## Production fulfillment authority
+
+See [Printful fulfillment operations](docs/PRINTFUL_FULFILLMENT_OPERATIONS.md) for the canonical `draft_then_confirm` worker, signed V2 webhook custody/rotation, accepted shipping-method snapshot, optional merchant weight-band data, and webhook/reconciliation convergence. Fulfillment readiness uses current eligible variants and real activation gates; synthetic preview inputs and absence of a first shipment do not globally block production.
+
 ## Customer identity and order history
 
 An Account is authentication authority; a Customer is commerce relationship authority. Accounts own login providers, credentials, roles, state, sessions, display name, avatar, and verified email. `commerce_customers` owns only the protected guest/account customer relationship and current encrypted checkout contact identity. Accounts without purchases have no Customer. Guest purchasers remain Customers with no Account linkage. Authenticated checkout resolves the real session server-side and creates or reuses the one Customer linked to that Account; browser-supplied account or Customer IDs are rejected.
