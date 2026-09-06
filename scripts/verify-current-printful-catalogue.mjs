@@ -13,7 +13,29 @@ else {
     counts: snapshot.counts,
     fingerprint: snapshot.fingerprint,
     retrievedAt: snapshot.retrievedAt,
+    ...(process.argv.includes("--images") ? { images: await imageEvidence(snapshot) } : {}),
   }, null, 2));
+}
+
+async function imageEvidence(snapshot) {
+  const products = snapshot.products.filter((product) => /fuc yeh|my balloon|Embroidered Champion Packable Jacket/i.test(product.name));
+  const results = [];
+  for (const product of products) {
+    const url = product.images[0];
+    let resource = { status: null, imageContentType: false };
+    if (url) {
+      try {
+        const response = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15000) });
+        resource = { status: response.status, imageContentType: /^image\//.test(response.headers.get("content-type") || "") };
+        await response.body?.cancel();
+      } catch { resource = { status: "unavailable", imageContentType: false }; }
+    }
+    results.push({ syncProductId: product.id, title: product.name,
+      safeProductThumbnail: product.imageSelection.sources.includes("sync_product_thumbnail"),
+      safeVariantPreviews: new Set(product.variants.flatMap((variant) => variant.customerPreviewUrls)).size,
+      selectedSource: product.imageSelection.primarySource, selectedHost: url ? new URL(url).hostname : null, resource });
+  }
+  return results;
 }
 
 async function printLegacyPreview(providerEnvironment) {

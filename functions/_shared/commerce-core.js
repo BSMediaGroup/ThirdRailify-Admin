@@ -462,9 +462,9 @@ export async function updateMerchandisingProductFeatured(env, session, productId
   if (!id) throw new AuthFailure(400, "commerce_product_id_invalid", "The commerce product ID is invalid.");
   requireExactFields(input, ["featured"], "commerce_product_featured_fields_invalid");
   const featured = normalizeProductFeatured(input.featured);
-  const current = await db.prepare("SELECT id, status, is_featured, featured_order, updated_at, provider_presence, provider_reconciliation_status, archived_at FROM commerce_products WHERE id = ?").bind(id).first();
+  const current = await db.prepare("SELECT id, status, is_featured, featured_order, updated_at, provider_store_id, target_printful_product_id, provider_presence, provider_reconciliation_status, archived_at FROM commerce_products WHERE id = ?").bind(id).first();
   if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
-  await requireFeaturedProductCurrent(db, current);
+  await requireFeaturedProductCurrent(db, current, env);
   const alreadyEqual = Number(current.is_featured) === featured && (featured === 0 || Number.isSafeInteger(Number(current.featured_order)));
   if (alreadyEqual) return { ok: true, changed: false, product: featuredMutationProduct(current) };
 
@@ -2121,20 +2121,21 @@ function filterMerchandisingProducts(products, options) {
 function normalizeProductVisibility(value) { return ["private", "public"].includes(value) ? value : invalidMerch("commerce_product_visibility_invalid", "Product visibility is invalid."); }
 function normalizeProductFeatured(value) { return value === true ? 1 : value === false ? 0 : invalidMerch("commerce_product_featured_invalid", "Featured state is invalid."); }
 async function requireCurrentProviderProductWhenReconciled(db, product) { const current = await db.prepare("SELECT 1 current FROM commerce_products WHERE provider_presence='current' LIMIT 1").first(); if (current && product.provider_presence !== "current") throw new AuthFailure(409, "commerce_product_provider_inactive", "This archived or provider-missing product is not eligible for storefront curation."); }
-async function requireFeaturedProductCurrent(db, product) {
+async function requireFeaturedProductCurrent(db, product, env) {
+  if (product.provider_presence === "provider_missing") throw new AuthFailure(409, "provider_missing", "This product is missing from the current provider store and cannot be Featured.");
+  if (product.provider_presence === "wrong_store" || (env.PRINTFUL_STORE_ID && product.provider_store_id && product.provider_store_id !== String(env.PRINTFUL_STORE_ID))) throw new AuthFailure(409, "wrong_store", "This product belongs to the wrong provider store and cannot be Featured.");
+  if (product.archived_at || product.provider_reconciliation_status === "archived") throw new AuthFailure(409, "archived_product", "Archived products cannot be Featured.");
   const authority = await db.prepare("SELECT 1 current FROM commerce_products WHERE provider_presence='current' LIMIT 1").first();
-  if (!authority) {
+  if (!authority && product.provider_presence === "legacy" && product.provider_reconciliation_status === "legacy") {
     if (!["active", "legacy_production"].includes(product.status)) throw new AuthFailure(409, "commerce_product_not_current", "Only an active legacy product can be Featured before provider reconciliation.");
     return;
   }
   if (product.provider_presence !== "current") {
-    if (product.provider_presence === "provider_missing") throw new AuthFailure(409, "provider_missing", "This product is missing from the current provider store and cannot be Featured.");
-    if (product.provider_presence === "wrong_store") throw new AuthFailure(409, "wrong_store", "This product belongs to the wrong provider store and cannot be Featured.");
-    if (product.provider_reconciliation_status === "archived" || product.archived_at) throw new AuthFailure(409, "archived_product", "Archived products cannot be Featured.");
     throw new AuthFailure(409, "commerce_product_not_current", "Only a current provider product can be Featured.");
   }
   if (product.provider_reconciliation_status === "ambiguous") throw new AuthFailure(409, "ambiguous_product", "This product has ambiguous provider identity and cannot be Featured.");
   if (product.provider_reconciliation_status !== "current") throw new AuthFailure(409, "product_not_current", "This product requires provider review before it can be Featured.");
+  if (!product.provider_store_id || !product.target_printful_product_id) throw new AuthFailure(409, "product_not_current", "This product requires an exact current provider identity before it can be Featured.");
 }
 function requireExactFields(input, allowed, code) { if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !allowed.includes(key)) || allowed.some((key) => !(key in input))) throw new AuthFailure(400, code, "The merchandising mutation fields are invalid."); }
 function requiredPlainText(value, maximum, code) { const text = plainMerchText(value, maximum); if (!text) throw new AuthFailure(400, code, "A required merchandising value is invalid."); return text; }

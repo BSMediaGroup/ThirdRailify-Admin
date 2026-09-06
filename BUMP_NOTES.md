@@ -1,5 +1,19 @@
 # Bump notes
 
+## 2026-09-06 - Current-product image delivery and completeness follow-up
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Existing image normalization/provenance, local Featured curation, semantic status colours and graceful image fallback were already committed in `7d59d5a`. Closed the remaining CSP mismatch: both sites now allow only the three Printful image hosts already accepted by reconciliation in `img-src`.
+- Unchanged snapshots now compare provider metadata/provenance and current variant mappings, preserve valid local product/variant prices during image repair, archive unidentified stale variants once, and leave historical archived rows untouched across fingerprint changes. No historical migration changed.
+- Targeted Featured validates configured store identity, exact local provider identity and archived state even when no current rows remain. Hidden/disabled/zero-public-variant curation remains local and independent from Public eligibility; no provider call or global reload was introduced.
+- Added D1 repair-to-no-op and curation preservation tests, stricter Featured integrity regressions, actual CSP/provider-host browser fixtures, and sanitized `--images` GET diagnostics. Chrome fixture launches disable only the local-network check that otherwise rejects Vite HMR after intercepted document responses; CSP remains enforced.
+- GET-only verification on September 6 found 16 products / 256 variants, zero missing safe images, zero invalid-variant products. IDs 459991347, 460338949 and 460339175 have selected images returning HTTP 200 image content; no current title matched `fuc yeh`. Fresh Preview review is required; the historical 17/262 census is stale.
+- Rollout requires reviewed Admin and Public deployments plus a fresh Master Preview/confirmed Apply for persisted repairs. Do not replay the legacy manifest or migration 0026. No deployment, remote D1/migration, provider write, secret change or reference-repository change was performed.
+- Validation: reconciliation/product regressions passed across full/focused runs, including all 17 safe projected fixture images; Products browser 3/3 plus Admin route matrix passed; lint/typecheck/build/Functions compile and Worker dry-run passed. Broader Commerce had 42 passes and 2 unrelated Stripe status assertion failures. Exact commands, initial harness failures and limits are recorded in `docs/PRINTFUL_CATALOGUE_RECONCILIATION.md`.
+
 ## 2026-09-06 - IGDB lookup and references (0.1.0-alpha.0)
 
 - Added private IGDB title search/direct detail resolution behind gaming.view, beside the unchanged default Steam tab; candidates remain independently selectable and prefill never saves.

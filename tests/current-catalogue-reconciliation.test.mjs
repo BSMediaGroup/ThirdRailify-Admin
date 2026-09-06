@@ -13,7 +13,7 @@ import { merchandisingProductsPayload } from "../functions/_shared/commerce-core
 import { publicCataloguePayload } from "../functions/_shared/public-catalogue.js";
 import { authoritativeCartLines } from "../functions/_shared/shipping-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
-import { commerceEnvironment, createCommerceDatabases, insertTestProduct } from "./commerce-test-helpers.mjs";
+import { commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
 
 const STORE_ID = "18668025";
 const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
@@ -88,7 +88,7 @@ test("local image completeness repairs null and stale Wix images while preservin
 
   const editorialUrl = "https://cdn.thirdrailify.com/commerce-media/" + "e".repeat(64) + ".png";
   const editorial = buildCurrentCataloguePlan(snapshot, { products: [{ ...base, id: "editorial", slug: "editorial", metadata: { publicImage: editorialUrl, publicImages: [], imageAuthority: { kind: "editorial_override", source: "admin_product_editor" } } }] }).items[0];
-  assert.equal(editorial.action, "keep");
+  assert.equal(editorial.action, "update", "provider metadata still needs repair behind the preserved override");
   assert.equal(editorial.desired.metadata.publicImage, editorialUrl);
   assert.equal(editorial.desired.metadata.imageAuthority.kind, "editorial_override");
 });
@@ -220,6 +220,63 @@ test("Apply fails closed when the provider snapshot changes after Preview", asyn
   );
   assert.equal((await harness.commerceDb.prepare("SELECT state FROM commerce_catalogue_reconciliation_runs WHERE id=?").bind(preview.runId).first()).state, "failed");
   assert.equal((await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_products WHERE archived_at IS NOT NULL").first()).count, 0);
+});
+
+test("unchanged snapshots repair persisted images, provenance and variant mappings without changing curation, then become no-ops", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(() => harness.dispose());
+  const env = commerceEnvironment(harness, environment());
+  const provider = providerFixture(1); const session = { accountId: "env-master-1" };
+  const preview = () => previewCurrentCatalogueReconciliation(env, session, provider.response, { intervalMs: 0 });
+  const apply = (plan) => applyCurrentCatalogueReconciliation(env, session, { runId: plan.runId, confirmation: plan.confirmationText }, provider.response, { intervalMs: 0 });
+  await apply(await preview());
+  const id = `printful-${STORE_ID}-1`;
+  await insertTestVariant(harness.commerceDb, { id: "unmapped-history", productId: id, targetPrintfulSyncVariantId: null });
+  const orphan = await preview(); assert.equal(orphan.changes.variantsArchived, 1); await apply(orphan);
+  const archived = await harness.commerceDb.prepare("SELECT archived_at FROM commerce_product_variants WHERE id='unmapped-history'").first();
+  assert.ok(archived.archived_at); assert.equal((await preview()).changes.productsUpdated, 0);
+  await harness.commerceDb.prepare("UPDATE commerce_products SET unit_amount=4321,is_featured=1,featured_order=20,visibility='private' WHERE id=?").bind(id).run();
+  await harness.commerceDb.prepare("UPDATE commerce_product_variants SET unit_amount=5432,visibility='private' WHERE product_id=?").bind(id).run();
+  const original = await harness.commerceDb.prepare("SELECT safe_metadata_json,provider_snapshot_hash FROM commerce_products WHERE id=?").bind(id).first();
+  for (const value of [null, "https://static.wixstatic.com/media/stale.png"]) {
+    const metadata = JSON.parse(original.safe_metadata_json); metadata.publicImage = value; metadata.publicImages = [];
+    await harness.commerceDb.prepare("UPDATE commerce_products SET safe_metadata_json=? WHERE id=?").bind(JSON.stringify(metadata), id).run();
+    const plan = await preview(); assert.equal(plan.snapshot.fingerprint, original.provider_snapshot_hash);
+    assert.equal(plan.changes.imagesReconciled, 1); assert.equal(plan.changes.productsUpdated, 1);
+    await apply(plan); assert.equal((await preview()).changes.productsUpdated, 0);
+  }
+  const metadata = JSON.parse(original.safe_metadata_json); delete metadata.providerCatalogue; delete metadata.imageAuthority;
+  await harness.commerceDb.prepare("UPDATE commerce_products SET safe_metadata_json=? WHERE id=?").bind(JSON.stringify(metadata), id).run();
+  await harness.commerceDb.prepare("UPDATE commerce_product_variants SET provider_store_id=NULL,target_catalogue_variant_id=NULL,safe_metadata_json='{}' WHERE product_id=?").bind(id).run();
+  const repair = await preview(); assert.equal(repair.changes.productsUpdated, 1); assert.equal(repair.changes.variantsUpdated, 1);
+  await apply(repair); const final = await preview(); assert.equal(final.changes.productsUpdated, 0); assert.equal(final.changes.variantsUpdated, 0);
+  const product = await harness.commerceDb.prepare("SELECT unit_amount,is_featured,featured_order,visibility FROM commerce_products WHERE id=?").bind(id).first();
+  assert.deepEqual(product, { unit_amount: 4321, is_featured: 1, featured_order: 20, visibility: "private" });
+  const variant = await harness.commerceDb.prepare("SELECT unit_amount,visibility,target_catalogue_variant_id FROM commerce_product_variants WHERE product_id=? AND provider_presence='current'").bind(id).first();
+  assert.deepEqual(variant, { unit_amount: 5432, visibility: "private", target_catalogue_variant_id: "2001" });
+  const admin = (await merchandisingProductsPayload(env, session)).products.find((item) => item.id === id);
+  assert.equal(admin.displayData.imageProvenance, "current_provider"); assert.ok(admin.primaryImageUrl);
+  assert.equal((await publicCataloguePayload(env)).products.length, 0, "Featured Hidden products remain excluded");
+});
+
+test("historical products do not become fresh archival work when the provider fingerprint changes", () => {
+  const snapshot = normalizedSnapshot(1);
+  const archived = localProduct({ id: "archived", status: "disabled", visibility: "private", archivedAt: "2026-09-01", targetPrintfulProductId: "999", providerSnapshotHash: "b".repeat(64) });
+  assert.equal(buildCurrentCataloguePlan(snapshot, { products: [archived] }).items[0].action, "keep");
+});
+
+test("all 17 fixture products project safe imagery after Apply, including a variant-preview-only product", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(() => harness.dispose());
+  const env = commerceEnvironment(harness, { ...environment(), THIRDRAILIFY_MEDIA_PUBLIC_ORIGIN: "https://cdn.thirdrailify.com" }); const session = { accountId: "env-master-1" };
+  const provider = providerFixture(17); provider.products[0].sync_product.thumbnail_url = null;
+  const preview = await previewCurrentCatalogueReconciliation(env, session, provider.response, { intervalMs: 0 });
+  await applyCurrentCatalogueReconciliation(env, session, { runId: preview.runId, confirmation: preview.confirmationText }, provider.response, { intervalMs: 0 });
+  const admin = await merchandisingProductsPayload(env, session); assert.equal(admin.products.length, 17);
+  assert.ok(admin.products.every((product) => product.primaryImageUrl?.startsWith("https://") && product.displayData.imageProvenance === "current_provider"));
+  assert.equal(admin.products.find((product) => product.id === `printful-${STORE_ID}-1`).primaryImageUrl, "https://files.cdn.printful.com/files/preview-1.png");
+  await harness.commerceDb.prepare("UPDATE commerce_products SET visibility='public'").run();
+  await harness.commerceDb.prepare("UPDATE commerce_product_variants SET is_sellable=1").run();
+  const publicProducts = (await publicCataloguePayload(env)).products; assert.equal(publicProducts.length, 17);
+  for (const product of publicProducts) assert.equal(product.images[0], admin.products.find((item) => item.id === product.id).primaryImageUrl);
 });
 
 function environment() { return { PRINTFUL_STORE_ID: STORE_ID, PRINTFUL_API_TOKEN: "test-token" }; }

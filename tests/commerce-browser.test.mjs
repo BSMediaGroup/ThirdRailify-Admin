@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -9,14 +9,14 @@ import { chromium } from "playwright-core";
 const ORIGIN = "http://127.0.0.1:4199";
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const RESULTS = join(tmpdir(), "thirdrailify-admin-commerce-browser");
-const IMAGE = "https://static.wixstatic.com/media/admin-shop-v2-fixture.svg";
+const IMAGE = "https://files.cdn.printful.com/files/admin-shop-v2-fixture.png";
 const IMAGE_TWO = "https://static.wixstatic.com/media/admin-shop-v2-back.svg";
 const IMAGE_THREE = "https://static.wixstatic.com/media/admin-shop-v2-detail.svg";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 
 test("Admin Products and Collections render real imagery, scoped dirty rails, nested navigation, and assignment controls responsively", async (t) => {
   await mkdir(RESULTS, { recursive: true }); const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4199"], { stdio: "ignore" }); t.after(() => server.kill()); await waitForServer();
-  const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--disable-features=LocalNetworkAccessChecks"] }); t.after(() => browser.close());
   for (const [width, height] of [[1920,1080],[1440,900],[768,1024],[390,844]]) {
     const { context, page, errors, imageResponses, savedBodies } = await fixturePage(browser, width, height); await page.goto(`${ORIGIN}/products`); try { await page.getByRole("heading", { level: 1, name: "Shop / Products" }).waitFor({ timeout: 10_000 }); } catch (reason) { throw new Error("Products page did not render: " + errors.join(" | "), { cause: reason }); }
     await page.getByRole("heading", { level: 2, name: "Printful catalogue reconciliation" }).waitFor(); assert.equal(await page.getByText(/Configured store 18668025/).count(), 1); assert.equal(await page.getByRole("button", { name: "Preview reconciliation" }).isEnabled(), true);
@@ -67,7 +67,7 @@ test("Admin Products and Collections render real imagery, scoped dirty rails, ne
 
 test("rapid Featured changes stay targeted, preserve list state, and never multiply account or catalogue requests", async (t) => {
   await mkdir(RESULTS, { recursive: true }); const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4199"], { stdio: "ignore" }); t.after(() => server.kill()); await waitForServer();
-  const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--disable-features=LocalNetworkAccessChecks"] }); t.after(() => browser.close());
   const { context, page, requestCounts, responseStatuses, errors } = await fixturePage(browser, 1440, 900, { products: stressProductList(50), featuredDelay: 75 }); t.after(() => context.close());
   await page.goto(`${ORIGIN}/products`); await page.getByRole("heading", { level: 1, name: "Shop / Products" }).waitFor();
   const search = page.locator(".commerce-product-filters input[type='search']"); await search.fill("Stress Product"); await page.getByText("Showing 1–20 of 50 products", { exact: true }).waitFor();
@@ -90,7 +90,7 @@ test("rapid Featured changes stay targeted, preserve list state, and never multi
 
 test("Featured 409, 429, 500, and network failures roll back only the affected row", async (t) => {
   await mkdir(RESULTS, { recursive: true }); const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4199"], { stdio: "ignore" }); t.after(() => server.kill()); await waitForServer();
-  const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--disable-features=LocalNetworkAccessChecks"] }); t.after(() => browser.close());
   const archived = baseProduct("p6", "provider-missing-product", "Provider Missing Product", ["collection-apparel"], false, null, 60); archived.status = "disabled"; archived.visibility = "private"; archived.provider = { ...archived.provider, presence: "provider_missing", reconciliationStatus: "archived", archivedAt: "2026-09-01T00:00:00.000Z" };
   const products = [...productList(), baseProduct("p4", "network-product", "Network Product", ["collection-apparel"], false, null, 40), baseProduct("p5", "healthy-product", "Healthy Product", ["collection-apparel"], false, null, 50), archived];
   const failures = { p1: { status: 409 }, p2: { status: 429, nonJson: true }, p3: { status: 500 }, p4: { abort: true } };
@@ -107,6 +107,13 @@ test("Featured 409, 429, 500, and network failures roll back only the affected r
 
 async function fixturePage(browser, width, height, options = {}) { const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" }); const page = await context.newPage(); const errors = []; const imageResponses = []; let products = options.products || productList(); let collections = collectionList(products); const requestCounts = { authConfig: 0, authSession: 0, productList: 0, featuredMutation: 0 }; const featuredAttempts = new Map(); const responseStatuses = []; page.on("console", (message) => { if (message.type() === "error") errors.push(message.text() + (message.location().url ? ` (${message.location().url})` : "")); }); page.on("pageerror", (error) => errors.push(error.message)); page.on("response", (response) => { if (response.url() === IMAGE && response.ok()) imageResponses.push(response.status()); if (response.url().includes("/featured")) responseStatuses.push(response.status()); });
   const savedBodies = []; let uploadCount = 0;
+  const headers = await readFile(new URL("../public/_headers", import.meta.url), "utf8");
+  const imagePolicy = headers.match(/img-src [^;]+/)[0];
+  await page.route((url) => url.origin === ORIGIN && !url.pathname.startsWith("/api/"), async (route) => {
+    if (route.request().resourceType() !== "document") return route.continue();
+    const response = await route.fetch();
+    return route.fulfill({ response, headers: { ...response.headers(), "content-security-policy": imagePolicy } });
+  });
   await page.route("**/commerce-media/**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: PNG }));
   for (const imageUrl of [IMAGE, IMAGE_TWO, IMAGE_THREE]) await page.route(imageUrl, (route) => route.fulfill({ status: 200, contentType: "image/svg+xml", body: imageUrl === IMAGE_THREE ? "not an image" : `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="750"><rect width="100%" height="100%" fill="#161616"/><path d="M80 375h440" stroke="#f2c94c" stroke-width="44"/><text x="300" y="330" fill="white" text-anchor="middle" font-size="58">TR SHOP</text></svg>` }));
   await page.route("**/api/**", async (route) => { const path = new URL(route.request().url()).pathname;

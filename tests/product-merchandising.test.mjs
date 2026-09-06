@@ -149,16 +149,35 @@ test("current Hidden and zero-public-variant products can store Featured while n
     harness.commerceDb.prepare("UPDATE commerce_products SET provider_store_id='18668025',provider_presence='current',provider_reconciliation_status='current' WHERE id IN ('current-hidden','current-public')"),
     harness.commerceDb.prepare("UPDATE commerce_products SET provider_store_id='18668025',provider_presence='provider_missing',provider_reconciliation_status='archived',archived_at='2026-09-01T00:00:00.000Z' WHERE id='provider-missing'"),
   ]);
+  await insertTestVariant(harness.commerceDb, { id: "current-public-variant", productId: "current-public", migrationStatus: "target_verified" });
+  await harness.commerceDb.prepare("UPDATE commerce_product_variants SET provider_store_id='18668025',provider_presence='current' WHERE id='current-public-variant'").run();
   const post = (id, featured) => commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/${id}/featured`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { featured } }), env, data: { commerceFetch: () => { throw new Error("Featured must not call Printful"); } } });
 
   for (const id of ["current-hidden", "current-public"]) {
     const enabled = await post(id, true); assert.equal(enabled.status, 200); assert.equal((await enabled.json()).product.featured, true);
+    if (id === "current-hidden") {
+      assert.equal((await harness.commerceDb.prepare("SELECT is_featured FROM commerce_products WHERE id=?").bind(id).first()).is_featured, 1);
+      assert.equal((await publicCataloguePayload(env)).products.some((product) => product.id === id), false);
+    } else assert.equal((await publicCataloguePayload(env)).products.find((product) => product.id === id).featured, true);
     const disabled = await post(id, false); assert.equal(disabled.status, 200); assert.equal((await disabled.json()).product.featured, false);
+    if (id === "current-public") assert.equal((await publicCataloguePayload(env)).products.find((product) => product.id === id).featured, false);
   }
   const hidden = await harness.commerceDb.prepare("SELECT status,visibility,is_featured FROM commerce_products WHERE id='current-hidden'").first();
   assert.deepEqual(hidden, { status: "disabled", visibility: "private", is_featured: 0 });
   const publicPayload = await publicCataloguePayload(env); assert.equal(publicPayload.products.some((product) => product.id === "current-hidden"), false);
   const rejected = await post("provider-missing", true); assert.equal(rejected.status, 409); assert.equal((await rejected.json()).error, "provider_missing");
+  env.PRINTFUL_STORE_ID = "18668025";
+  for (const [patch, reason] of [
+    ["provider_store_id='16847493'", "wrong_store"],
+    ["provider_store_id='18668025',archived_at='2026-09-01'", "archived_product"],
+    ["archived_at=NULL,provider_reconciliation_status='ambiguous'", "ambiguous_product"],
+    ["provider_reconciliation_status='current',target_printful_product_id=NULL", "product_not_current"],
+  ]) {
+    await harness.commerceDb.prepare(`UPDATE commerce_products SET ${patch} WHERE id='current-hidden'`).run();
+    const response = await post("current-hidden", true); assert.equal(response.status, 409); assert.equal((await response.json()).error, reason);
+  }
+  await harness.commerceDb.prepare("UPDATE commerce_products SET provider_presence='provider_missing' WHERE provider_presence='current'").run();
+  const noCurrent = await post("provider-missing", true); assert.equal(noCurrent.status, 409); assert.equal((await noCurrent.json()).error, "provider_missing");
 });
 
 test("individual featured toggle appends deterministically and unfeature removes ordering", async (t) => {
