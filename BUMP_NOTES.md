@@ -1,5 +1,10 @@
 # Bump notes
 
+## 2026-09-06 - Existing Gaming listing IGDB URL repair
+
+- Reproduced full-title lookup failure for The Witcher 3: Wild Hunt - Complete Edition. IGDB's official listing uses `complete-edition--1`; the single-hyphen-only URL validator rejected that legitimate result and aborted normalization of the search response.
+- Accept repeated hyphens within IGDB listing slugs while retaining the exact HTTPS host/path, credential, port, query and fragment checks. Added full-title search/detail and existing-record persistence regressions, including the stored Public projection.
+
 ## 2026-09-06 - Micro-typography and complete country flags (local visual review)
 
 CURRENT VER=0.1.0-alpha.0

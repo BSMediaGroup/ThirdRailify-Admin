@@ -11,10 +11,11 @@ test("0032 preserves seeds and rotation; IGDB mappings save, clear and reject un
   const harness = await createCommerceDatabases(); t.after(harness.dispose); await insertMaster(harness.authDb);
   const env = commerceEnvironment(harness, { THIRDRAILIFY_ADMIN_ORIGIN: "https://thirdrailify-admin.pages.dev" });
   const before = await publicGamingRotation(env); assert.equal(before.items.length, 4); assert.ok(before.items.every(game => game.igdb === null));
-  const game = { id: "gaming-witcher", title: "WITCHER", igdbId: "1942", igdbUrl: "https://www.igdb.com/games/the-witcher-3-wild-hunt", steamAppId: "292030", steamState: "verified" };
+  const game = { id: "gaming-witcher", title: "WITCHER", igdbId: "1942", igdbUrl: "https://www.igdb.com/games/the-witcher-3-wild-hunt-complete-edition--1", steamAppId: "292030", steamState: "verified" };
   const saved = await mutateGaming(env, "gaming-master", { action: "update", game });
   assert.deepEqual(saved.games.find(item => item.id === game.id).igdb, { id: "1942", url: game.igdbUrl });
   const after = await publicGamingRotation(env); assert.deepEqual(after.items.map(item => item.id), before.items.map(item => item.id)); assert.equal(after.items[0].steam.appId, "292030"); assert.equal(after.items[0].igdb.id, "1942");
+  assert.equal(after.items[0].igdb.url, game.igdbUrl);
   for (const igdbUrl of ["http://www.igdb.com/games/game", "https://u:p@www.igdb.com/games/game", "https://www.igdb.com:444/games/game", "https://www.igdb.com.evil.test/games/game"]) await assert.rejects(mutateGaming(env, "gaming-master", { action: "update", game: { ...game, igdbUrl } }), { code: "gaming_igdb_mapping_invalid" });
   await assert.rejects(mutateGaming(env, "gaming-master", { action: "update", game: { ...game, igdbId: "" } }), { code: "gaming_igdb_mapping_invalid" });
   await mutateGaming(env, "gaming-master", { action: "update", game: { ...game, igdbId: "", igdbUrl: "" } });

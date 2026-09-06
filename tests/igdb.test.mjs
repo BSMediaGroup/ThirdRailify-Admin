@@ -64,7 +64,22 @@ test("timeouts, malformed data, oversized data and provider throttling fail boun
 });
 test("canonical URLs reject deceptive hosts, credentials, ports, query strings and non-listings", () => {
   assert.equal(normalizeIgdbUrl("https://www.igdb.com/games/the-witcher-3-wild-hunt"), "https://www.igdb.com/games/the-witcher-3-wild-hunt");
+  const editionUrl = "https://www.igdb.com/games/the-witcher-3-wild-hunt-complete-edition--1";
+  assert.equal(normalizeIgdbUrl(editionUrl), editionUrl);
+  for (const suffix of ["/extra", "?redirect=https://evil.test", "#fragment", "%2fextra", "--"]) assert.equal(normalizeIgdbUrl(editionUrl + suffix), null);
   for (const value of ["http://www.igdb.com/games/game", "https://user:pass@www.igdb.com/games/game", "https://www.igdb.com:444/games/game", "https://www.igdb.com.evil.test/games/game", "https://igdb.com/games/game", "https://www.igdb.com/search?q=game", "https://www.igdb.com/games/game?x=y", "https://www.igdb.com/games/game#hash"]) assert.equal(normalizeIgdbUrl(value), null, value);
+});
+
+test("existing Complete Edition title search and detail retain IGDB duplicate-slug URLs", async () => {
+  const title = "The Witcher 3: Wild Hunt - Complete Edition";
+  const edition = { ...fixture(1020, title), url: "https://www.igdb.com/games/the-witcher-3-wild-hunt-complete-edition--1" };
+  const options = { env: environment(), cache: cacheFixture(), fetchImpl: provider(async (_url, init) => {
+    if (init.body.includes("search ")) { assert.ok(init.body.includes(`search ${JSON.stringify(title)};`)); return Response.json([edition, fixture()]); }
+    return Response.json([edition]);
+  }) };
+  const results = await searchIgdbGames(title, options);
+  assert.deepEqual(results.results.map(game => game.url), [edition.url, fixture().url]);
+  assert.equal((await getIgdbGame("1020", options)).url, edition.url);
 });
 
 test("real Workers Request accepts IGDB transport options and redirects never forward credentials", async t => {
