@@ -51,8 +51,9 @@ test("zero, partial, and identity-mismatched provider reads fail closed", async 
 test("customer-safe image selection canonicalizes current thumbnails, prefers previews, and rejects artwork files", async () => {
   const provider = providerFixture(1);
   const snapshot = await readCurrentPrintfulSnapshot(environment(), provider.response, { intervalMs: 0 });
-  assert.equal(snapshot.products[0].images[0], `https://cdn.thirdrailify.com/commerce-media/${"1".repeat(64)}.png`);
-  assert.equal(snapshot.products[0].imageSelection.primarySource, "sync_product_thumbnail");
+  assert.equal(snapshot.products[0].images[0], "https://files.cdn.printful.com/files/preview-1.png");
+  assert.equal(snapshot.products[0].imageSelection.primarySource, "sync_variant_preview");
+  assert.equal(snapshot.products[0].imageSelection.thumbnailReviewRequired, true);
 
   provider.products[0].sync_product.thumbnail_url = null;
   const variantFallback = await readCurrentPrintfulSnapshot(environment(), provider.response, { intervalMs: 0 });
@@ -177,7 +178,7 @@ test("preview/apply archives stale rows, imports current rows, records audit, an
   assert.deepEqual(publicCatalogue.products.map((product) => product.id), ["local-current"]);
   const adminProduct = (await merchandisingProductsPayload(env, session)).products.find((product) => product.id === "local-current");
   assert.equal(adminProduct.displayData.imageProvenance, "current_provider");
-  assert.match(adminProduct.primaryImageUrl, /^https:\/\/cdn\.thirdrailify\.com\/commerce-media\//);
+  assert.equal(adminProduct.primaryImageUrl, "https://files.cdn.printful.com/files/preview-1.png");
   await assert.rejects(authoritativeCartLines(harness.commerceDb, [{ productId: "local-stale", variantId: null, quantity: 1 }]), (error) => error.code === "checkout_product_provider_inactive");
 
   const second = await previewCurrentCatalogueReconciliation(env, session, provider.response, { intervalMs: 0 });

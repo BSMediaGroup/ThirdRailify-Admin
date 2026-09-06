@@ -1,5 +1,7 @@
 # Current Printful catalogue reconciliation
 
+The September 7 [mockup and publication repair](PRINTFUL_MOCKUP_PUBLICATION_REPAIR.md) supersedes the earlier image-selection/completeness assumptions below. Attached preview-role files remain eligible when `visible=false`; catalogue images and artwork derivatives are rejected. Existing media and variant publication now have separate scoped Preview/Apply workflows using the existing schema. Do not replay full reconciliation solely to repair images or enable products.
+
 This milestone replaces the historical 50-product / 1,323-variant import view with the explicitly configured current Printful store as the provider authority. Commerce D1 remains the local merchandising, historical-order, and customer-safe projection authority. The reconciliation never title-matches products, never hard-deletes catalogue or order history, and never writes to Printful.
 
 ## Authority contract

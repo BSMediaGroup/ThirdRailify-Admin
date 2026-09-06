@@ -60,10 +60,11 @@ export const TEST_DELIVERY_RECIPIENT = Object.freeze({
   countryCode: "CA",
 });
 
-export async function createCommerceDatabases({ commerceMigrationCount = commerceMigrationUrls.length } = {}) {
+export async function createCommerceDatabases({ commerceMigrationCount = commerceMigrationUrls.length, withMedia = false } = {}) {
   const miniflare = new Miniflare({
     compatibilityDate: "2026-08-11",
     d1Databases: ["THIRDRAILIFY_AUTH_DB", "THIRDRAILIFY_COMMERCE_DB"],
+    r2Buckets: withMedia ? ["THIRDRAILIFY_PROFILE_MEDIA"] : [],
     modules: true,
     script: "export default { fetch() { return new Response('test'); } };",
   });
@@ -74,7 +75,7 @@ export async function createCommerceDatabases({ commerceMigrationCount = commerc
   const commerceMigrations = files.slice(authMigrationUrls.length);
   for (const migration of authMigrations) await applyMigration(authDb, migration);
   for (const migration of commerceMigrations.slice(0, commerceMigrationCount)) await applyMigration(commerceDb, migration);
-  return { authDb, commerceDb, commerceMigrations, dispose: () => miniflare.dispose() };
+  return { authDb, commerceDb, commerceMigrations, ...(withMedia ? { media: await miniflare.getR2Bucket("THIRDRAILIFY_PROFILE_MEDIA") } : {}), dispose: () => miniflare.dispose() };
 }
 
 export function commerceEnvironment(harness, overrides = {}) {

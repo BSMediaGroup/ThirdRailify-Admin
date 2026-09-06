@@ -1,3 +1,4 @@
+import { previewCurrentProductRepair, applyCurrentProductRepair } from "../../../_shared/current-product-repair.js";
 import {
   AuthFailure,
   corsHeaders,
@@ -222,9 +223,9 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   const isSnapshotStart = snapshotBody?.phase === "begin" && !snapshotBody?.checkpoint;
   const rateCategory = isFeaturedCatalogueMutation(path)
     ? "commerce_catalogue_mutation"
-    : path === "products/reconciliation/apply"
+    : path === "products/reconciliation/apply" || path === "products/repair/apply"
     ? "commerce_catalogue_mutation"
-    : path === "products/reconciliation/preview"
+    : path === "products/reconciliation/preview" || path === "products/repair/preview"
     ? "commerce_snapshot"
     : path === "printful/catalogue/migrate"
     ? "commerce_migration"
@@ -405,6 +406,11 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     const [, orderId, , documentType] = path.split("/");
     payload = await issueOrderDocumentAccess(env, session, decodePathPart(orderId), documentType);
     authEventType = "commerce_order_document_issued";
+  } else if (path === "products/repair/preview" || path === "products/repair/apply") {
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
+    const body = await readJsonBody(request);
+    payload = path.endsWith("/preview") ? await previewCurrentProductRepair(env, session, body, fetchImpl, schedulerRuntime) : await applyCurrentProductRepair(env, session, body, fetchImpl, schedulerRuntime);
+    authEventType = path.endsWith("/preview") ? "commerce_product_repair_previewed" : "commerce_product_repair_applied";
   } else if (path === "products/bulk") {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.catalogue.manage");

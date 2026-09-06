@@ -1,6 +1,7 @@
 import { AuthFailure, cleanText } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
 import { canonicalPublicMediaUrl } from "./media-origin.js";
+import { storefrontEligibility } from "./storefront-eligibility.js";
 
 export async function publicCataloguePayload(env) {
   const db = requireCommerceDb(env);
@@ -41,8 +42,7 @@ async function loadPublicCatalogue(db, env, slug = null) {
   ).all();
   const collectionRows = collectionResult?.results || [];
   const productStatement = db.prepare(
-    `SELECT id, slug, title, safe_metadata_json, is_featured, featured_order,
-            unit_amount, currency_code, max_checkout_quantity, requires_shipping, updated_at
+    `SELECT *
      FROM commerce_products
      WHERE status = 'active' AND visibility = 'public'
        AND (NOT EXISTS (SELECT 1 FROM commerce_products current_products WHERE current_products.provider_presence='current') OR provider_presence='current')
@@ -54,8 +54,7 @@ async function loadPublicCatalogue(db, env, slug = null) {
   if (!rows.length) return { products: [], collections: collectionRows.map((row) => serializePublicCollection(row, [])), currentProviderProducts, reconciliationApplied };
   const ids = rows.map((row) => row.id);
   const [variantResult, membershipResult] = await Promise.all([db.prepare(
-    `SELECT id, product_id, size_label, color_label, option_values_json,
-            unit_amount, currency_code, availability_status, safe_metadata_json
+    `SELECT *
      FROM commerce_product_variants
      WHERE product_id IN (${ids.map(() => "?").join(",")})
        AND status = 'active' AND visibility = 'public' AND is_ignored = 0
@@ -70,10 +69,15 @@ async function loadPublicCatalogue(db, env, slug = null) {
                 AND c.status = 'active' AND c.visibility = 'public'
               ORDER BY pc.product_id, c.display_order, c.slug`).bind(...ids).all()]);
   const variantsByProduct = new Map(ids.map((id) => [id, []]));
-  for (const row of variantResult?.results || []) variantsByProduct.get(row.product_id)?.push(serializePublicVariant(row));
+  for (const row of variantResult?.results || []) {
+    const product = rows.find((p) => p.id === row.product_id);
+    if (product.provider_presence === "current" && !storefrontEligibility(product, [row], env.PRINTFUL_STORE_ID).displayable) continue;
+    if (row.currency_code !== "CAD" || !boundedAmount(row.unit_amount)) continue;
+    variantsByProduct.get(row.product_id)?.push(serializePublicVariant(row, env));
+  }
   const collectionsByProduct = new Map(ids.map((id) => [id, []]));
   for (const row of membershipResult?.results || []) collectionsByProduct.get(row.product_id)?.push({ id: row.id, slug: row.slug, title: row.title });
-  const products = rows.map((row) => serializePublicProduct(row, variantsByProduct.get(row.id) || [], collectionsByProduct.get(row.id) || [], env)).filter(Boolean);
+  const products = rows.filter((row) => row.provider_presence !== "current" || storefrontEligibility(row, (variantResult?.results || []).filter((v) => v.product_id === row.id), env.PRINTFUL_STORE_ID).displayable).map((row) => serializePublicProduct(row, variantsByProduct.get(row.id) || [], collectionsByProduct.get(row.id) || [], env)).filter(Boolean);
   const publicProductIds = new Set(products.map((product) => product.id));
   const collectionProducts = new Map(collectionRows.map((row) => [row.id, []]));
   for (const row of membershipResult?.results || []) if (publicProductIds.has(row.product_id)) collectionProducts.get(row.id)?.push(row.product_id);
@@ -139,7 +143,7 @@ function serializePublicCollection(row, productIds) {
   };
 }
 
-function serializePublicVariant(row) {
+function serializePublicVariant(row, env) {
   const options = safeOptions(row.option_values_json);
   const metadata = safeObject(row.safe_metadata_json);
   const size = cleanText(row.size_label, 120) || null;
@@ -151,6 +155,7 @@ function serializePublicVariant(row) {
     size,
     color,
     options,
+    image: metadata.providerImageSource?.sourceClass === "merchant_preview" ? safeHttpsUrl(canonicalPublicMediaUrl(metadata.providerImage, env)) : null,
     unitAmount: boundedAmount(row.unit_amount),
     currency: "CAD",
     availability: row.availability_status === "temporarily_out_of_stock" ? "temporarily_out_of_stock" : "active",

@@ -1,4 +1,5 @@
 import { StoreLaunchWorkspace } from "../commerce/StoreLaunchWorkspace";
+import { CurrentProductRepair } from "../commerce/CurrentProductRepair";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useOutletContext } from "react-router-dom";
@@ -14,6 +15,7 @@ import {
   getCommerceLaunchPlan,
   getPaymentsControlPlane,
   getMerchandisingProductList,
+  getMerchandisingProduct,
   getCatalogueReconciliationStatus,
   previewCatalogueReconciliation,
   applyCatalogueReconciliation,
@@ -265,6 +267,7 @@ export function CommerceProductsPage() {
   const [reconciliationBusy, setReconciliationBusy] = useState(false);
   const [reconciliationConfirmation, setReconciliationConfirmation] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<MerchandisingProduct | null>(null);
+  const [repairIds, setRepairIds] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [visibility, setVisibility] = useState("all");
   const [status, setStatus] = useState("all");
@@ -426,6 +429,7 @@ export function CommerceProductsPage() {
   const toggleVisibility = async (product: MerchandisingProduct) => {
     if (!csrfToken || !canManage || pendingVisibility.includes(product.id)) return;
     const operation: ProductBulkOperation = product.visibility === "public" ? "hide" : "show";
+    if (operation === "show" && product.provider.presence === "current") { setRepairIds([product.id]); return; }
     setPendingVisibility((current) => [...current, product.id]); setError("");
     try {
       const result = await bulkUpdateMerchandisingProducts(csrfToken, { operation, productIds: [product.id] });
@@ -440,6 +444,12 @@ export function CommerceProductsPage() {
   };
   const applyBulk = async (operation: ProductBulkOperation) => {
     if (!csrfToken || !canManage || !payload || !selectedCount || busy) return;
+    if (operation === "show") {
+      if (selectedCount > 20) { setError("Select at most 20 products for a reviewed publication batch."); return; }
+      try { const ids = allMatching ? (await getMerchandisingProductList({ ...matchingFilters, page: 1, pageSize: 20 })).items.map((p) => p.id) : selectedIds; setRepairIds(ids); }
+      catch (reason) { setError(errorMessage(reason, "Could not read the publication selection.")); }
+      return;
+    }
     if (allMatching && !window.confirm("Apply “" + bulkOperationLabel(operation) + "” to all " + String(payload.totalItems) + " products matching the current filters?")) return;
     setBusy(true); setError("");
     try {
@@ -463,6 +473,7 @@ export function CommerceProductsPage() {
       <section className="commerce-section catalogue-reconciliation" aria-labelledby="catalogue-reconciliation-title"><div className="commerce-section-heading-actions"><div><p className="eyebrow">Current provider authority</p><h2 id="catalogue-reconciliation-title">Printful catalogue reconciliation</h2></div><button className="button-link" type="button" onClick={() => void previewReconciliation()} disabled={!access.isMasterAdmin || reconciliationBusy}>{reconciliationBusy ? "Reading Printful…" : "Preview reconciliation"}</button></div><p>Configured store <code>{reconciliation?.authority.configuredStoreId || "Unavailable"}</code> · {reconciliation?.authority.storeVerified ? `${reconciliation.authority.store?.name} verified` : "not yet verified by a reconciliation read"}. Preview performs bounded GET requests only; Apply requires a fresh matching snapshot and exact confirmation.</p>{!access.isMasterAdmin && <p className="commerce-action-note">Full Admins can inspect this state. Only Master Admin can preview or apply catalogue reconciliation.</p>}<div className="catalogue-reconciliation__counts"><span>Current <strong>{reconciliation?.counts.currentProducts ?? payload.totals.currentProducts}</strong></span><span>Archived <strong>{reconciliation?.counts.archivedProducts ?? payload.totals.archivedProducts}</strong></span><span>Current variants <strong>{reconciliation?.counts.currentVariants ?? payload.totals.variants}</strong></span><span>Needs review <strong>{reconciliation?.counts.needsReviewProducts ?? payload.totals.needsReviewProducts}</strong></span><span>Provider read <strong>{reconciliationPreview?.snapshot.products ?? reconciliation?.latest?.providerProducts ?? "—"}</strong></span></div>{reconciliationPreview && <div className={reconciliationPreview.unusualReduction || reconciliationPreview.blockers.length ? "catalogue-reconciliation__preview is-warning" : "catalogue-reconciliation__preview"} role="status"><h3>Preview ready: {reconciliationPreview.snapshot.products} products / {reconciliationPreview.snapshot.variants} variants</h3><p>{Object.entries(reconciliationPreview.changes).map(([key, value]) => `${humanize(key)} ${value}`).join(" · ")}</p>{reconciliationPreview.unusualReduction && <p><strong>Unusual reduction detected.</strong> Review every group before applying.</p>}{reconciliationPreview.blockers.map((blocker, index) => <p key={index}><strong>Blocked:</strong> {blocker.reason}</p>)}<details><summary>Classification counts</summary><dl>{Object.entries(reconciliationPreview.counts).map(([key, value]) => <div key={key}><dt>{humanize(key)}</dt><dd>{value}</dd></div>)}</dl></details><Field label={`Type ${reconciliationPreview.confirmationText} to apply`}><input value={reconciliationConfirmation} onChange={(event) => setReconciliationConfirmation(event.target.value)} autoComplete="off" /></Field><button className="button-link" type="button" onClick={() => void applyReconciliation()} disabled={reconciliationBusy || reconciliationPreview.blockers.length > 0 || reconciliationConfirmation !== reconciliationPreview.confirmationText}>Apply reconciliation</button></div>}</section>
       <section className="commerce-posture" aria-label="Catalogue totals"><div><span>Current products</span><strong>{payload.totals.currentProducts || payload.totals.products}</strong></div><div><span>Public current</span><strong>{payload.totals.publicProducts}</strong></div><div><span>Archived</span><strong>{payload.totals.archivedProducts}</strong></div><div><span>Current variants</span><strong>{payload.totals.variants}</strong></div></section>
       <section className="commerce-section" aria-labelledby="catalogue-products-title">
+        {repairIds.length > 0 && <CurrentProductRepair key={repairIds.join(",")} productIds={repairIds} csrfToken={csrfToken} disabled={!canManage || busy} onApplied={() => { setRepairIds([]); refresh(); }} />}
         <div className="commerce-section-heading-actions"><SectionTitle id="catalogue-products-title" eyebrow="Authoritative catalogue" title="Products and readiness" /><button className={bulkMode ? "button-link" : "secondary-button"} type="button" onClick={() => { setBulkMode((value) => !value); setSelectedIds([]); setAllMatching(false); }} disabled={!canManage}>{bulkMode ? "Exit bulk edit" : "Bulk edit"}</button></div>
         <div className="commerce-product-filters"><Field label="Search"><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} type="search" placeholder="Title, slug, category, or tag" /></Field><Field label="Catalogue"><select value={catalogue} onChange={(event) => { setCatalogue(event.target.value as ProductListFilters["catalogue"]); setPage(1); }}><option value="current">Current provider</option><option value="archived">Archived / inactive</option><option value="provider_missing">Provider missing</option><option value="wrong_store">Wrong store</option><option value="needs_review">Needs review</option><option value="all">All historical</option></select></Field><Field label="Visibility"><select value={visibility} onChange={(event) => { setVisibility(event.target.value); setPage(1); }}><option value="all">All</option><option value="public">Public</option><option value="private">Hidden</option></select></Field><Field label="Status"><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="all">All</option>{["active", "disabled", "pending", "restricted", "error"].map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Migration"><select value={migration} onChange={(event) => { setMigration(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.migrationStatuses.map((value) => <option key={value} value={value}>{humanize(value)}</option>)}</select></Field><Field label="Category"><select value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="all">All</option>{payload.facets.categories.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Sort"><select value={sort} onChange={(event) => { setSort(event.target.value as ProductListFilters["sort"]); setPage(1); }}><option value="display">Featured / display</option><option value="name">Name</option><option value="price">Price</option></select></Field></div>
         {bulkMode && <div className="commerce-bulk-toolbar" aria-label="Bulk product actions"><strong aria-live="polite">{selectedCount} selected</strong><div><button type="button" className="text-button" onClick={() => { setAllMatching(false); setSelectedIds((current) => [...new Set([...current, ...payload.items.map((product) => product.id)])]); }}>Select current page</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(false); }}>Clear selection</button><button type="button" className="text-button" onClick={() => { setSelectedIds([]); setAllMatching(true); }}>Select all {payload.totalItems} matching</button></div><div className="commerce-bulk-toolbar__actions"><button type="button" onClick={() => void applyBulk("show")} disabled={!selectedCount || busy}>Show in store</button><button type="button" onClick={() => void applyBulk("hide")} disabled={!selectedCount || busy}>Hide from store</button><button type="button" onClick={() => void applyBulk("feature")} disabled={!selectedCount || busy}>Feature</button><button type="button" onClick={() => void applyBulk("unfeature")} disabled={!selectedCount || busy}>Unfeature</button></div>{allMatching && <small>All {payload.totalItems} products matching the current search and filters will be affected. You’ll confirm before applying.</small>}</div>}
@@ -480,7 +491,7 @@ export function CommerceProductsPage() {
             <ProductThumbnail product={product} />
             <div><strong>{product.title}</strong><small>/{product.slug}</small><span>{humanize(product.provider.presence)} · {humanize(product.provider.reconciliationStatus)}</span><span>{product.categories.join(" · ") || "Uncategorized"}{product.tags.length ? " · " + product.tags.join(" · ") : ""}</span></div>
             <div><span>Price</span><strong>{product.price.label}</strong><small>{product.activeVariantCount} / {product.variantCount} public variants</small></div>
-            <div><span>Storefront</span><strong className={statusToneClass(presentation.storefront.tone)}>{presentation.storefront.label}</strong><small className={product.featured ? "commerce-status-secondary is-featured" : "commerce-status-secondary is-muted"}>{product.featured ? "Featured" : "Order " + String(product.displayOrder)}</small>{product.displayData.imageReview && <small className="commerce-status-secondary is-warning">Image review</small>}</div>
+            <div><span>Storefront</span><strong className={statusToneClass(presentation.storefront.tone)}>{presentation.storefront.label}</strong>{product.publication && !product.publication.displayable && <details><summary>Publication details</summary><p>{product.publication.reasons.map(humanize).join("; ")}</p><p>{product.publication.eligibleVariants} eligible variants; {product.publication.publicVariants} enabled.</p>{Object.entries(product.publication.exclusions).map(([reason, count]) => <p key={reason}>{count}: {humanize(reason)}</p>)}</details>}<small className={product.featured ? "commerce-status-secondary is-featured" : "commerce-status-secondary is-muted"}>{product.featured ? "Featured" : "Order " + String(product.displayOrder)}</small>{product.displayData.imageReview && <small className="commerce-status-secondary is-warning">Image review</small>}</div>
             <div><span>Fulfillment mapping</span><strong className={statusToneClass(presentation.fulfillment.tone)}>{presentation.fulfillment.label}</strong><small className={"commerce-status-secondary is-" + presentation.migration.tone}>Migration: {presentation.migration.label}</small></div>
             <div className="commerce-product-row__actions">
               <button className="commerce-icon-action" type="button" title={providerEligible ? (visible ? "Hide from store" : "Show in store") : "Archived products cannot be published"} aria-label={(visible ? "Hide " : "Show ") + product.title + (visible ? " from store" : " in store")} aria-pressed={visible} onClick={() => void toggleVisibility(product)} disabled={!canManage || visibilityPending || !providerEligible}>{visibilityPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name={visible ? "eye" : "eyeOff"} size={18} />}</button>
@@ -760,10 +771,14 @@ function ProductMerchandisingEditor({ product, collections, csrfToken, canManage
     event.preventDefault(); if (!csrfToken || !canManage || !providerWritable || uploading) return; setSaving(true); onError("");
     try {
       const selectedCollections = collections.filter((collection) => form.collectionIds.includes(collection.id));
-      const media = await ingestMerchandisingProductMedia(csrfToken, product.id, uniqueMediaUrls([form.primaryImageUrl, ...form.additionalImages]));
-      const canonical = media.assets.map((asset) => asset.url);
-      const primaryImageUrl = form.primaryImageUrl ? canonical[0] || null : null;
-      const additionalImages = canonical.slice(form.primaryImageUrl ? 1 : 0);
+      // Stage only newly introduced references (including the advanced URL editor).
+      // Unchanged imported media retains its exact reference and authority.
+      const savedImages = new Set(uniqueMediaUrls([product.primaryImageUrl || "", ...product.additionalImages]));
+      const introduced = uniqueMediaUrls([form.primaryImageUrl, ...form.additionalImages]).filter((url) => !savedImages.has(url));
+      const staged = introduced.length ? await ingestMerchandisingProductMedia(csrfToken, product.id, introduced) : null;
+      const canonical = (url: string) => staged?.assets[introduced.indexOf(url)]?.url || url;
+      const primaryImageUrl = form.primaryImageUrl ? canonical(form.primaryImageUrl) : null;
+      const additionalImages = form.additionalImages.map(canonical);
       const result = await saveMerchandisingProduct(csrfToken, product.id, { title: form.title, slug: form.slug, description: form.description, primaryImageUrl, additionalImages, categories: selectedCollections.map((collection) => collection.title), tags: splitComma(form.tags), featured: form.featured, visibility: form.visibility, status: form.status, displayOrder: Number(form.displayOrder), maxQuantity: Number(form.maxQuantity), unitAmount: product.unitAmount, currencyCode: "CAD" });
       onSaved(result.product, "Product merchandising, first-party media, and collection memberships saved to Commerce D1.");
     } catch (reason) { onError(errorMessage(reason, "Product merchandising could not be saved.")); }
@@ -771,6 +786,7 @@ function ProductMerchandisingEditor({ product, collections, csrfToken, canManage
   };
   return <CommerceEditorModal titleId="product-editor-title" onClose={onClose}><section className="commerce-product-editor"><header><div><p className="eyebrow">Product editor</p><h2 id="product-editor-title">{product.title}</h2></div><button type="button" className="commerce-editor-close" onClick={onClose} data-autofocus>Close editor</button></header>
     {!providerWritable && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Archived provider record — read only</strong><p>This product is {humanize(product.provider.presence)}. History and curation are preserved, but it cannot be edited, published, featured, or made sellable.</p></div></div>}
+    {product.provider.presence === "current" && <CurrentProductRepair productIds={[product.id]} csrfToken={csrfToken} disabled={!canManage || saving || dirty || Boolean(uploading)} onApplied={() => { void getMerchandisingProduct(product.id).then((result) => onSaved(result.product, "Reviewed product repair saved.")).catch((reason) => onError(errorMessage(reason, "Reload failed."))); }} />}
     <form onSubmit={(event) => void saveProduct(event)}>
       <div className="commerce-form-grid">
         <Field label="Title"><input value={form.title} onChange={(event) => update("title", event.target.value)} maxLength={240} required /></Field>
@@ -939,7 +955,8 @@ type ProductStatusTone = "healthy" | "warning" | "error" | "muted";
 type ProductStatusPresentation = { label: string; tone: ProductStatusTone };
 function productOperationalPresentation(product: MerchandisingProduct): { storefront: ProductStatusPresentation; fulfillment: ProductStatusPresentation; migration: ProductStatusPresentation } {
   let storefront: ProductStatusPresentation;
-  if (product.provider.presence === "provider_missing") storefront = { label: "Provider missing", tone: "error" };
+  if (product.provider.presence === "current" && product.publication) storefront = product.publication.displayable ? { label: "Public", tone: "healthy" } : product.publication.canPublish ? { label: "Not published", tone: "warning" } : { label: "Blocked", tone: "error" };
+  else if (product.provider.presence === "provider_missing") storefront = { label: "Provider missing", tone: "error" };
   else if (product.provider.presence === "wrong_store") storefront = { label: "Wrong store", tone: "error" };
   else if (product.provider.archivedAt || product.provider.reconciliationStatus === "archived") storefront = { label: "Archived", tone: "muted" };
   else if (["needs_review", "ambiguous"].includes(product.provider.reconciliationStatus) || product.status === "pending") storefront = { label: "Needs review", tone: "warning" };

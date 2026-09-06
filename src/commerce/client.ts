@@ -153,6 +153,7 @@ export type MerchandisingVariant = {
   provider: { storeId: string | null; presence: string; lastSeenAt: string | null; reconciledAt: string | null; snapshotFingerprint: string | null; archivedAt: string | null }; updatedAt: string;
 };
 export type MerchandisingProduct = {
+  publication?: { displayable: boolean; canPublish: boolean; reasons: string[]; eligibleVariants: number; publicVariants: number; exclusions: Record<string, number> };
   id: string; slug: string; title: string; description: string; primaryImageUrl: string | null; additionalImages: string[];
   categories: string[]; collectionIds: string[]; tags: string[]; status: string; visibility: string; currencyCode: string; unitAmount: number | null;
   price: { minimum: number | null; maximum: number | null; label: string }; maxQuantity: number; requiresShipping: boolean;
@@ -528,6 +529,9 @@ export function saveCommerceTemplate(csrfToken: string, template: CommerceTempla
 export function previewCommerceTemplate(csrfToken: string, template: CommerceTemplate, orderId?: string) { return adminApi<TemplatePreviewPayload>(`/api/admin/commerce/templates/${encodeURIComponent(template.templateKey)}/preview`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ template: commerceTemplateInput(template), ...(orderId ? { orderId } : {}) }) }); }
 export function sendCommerceTemplateTest(csrfToken: string, templateKey: string, recipient: string, orderId?: string) { return adminApi<{ ok: true; duplicate: boolean; status: string; recipient: string }>(`/api/admin/commerce/templates/${encodeURIComponent(templateKey)}/send-test`, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ recipient, ...(orderId ? { orderId } : {}) }) }); }
 export function getMerchandisingProducts() { return adminApi<MerchandisingPayload>("/api/admin/commerce/products"); }
+export type ProductRepairPreview = { ok: boolean; runId: string; kind: "media" | "publication"; approvedThumbnailIds?: string[]; confirmationText: string; blockers: Array<{ id: string; reasons: string[] }>; products: Array<{ id: string; title: string; beforeImages: string[]; selectedImages: string[]; preservedImages: string[]; thumbnailReviewRequired?: boolean; thumbnailCandidate?: string | null; completeness: string; diagnostic: { eligibleVariants: number; variants: Array<{ id: string; eligible: boolean; reasons: string[]; localReasons: string[] }> } }> };
+export function previewProductRepair(csrfToken: string, kind: "media" | "publication", productIds: string[], restoreOverride = false, approvedThumbnailIds: string[] = []) { return adminApi<ProductRepairPreview>("/api/admin/commerce/products/repair/preview", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ kind, productIds, restoreOverride, approvedThumbnailIds }) }); }
+export function applyProductRepair(csrfToken: string, runId: string, confirmation: string) { return adminApi<{ ok: boolean; changedProducts: number }>("/api/admin/commerce/products/repair/apply", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ runId, confirmation }) }); }
 export function getMerchandisingProduct(productId: string) { return adminApi<MerchandisingProductPayload>(`/api/admin/commerce/products/${encodeURIComponent(productId)}`); }
 export function getMerchandisingProductList(filters: ProductListFilters = {}) {
   const query = new URLSearchParams();

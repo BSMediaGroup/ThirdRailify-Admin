@@ -18,7 +18,7 @@ else {
 }
 
 async function imageEvidence(snapshot) {
-  const products = snapshot.products.filter((product) => /fuc yeh|my balloon|Embroidered Champion Packable Jacket/i.test(product.name));
+  const products = snapshot.products;
   const results = [];
   for (const product of products) {
     const url = product.images[0];
@@ -31,9 +31,13 @@ async function imageEvidence(snapshot) {
       } catch { resource = { status: "unavailable", imageContentType: false }; }
     }
     results.push({ syncProductId: product.id, title: product.name,
-      safeProductThumbnail: product.imageSelection.sources.includes("sync_product_thumbnail"),
-      safeVariantPreviews: new Set(product.variants.flatMap((variant) => variant.customerPreviewUrls)).size,
-      selectedSource: product.imageSelection.primarySource, selectedHost: url ? new URL(url).hostname : null, resource });
+      linkedPreviewThumbnail: product.imageSelection.sources.includes("sync_product_thumbnail"),
+      attachedPreviewCount: new Set(product.variants.flatMap((variant) => variant.customerPreviewUrls)).size,
+      thumbnailReviewRequired: product.imageSelection.thumbnailReviewRequired,
+      catalogueCandidatesRejected: product.imageSelection.catalogueCandidatesRejected,
+      coverage: product.imageSelection.completeness,
+      selectedSource: product.imageSelection.primarySource, selectedHost: url ? new URL(url).hostname : null,
+      transportCheckOnly: resource, visualMerchantArtworkVerified: false });
   }
   return results;
 }

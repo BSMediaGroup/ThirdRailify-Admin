@@ -1,4 +1,6 @@
 import { transactionGuard } from "./commerce-transaction-guards.js";
+import { editedImageAuthority } from "./commerce-image-authority.js";
+import { storefrontEligibility } from "./storefront-eligibility.js";
 import {
   AuthFailure,
   cleanText,
@@ -249,7 +251,7 @@ export async function merchandisingProductsPayload(env, session) {
                 FROM commerce_products
                 ORDER BY is_featured DESC, featured_order ASC, slug ASC`).all(),
     db.prepare(`SELECT id, product_id, local_variant_key, status, visibility,
-                       is_sellable, availability_status, unit_amount, currency_code, sku,
+                       is_sellable, is_ignored, availability_status, unit_amount, currency_code, sku,
                        size_label, color_label, option_values_json, fulfillment_provider,
                        fulfillment_mapping_status, migration_status, target_printful_product_id,
                        target_printful_sync_variant_id, target_catalogue_product_id,
@@ -277,7 +279,15 @@ export async function merchandisingProductsPayload(env, session) {
     list.push({ id: cleanText(row.id, 160), title: cleanText(row.title, 160), slug: cleanText(row.slug, 180), visibility: row.visibility, displayOrder: Number(row.display_order) });
     memberships.set(row.product_id, list);
   }
-  const products = (result?.results || []).map((row) => serializeMerchandisingProduct(row, variants.get(row.id) || [], memberships.get(row.id) || []));
+  const products = (result?.results || []).map((row) => {
+    const product = serializeMerchandisingProduct(row, variants.get(row.id) || [], memberships.get(row.id) || []);
+    product.publication = storefrontEligibility(row, (variantResult?.results || []).filter((v) => v.product_id === row.id), env.PRINTFUL_STORE_ID);
+    if (row.provider_presence === "current") {
+      product.readiness.displayable = product.publication.displayable;
+      product.activeVariantCount = product.publication.publicVariants;
+    }
+    return product;
+  });
   return {
     ok: true,
     databaseConfigured: true,
@@ -318,7 +328,7 @@ export async function merchandisingProductListPayload(env, session, input = {}) 
       providerMissingProducts: payload.products.filter((product) => product.provider.presence === "provider_missing").length,
       wrongStoreProducts: payload.products.filter((product) => product.provider.presence === "wrong_store").length,
       needsReviewProducts: payload.products.filter((product) => ["needs_review", "ambiguous"].includes(product.provider.reconciliationStatus)).length,
-      publicProducts: payload.products.filter((product) => product.provider.presence === "current" && product.visibility === "public" && product.status === "active").length,
+      publicProducts: payload.products.filter((product) => product.provider.presence === "current" && product.readiness.displayable).length,
       variants: payload.products.filter((product) => product.provider.presence === "current").reduce((total, product) => total + product.variantCount, 0),
       featuredProducts: payload.featured.filter((product) => product.provider.presence === "current").length,
     },
@@ -336,7 +346,7 @@ export async function merchandisingProductPayload(env, session, productId) {
 export async function updateMerchandisingProduct(env, session, productId, input) {
   const db = requireCommerceDb(env);
   const id = cleanText(productId, 160);
-  const current = await db.prepare("SELECT id, safe_metadata_json, is_featured, featured_order, provider_presence FROM commerce_products WHERE id = ?").bind(id).first();
+  const current = await db.prepare("SELECT id, safe_metadata_json, is_featured, featured_order, provider_presence, status, visibility FROM commerce_products WHERE id = ?").bind(id).first();
   if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
   await requireCurrentProviderProductWhenReconciled(db, current);
   requireExactFields(input, ["title", "slug", "description", "primaryImageUrl", "additionalImages", "categories", "tags", "featured", "visibility", "status", "displayOrder", "maxQuantity", "unitAmount", "currencyCode"], "commerce_product_fields_invalid");
@@ -368,10 +378,10 @@ export async function updateMerchandisingProduct(env, session, productId, input)
   }
   const previousMetadata = safeJson(current.safe_metadata_json, {});
   const metadata = { ...previousMetadata, description, publicImage: primaryImageUrl, publicImages: additionalImages, categories, tags, displayOrder };
+  if (current.status !== status || current.visibility !== visibility) metadata.publicationIntent = visibility === "private" || status !== "active" ? "operator_hidden" : "operator_product_visible";
   const requestedImages = [primaryImageUrl, ...additionalImages].filter(Boolean);
-  const providerImages = safeStoredStringArray(previousMetadata.providerCatalogue?.imageUrls, []).map(validateStoredHttpsUrl).filter(Boolean);
-  if (primaryImageUrl && sameOrderedStrings(requestedImages, providerImages) && previousMetadata.imageAuthority?.kind === "current_provider") metadata.imageAuthority = previousMetadata.imageAuthority;
-  else if (primaryImageUrl) metadata.imageAuthority = { kind: "editorial_override", source: "admin_product_editor", updatedAt: timestamp };
+  const authority = editedImageAuthority(previousMetadata, requestedImages, timestamp);
+  if (authority) metadata.imageAuthority = authority;
   else delete metadata.imageAuthority;
   const metadataJson = JSON.stringify(metadata);
   if (metadataJson.length > 16384) throw new AuthFailure(400, "commerce_product_metadata_too_large", "Product merchandising metadata is too large.");
@@ -400,7 +410,7 @@ export async function updateMerchandisingVariant(env, session, productId, varian
   const db = requireCommerceDb(env);
   const product = cleanText(productId, 160);
   const id = cleanText(variantId, 160);
-  const current = await db.prepare("SELECT v.id, v.safe_metadata_json, p.provider_presence FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id WHERE v.id = ? AND v.product_id = ?").bind(id, product).first();
+  const current = await db.prepare("SELECT v.id, v.safe_metadata_json, v.status, v.visibility, v.is_sellable, p.provider_presence FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id WHERE v.id = ? AND v.product_id = ?").bind(id, product).first();
   if (!current) throw new AuthFailure(404, "commerce_variant_not_found", "The commerce product variant was not found.");
   await requireCurrentProviderProductWhenReconciled(db, current);
   requireExactFields(input, ["displayLabel", "size", "color", "options", "unitAmount", "currencyCode", "status", "visibility", "sellable", "availability"], "commerce_variant_fields_invalid");
@@ -415,6 +425,7 @@ export async function updateMerchandisingVariant(env, session, productId, varian
   const sellable = input.sellable === true ? 1 : input.sellable === false ? 0 : invalidMerch("commerce_variant_sellable_invalid", "Variant sellability is invalid.");
   const availability = ["active", "temporarily_out_of_stock", "discontinued"].includes(input.availability) ? input.availability : invalidMerch("commerce_variant_availability_invalid", "Variant availability is invalid.");
   const metadata = { ...safeJson(current.safe_metadata_json, {}), displayLabel };
+  if (current.status !== status || current.visibility !== visibility || current.is_sellable !== sellable) metadata.publicationIntent = status === "active" && visibility === "public" && sellable ? "operator_publish" : "operator_hidden";
   const metadataJson = JSON.stringify(metadata);
   if (metadataJson.length > 16384) throw new AuthFailure(400, "commerce_variant_metadata_too_large", "Variant merchandising metadata is too large.");
   await db.prepare(`UPDATE commerce_product_variants SET safe_metadata_json = ?, size_label = ?, color_label = ?,
@@ -538,11 +549,12 @@ export async function bulkUpdateMerchandisingProducts(env, session, input) {
   const timestamp = nowIso();
   const statements = [];
   const updatedIds = [];
+  if (operation === "show" && products.some((product) => product.provider.presence === "current")) throw new AuthFailure(409, "publication_preview_required", "Use Publish product with eligible variants to review and enable current variants.");
   if (operation === "show" || operation === "hide") {
     const visibility = normalizeProductVisibility(operation === "show" ? "public" : "private");
     for (const product of products) {
       if (product.visibility === visibility) continue;
-      statements.push(db.prepare("UPDATE commerce_products SET visibility = ?, updated_at = ? WHERE id = ?").bind(visibility, timestamp, product.id));
+      statements.push(db.prepare("UPDATE commerce_products SET visibility = ?, safe_metadata_json=json_set(safe_metadata_json,'$.publicationIntent',?), updated_at = ? WHERE id = ?").bind(visibility, operation === "hide" ? "operator_hidden" : "operator_product_visible", timestamp, product.id));
       updatedIds.push(product.id);
     }
   } else if (operation === "feature") {
@@ -2147,7 +2159,6 @@ function validateStringArray(value, maximum, itemLength, code) { if (!Array.isAr
 function validateOptionValues(value) { if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length > 12) throw new AuthFailure(400, "commerce_variant_options_invalid", "Variant options are invalid."); const entries = Object.entries(value).map(([key, item]) => [plainMerchText(key, 80), plainMerchText(item, 120)]).filter(([key, item]) => key && item); if (entries.length !== Object.keys(value).length) throw new AuthFailure(400, "commerce_variant_options_invalid", "Variant options are invalid."); return Object.fromEntries(entries); }
 function validateStoredHttpsUrl(value) { const text = cleanText(value, 4096); if (!text) return null; try { const url = new URL(text); return url.protocol === "https:" && !url.username && !url.password ? url.href : null; } catch { return null; } }
 function safeStoredStringArray(value, fallback) { try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) && parsed.length ? parsed.map((item) => cleanText(item, 4096)).filter(Boolean) : Array.isArray(fallback) ? fallback.map((item) => cleanText(item, 4096)).filter(Boolean) : []; } catch { return Array.isArray(fallback) ? fallback.map((item) => cleanText(item, 4096)).filter(Boolean) : []; } }
-function sameOrderedStrings(left, right) { const a = [...new Set(left.filter(Boolean))], b = [...new Set(right.filter(Boolean))]; return a.length === b.length && a.every((value, index) => value === b[index]); }
 function collectionSlug(value) { const slug = cleanText(value, 180).toLowerCase(); if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new AuthFailure(400, "commerce_collection_slug_invalid", "Collection slugs may contain lowercase letters, numbers, and single hyphens only."); return slug; }
 function collectionVisibility(value) { return ["public", "hidden"].includes(value) ? value : invalidMerch("commerce_collection_visibility_invalid", "Collection visibility is invalid."); }
 function collectionIdValue(value) { const id = cleanText(value, 160); if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(id)) throw new AuthFailure(400, "commerce_collection_id_invalid", "The commerce collection identity is invalid."); return id; }

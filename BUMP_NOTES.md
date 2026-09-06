@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-07 - Printful mockup authority and scoped publication repair (local)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Correct merchant previews now survive `visible=false`; catalogue stock imagery and artwork derivatives cannot supply merchant galleries. Existing media can be repaired independently of provider fingerprint changes. Primary, gallery and explicit manual-image authority are separated; unchanged ordinary saves retain provider ownership.
+- Added protected scoped media/publication Preview/Apply with exact confirmation, fresh provider/local-state checks, immutable R2 staging and explicit thumbnail/legacy-override review. Shared eligibility exposes actual local variant blockers and keeps global checkout disabled. Public relay/detail/cart preserve verified variant images.
+- Fresh read-only census: 13 products / 91 variants, all with attached merchant previews. Stored state has only 25 enabled variants across six products; seven products need explicit publication review. Detailed per-product causes, historical counts, evidence and pending rollout: `docs/PRINTFUL_MOCKUP_PUBLICATION_REPAIR.md`.
+- Validation: focused repair tests 4/4; isolated reconciliation/Featured/collection/checkout regressions 5/5; real local D1/R2 protected UI and actual Public relay acceptance passed for 13/91 at 1440/768/390px, including persisted reload and second media Preview with zero changes. Broader 49-test run had 44 passes, two unchanged Stripe expectation failures, one corrected thumbnail assertion and two Miniflare startup failures; the latter three passed isolated. Both repositories pass lint, TypeScript-inclusive production builds and Pages Functions compilation; Public retains two existing hook warnings and builds retain chunk-size warnings.
+- No migration added or rewritten, no files removed, no production/provider writes or deployment. Existing concurrent changes are preserved. Stable-origin acceptance and separately authorized production backup, scoped Preview/Apply and publication remain pending.
+
 ## 2026-09-06 - Readability coverage continuation (local; acceptance incomplete)
 
 CURRENT VER=0.1.0-alpha.0

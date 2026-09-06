@@ -141,7 +141,7 @@ test("targeted Featured mutation is authoritative, idempotent, bounded, and isol
 });
 
 test("current Hidden and zero-public-variant products can store Featured while non-current products fail explicitly", async (t) => {
-  const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness); const { created, cookie } = await masterSession(env);
+  const harness = await createCommerceDatabases(); t.after(harness.dispose); const env = commerceEnvironment(harness, { PRINTFUL_STORE_ID: "18668025" }); const { created, cookie } = await masterSession(env);
   await insertTestProduct(harness.commerceDb, { id: "current-hidden", slug: "current-hidden", title: "Current Hidden", status: "disabled", visibility: "private", targetPrintfulProductId: "460338949", migrationStatus: "target_verified" });
   await insertTestProduct(harness.commerceDb, { id: "current-public", slug: "current-public", title: "Current Public", status: "active", visibility: "public", targetPrintfulProductId: "460339030", migrationStatus: "target_verified" });
   await insertTestProduct(harness.commerceDb, { id: "provider-missing", slug: "provider-missing", title: "Provider Missing", status: "disabled", visibility: "private", targetPrintfulProductId: "old-provider", migrationStatus: "target_verified" });
@@ -149,7 +149,8 @@ test("current Hidden and zero-public-variant products can store Featured while n
     harness.commerceDb.prepare("UPDATE commerce_products SET provider_store_id='18668025',provider_presence='current',provider_reconciliation_status='current' WHERE id IN ('current-hidden','current-public')"),
     harness.commerceDb.prepare("UPDATE commerce_products SET provider_store_id='18668025',provider_presence='provider_missing',provider_reconciliation_status='archived',archived_at='2026-09-01T00:00:00.000Z' WHERE id='provider-missing'"),
   ]);
-  await insertTestVariant(harness.commerceDb, { id: "current-public-variant", productId: "current-public", migrationStatus: "target_verified" });
+  await insertTestVariant(harness.commerceDb, { id: "current-public-variant", productId: "current-public", targetPrintfulProductId: "460339030", migrationStatus: "target_verified" });
+  await harness.commerceDb.prepare("UPDATE commerce_products SET safe_metadata_json=? WHERE id='current-public'").bind(JSON.stringify({ publicImage: "https://files.cdn.printful.com/files/merchant-preview.png" })).run();
   await harness.commerceDb.prepare("UPDATE commerce_product_variants SET provider_store_id='18668025',provider_presence='current' WHERE id='current-public-variant'").run();
   const post = (id, featured) => commerceRequest({ request: jsonRequest(`${ADMIN_ORIGIN}/api/admin/commerce/products/${id}/featured`, { origin: ADMIN_ORIGIN, cookie, csrfToken: created.csrfToken, body: { featured } }), env, data: { commerceFetch: () => { throw new Error("Featured must not call Printful"); } } });
 

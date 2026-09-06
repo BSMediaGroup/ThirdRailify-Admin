@@ -179,7 +179,8 @@ async function fetchImage(url, fetchImpl) {
     if (!response.ok || response.status >= 300) throw new AuthFailure(400, "commerce_media_url_unavailable", "The image URL could not be read.");
     const length = Number(response.headers.get("content-length") || 0);
     if (Number.isFinite(length) && length > MAX_COMMERCE_IMAGE_BYTES) throw new AuthFailure(413, "commerce_media_too_large", "Each product image must be no larger than 10 MB.");
-    return response;
+    const bytes = await readLimited(response);
+    return new Response(bytes, { headers: { "Content-Type": response.headers.get("content-type") || "" } });
   } catch (error) {
     if (error instanceof AuthFailure) throw error;
     throw new AuthFailure(400, "commerce_media_url_unavailable", "The image URL could not be read.");
@@ -187,9 +188,20 @@ async function fetchImage(url, fetchImpl) {
 }
 
 async function readLimited(response) {
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.byteLength) throw new AuthFailure(400, "commerce_media_empty", "The product image is empty.");
-  if (bytes.byteLength > MAX_COMMERCE_IMAGE_BYTES) throw new AuthFailure(413, "commerce_media_too_large", "Each product image must be no larger than 10 MB.");
+  const reader = response.body?.getReader();
+  if (!reader) throw new AuthFailure(400, "commerce_media_empty", "The product image is empty.");
+  const chunks = []; let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      length += value.byteLength;
+      if (length > MAX_COMMERCE_IMAGE_BYTES) throw new AuthFailure(413, "commerce_media_too_large", "Each product image must be no larger than 10 MB.");
+      chunks.push(value);
+    }
+  } finally { await reader.cancel(); }
+  if (!length) throw new AuthFailure(400, "commerce_media_empty", "The product image is empty.");
+  const bytes = new Uint8Array(length); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes;
 }
 
