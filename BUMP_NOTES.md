@@ -1,5 +1,10 @@
 # Bump notes
 
+## 2026-09-07 - Direct checkout acceptance and merchant privacy
+
+Removed the separate agreement review button, expanded declaration, and acceptance checkbox from Checkout. PayPal Checkout is the acceptance action: the click obtains a current server offer and submits its token with acceptance; changed checkout details reject a stale in-flight offer. A visible notice directly beneath the button links Terms, Privacy and Refunds in new tabs. Admin agreement projection and Public allowlist exclude merchant private phone and street address. Existing encrypted records and completed-order documents were not rewritten.
+
+
 ## 2026-09-07 - Production checkout projection repair
 
 CURRENT VER=0.1.0-alpha.0

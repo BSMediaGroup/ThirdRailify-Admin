@@ -198,7 +198,7 @@ test("scoped review and acceptance precede PayPal; retained agreement and encryp
   await db.prepare("UPDATE commerce_shipping_quotes SET environment='live'").run();
   await assert.rejects(offerCheckoutAgreement(env,request(),{...body,quoteId:"shq_00000000-0000-4000-8000-000000000000"},null));
   const offer=await offerCheckoutAgreement(env,request(),body,null);
-  assert.equal(offer.agreement.merchant.phone,PHONE);assert.equal(offer.agreement.merchant.address.line1,ADDRESS);assert.equal(offer.agreement.totals.taxAmount,0);assert.equal(offer.agreement.tax.policy,"not_collecting");
+  assert.equal(offer.agreement.merchant.phone,undefined);assert.equal(offer.agreement.merchant.address,undefined);assert.ok(!JSON.stringify(offer).includes(PHONE));assert.ok(!JSON.stringify(offer).includes(ADDRESS));assert.equal(offer.agreement.totals.taxAmount,0);assert.equal(offer.agreement.tax.policy,"not_collecting");
   assert.equal(offer.agreement.policies.returns.version,"2026.09-store-agreement-2");
   let providerCalls=0;
   await assert.rejects(createPayPalStorePayment(env,request(),body,null,async()=>{providerCalls++;throw new Error("No provider calls permitted");}),e=>e.code==="agreement_acceptance_required");assert.equal(providerCalls,0);

@@ -170,3 +170,9 @@ DanielClancy-Admin
 ```text
 clean
 ```
+
+## 2026-09-07 - Direct checkout acceptance and merchant privacy
+
+Removed the separate agreement review button, expanded declaration, and acceptance checkbox from Checkout. PayPal Checkout is the acceptance action: the click obtains a current server offer and submits its token with acceptance; changed checkout details reject a stale in-flight offer. A visible notice directly beneath the button links Terms, Privacy and Refunds in new tabs. Admin agreement projection and Public allowlist exclude merchant private phone and street address. Existing encrypted records and completed-order documents were not rewritten.
+
+Admin release 33d7ec5f; Public preview c2956444 (UI acceptance), then 88b1e095 (same UI plus defensive proxy redaction); final identical Public release 7d4c2c82. Public typecheck/build and scoped lint passed. Admin privacy/retention regressions: 2 passed. Public privacy/guest browser regressions: 2 passed after replacing a load-event timeout with DOM readiness. Four-width checkout flow passed locally and on preview; fixture PayPal click proved agreementAccepted is sent with the freshly offered token, while the intercepted create request was rejected before any provider transaction. Live production verified enabled PayPal after shipping alone, zero review buttons, zero acceptance checkboxes, zero policy expanders, and all three policy links target=_blank. Live summary screenshot inspected: output/checkout-click-acceptance/live-summary.png. Acceptance stopped before clicking the live PayPal button. One expiring shipping quote was requested; no order, payment, email or fulfillment created.
