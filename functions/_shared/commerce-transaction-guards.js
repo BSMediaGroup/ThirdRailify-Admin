@@ -12,6 +12,8 @@ export const LAUNCH_AUTHORITY_SQL = `SELECT json_object(
   'payment',(SELECT json_array(revision,preferred_provider,stripe_enabled,emergency_paused) FROM commerce_payment_provider_state WHERE id='primary'),
   'templates',(SELECT json_group_array(json_array(template_key,revision,status,enabled,updated_at)) FROM (SELECT * FROM commerce_templates ORDER BY template_key)),
   'markets',(SELECT json_group_array(json_array(country_code,status,strategy,revision)) FROM (SELECT * FROM commerce_shipping_markets ORDER BY country_code)),
+  'shippingPolicy',(SELECT json_array(active_ratebook_id,revision) FROM commerce_shipping_policy WHERE id='primary'),
+  'shippingWeights',(SELECT json_group_array(json_array(id,revision,weight_mg)) FROM (SELECT * FROM commerce_shipping_weights ORDER BY id)),
   'products',(SELECT json_group_array(json_array(id,updated_at)) FROM (SELECT id,updated_at FROM commerce_products ORDER BY id)),
   'variants',(SELECT json_group_array(json_array(id,updated_at,is_sellable)) FROM (SELECT id,updated_at,is_sellable FROM commerce_product_variants ORDER BY id)),
   'migration',(SELECT json_array(status,phase,step_lease_token,safe_state_json) FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08')

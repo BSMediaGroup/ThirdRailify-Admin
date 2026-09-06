@@ -456,6 +456,8 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
   const totalAmount = safeMinorAmount(order.customer_gross_amount);
   const refundAmount = safeMinorAmount(order.refund_amount);
   const shippingAmount = deliverySnapshot ? safeMinorAmount(deliverySnapshot.shipping_amount) : null;
+  const merchantShipping = await db.prepare("SELECT ratebook_id,snapshot_json,provider_cost_amount FROM commerce_order_shipping_policies WHERE order_id=?").bind(orderId).first();
+  const merchantSnapshot = merchantShipping ? parseJson(merchantShipping.snapshot_json, {}) : null;
   const [customerRelationship, recipientSnapshot] = await Promise.all([
     orderCustomerProjection(env, order.customer_id),
     deliverySnapshot?.recipient_ciphertext
@@ -463,10 +465,11 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
       : Promise.resolve(null),
   ]);
   const delivery = deliverySnapshot ? {
+    pricingPolicy: merchantSnapshot ? { ratebookId: merchantShipping.ratebook_id, revision: merchantSnapshot.revision, zoneId: merchantSnapshot.zoneId, methodId: merchantSnapshot.methodId, weightMg: merchantSnapshot.weight?.totalMg, providerQuotedCost: merchantShipping.provider_cost_amount } : null,
     available: true, recipientConfigured: true,
     destinationCountryCode: cleanText(deliverySnapshot.destination_country_code, 2).toUpperCase(),
     destinationRegionCode: cleanText(deliverySnapshot.destination_region_code, 80) || null,
-    strategy: cleanText(deliverySnapshot.shipping_strategy, 80), provider: cleanText(deliverySnapshot.provider, 40) || null,
+    strategy: merchantSnapshot ? "merchant_weight_bands" : cleanText(deliverySnapshot.shipping_strategy, 80), provider: cleanText(deliverySnapshot.provider, 40) || null,
     method: cleanText(deliverySnapshot.display_shipping_method, 100), amount: shippingAmount,
     currencyCode: cleanText(deliverySnapshot.currency_code, 3).toUpperCase(),
     quoteReference: cleanText(deliverySnapshot.source_quote_id, 80), quotedAt: cleanText(deliverySnapshot.quoted_at, 80),

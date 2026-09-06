@@ -58,7 +58,7 @@ export async function offerCheckoutAgreement(env, request, input, session) {
     items: lines.map((line) => ({ productId: line.productId, variantId: line.variantId, name: line.productName, description: line.description || line.productName, variant: line.variantName || null, options: line.optionValues, unitAmount: line.unitAmount, quantity: line.quantity, lineTotalAmount: line.lineTotalAmount })),
     totals: { productSubtotalAmount: subtotal, shippingAmount: shipping.option.amount, taxAmount: 0, totalAmount: total, currency: "CAD" },
     tax: { policy: "not_collecting", statement: "Tax is not being collected under the merchant's configured policy." },
-    shipping: { methodId: shipping.option.providerRateId, method: shipping.option.name, delivery: {minDays:shipping.option.minDeliveryDays,maxDays:shipping.option.maxDeliveryDays,minDate:shipping.option.minDeliveryDate,maxDate:shipping.option.maxDeliveryDate}, destination: shipping.recipient, destinationCountryCode: shipping.recipient.countryCode },
+    shipping: { methodId: shipping.option.providerRateId, method: shipping.option.name, pricingPolicy: shipping.option.merchantPolicy || null, delivery: shipping.option.estimatedDelivery ? {text:shipping.option.estimatedDelivery} : shipping.option.merchantPolicy ? null : {minDays:shipping.option.minDeliveryDays,maxDays:shipping.option.maxDeliveryDays,minDate:shipping.option.minDeliveryDate,maxDate:shipping.option.maxDeliveryDate}, destination: shipping.recipient, destinationCountryCode: shipping.recipient.countryCode },
     payment: { provider: "PayPal", currency: "CAD", terms: "Payment is requested through PayPal after this agreement is accepted. No payment is created by reviewing or declining it." },
     fulfillment: { provider: "Printful", method: shipping.option.name, statement: "Fulfillment starts only after authoritative completed payment evidence." },
     policies: { terms:COMMERCE_POLICIES.terms, privacy:COMMERCE_POLICIES.privacy, returns:COMMERCE_POLICIES.refunds },
@@ -143,7 +143,7 @@ function validateAgreementInput(input, session) {
 
 function requireAgreementConfiguration(settings, profile) {
   if (settings.commerce_environment?.value !== "production" || settings.commerce_emergency_paused?.value === true || settings.paypal_store_checkout_enabled?.value !== true || settings.paypal_live_capture_enabled?.value !== true || settings.internet_agreement_disclosure_enabled?.value !== true) throw new AuthFailure(409, "agreement_disclosure_unavailable", "Transaction disclosure is unavailable until the production store is active.");
-  if (settings.tax_calculation_provider?.value !== "not_collecting" || settings.shipping_strategy?.value !== "printful_dynamic") throw new AuthFailure(409, "agreement_policy_unavailable", "The checkout tax or shipping policy is unavailable.");
+  if (settings.tax_calculation_provider?.value !== "not_collecting" || !["printful_dynamic", "merchant_weight_bands"].includes(settings.shipping_strategy?.value)) throw new AuthFailure(409, "agreement_policy_unavailable", "The checkout tax or shipping policy is unavailable.");
   const revision = Number(profile?.revision || 0);
   if (!revision || Number(profile?.owner_attested_revision) !== revision || Number(profile?.transaction_disclosure_authorized_revision) !== revision || !profile?.legal_business_name_ciphertext || !profile?.private_phone_ciphertext || !profile?.private_address_ciphertext) throw new AuthFailure(409, "agreement_merchant_authority_unavailable", "Current merchant facts are not owner-confirmed and authorized for transaction disclosure.");
 }
@@ -157,7 +157,7 @@ function agreementTextLines(s, acceptedAt) {
   if(s.qualifyingInternetAgreement) lines.push(`Legal supplier: ${s.merchant.legalName}`,`Supplier telephone: ${s.merchant.phone}`,`Business premises: ${Object.values(s.merchant.address||{}).filter(Boolean).join(", ")}`);
   lines.push(`Contact: ${s.merchant.supportEmail}`, ...s.items.map(i=>`${i.name} / ${i.variant||""}: ${i.description||i.name}; ${i.quantity} at ${money(i.unitAmount)} = ${money(i.lineTotalAmount)}`),
     `Products: ${money(s.totals.productSubtotalAmount)}`,`Shipping (${s.shipping.method}): ${money(s.totals.shippingAmount)}`,`Delivery destination: ${Object.values(s.shipping.destination||{}).filter(Boolean).join(", ")}`,
-    `Delivery estimate: ${JSON.stringify(s.shipping.delivery) || "Not supplied"} (estimated, not guaranteed)`,
+    `Delivery estimate: ${s.shipping.delivery ? JSON.stringify(s.shipping.delivery) : "Not supplied"} (estimated, not guaranteed)`,
     `Tax: ${money(s.totals.taxAmount)} - ${s.tax.statement}`,`Total: ${money(s.totals.totalAmount)}`,s.payment.terms,s.fulfillment.statement,s.additionalCharges,s.tradeIn,...s.conditions);
   for(const policy of Object.values(s.policies)) {
     lines.push(`${policy.title} (${policy.version}) - https://thirdrailify.com${policy.url}`);

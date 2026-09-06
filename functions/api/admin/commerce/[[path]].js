@@ -92,6 +92,7 @@ import { commerceJobsPayload, retryCommerceJob } from "../../../_shared/commerce
 import { commerceIntelligenceReport } from "../../../_shared/commerce-intelligence.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
+import { shippingManagerPayload, mutateShippingRatebook, productShippingWeights, saveShippingWeights, calculateMerchantRates, validateRatebook, weightToMilligrams } from "../../../_shared/shipping-ratebook.js";
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -146,6 +147,12 @@ async function handleGet(request, env, path) {
   } else if (path === "analytics") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceIntelligenceReport(env, Object.fromEntries(new URL(request.url).searchParams));
+  } else if (path === "shipping-rates") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await shippingManagerPayload(env);
+  } else if (/^products\/[^/]+\/shipping-weights$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await productShippingWeights(env, decodePathPart(path.split("/")[1]));
   } else if (path === "fulfillment") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await fulfillmentShippingPayload(env, session);
@@ -227,7 +234,20 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   let payload;
   let authEventType;
 
-  if (path === "stripe/verify") {
+  if (path === "shipping-rates" || path === "shipping-rates/calculate") {
+    await requireCommerceCapability(env, session, path.endsWith("calculate") ? "commerce.view" : "commerce.operations.manage");
+    const body = await readJsonBody(request);
+    if (path.endsWith("calculate")) {
+      const current = await shippingManagerPayload(env);
+      validateRatebook(body.body, current.markets.map(m => m.country_code));
+      if (!current.markets.some(m => m.country_code === body.country)) throw new AuthFailure(400,"shipping_destination_invalid","Choose a supported destination.");
+      payload = { ok: true, options: calculateMerchantRates(body.body, body.country, weightToMilligrams(body.weight, body.unit), body.subtotalAmount) };
+    } else { payload = await mutateShippingRatebook(env, body); authEventType = "commerce_shipping_rates_updated"; }
+  } else if (/^products\/[^/]+\/shipping-weights$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
+    payload = await saveShippingWeights(env, decodePathPart(path.split("/")[1]), await readJsonBody(request));
+    authEventType = "commerce_shipping_weights_updated";
+  } else if (path === "stripe/verify") {
     await requireCommerceCapability(env, session, "commerce.payments.manage");
     payload = await verifyStripeAccount(env, session, fetchImpl);
     authEventType = "stripe_account_verified";

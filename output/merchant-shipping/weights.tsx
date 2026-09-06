@@ -1,0 +1,1 @@
+import React from "react";import{createRoot}from"react-dom/client";import{ProductShippingWeights}from"/src/commerce/ProductShippingWeights";createRoot(document.getElementById("root")).render(<ProductShippingWeights productId="fixture" csrfToken="synthetic" canManage={true}/>);

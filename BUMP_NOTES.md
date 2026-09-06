@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-09-06 - Readability coverage continuation (local; acceptance incomplete)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Expanded the previous Overview/Analytics-only scope to a source-derived inventory of 43 route entries: 2 redirect aliases and 39 template groups. Every route entry was rendered at 1440/390px, with intermediate/wide measurements. Complete visual and internal-surface sign-off remains outstanding; this is not a claim of completed site-wide acceptance.
+- Targeted Products slug/category/catalogue/status/variant metadata, filters, editor/media captions, dense order/customer details, business/tax/email/fulfillment text, Watch records, runtime telemetry and permission identifiers. Preserved semantic colors, heading/body scale, account identity controls, local ISO flags/license and feature behavior.
+- Added `tests/readability-browser.test.mjs` and `tests/readability-fixtures.mjs`; README documents the additions. Lint, production build (including TypeScript), focused readability browser test, country-code regression and existing Analytics browser suite pass. Full evidence and remaining gaps are in `X:\GIT\ThirdRailify\.artifacts\readability-complete\AUDIT.md`; native comparisons are in `REVIEW.html`.
+- Preserved concurrent feature work. No commit, push, deployment, remote data/provider change or reference-repository edit. Awaiting Daniel's visual review; acceptance remains open.
+
 ## 2026-09-06 - Existing Gaming listing IGDB URL repair
 
 - Reproduced full-title lookup failure for The Witcher 3: Wild Hunt - Complete Edition. IGDB's official listing uses `complete-edition--1`; the single-hyphen-only URL validator rejected that legitimate result and aborted normalization of the search response.

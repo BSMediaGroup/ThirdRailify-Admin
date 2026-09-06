@@ -32,16 +32,16 @@
 .bot-heartbeat__header { justify-content:space-between; gap:16px; }
 .bot-heartbeat__identity { gap:10px; }
 .bot-heartbeat__identity>div { display:grid; gap:2px; }
-.bot-heartbeat__identity>div>span { color:var(--quiet); font:700 .48rem "Geist Mono",monospace; letter-spacing:.11em; text-transform:uppercase; }
+.bot-heartbeat__identity>div>span { color:var(--microcopy-ink); font:700 10px "Geist Mono",monospace; letter-spacing:.11em; text-transform:uppercase; }
 .bot-heartbeat__identity strong { color:var(--runtime-pulse-primary); font:700 .68rem "Geist Mono",monospace; letter-spacing:.08em; text-transform:uppercase; transition:color .45s ease; }
 .bot-heartbeat__glyph { position:relative; display:grid; width:28px; height:28px; place-items:center; border:1px solid rgba(var(--runtime-pulse-rgb),.24); border-radius:50%; transition:border-color .45s ease; }
 .bot-heartbeat__glyph::before { width:7px; height:7px; border-radius:50%; background:var(--runtime-pulse-primary); box-shadow:0 0 14px var(--runtime-pulse-primary); content:""; transition:background .45s ease,box-shadow .45s ease; }
 .bot-heartbeat__glyph i { position:absolute; inset:5px; border:1px solid rgba(var(--runtime-pulse-rgb),.35); border-radius:50%; animation:bot-heartbeat-ring var(--runtime-pulse-duration) ease-out infinite; }
 .bot-heartbeat__glyph i+i { animation-delay:calc(var(--runtime-pulse-duration) / 2); }
-.bot-heartbeat__badge { display:inline-flex; min-height:28px; align-items:center; gap:7px; padding:0 10px; border:1px solid rgba(var(--runtime-pulse-rgb),.34); border-radius:999px; background:var(--runtime-chip-bg); color:var(--runtime-pulse-primary); font:700 .52rem "Geist Mono",monospace; letter-spacing:.06em; text-transform:uppercase; transition:color .45s ease,border-color .45s ease,background .45s ease; }
+.bot-heartbeat__badge { display:inline-flex; min-height:28px; align-items:center; gap:7px; padding:0 10px; border:1px solid rgba(var(--runtime-pulse-rgb),.34); border-radius:999px; background:var(--runtime-chip-bg); color:var(--runtime-pulse-primary); font:700 10px "Geist Mono",monospace; letter-spacing:.06em; text-transform:uppercase; transition:color .45s ease,border-color .45s ease,background .45s ease; }
 .bot-heartbeat__badge i { width:6px; height:6px; border-radius:50%; background:currentColor; box-shadow:0 0 11px currentColor; animation:bot-heartbeat-dot var(--runtime-pulse-duration) ease-in-out infinite; }
 .bot-heartbeat__copy { margin-top:24px; }
-.bot-heartbeat__copy p { margin:0 0 7px; color:var(--runtime-pulse-primary); font:700 .51rem "Geist Mono",monospace; letter-spacing:.12em; text-transform:uppercase; transition:color .45s ease; }
+.bot-heartbeat__copy p { margin:0 0 7px; color:var(--runtime-pulse-primary); font:700 10px "Geist Mono",monospace; letter-spacing:.12em; text-transform:uppercase; transition:color .45s ease; }
 .bot-heartbeat__copy h2 { margin:0; color:var(--ink); font-size:clamp(2rem,3.2vw,3.45rem); line-height:.88; letter-spacing:.005em; }
 .bot-heartbeat__copy>span { display:block; max-width:720px; margin-top:10px; color:var(--muted); font-size:.78rem; line-height:1.5; }
 .bot-heartbeat__signal { position:relative; height:126px; margin-top:12px; overflow:hidden; border-block:1px solid rgba(var(--runtime-pulse-rgb),.12); background:linear-gradient(90deg,transparent,var(--runtime-pulse-fill) 12%,rgba(var(--runtime-pulse-rgb),.055) 50%,transparent); transition:border-color .45s ease,background .45s ease; }
@@ -57,17 +57,17 @@
 .bot-heartbeat--catching_up .bot-heartbeat__sweep { width:13%; }
 .bot-heartbeat--warning .bot-heartbeat__sweep,.bot-heartbeat--degraded .bot-heartbeat__sweep { opacity:.72; }
 .bot-heartbeat--offline .bot-heartbeat__sweep { display:none; }
-.bot-heartbeat__readout { position:absolute; right:8px; bottom:7px; color:rgba(var(--runtime-pulse-rgb),.82); font:700 .43rem "Geist Mono",monospace; letter-spacing:.15em; text-transform:uppercase; transition:color .45s ease; }
+.bot-heartbeat__readout { position:absolute; right:8px; bottom:7px; color:rgba(var(--runtime-pulse-rgb),.82); font:700 9.5px "Geist Mono",monospace; letter-spacing:.15em; text-transform:uppercase; transition:color .45s ease; }
 .bot-heartbeat__disclaimer { margin:10px 0 0; color:var(--quiet); font-size:.63rem; }
 .bot-heartbeat__telemetry { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-content:stretch; margin:0; border-left:1px solid rgba(var(--runtime-pulse-rgb),.13); background:rgba(5,7,5,.5); transition:border-color .45s ease; }
 .bot-heartbeat__telemetry>div { display:grid; min-width:0; align-content:center; padding:16px; border-bottom:1px solid rgba(var(--runtime-pulse-rgb),.11); transition:border-color .45s ease; }
 .bot-heartbeat__telemetry>div:nth-child(even) { border-left:1px solid rgba(var(--runtime-pulse-rgb),.11); }
 .bot-heartbeat__telemetry>div.is-wide,.bot-heartbeat__telemetry>.bot-heartbeat__link { grid-column:1/-1; border-left:0; }
-.bot-heartbeat__telemetry dt { color:var(--quiet); font:700 .48rem "Geist Mono",monospace; letter-spacing:.08em; text-transform:uppercase; }
+.bot-heartbeat__telemetry dt { color:var(--microcopy-ink); font:700 10px "Geist Mono",monospace; letter-spacing:.08em; text-transform:uppercase; }
 .bot-heartbeat__telemetry dd { margin:7px 0 0; overflow-wrap:anywhere; color:var(--ink); font-size:.74rem; font-weight:700; }
-.bot-heartbeat__telemetry small { display:block; margin-top:4px; color:rgba(var(--runtime-pulse-rgb),.72); font:.46rem "Geist Mono",monospace; text-transform:uppercase; transition:color .45s ease; }
+.bot-heartbeat__telemetry small { display:block; margin-top:4px; color:rgba(var(--runtime-pulse-rgb),.85); font:10px "Geist Mono",monospace; text-transform:uppercase; transition:color .45s ease; }
 .bot-heartbeat__link { padding:0!important; border-bottom:0!important; }
-.bot-heartbeat__link a { display:flex; min-height:48px; align-items:center; justify-content:space-between; padding:0 16px; color:var(--runtime-pulse-primary); font:700 .52rem "Geist Mono",monospace; letter-spacing:.06em; text-transform:uppercase; transition:color .45s ease,background .2s ease; }
+.bot-heartbeat__link a { display:flex; min-height:48px; align-items:center; justify-content:space-between; padding:0 16px; color:var(--runtime-pulse-primary); font:700 10px "Geist Mono",monospace; letter-spacing:.06em; text-transform:uppercase; transition:color .45s ease,background .2s ease; }
 .bot-heartbeat__link a:hover { background:rgba(var(--runtime-pulse-rgb),.045); }
 .bot-heartbeat--compact { grid-template-columns:minmax(0,1.42fr) minmax(300px,.58fr); border-radius:14px; }
 .bot-heartbeat--compact .bot-heartbeat__main { padding:18px 21px 15px; }
@@ -81,6 +81,6 @@
 @keyframes bot-heartbeat-dot { 0%,42%,100% { opacity:.42; transform:scale(.85); } 48%,54% { opacity:1; transform:scale(1.35); } 60% { opacity:.55; transform:scale(.94); } 66% { opacity:1; transform:scale(1.18); } }
 @keyframes bot-heartbeat-aura { 50% { opacity:.68; transform:scale(1.035); } }
 @media(max-width:1000px) { .bot-heartbeat,.bot-heartbeat--compact { grid-template-columns:1fr; } .bot-heartbeat__telemetry { border-top:1px solid rgba(var(--runtime-pulse-rgb),.13); border-left:0; } .bot-heartbeat__telemetry>div { min-height:82px; } }
-@media(max-width:620px) { .bot-heartbeat { border-radius:13px; } .bot-heartbeat__main,.bot-heartbeat--compact .bot-heartbeat__main { padding:16px; } .bot-heartbeat__header { align-items:flex-start; } .bot-heartbeat__identity>div>span { font-size:.43rem; } .bot-heartbeat__copy { margin-top:20px; } .bot-heartbeat__copy h2,.bot-heartbeat--compact .bot-heartbeat__copy h2 { font-size:clamp(2rem,10vw,2.75rem); } .bot-heartbeat__copy>span { font-size:.72rem; } .bot-heartbeat__signal,.bot-heartbeat--compact .bot-heartbeat__signal { height:104px; } .bot-heartbeat__telemetry { grid-template-columns:1fr; } .bot-heartbeat__telemetry>div,.bot-heartbeat__telemetry>div:nth-child(even) { min-height:0; border-left:0; } .bot-heartbeat__telemetry>.bot-heartbeat__link { border-bottom:0; } .bot-heartbeat__disclaimer { line-height:1.45; } }
+@media(max-width:620px) { .bot-heartbeat { border-radius:13px; } .bot-heartbeat__main,.bot-heartbeat--compact .bot-heartbeat__main { padding:16px; } .bot-heartbeat__header { align-items:flex-start; } .bot-heartbeat__identity>div>span { font-size:10px; } .bot-heartbeat__copy { margin-top:20px; } .bot-heartbeat__copy h2,.bot-heartbeat--compact .bot-heartbeat__copy h2 { font-size:clamp(2rem,10vw,2.75rem); } .bot-heartbeat__copy>span { font-size:.72rem; } .bot-heartbeat__signal,.bot-heartbeat--compact .bot-heartbeat__signal { height:104px; } .bot-heartbeat__telemetry { grid-template-columns:1fr; } .bot-heartbeat__telemetry>div,.bot-heartbeat__telemetry>div:nth-child(even) { min-height:0; border-left:0; } .bot-heartbeat__telemetry>.bot-heartbeat__link { border-bottom:0; } .bot-heartbeat__disclaimer { line-height:1.45; } }
 @media(prefers-reduced-motion:reduce) { .bot-heartbeat,.bot-heartbeat::before,.bot-heartbeat::after,.bot-heartbeat__signal,.bot-heartbeat__signal svg,.bot-heartbeat__trace,.bot-heartbeat__track,.bot-heartbeat__baseline { transition:none!important; } .bot-heartbeat__aura,.bot-heartbeat__glyph i,.bot-heartbeat__badge i,.bot-heartbeat__trace,.bot-heartbeat__sweep { animation:none!important; } .bot-heartbeat__trace { stroke-dasharray:none; stroke-dashoffset:0; } .bot-heartbeat__sweep { display:none; } }
 @media(forced-colors:active) { .bot-heartbeat { --runtime-pulse-primary:CanvasText; --runtime-pulse-rgb:255,255,255; border-color:CanvasText; background:Canvas; } .bot-heartbeat::before,.bot-heartbeat::after,.bot-heartbeat__aura,.bot-heartbeat__grid,.bot-heartbeat__sweep { display:none; } .bot-heartbeat__badge,.bot-heartbeat__glyph { border-color:CanvasText; } .bot-heartbeat__trace,.bot-heartbeat__track,.bot-heartbeat__baseline { stroke:CanvasText; } .bot-heartbeat__telemetry { border-color:CanvasText; background:Canvas; } }

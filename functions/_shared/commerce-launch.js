@@ -1,4 +1,5 @@
 import { worldwideShippingMarkets } from "./shipping-core.js";
+import { activeRatebook, shippingWeightCoverage } from "./shipping-ratebook.js";
 import { transactionGuard, LAUNCH_AUTHORITY_SQL } from "./commerce-transaction-guards.js";
 import { AuthFailure, cleanText, nowIso, randomId } from "./auth-core.js";
 import { prepareBusinessProfileMutation, requireCommerceDb, writeCommerceAudit, decryptCommerceSecret } from "./commerce-core.js";
@@ -75,6 +76,8 @@ export async function commerceLaunchPlan(env) {
     merchantDecryptable = Boolean(name?.trim() && phone?.trim() && Object.values(JSON.parse(address)).some((value) => typeof value === "string" && value.trim()));
   } catch { /* Safe configured-state projection; never log the encrypted payload. */ }
   const receiptReady = (templates?.results || []).some((t) => t.template_key === "payment_receipt" && t.status === "ready" && Number(t.enabled) === 1);
+  const merchantPolicy = settings.shipping_strategy === "merchant_weight_bands" ? await activeRatebook(db) : null;
+  const merchantCoverage = merchantPolicy ? await shippingWeightCoverage(db) : null;
   const hardGates = [
     gate("merchant_identity", merchantDecryptable && Boolean(cleanText(business?.trading_name, 160) && business?.country_code === "CA" && business?.currency_code === "CAD" && cleanText(business?.support_email || business?.public_contact_email, 254) && business?.private_phone_ciphertext && business?.private_address_ciphertext && business?.legal_business_name_ciphertext), "Required transaction-disclosure facts are stored encrypted as operator-entered data. No address or telephone-format validator claims legal or real-world verification."),
     gate("transaction_disclosure_checkout", Boolean(agreementSchema?.name) && Number(settings.commerce_agreement_schema_version) >= 1, "The scoped pre-agreement disclosure and immutable accepted-agreement schema are installed; activation enables the transaction-only projection atomically."),
@@ -86,7 +89,7 @@ export async function commerceLaunchPlan(env) {
     gate("printful_store", printful?.status === "connected" && printful?.integration_mode === "fulfillment" && String(printful?.external_account_id || "") === "18668025" && printful?.metadata?.api_configured === true && hasPrintfulSecret(env), "The native Printful target store 18668025 is verified."),
     gate("catalogue", Number(counts?.eligible_variants || 0) > 0 && Number(counts?.eligible_sellable_variants || 0) === Number(counts?.eligible_variants || 0) && Number(counts?.ineligible_sellable_variants || 0) === 0, "Every eligible target-verified variant is sellable and blocked variants remain unavailable."),
     gate("catalogue_migration_terminal", new Set(["completed", "completed_with_blocked_products"]).has(migration?.status) && migration?.phase === "completed" && !migration?.step_lease_token && new Set(["completed", "completed_with_blocked_products"]).has(migrationState.finalStatus || migration?.status), "The permanent catalogue migration is terminal with no active lease and remains outside the launch workflow."),
-    gate("shipping", settings.shipping_strategy === "printful_dynamic" && worldwideShippingMarkets().every(market => activeMarkets.some(active => active.country_code === market.countryCode)), "Worldwide shipping destinations are configured; server-issued Printful rates determine product and destination availability."),
+    gate("shipping", (settings.shipping_strategy === "printful_dynamic" || Boolean(merchantPolicy && merchantCoverage && !merchantCoverage.missing.length)) && worldwideShippingMarkets().every(market => activeMarkets.some(active => active.country_code === market.countryCode)), merchantPolicy ? `Merchant weight-band rates published; ${merchantCoverage.covered}/${merchantCoverage.total} usable variant weights. Finite method ceilings are valid; out-of-range carts fail individually. Printful still determines serviceability.` : "Worldwide shipping destinations are configured; server-issued Printful rates determine product and destination availability."),
     gate("customer_documents", receiptReady, "The branded receipt renderer is ready; accepted agreements are retained with completed orders. Tax invoices are not applicable under not_collecting."),
     gate("operations_worker", settings.commerce_operations_worker_configured === true, "The scheduled Commerce Operations Worker and D1 job authority are configured."),
     gate("order_confirmation_delivery", orderConfirmationDeliveryReady, "Resend and the order-confirmation template are ready. Global Customer Sending is enabled atomically with the store."),
@@ -309,7 +312,7 @@ async function verifyActivationReadback(db, revision) {
   const profile = await db.prepare("SELECT revision,owner_attested_revision,transaction_disclosure_authorized_revision FROM commerce_business_profiles WHERE id='primary'").first();
   const state = await db.prepare("SELECT preferred_provider,stripe_enabled,paypal_store_checkout_enabled,paypal_live_capture_enabled,emergency_paused FROM commerce_payment_provider_state WHERE id='primary'").first();
   if (!Object.entries(STORE_ACTIVATION_SETTINGS).every(([key,value])=>settings[key]===value)
-      || settings.commerce_emergency_paused === true || settings.tax_calculation_provider !== "not_collecting" || settings.shipping_strategy !== "printful_dynamic"
+      || settings.commerce_emergency_paused === true || settings.tax_calculation_provider !== "not_collecting" || !["printful_dynamic", "merchant_weight_bands"].includes(settings.shipping_strategy)
       || Number(profile?.revision)!==revision || Number(profile?.owner_attested_revision)!==revision || Number(profile?.transaction_disclosure_authorized_revision)!==revision
       || state?.preferred_provider!=="paypal" || Number(state?.stripe_enabled)!==0 || Number(state?.paypal_store_checkout_enabled)!==1 || Number(state?.paypal_live_capture_enabled)!==1 || Number(state?.emergency_paused)!==0) {
     throw new AuthFailure(503,"commerce_activation_readback_failed","Persisted activation readback differs. Refresh store status before retrying.");

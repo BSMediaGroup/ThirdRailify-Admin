@@ -1,0 +1,64 @@
+import { useEffect, useState } from "react";
+import { adminApi } from "../auth/client";
+import { useAuth } from "../auth/AuthProvider";
+import { flagSource } from "../components/countryFlags";
+import "../styles/shipping-rates.css";
+
+type Band = { lowerMg: number; upperMg: number | null; amount: number };
+type Method = { id: string; name: string; status: "enabled" | "disabled" | "archived"; providerServiceId: string; estimatedDelivery: string | null; freeShippingSubtotal: number | null; bands: Band[] };
+type Zone = { id: string; name: string; countries: string[]; worldwide: boolean; methods: Method[] };
+type Book = { currency: string; exclusions: string[]; zones: Zone[] };
+type Payload = { policy: { active_ratebook_id: string | null; revision: number }; books: { id: string; revision: number; status: string; body: Book }[]; markets: { country_code: string; display_name: string }[]; coverage: { total: number; covered: number; missing: { productId: string; productName: string; variantId: string; sku: string }[] } };
+const money = (value: number) => (value / 100).toFixed(2);
+const copy = <T,>(value: T): T => structuredClone(value);
+const message = (e: unknown) => e instanceof Error ? e.message : "Shipping authority is unavailable.";
+
+export function ShippingRatesWorkspace() {
+  const { csrfToken, hasCapability } = useAuth();
+  const [payload, setPayload] = useState<Payload | null>(null), [book, setBook] = useState<Book | null>(null);
+  const [error, setError] = useState(""), [notice, setNotice] = useState(""), [busy, setBusy] = useState(false);
+  const [zoneId, setZoneId] = useState("ca"), [editing, setEditing] = useState<"destinations" | string | null>(null);
+  const [country, setCountry] = useState("CA"), [weight, setWeight] = useState("6600"), [subtotal, setSubtotal] = useState("0"), [result, setResult] = useState("");
+  const draft = payload?.books.find(b => b.status === "draft"), dirty = Boolean(book && draft && JSON.stringify(book) !== JSON.stringify(draft.body));
+  const canManage = hasCapability("commerce.operations.manage");
+  const install = (p: Payload) => { setPayload(p); setBook(copy(p.books.find(b => b.status === "draft")!.body)); };
+  useEffect(() => { let alive = true; adminApi<Payload>("/api/admin/commerce/shipping-rates").then(p => { if (alive) install(p); }).catch(e => { if (alive) setError(message(e)); }); return () => { alive = false; }; }, []);
+  useEffect(() => { if (!dirty) return; const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; }; window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn); }, [dirty]);
+  const update = (fn: (next: Book) => void) => setBook(current => { const next = copy(current!); fn(next); return next; });
+  async function save(action: "save" | "publish") {
+    setBusy(true); setError(""); setNotice("");
+    try { install(await adminApi<Payload>("/api/admin/commerce/shipping-rates", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ action, ratebookId: draft!.id, revision: draft!.revision, body: book }) })); setNotice(action === "publish" ? "Shipping rates published. Store activation is unchanged." : "Draft saved."); setEditing(null); }
+    catch (e) { setError(message(e)); } finally { setBusy(false); }
+  }
+  async function calculate() {
+    setResult("Calculating…");
+    try { const r = await adminApi<{ options: { zoneName: string; name: string; weightMg: number; amount: number; bracket: Band }[] }>("/api/admin/commerce/shipping-rates/calculate", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ body: book, country, weight, unit: "g", subtotalAmount: Math.round(Number(subtotal) * 100) }) }); setResult(r.options.map(o => `${o.zoneName} · ${o.name} · ${o.weightMg / 1000} g · > ${o.bracket.lowerMg / 1000} g to ${o.bracket.upperMg === null ? "unlimited" : o.bracket.upperMg / 1000 + " g inclusive"} · CAD ${money(o.amount)}`).join("\n")); }
+    catch (e) { setResult(message(e)); }
+  }
+  const zone = book?.zones.find(z => z.id === zoneId), method = zone?.methods.find(m => m.id === editing);
+  return <section className="shipping-rates" id="shipping-rates" aria-labelledby="shipping-rates-title">
+    <header><p className="eyebrow">Merchant customer pricing</p><h2 id="shipping-rates-title">Shipping rates</h2><p><img src={flagSource("CA")} width="24" height="16" alt="Canadian currency" /> CAD · Rate by weight · One charge for the physical cart. Provider fulfillment costs remain separate.</p></header>
+    {error && <p role="alert" className="admin-alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {!book || !payload ? <p>Loading shipping ratebook…</p> : <>
+      <p>Draft revision {draft?.revision} · {payload.policy.active_ratebook_id ? `Published: ${payload.policy.active_ratebook_id} (policy revision ${payload.policy.revision})` : "Not published; existing customer pricing remains active."}</p>
+      <div className="shipping-zone-grid">{book.zones.map(z => <article key={z.id} className={z.id === zoneId ? "is-selected" : ""}>
+        <h3 className="shipping-zone-heading"><img src={flagSource(z.worldwide ? null : z.countries[0])} width="30" height="20" alt="" aria-hidden="true" />{z.name}</h3><p>{z.worldwide ? "Remaining supported destinations" : z.countries.join(", ") || "No destinations assigned"}</p>
+        {z.methods.map(m => <div key={m.id}><strong>{m.name}</strong><p>{m.status} · Draft</p><ul>{m.bands.map((b, i) => <li key={i}>&gt; {b.lowerMg / 1000}–{b.upperMg === null ? "And up" : `${b.upperMg / 1000} g inclusive`}: CAD {money(b.amount)}</li>)}</ul><p>Maximum: {m.bands.at(-1)?.upperMg === null ? "Unlimited" : `${(m.bands.at(-1)?.upperMg || 0) / 1000} g`}</p><button type="button" onClick={() => { setZoneId(z.id); setEditing(m.id); }}>Edit rate</button></div>)}
+        <div className="shipping-actions"><button type="button" onClick={() => { setZoneId(z.id); setEditing("destinations"); }}>Edit destinations</button><button type="button" disabled={!canManage} onClick={() => { const id = `method_${Date.now()}`; update(b => b.zones.find(v => v.id === z.id)!.methods.push({ id, name: "Standard Shipping", status: "disabled", providerServiceId: "STANDARD", estimatedDelivery: null, freeShippingSubtotal: null, bands: [{ lowerMg: 0, upperMg: null, amount: 0 }] })); setZoneId(z.id); setEditing(id); }}>Add shipping rate</button></div>
+      </article>)}</div>
+      {zone && editing === "destinations" && <fieldset disabled={!canManage || busy}><legend>Edit destinations — {zone.name}</legend><p>Specific countries never fall through to Worldwide. Separate territories retain their own country codes. Legacy subdivision counts are unverified.</p>{zone.worldwide ? <p>Worldwide automatically covers remaining supported countries.</p> : <div className="shipping-destinations">{payload.markets.map(m => <label key={m.country_code}><input type="checkbox" checked={zone.countries.includes(m.country_code)} onChange={e => update(b => { const z = b.zones.find(v => v.id === zone.id)!; z.countries = e.target.checked ? [...z.countries, m.country_code] : z.countries.filter(c => c !== m.country_code); })} />{m.display_name} ({m.country_code})</label>)}</div>}<label>Explicit exclusions (country codes separated by commas)<input value={book.exclusions.join(",")} onChange={e => update(b => { b.exclusions = e.target.value.toUpperCase().split(",").map(v => v.trim()).filter(Boolean); })} /></label></fieldset>}
+      {zone && method && <fieldset disabled={!canManage || busy}><legend>Edit rate — {zone.name}</legend><p>Rate by weight. Lower bounds are exclusive; upper bounds are inclusive. A finite final maximum is valid.</p><div className="shipping-fields">
+        <label>Name at checkout<input value={method.name} maxLength={100} onChange={e => update(b => { b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!.name = e.target.value; })} /></label>
+        <label>Estimated delivery time (optional)<input value={method.estimatedDelivery || ""} maxLength={240} onChange={e => update(b => { b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!.estimatedDelivery = e.target.value || null; })} /></label>
+        <label>Status<select value={method.status} onChange={e => update(b => { b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!.status = e.target.value as Method["status"]; })}><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="archived">Archived (retained)</option></select></label>
+      </div>{method.bands.map((band, index) => <div className="shipping-band" key={index}>{(["lowerMg", "upperMg", "amount"] as const).map(key => <label key={key}>{key === "lowerMg" ? "From (not including), g" : key === "upperMg" ? "Up to (including), g — blank means And up" : "Rate in CAD"}<input type="number" min="0" step={key === "amount" ? "0.01" : "0.001"} value={band[key] === null ? "" : Number(band[key]) / (key === "amount" ? 100 : 1000)} onChange={e => update(b => { b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!.bands[index][key] = (key === "upperMg" && e.target.value === "" ? null : Math.round(Number(e.target.value) * (key === "amount" ? 100 : 1000))) as never; })} /></label>)}<button type="button" onClick={() => update(b => { b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!.bands.splice(index, 1); })}>Remove range {index + 1}</button></div>)}
+        <button type="button" onClick={() => update(b => { const m = b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!; const last = m.bands.at(-1); if (last?.upperMg === null) last.upperMg = last.lowerMg + 1100000; m.bands.push({ lowerMg: last?.upperMg || 0, upperMg: null, amount: last?.amount || 0 }); })}>Add another range</button>
+        <label><input type="checkbox" checked={method.freeShippingSubtotal !== null} onChange={e => update(b => { b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!.freeShippingSubtotal = e.target.checked ? 10000 : null; })} />Free shipping threshold</label>
+        {method.freeShippingSubtotal !== null && <label>CAD merchandise subtotal before shipping and tax<input type="number" min="0.01" step="0.01" value={method.freeShippingSubtotal / 100} onChange={e => update(b => { b.zones.find(z => z.id === zone.id)!.methods.find(m => m.id === method.id)!.freeShippingSubtotal = Math.round(Number(e.target.value) * 100); })} /></label>}<p>Free shipping applies only within the method’s configured weight coverage.</p>
+      </fieldset>}
+      <div className="shipping-savebar"><p>{dirty ? "Unsaved changes. Save the draft before leaving." : "Draft is saved."}</p><div className="shipping-actions"><button type="button" disabled={!canManage || busy || !dirty} onClick={() => void save("save")}>Save draft</button><button type="button" disabled={busy || !dirty} onClick={() => { setBook(copy(draft!.body)); setEditing(null); }}>Cancel changes</button><button type="button" disabled={!canManage || busy} onClick={() => void save("publish")}>Publish ratebook</button></div></div>
+      <fieldset><legend>Test this rate</legend><p>Uses the current draft. No provider calls, quotes or transactions.</p><div className="shipping-fields"><label>Destination<select value={country} onChange={e => { setCountry(e.target.value); setResult(""); }}>{payload.markets.map(m => <option value={m.country_code} key={m.country_code}>{m.display_name}</option>)}</select></label><label>Cart shipping weight, g<input type="number" min="0.001" step="0.001" value={weight} onChange={e => setWeight(e.target.value)} /></label><label>Merchandise subtotal, CAD<input type="number" min="0" step="0.01" value={subtotal} onChange={e => setSubtotal(e.target.value)} /></label></div><button type="button" onClick={() => void calculate()}>Calculate</button><p role="status" className="shipping-result">{result}</p></fieldset>
+      <details><summary>Shipping weight coverage: {payload.coverage.covered} / {payload.coverage.total} current checkout-eligible variants</summary><p>Includes the variants’ configured checkout environments. Missing weights must be repaired before publication.</p><ul>{payload.coverage.missing.map(v => <li key={v.variantId}><a href="/products">{v.productName}</a> · {v.variantId} · {v.sku || "No SKU"}</li>)}</ul></details>
+    </>}
+  </section>;
+}

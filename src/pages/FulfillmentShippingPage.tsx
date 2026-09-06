@@ -4,6 +4,7 @@ import { AdminIcon } from "../components/AdminIcon";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { getFulfillmentShipping, type FulfillmentGate, type FulfillmentShippingPayload, type FulfillmentStatusProjection } from "../commerce/client";
 import "../styles/fulfillment-shipping.css";
+import { ShippingRatesWorkspace } from "../commerce/ShippingRatesWorkspace";
 
 const READINESS_LABELS: Array<[keyof FulfillmentShippingPayload["readiness"], string]> = [
   ["provider", "Provider"], ["catalogue", "Catalogue"], ["customerShippingData", "Customer shipping data"],
@@ -25,9 +26,10 @@ export function FulfillmentShippingPage() {
 
   return <main className="fulfillment-workspace">
     <header className="fulfillment-heading">
-      <div><p className="eyebrow">Commerce operations control plane</p><h1>Fulfillment &amp; Shipping</h1><p>Local readiness, Printful mapping, delivery dependencies, scheduled reconciliation, and production locks. This read-only workspace cannot submit or activate anything.</p></div>
-      <span className="fulfillment-lock"><AdminIcon name="shield" size={16} /> Read only / locked</span>
+      <div><p className="eyebrow">Commerce operations control plane</p><h1>Fulfillment &amp; Shipping</h1><p>Manage customer shipping rates and review Printful mapping, delivery dependencies and fulfillment readiness.</p></div>
+      <span className="fulfillment-lock"><AdminIcon name="shield" size={16} /> Provider operations protected</span>
     </header>
+    <ShippingRatesWorkspace />
     {error && <div className="admin-alert" role="alert">{error}</div>}
     {!payload && !error && <div className="commerce-state" role="status">Loading authoritative fulfillment state…</div>}
     {payload && <>

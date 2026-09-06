@@ -8,9 +8,9 @@
 .tax-readiness-summary { display: grid; min-width: 0; align-self: stretch; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.22); }
 .tax-readiness-summary > div { display: grid; grid-template-columns: minmax(115px,.65fr) minmax(0,1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 13px 15px; border-bottom: 1px solid var(--line); }
 .tax-readiness-summary > div:last-child { border-bottom: 0; }
-.tax-readiness-summary span:first-child { color: var(--quiet); font: 700 .55rem "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
+.tax-readiness-summary span:first-child { color: var(--microcopy-ink); font: 700 10.5px "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
 .tax-readiness-summary strong { min-width: 0; color: var(--cream); font-size: .73rem; font-weight: 650; overflow-wrap: anywhere; }
-.tax-status { display: inline-flex; width: fit-content; max-width: 100%; align-items: center; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--quiet); background: rgba(255,255,255,.025); font: 750 .51rem "Geist Mono",monospace; letter-spacing: .055em; line-height: 1.2; text-align: center; text-transform: uppercase; white-space: normal; }
+.tax-status { display: inline-flex; width: fit-content; max-width: 100%; align-items: center; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--quiet); background: rgba(255,255,255,.025); font: 750 10.5px "Geist Mono",monospace; letter-spacing: .055em; line-height: 1.2; text-align: center; text-transform: uppercase; white-space: normal; }
 .tax-status.is-complete,.tax-status.is-configured { color: #92e4b9; border-color: rgba(114,215,165,.38); background: rgba(114,215,165,.075); }
 .tax-status.is-incomplete,.tax-status.is-action_required,.tax-status.is-not_configured { color: #f2b398; border-color: rgba(242,141,117,.4); background: rgba(242,141,117,.07); }
 .tax-status.is-unverified { color: var(--gold-soft); border-color: rgba(243,201,40,.38); background: rgba(243,201,40,.07); }
@@ -24,11 +24,11 @@
 .tax-registration-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
 .tax-registration-card { min-width: 0; padding: 21px; border: 1px solid var(--line); border-radius: 12px; background: radial-gradient(90% 100% at 100% 0,rgba(243,201,40,.05),transparent 68%),var(--panel-soft); }
 .tax-registration-card > header,.tax-registration-card > footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.tax-registration-card > header p { margin: 0 0 5px; color: var(--gold-soft); font: .55rem "Geist Mono",monospace; letter-spacing: .09em; }
+.tax-registration-card > header p { margin: 0 0 5px; color: var(--gold-soft); font: 10.5px "Geist Mono",monospace; letter-spacing: .09em; }
 .tax-registration-card h3 { font-size: 1.45rem; }
 .tax-registration-card dl,.tax-dependency-card dl,.tax-technical dl,.document-preview-body dl { display: grid; gap: 0; margin: 18px 0 0; }
 .tax-registration-card dl > div,.tax-dependency-card dl > div,.tax-technical dl > div,.document-preview-body dl > div { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 18px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.tax-registration-card dt,.tax-dependency-card dt,.tax-technical dt { color: var(--quiet); font-size: .65rem; }
+.tax-registration-card dt,.tax-dependency-card dt,.tax-technical dt { color: var(--microcopy-ink); font-size: 12px; }
 .tax-registration-card dd,.tax-dependency-card dd,.tax-technical dd { margin: 0; color: var(--cream); font-size: .68rem; text-align: right; overflow-wrap: anywhere; }
 .tax-registration-card__notes { padding: 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: rgba(0,0,0,.18); font-size: .69rem; line-height: 1.48; overflow-wrap: anywhere; }
 .tax-registration-card > footer { align-items: center; margin-top: 17px; }
@@ -45,7 +45,7 @@
 .document-switcher button.is-active { color: var(--ink); border-color: rgba(243,201,40,.46); background: rgba(243,201,40,.075); box-shadow: inset 0 1px 0 rgba(255,225,105,.09); }
 .document-switcher button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .document-switcher span { font-size: .83rem; font-weight: 750; }
-.document-switcher small { color: var(--quiet); font: .54rem "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
+.document-switcher small { color: var(--microcopy-ink); font: 10.5px "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
 .document-editor-layout { display: grid; grid-template-columns: minmax(0,1.08fr) minmax(390px,.92fr); align-items: start; gap: 14px; }
 .document-template-editor,.document-preview-panel { min-width: 0; padding: clamp(20px,3vw,30px); border: 1px solid var(--line); border-radius: 13px; background: radial-gradient(90% 80% at 100% 0,rgba(243,201,40,.05),transparent 70%),var(--panel-soft); }
 .document-template-editor > header,.document-preview-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 20px; }
@@ -53,30 +53,30 @@
 .document-field-grid,.tax-dialog-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; }
 .tax-field { display: grid; min-width: 0; align-content: start; gap: 7px; }
 .tax-field.is-wide,.tax-dialog-grid > .is-wide,.tax-sensitive-field { grid-column: 1/-1; }
-.tax-field > span,.tax-sensitive-field > header span { color: var(--muted); font: 700 .56rem "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
+.tax-field > span,.tax-sensitive-field > header span { color: var(--muted); font: 700 11px "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
 .tax-field input,.tax-field textarea,.tax-field select { width: 100%; min-width: 0; min-height: 43px; padding: 9px 11px; resize: vertical; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #090907; font: inherit; }
 .tax-field input[type="color"] { padding: 5px; cursor: pointer; }
 .tax-field input:focus,.tax-field textarea:focus,.tax-field select:focus { border-color: var(--gold); outline: 2px solid rgba(243,201,40,.14); }
 .tax-field input:disabled,.tax-field textarea:disabled,.tax-field select:disabled { color: var(--quiet); background: rgba(255,255,255,.015); }
-.tax-field small { color: var(--quiet); font-size: .65rem; line-height: 1.4; }
+.tax-field small { color: var(--microcopy-ink); font-size: 12px; line-height: 1.4; }
 .tax-field small.is-error { color: #f2b398; }
 .document-enabled-toggle { display: flex; grid-column: 1/-1; align-items: flex-start; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
 .document-enabled-toggle input { margin-top: 3px; accent-color: var(--gold); }
 .document-enabled-toggle span { display: grid; gap: 3px; }
 .document-enabled-toggle strong { color: var(--cream); font-size: .73rem; }
-.document-enabled-toggle small { color: var(--quiet); font-size: .65rem; line-height: 1.4; }
+.document-enabled-toggle small { color: var(--microcopy-ink); font-size: 12px; line-height: 1.4; }
 .document-editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
 .document-editor-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .document-editor-actions button { margin: 0; }
-.document-editor-actions > span { color: var(--quiet); font: .56rem "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
+.document-editor-actions > span { color: var(--microcopy-ink); font: 11px "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
 .document-variable-help { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .document-variable-help summary { color: var(--gold-soft); cursor: pointer; font: 700 .6rem "Geist Mono",monospace; letter-spacing: .06em; text-transform: uppercase; }
 .document-variable-help p { color: var(--quiet); font-size: .68rem; line-height: 1.5; }
 .document-variable-help div { display: flex; flex-wrap: wrap; gap: 6px; }
-.document-variable-help code { padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: #090907; font-size: .58rem; }
+.document-variable-help code { padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: #090907; font-size: 11px; }
 .document-preview-panel { position: sticky; top: 82px; }
 .document-preview-panel > header > div { display: grid; gap: 6px; }
-.document-sample-marker { width: fit-content; padding: 5px 7px; border: 1px solid rgba(243,201,40,.48); border-radius: 4px; color: #18160d; background: #f3c928; font: 850 .52rem "Geist Mono",monospace; letter-spacing: .08em; }
+.document-sample-marker { width: fit-content; padding: 5px 7px; border: 1px solid rgba(243,201,40,.48); border-radius: 4px; color: #18160d; background: #f3c928; font: 850 10.5px "Geist Mono",monospace; letter-spacing: .08em; }
 .document-preview-panel > header small { color: var(--quiet); font-size: .65rem; }
 .document-preview-panel > iframe { display: block; width: 100%; min-height: 760px; border: 1px solid var(--line-strong); border-radius: 10px; background: #080806; }
 .document-preview-panel > footer { margin-top: 12px; padding: 12px; border-left: 2px solid var(--safe); background: rgba(114,215,165,.04); }
@@ -91,13 +91,13 @@
 .document-preview-body { padding: clamp(22px,3vw,34px); }
 .document-preview-title { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 25px; }
 .document-preview-title div { display: grid; gap: 4px; min-width: 0; }
-.document-preview-title small { color: #817a65; font: .5rem "Geist Mono",monospace; letter-spacing: .08em; }
+.document-preview-title small { color: #817a65; font: 10px "Geist Mono",monospace; letter-spacing: .08em; }
 .document-preview-title strong { color: #302d22; font-size: .68rem; overflow-wrap: anywhere; }
 .document-preview-body h3 { margin: 0 0 10px; color: #17160f; font: clamp(2rem,4vw,3rem) "American Captain",sans-serif; line-height: .95; }
 .document-preview-body > p { color: #4d493a; font-size: .75rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .document-line-items { margin-top: 24px; border-block: 1px solid rgba(23,22,15,.15); }
 .document-line-items header,.document-line-items > div { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 15px; padding: 10px 0; }
-.document-line-items header { color: #817a65; font: .5rem "Geist Mono",monospace; letter-spacing: .08em; text-transform: uppercase; }
+.document-line-items header { color: #817a65; font: 10px "Geist Mono",monospace; letter-spacing: .08em; text-transform: uppercase; }
 .document-line-items > div { color: #302d22; font-size: .67rem; }
 .document-line-items strong { font-weight: 650; overflow-wrap: anywhere; }
 .document-preview-body dl > div { border-color: rgba(23,22,15,.1); }
@@ -108,7 +108,7 @@
 .document-preview-blocks p,.document-preview-support { margin: 6px 0; color: #4d493a; font-size: .68rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .document-preview-panel article > footer { display: grid; gap: 5px; padding: 16px 21px; border-top: 1px solid rgba(23,22,15,.12); color: #4d493a; background: #e8e3d4; }
 .document-preview-panel article > footer span { font-size: .68rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.document-preview-panel article > footer small { color: #756f5c; font: .5rem/1.45 "Geist Mono",monospace; }
+.document-preview-panel article > footer small { color: #756f5c; font: 10px/1.45 "Geist Mono",monospace; }
 .tax-dependency-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
 .tax-dependency-card { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-soft); }
 .tax-dependency-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -141,7 +141,7 @@
 .tax-sensitive-field > header small { color: var(--quiet); font-size: .64rem; }
 .tax-sensitive-field .secondary-button { width: auto; margin: 0; }
 .tax-dialog form > footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
-.tax-dialog form > footer > span { color: var(--quiet); font: .55rem "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
+.tax-dialog form > footer > span { color: var(--microcopy-ink); font: 11px "Geist Mono",monospace; letter-spacing: .05em; text-transform: uppercase; }
 .tax-dialog form > footer > div { display: flex; gap: 8px; }
 .tax-dialog form > footer button { margin: 0; }
 

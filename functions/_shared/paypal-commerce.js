@@ -1,4 +1,5 @@
 import { commerceLaunchPlan } from "./commerce-launch.js";
+import { merchantOrderGuards } from "./shipping-ratebook.js";
 import { AuthFailure, cleanText, enforceRateLimit, nowIso, randomId, verifyTurnstile } from "./auth-core.js";
 import { commerceAccessForSession, decryptCommerceSecret, encryptCommerceSecret, requireCommerceDb } from "./commerce-core.js";
 import { prepareCheckoutCustomer, validateCheckoutCustomer } from "./commerce-customers.js";
@@ -106,7 +107,9 @@ export async function createPayPalStorePayment(env, request, input, session, fet
         order_id,recipient_ciphertext,destination_country_code,destination_region_code,shipping_strategy,provider,
         provider_shipping_method_id,display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at,updated_at
       ) VALUES (?,?,?,?,?,?,?,?,?,'CAD',?,?,?,?)`).bind(orderId,recipientCiphertext,shipping.recipient.countryCode,shipping.recipient.region,shipping.strategy,shipping.provider,shipping.option.providerRateId,shipping.option.name,shipping.option.amount,shipping.quoteId,shipping.quotedAt,timestamp,timestamp),
+      ...merchantOrderGuards(db, shipping),
       ...(agreement ? [agreement.statement] : []),
+      ...(shipping.option.merchantPolicy ? [db.prepare(`INSERT INTO commerce_order_shipping_policies(order_id,ratebook_id,snapshot_json,provider_cost_amount,created_at) VALUES(?,?,?,?,?)`).bind(orderId,shipping.option.merchantPolicy.ratebookId,JSON.stringify(shipping.option.merchantPolicy),shipping.option.providerCostAmount,timestamp)] : []),
       ...(customer.accountId ? [accountTransactionalMessageStatement(db, customer.accountId, {
         category:"orders",sourceType:"order.created",sourceId:orderId,title:"Order started",
         preview:"Your Third Railify order has been recorded.",

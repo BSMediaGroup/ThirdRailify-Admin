@@ -1,5 +1,7 @@
 # Third Railify Admin
 
+Readability regression files: `tests/readability-browser.test.mjs` checks Products metadata, editor captions, semantic statuses, account identity geometry and Order detail text at desktop/mobile widths. `tests/readability-fixtures.mjs` reuses existing sanitized browser fixture factories without registering their suites. Run `node --test --test-concurrency=1 tests/readability-browser.test.mjs`. The cross-application route register and visual review evidence are ignored under `X:\GIT\ThirdRailify\.artifacts\readability-complete\`; no diagnostic assets ship with Admin.
+
 ## Analytics country flags and microcopy
 
 `src/components/countryCode.ts` validates trimmed, case-normalized input against all 249 assigned ISO alpha-2 countries in the existing pinned `country-region-data@4.1.0` dataset. `countryFlags.ts` supplies both the React list and DOM map-popup renderer. Unknown, malformed and aggregate codes retain `unknown.svg`; the original AU/CA/US artwork is preserved. The remaining 246 SVGs are served locally from `public/assets/country-flags/`, vendored from [flag-icons 7.5.0](https://github.com/lipis/flag-icons/tree/v7.5.0/flags/4x3) with its MIT `LICENSE.flag-icons`. There is no runtime CDN request or new package dependency. Source tarball SHA-256: `c0b80bf0e08006a60f56621d6bc49f8c7131f4d1fef6737a165a673431f4b518`.

@@ -12,12 +12,44 @@ import { paypalPublicConfiguration, createPayPalStorePayment } from "../function
 import { PAYPAL_WEBHOOK_EVENTS } from "../functions/_shared/paypal-client.js";
 import { normalizeCartItems, normalizeDeliveryRecipient, authoritativeCartLines, resolveShippingSelection, worldwideShippingMarkets } from "../functions/_shared/shipping-core.js";
 import { validateCheckoutCustomer, prepareCheckoutCustomer } from "../functions/_shared/commerce-customers.js";
+import { shippingManagerPayload, saveShippingWeights, mutateShippingRatebook } from "../functions/_shared/shipping-ratebook.js";
+import { createShippingQuote } from "../functions/_shared/shipping-core.js";
 
 const master={accountId:"synthetic-owner",account:{adminLevel:"master"}};
 const PHONE="Téléphone ☎ owner extension 四";
 const ADDRESS="Lieu privé — arrière bâtiment";
 const request=()=>new Request("https://thirdrailify.com/api/commerce/agreement",{method:"POST",headers:{Origin:"https://thirdrailify.com"}});
 const confirm=plan=>({confirmation:"SAVE, CONFIRM & ENABLE STORE",expectedRevision:plan.revision,expectedDigest:plan.digest,businessProfileRevision:plan.business.revision,ownerAttestation:true,transactionDisclosureAuthorization:true,productionEnvironment:"production"});
+
+test("merchant shipping agrees across agreement, mocked PayPal, order, receipt and email; established orders never reprice",async t=>{
+  const {env,db,body}=await fixture(t);
+  env.PRINTFUL_API_TOKEN="synthetic-provider-token";
+  const manager=await shippingManagerPayload(env),draft=manager.books.find(b=>b.status==="draft");
+  await saveShippingWeights(env,"product-test-001",{assignments:[{variantId:null,revision:0,value:"1100",unit:"g",provenance:"Synthetic measured fixture"}]});
+  await mutateShippingRatebook(env,{action:"publish",ratebookId:draft.id,revision:draft.revision,body:draft.body});
+  const plan=await commerceLaunchPlan(env);assert.equal(plan.hardGates.find(g=>g.id==="shipping").ready,true);await activateCommerceLaunch(env,confirm(plan),master);
+  const quote=await createShippingQuote(env,request(),{items:body.items,recipient:body.recipient},async()=>Response.json({code:200,result:[{id:"STANDARD",name:"Provider service",rate:"13.50",currency:"CAD"}]}));
+  const checkout={...body,quoteId:quote.quote.id,shippingOptionId:quote.quote.options[0].id};
+  const offer=await offerCheckoutAgreement(env,request(),checkout,null);assert.equal(offer.agreement.totals.shippingAmount,2300);assert.equal(offer.agreement.totals.totalAmount,8300);
+  let creates=0;
+  const mockedPayPal=async(url,init)=>{
+    if(url.endsWith("/v1/oauth2/token"))return Response.json({access_token:"synthetic-token",token_type:"Bearer",expires_in:3600});
+    assert.ok(url.endsWith("/v2/checkout/orders"));creates++;
+    const payment=JSON.parse(init.body),unit=payment.purchase_units[0];assert.equal(unit.amount.value,"83.00");assert.equal(unit.amount.breakdown.shipping.value,"23.00");
+    return Response.json({id:"MERCHANTPOLICY1",intent:"CAPTURE",status:"CREATED",purchase_units:[{reference_id:unit.reference_id,custom_id:unit.custom_id,amount:unit.amount}]},{status:201});
+  };
+  const accepted={...checkout,agreementId:offer.agreement.id,agreementToken:offer.acceptanceToken,agreementAccepted:true};
+  await createPayPalStorePayment(env,request(),accepted,null,mockedPayPal);
+  const order=await db.prepare("SELECT id,shipping_amount,customer_gross_amount FROM commerce_orders WHERE checkout_request_id=?").bind(body.checkoutRequestId).first();assert.equal(order.shipping_amount,2300);assert.equal(order.customer_gross_amount,8300);
+  const stored=await db.prepare("SELECT * FROM commerce_order_shipping_policies WHERE order_id=?").bind(order.id).first();assert.equal(stored.provider_cost_amount,1350);assert.equal(JSON.parse(stored.snapshot_json).weight.totalMg,1100000);
+  const delivery=await db.prepare("SELECT provider_shipping_method_id,display_shipping_method,shipping_amount FROM commerce_order_delivery_snapshots WHERE order_id=?").bind(order.id).first();assert.equal(delivery.provider_shipping_method_id,"STANDARD");assert.equal(delivery.display_shipping_method,"Standard Shipping (CA)");assert.equal(delivery.shipping_amount,2300);
+  await saveShippingWeights(env,"product-test-001",{assignments:[{variantId:null,revision:1,value:"6601",unit:"g",provenance:"Synthetic later revision"}]});
+  await createPayPalStorePayment(env,request(),accepted,null,mockedPayPal);assert.equal(creates,1);
+  await db.prepare("UPDATE commerce_orders SET payment_status='paid' WHERE id=?").bind(order.id).run();
+  const receipt=await ensureCompletedOrderReceipt(env,order.id),doc=await customerDocumentByToken(env,receipt.token);assert.equal(doc.document.total,8300);assert.equal(doc.document.shipping,2300);
+  const mail=await renderOrderLifecycleEmail(env,order.id,"order_confirmation");assert.match(mail.rendered.text,/83\.00/);assert.match((await acceptedAgreementAppendix(env,order.id)).text,/Shipping \(Standard Shipping \(CA\)\): 23\.00 CAD/);
+  assert.equal((await db.prepare("SELECT customer_gross_amount FROM commerce_orders WHERE id=?").bind(order.id).first()).customer_gross_amount,8300);
+});
 
 async function fixture(t) {
   const h=await createCommerceDatabases();t.after(h.dispose);const db=h.commerceDb;

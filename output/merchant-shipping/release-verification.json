@@ -1,0 +1,68 @@
+{
+  "settingsPreservationVerified": true,
+  "historicalPreservationEvidence": "Migration creates new tables only; no historical-order or private-profile mutation was issued. Historical figures below are post-deployment readback, not a before/after checksum.",
+  "migration": [
+    {
+      "name": "0033_merchant_shipping_ratebook.sql",
+      "applied_at": "2026-09-06 13:00:04"
+    }
+  ],
+  "ratebook": {
+    "id": "wix-five-zone-20260906",
+    "revision": 1,
+    "status": "draft"
+  },
+  "policy": {
+    "id": "primary",
+    "active_ratebook_id": null,
+    "revision": 1
+  },
+  "coverage": {
+    "total": 113,
+    "covered": 0,
+    "missing": 113,
+    "environments": [
+      "test"
+    ]
+  },
+  "historicalOrders": 3,
+  "foreignKeyViolations": 0,
+  "probes": [
+    {
+      "origin": "https://admin.thirdrailify.com",
+      "status": 200,
+      "bundle": "/assets/index-DLklXtCF.js",
+      "hashVerified": true
+    },
+    {
+      "origin": "https://thirdrailify.com",
+      "status": 200,
+      "bundle": "/assets/index-CmFFrXui.js",
+      "hashVerified": true
+    },
+    {
+      "url": "https://admin.thirdrailify.com/api/admin/commerce/shipping-rates",
+      "status": 401,
+      "json": true,
+      "error": "unauthenticated"
+    },
+    {
+      "url": "https://thirdrailify.com/api/commerce/shipping-markets",
+      "status": 200,
+      "json": true,
+      "destinations": 242
+    },
+    {
+      "url": "https://thirdrailify.com/api/commerce/payment-config",
+      "status": 200,
+      "json": true,
+      "storeCheckoutEnabled": false,
+      "donationsEnabled": true,
+      "stripe": {
+        "configured": true,
+        "enabled": false,
+        "preferred": false
+      }
+    }
+  ]
+}

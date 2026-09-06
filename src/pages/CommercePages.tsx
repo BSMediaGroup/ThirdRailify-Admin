@@ -731,6 +731,7 @@ function CollectionManagementEditor({ collectionId, csrfToken, canManage, onClos
 
 function CollectionProductIdentity({ product }: { product: CollectionProductListPayload["items"][number] }) { return <span className="collection-product-identity"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" && product.status === "active" ? "Public" : "Hidden"} · {product.priceLabel}</small></span></span>; }
 
+import { ProductShippingWeights } from "../commerce/ProductShippingWeights";
 function ProductMerchandisingEditor({ product, collections, csrfToken, canManage, onClose, onSaved, onError }: { product: MerchandisingProduct; collections: CommerceCollection[]; csrfToken: string | null; canManage: boolean; onClose: () => void; onSaved: (product: MerchandisingProduct, message: string) => void; onError: (message: string) => void }) {
   const [form, setForm] = useState(() => productForm(product));
   const [variantId, setVariantId] = useState(product.variants[0]?.id || "");
@@ -785,6 +786,7 @@ function ProductMerchandisingEditor({ product, collections, csrfToken, canManage
       <div className="merchandising-savebar"><p>{!providerWritable ? "Archived products remain read only." : uploading ? `${uploading} image upload${uploading === 1 ? "" : "s"} in progress. Product association will wait.` : dirty ? "Unsaved product changes. Provider identity and migration provenance remain read-only." : "Product is up to date. Provider identity and migration provenance are read-only."}</p><button className="button-link" type="submit" disabled={!providerWritable || !dirty || !canManage || !csrfToken || saving || Boolean(uploading)}>{saving ? "Saving…" : "Save product"}</button></div>
     </form>
     <section className="commerce-variant-manager" aria-labelledby="variant-editor-title"><SectionTitle id="variant-editor-title" eyebrow="Variant authority" title={`Variants (${product.variants.length})`} />{product.variants.length ? <><Field label="Choose variant"><select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{product.variants.map((entry) => <option key={entry.id} value={entry.id}>{entry.displayLabel} — {formatCad(entry.unitAmount)}</option>)}</select></Field>{variant && <VariantMerchandisingEditor key={variant.id} product={product} variant={variant} csrfToken={csrfToken} canManage={canManage && providerWritable} onSaved={onSaved} onError={onError} />}</> : <CommerceState>No variants are attached to this product.</CommerceState>}</section>
+    <ProductShippingWeights productId={product.id} csrfToken={csrfToken} canManage={canManage && providerWritable} />
   </section></CommerceEditorModal>;
 }
 

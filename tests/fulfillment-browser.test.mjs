@@ -20,11 +20,13 @@ test("Fulfillment & Shipping is a responsive, truthful, non-mutating operations 
       if (path === "/api/auth/session") return json(route, session());
       if (path === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
       if (path === "/api/admin/commerce/fulfillment") return json(route, fulfillmentPayload(fixture));
+      if (path === "/api/admin/commerce/shipping-rates") return json(route, { ok: true, policy: { active_ratebook_id: null, revision: 1 }, books: [{ id: "fixture-draft", revision: 1, status: "draft", body: { currency: "CAD", exclusions: [], zones: [] } }], markets: [], coverage: { total: 0, covered: 0, missing: [] } });
       return json(route, { ok: false, error: "not_found" }, 404);
     });
     await page.goto(`${PREVIEW_ORIGIN}/COMMERCE/FULFILLMENT`); await page.waitForURL(`${PREVIEW_ORIGIN}/commerce/fulfillment`);
     await page.getByRole("heading", { level: 1, name: "Fulfillment & Shipping" }).waitFor();
-    assert.equal(await page.getByText("Read only / locked", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Provider operations protected", { exact: true }).count(), 1);
+    await page.getByText("Draft Only", { exact: true }).first().waitFor();
     assert.equal(await page.getByText("Draft Only", { exact: true }).count() >= 1, true);
     assert.equal(await page.getByText("Encrypted customer delivery snapshots", { exact: true }).count(), 1);
     assert.equal(await page.getByText("The quote adapter is implemented, but the canonical strategy remains unconfigured and fail-closed.", { exact: true }).count(), 1);

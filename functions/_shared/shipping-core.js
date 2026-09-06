@@ -1,5 +1,6 @@
 import { AuthFailure, cleanText, enforceRateLimit, nowIso, randomId, verifyTurnstile } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
+import { merchantCartRates, validateMerchantSelection } from "./shipping-ratebook.js";
 
 const PRINTFUL_SHIPPING_RATES_URL = "https://api.printful.com/shipping/rates";
 const SHIPPING_QUOTE_TTL_MS = 15 * 60 * 1000;
@@ -157,12 +158,23 @@ export async function createShippingQuote(env, request, input, fetchImpl = fetch
   const cartFingerprint = await authoritativeCartFingerprint(lines);
   const addressFingerprint = await recipientFingerprint(recipient);
   const requiresShipping = lines.some((line) => line.requiresShipping);
-  const strategy = requiresShipping ? configuration.strategy : "none";
+  // This legacy column describes the provider service-resolution path. Merchant
+  // customer-pricing authority is stored separately on each option and order.
+  const strategy = requiresShipping ? "printful_dynamic" : "none";
   const provider = requiresShipping ? "printful" : null;
+  const merchantRates = requiresShipping && configuration.strategy === "merchant_weight_bands"
+    ? await merchantCartRates(db, lines, recipient.countryCode, subtotalAmount) : null;
   const providerRates = requiresShipping
     ? await requestPrintfulShippingRates(env, recipient, lines, fetchImpl)
     : [{ providerRateId: null, name: "No shipping required", amount: 0, currency: "CAD", minDeliveryDays: null, maxDeliveryDays: null, minDeliveryDate: null, maxDeliveryDate: null }];
-  const options = await Promise.all(providerRates.map(async (rate, index) => ({
+  const customerRates = merchantRates ? merchantRates.flatMap(rate => {
+    const service = providerRates.find(p => p.providerRateId === rate.providerServiceId);
+    return service ? [{ providerRateId: service.providerRateId, providerCostAmount: service.amount,
+      name: rate.name, amount: rate.amount, currency: "CAD", merchantPolicy: rate.policy,
+      estimatedDelivery: rate.estimatedDelivery, minDeliveryDays: null, maxDeliveryDays: null, minDeliveryDate: null, maxDeliveryDate: null }] : [];
+  }) : providerRates;
+  if (!customerRates.length) throw new AuthFailure(409, "shipping_service_unavailable", "The configured shipping service is not available for this basket and destination.");
+  const options = await Promise.all(customerRates.map(async (rate, index) => ({
     optionId: `shr_${(await sha256Hex(`${cartFingerprint}\n${addressFingerprint}\n${rate.providerRateId || "none"}\n${index}`)).slice(0, 24)}`,
     ...rate,
     totalAmount: checkedTotal(subtotalAmount, rate.amount),
@@ -210,6 +222,12 @@ export async function resolveShippingSelection(db, { lines, recipient, quoteId, 
   const options = parseQuoteOptions(quote.rate_options_json);
   const selected = options.find((option) => option.optionId === selectedId);
   if (!selected) throw new AuthFailure(409, "shipping_option_invalid", "The selected shipping method is not part of this quote.");
+  const pricing = await db.prepare("SELECT value_json FROM commerce_settings WHERE setting_key='shipping_strategy'").first();
+  if (selected.merchantPolicy) {
+    if (parseJson(pricing?.value_json, null) !== "merchant_weight_bands") throw new AuthFailure(409, "shipping_quote_policy_changed", "Shipping pricing changed. Request a new quote.");
+    await validateMerchantSelection(db, lines, normalizedRecipient.countryCode, selected, authoritativeSubtotal(lines));
+  }
+  else if (parseJson(pricing?.value_json, null) === "merchant_weight_bands" && lines.some(line => line.requiresShipping)) throw new AuthFailure(409, "shipping_quote_policy_changed", "Shipping pricing changed. Request a new quote.");
   return {
     quoteId: id, quotedAt: cleanText(quote.created_at, 80), expiresAt: cleanText(quote.expires_at, 80),
     strategy: quote.shipping_strategy, provider: quote.provider || null,
@@ -282,7 +300,7 @@ async function requireShippingConfiguration(env, db) {
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, parseJson(row.value_json, null)]));
   const strategy = cleanText(settings.shipping_strategy, 80).toLowerCase() || "unconfigured";
   if (strategy === "unconfigured") throw new AuthFailure(409, "shipping_unavailable", "Shipping calculation is not available yet.");
-  if (strategy !== "printful_dynamic") throw new AuthFailure(409, "shipping_strategy_unsupported", "Shipping calculation is not available for the configured strategy.");
+  if (!["printful_dynamic", "merchant_weight_bands"].includes(strategy)) throw new AuthFailure(409, "shipping_strategy_unsupported", "Shipping calculation is not available for the configured strategy.");
   const metadata = parseJson(provider?.safe_metadata_json, {});
   if (!provider || provider.status !== "connected" || provider.integration_mode !== "fulfillment" || String(provider.currency_code || "").toUpperCase() !== "CAD" || metadata.api_configured !== true || !String(env?.PRINTFUL_API_TOKEN || "").trim()) throw new AuthFailure(503, "shipping_provider_not_ready", "The shipping provider is not configured for rate calculation.");
   const allowedCountries = (marketsResult?.results || []).map((row) => cleanText(row.country_code, 2).toUpperCase()).filter(Boolean);
@@ -318,6 +336,7 @@ function parseQuoteOptions(value) {
   const parsed = parseJson(value, null);
   if (!Array.isArray(parsed) || !parsed.length || parsed.length > 20) throw new AuthFailure(503, "shipping_quote_invalid", "The stored shipping quote is invalid.");
   return parsed.map((option) => ({
+    ...(option.merchantPolicy ? { merchantPolicy: option.merchantPolicy, providerCostAmount: minorAmount(option.providerCostAmount), estimatedDelivery: option.estimatedDelivery || null } : {}),
     optionId: optionIdentifier(option?.optionId), providerRateId: option?.providerRateId === null ? null : providerMethodId(option?.providerRateId),
     name: displayText(option?.name, 100, "shipping method"), amount: minorAmount(option?.amount), currency: option?.currency === "CAD" ? "CAD" : invalidQuote(),
     minDeliveryDays: optionalPositiveInteger(option?.minDeliveryDays, 365), maxDeliveryDays: optionalPositiveInteger(option?.maxDeliveryDays, 365),
@@ -325,7 +344,7 @@ function parseQuoteOptions(value) {
   }));
 }
 
-function publicRateOption(option) { return { id: option.optionId, name: option.name, amount: option.amount, currency: option.currency, totalAmount: option.totalAmount, delivery: option.minDeliveryDays || option.maxDeliveryDays || option.minDeliveryDate || option.maxDeliveryDate ? { minDays: option.minDeliveryDays, maxDays: option.maxDeliveryDays, minDate: option.minDeliveryDate, maxDate: option.maxDeliveryDate } : null }; }
+function publicRateOption(option) { return { id: option.optionId, name: option.name, amount: option.amount, currency: option.currency, totalAmount: option.totalAmount, delivery: option.estimatedDelivery ? { text: option.estimatedDelivery } : option.minDeliveryDays || option.maxDeliveryDays || option.minDeliveryDate || option.maxDeliveryDate ? { minDays: option.minDeliveryDays, maxDays: option.maxDeliveryDays, minDate: option.minDeliveryDate, maxDate: option.maxDeliveryDate } : null }; }
 function safeField(value, maximum, label, required) { const raw = String(value ?? ""); if (raw.length > maximum * 2) throw new AuthFailure(400, "delivery_field_too_long", `The ${label} is too long.`); const text = raw.trim().replace(/[ \t]+/g, " "); if (required && !text) throw new AuthFailure(400, "delivery_field_required", `The ${label} is required.`); if (text.length > maximum) throw new AuthFailure(400, "delivery_field_too_long", `The ${label} is too long.`); if (/[\u0000-\u001f\u007f<>]/.test(text)) throw new AuthFailure(400, "delivery_field_unsafe", `The ${label} contains unsupported characters.`); return text; }
 function safePhone(value) { const phone = safeField(value, 32, "phone number", false); if (!phone) return null; if (!/^\+?[0-9][0-9 ().-]{5,30}$/.test(phone)) throw new AuthFailure(400, "delivery_phone_invalid", "Enter a valid phone number format."); return phone; }
 function postalCodeValid(value, country) { if (!REGION_REQUIRED_COUNTRIES.has(country)) return true; if (!/^[A-Z0-9][A-Z0-9 -]{1,22}[A-Z0-9]$/.test(value)) return false; if (country === "CA") return /^[A-Z]\d[A-Z][ -]?\d[A-Z]\d$/.test(value); if (country === "US") return /^\d{5}(?:-\d{4})?$/.test(value); if (country === "AU") return /^\d{4}$/.test(value); return true; }
