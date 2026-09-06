@@ -168,6 +168,7 @@ export type MerchandisingVariant = {
   provider: { storeId: string | null; presence: string; lastSeenAt: string | null; reconciledAt: string | null; snapshotFingerprint: string | null; archivedAt: string | null }; updatedAt: string;
 };
 export type MerchandisingProduct = {
+  saleRestriction?: { enabled: boolean; reason: "competition_prize" | "display_only" };
   publication?: { displayable: boolean; canPublish: boolean; reasons: string[]; eligibleVariants: number; publicVariants: number; exclusions: Record<string, number> };
   id: string; slug: string; title: string; description: string; primaryImageUrl: string | null; additionalImages: string[];
   categories: string[]; collectionIds: string[]; tags: string[]; status: string; visibility: string; currencyCode: string; unitAmount: number | null;

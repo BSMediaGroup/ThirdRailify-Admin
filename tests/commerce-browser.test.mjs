@@ -6,13 +6,45 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import { chromium } from "playwright-core";
 
-const ORIGIN = "http://127.0.0.1:4199";
+const ORIGIN = process.env.COMMERCE_BROWSER_ORIGIN || "http://127.0.0.1:4199";
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const RESULTS = join(tmpdir(), "thirdrailify-admin-commerce-browser");
 const IMAGE = "https://files.cdn.printful.com/files/admin-shop-v2-fixture.png";
 const IMAGE_TWO = "https://static.wixstatic.com/media/admin-shop-v2-back.svg";
 const IMAGE_THREE = "https://static.wixstatic.com/media/admin-shop-v2-detail.svg";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+
+test("special product status saves independently from public visibility", async t => {
+  await mkdir("output/special-products", { recursive: true });
+  const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", new URL(ORIGIN).port], { stdio: "ignore" }); t.after(() => server.kill()); await waitForServer();
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--disable-features=LocalNetworkAccessChecks"] }); t.after(() => browser.close());
+  for (const width of [1440, 390]) {
+    const { context, page, savedBodies, errors } = await fixturePage(browser, width, 950);
+    await page.route("**/shipping-weights", route => json(route, { weights: [], variants: [] }));
+    await page.goto(ORIGIN + "/products", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Edit product", exact: true }).first().click();
+    const dialog = page.getByRole("dialog", { name: "BLEH | Unisex classic tee" });
+    const restriction = dialog.getByRole("switch", { name: /Not for sale/ });
+    await dialog.getByText("Not for sale", { exact: true }).click();
+    assert.equal(await restriction.isChecked(), true);
+    assert.equal(await dialog.getByLabel("Public visibility").inputValue(), "public");
+    await dialog.getByLabel("Special status label").selectOption("competition_prize");
+    await dialog.getByRole("button", { name: "Save product", exact: true }).click();
+    await page.getByText("Merchandising saved", { exact: true }).waitFor();
+    assert.deepEqual(savedBodies[0].saleRestriction, { enabled: true, reason: "competition_prize" });
+    assert.equal(savedBodies[0].visibility, "public");
+    await dialog.getByLabel("Public visibility").selectOption("private");
+    await dialog.getByLabel("Special status label").selectOption("display_only");
+    await dialog.getByRole("button", { name: "Save product", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.merchandising-savebar button')?.disabled === true);
+    assert.deepEqual(savedBodies[1].saleRestriction, { enabled: true, reason: "display_only" });
+    assert.equal(savedBodies[1].visibility, "private");
+    await restriction.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `output/special-products/editor-${width}.png` });
+    assert.equal(await noOverflow(page), true); assert.deepEqual(errors, []);
+    await context.close();
+  }
+});
 
 test("Admin Products and Collections render real imagery, scoped dirty rails, nested navigation, and assignment controls responsively", async (t) => {
   await mkdir(RESULTS, { recursive: true }); const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4199"], { stdio: "ignore" }); t.after(() => server.kill()); await waitForServer();
@@ -51,7 +83,7 @@ test("Admin Products and Collections render real imagery, scoped dirty rails, ne
     await productDialog.getByLabel("Title").fill("BLEH edited but unsaved"); await productDialog.getByLabel("Upload / replace image").setInputFiles({ name: "new-primary.png", mimeType: "image/png", buffer: PNG }); await productDialog.getByText("new-primary.png").waitFor(); await productDialog.getByText(/Uploaded .* save product to publish/).waitFor();
     await productDialog.getByLabel("Add images").setInputFiles([{ name: "gallery-ok.png", mimeType: "image/png", buffer: PNG }, { name: "gallery-bad.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg/>") }]); await productDialog.getByText("gallery-ok.png").waitFor(); await productDialog.getByText("gallery-bad.svg").waitFor(); await productDialog.getByText("The file must be a valid JPG, PNG, or WebP image.").waitFor(); assert.equal(await productDialog.getByLabel("Title").inputValue(), "BLEH edited but unsaved"); assert.equal(await productDialog.locator(".product-media-gallery > li").count(), 2); const expectedUploadFailure = errors.findIndex((message) => message.includes("415 (Unsupported Media Type)") && message.includes("/media/ingest")); assert.notEqual(expectedUploadFailure, -1); errors.splice(expectedUploadFailure, 1);
     const featuredSwitch = productDialog.getByRole("switch", { name: /Featured product/ }); assert.equal(await featuredSwitch.isChecked(), true); await productDialog.getByRole("button", { name: "Save product" }).click(); await page.getByText("Merchandising saved", { exact: true }).waitFor(); assert.equal(savedBodies.length, 1); assert.equal(savedBodies[0].title, "BLEH edited but unsaved"); assert.match(savedBodies[0].primaryImageUrl, new RegExp(`^${ORIGIN.replaceAll("/", "\\/")}\/commerce-media\/[a-f0-9]{64}\\.png$`)); assert.equal(savedBodies[0].additionalImages.length, 2); assert.ok(savedBodies[0].additionalImages.every((url) => /\/commerce-media\/[a-f0-9]{64}\.png$/.test(url)));
-    const savedDialog = page.getByRole("dialog", { name: "BLEH edited but unsaved" }); const mediaSection = savedDialog.locator(".product-media-editor"); await mediaSection.evaluate((element) => element.scrollIntoView({ block: "start" })); if ([1440,768,390].includes(width)) await page.screenshot({ path: `${RESULTS}/product-media-editor-${width}x${height}.png` }); await savedDialog.locator(".commerce-featured-switch").evaluate((element) => element.scrollIntoView({ block: "center" })); const box = await savedDialog.boundingBox(); assert.ok(box && box.y >= 0 && box.y + box.height <= height + 1); assert.equal(await noOverflow(page), true); await page.keyboard.press("Escape"); await savedDialog.waitFor({ state: "detached" }); assert.equal(await editButton.evaluate((button) => document.activeElement === button), true);
+    const savedDialog = page.getByRole("dialog", { name: "BLEH edited but unsaved" }); const mediaSection = savedDialog.locator(".product-media-editor"); await mediaSection.evaluate((element) => element.scrollIntoView({ block: "start" })); if ([1440,768,390].includes(width)) await page.screenshot({ path: `${RESULTS}/product-media-editor-${width}x${height}.png` }); await savedDialog.locator(".commerce-featured-switch").first().evaluate((element) => element.scrollIntoView({ block: "center" })); const box = await savedDialog.boundingBox(); assert.ok(box && box.y >= 0 && box.y + box.height <= height + 1); assert.equal(await noOverflow(page), true); await page.keyboard.press("Escape"); await savedDialog.waitFor({ state: "detached" }); assert.equal(await editButton.evaluate((button) => document.activeElement === button), true);
     assert.equal(await noOverflow(page), true); assert.deepEqual(errors, []); if ([1920,1440,390].includes(width)) await page.screenshot({ path: `${RESULTS}/products-${width}x${height}.png`, fullPage: true }); await context.close();
   }
   for (const [width, height] of [[1440,900],[768,1024],[390,844]]) {

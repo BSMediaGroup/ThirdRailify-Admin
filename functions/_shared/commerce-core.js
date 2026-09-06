@@ -349,7 +349,7 @@ export async function updateMerchandisingProduct(env, session, productId, input)
   const current = await db.prepare("SELECT id, safe_metadata_json, is_featured, featured_order, provider_presence, status, visibility FROM commerce_products WHERE id = ?").bind(id).first();
   if (!current) throw new AuthFailure(404, "commerce_product_not_found", "The commerce product was not found.");
   await requireCurrentProviderProductWhenReconciled(db, current);
-  requireExactFields(input, ["title", "slug", "description", "primaryImageUrl", "additionalImages", "categories", "tags", "featured", "visibility", "status", "displayOrder", "maxQuantity", "unitAmount", "currencyCode"], "commerce_product_fields_invalid");
+  requireExactFields(input, ["title", "slug", "description", "primaryImageUrl", "additionalImages", "categories", "tags", "featured", "visibility", "status", "displayOrder", "maxQuantity", "unitAmount", "currencyCode", ...(input && Object.hasOwn(input, "saleRestriction") ? ["saleRestriction"] : [])], "commerce_product_fields_invalid");
   const title = requiredPlainText(input.title, 240, "commerce_product_title_invalid");
   const slug = cleanText(input.slug, 180).toLowerCase();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new AuthFailure(400, "commerce_product_slug_invalid", "The product slug is invalid.");
@@ -377,7 +377,9 @@ export async function updateMerchandisingProduct(env, session, productId, input)
     }
   }
   const previousMetadata = safeJson(current.safe_metadata_json, {});
-  const metadata = { ...previousMetadata, description, publicImage: primaryImageUrl, publicImages: additionalImages, categories, tags, displayOrder };
+  const saleRestriction = input.saleRestriction === undefined ? previousMetadata.saleRestriction : input.saleRestriction;
+  if (saleRestriction !== undefined && (!saleRestriction || typeof saleRestriction.enabled !== "boolean" || !["competition_prize", "display_only"].includes(saleRestriction.reason) || Object.keys(saleRestriction).some(key => !["enabled", "reason"].includes(key)))) throw new AuthFailure(400, "commerce_sale_restriction_invalid", "Choose a valid product sale restriction.");
+  const metadata = { ...previousMetadata, ...(saleRestriction ? { saleRestriction } : {}), description, publicImage: primaryImageUrl, publicImages: additionalImages, categories, tags, displayOrder };
   if (current.status !== status || current.visibility !== visibility) metadata.publicationIntent = visibility === "private" || status !== "active" ? "operator_hidden" : "operator_product_visible";
   const requestedImages = [primaryImageUrl, ...additionalImages].filter(Boolean);
   const authority = editedImageAuthority(previousMetadata, requestedImages, timestamp);
@@ -2021,6 +2023,7 @@ function serializeMerchandisingProduct(row, variants = [], collections = []) {
     additionalImages,
     categories,
     collectionIds: collections.map((collection) => collection.id),
+    saleRestriction: { enabled: metadata.saleRestriction?.enabled === true, reason: metadata.saleRestriction?.reason === "display_only" ? "display_only" : "competition_prize" },
     tags,
     status: cleanText(row.status, 40),
     visibility: cleanText(row.visibility, 20),
@@ -2052,7 +2055,7 @@ function serializeMerchandisingProduct(row, variants = [], collections = []) {
     variantCount: variants.length,
     activeVariantCount: activeVariants.length,
     sellableVariantCount: sellableVariants.length,
-    readiness: { displayable: row.status === "active" && row.visibility === "public" && hasImage && hasPrice, checkout: sellableVariants.length > 0, fulfillment: fulfillmentReadiness(variants) },
+    readiness: { displayable: row.status === "active" && row.visibility === "public" && hasImage && hasPrice, checkout: sellableVariants.length > 0 && metadata.saleRestriction?.enabled !== true, fulfillment: fulfillmentReadiness(variants) },
     variants,
     displayData: { hasImage, hasPrice, ready: hasImage && hasPrice, imageProvenance, imageReview },
     updatedAt: cleanText(row.updated_at, 80),

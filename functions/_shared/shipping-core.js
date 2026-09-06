@@ -94,6 +94,7 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
 
   return items.map((item) => {
     const product = products.get(item.productId);
+    if (product && parseJson(product.safe_metadata_json, {})?.saleRestriction?.enabled === true) throw new AuthFailure(409, "checkout_product_not_for_sale", "An item in your cart is reserved for display or competitions and is not for sale. Remove it to continue.");
     if (!product) throw new AuthFailure(400, "checkout_product_unknown", "A requested product does not exist.");
     if (currentAuthority && product.provider_presence !== "current") throw new AuthFailure(409, "checkout_product_provider_inactive", "A requested product is no longer present in the current provider catalogue.");
     if (product.status !== "active" || product.visibility !== "public" || product.checkout_environment !== environment) throw new AuthFailure(409, "checkout_product_unavailable", "A requested product is not available for this checkout environment.");

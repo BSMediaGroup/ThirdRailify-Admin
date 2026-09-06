@@ -111,6 +111,7 @@ function serializePublicProduct(row, variants, collections, env) {
     featured: row.is_featured === 1,
     featuredOrder: row.is_featured === 1 && Number.isSafeInteger(Number(row.featured_order)) ? Number(row.featured_order) : null,
     displayOrder: Number.isSafeInteger(Number(metadata.displayOrder)) ? Number(metadata.displayOrder) : 1000,
+    saleRestriction: { enabled: metadata.saleRestriction?.enabled === true, reason: metadata.saleRestriction?.reason === "display_only" ? "display_only" : "competition_prize" },
     requiresShipping: row.requires_shipping === 1,
     maxQuantity: boundedInteger(row.max_checkout_quantity, 1, 20, 20),
     price: {
