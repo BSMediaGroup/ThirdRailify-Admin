@@ -1,0 +1,7 @@
+export type ActionConfig = { version: 2; repeatActorPolicy: 'skip' | 'accumulate'; award: { mode: 'fixed' | 'per_gift' | 'per_amount'; entriesPerUnit: number; unitCents: number } };
+export const MAX_ENTRY_WEIGHT: number;
+export const EVENT_TYPES: readonly string[];
+export const CONDITION_FIELDS: Record<string, string[]>;
+export function defaultAction(): ActionConfig;
+export function ruleFieldErrors(input: unknown): Record<string, string>;
+export function calculateAward(action: ActionConfig, eventType: string, evidence?: { totalGifts?: number; amountCents?: number }): { entries: number; reason: string | null; calculation: string };

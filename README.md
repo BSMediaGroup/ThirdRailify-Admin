@@ -1,12 +1,16 @@
 # Third Railify Admin
 
-## Rumble event automations V1 (local implementation)
+## Rumble event automations V1.1 (local implementation)
 
-Trigger Studio and the per-Wheel Rumble Automation panel now manage operational exact-chat, Rant, follower, subscriber and gift-purchase rules. Admin owns revisions, activation boundaries, receipts, audit/counters and transactional writes to existing Wheel entries; the existing Bot remains the sole Rumble client. Every event attempts one weight-1 entry, with normalized duplicate labels skipped. The tester is a dry run; livestream transitions have no entrant-compatible action.
+Trigger Studio and each Wheel use the same detected-source rule editor. The safe Bot discovery projection preselects ThirdRailify when present; raw `user:<id>` / `channel:<id>` entry is available under Advanced / Custom source. Saved authoritative labels survive offline discovery. Chat and Rant rules can select detected livestreams; gifts, followers and subscribers have no unproven stream mapping.
 
-Apply additive `commerce-migrations/0034_rumble_event_automations.sql` to local test storage before using the rule APIs. No remote migration or deployment was performed. Protected `/api/admin/automations/rules`, `/rules/delete` and `/test` require established Automations and Wheels capabilities; writes also require Admin origin and CSRF. Existing signed `/api/internal/bot/rules` and `/events` carry bounded safe projections/envelopes. Historical events before activation are ignored; persisted unique receipts prevent repeated Wheel actions across restarts.
+Actor-bearing events support fixed integer awards. Gift purchases additionally support `total_gifts * entriesPerUnit`, awarded to the purchaser (recipient identities are unavailable). Rants support `floor(amount_cents / unitCents) * entriesPerUnit`, with a default 100-cent unit and no inferred currency. Only complete units award entries. Zero-value subscriber events remain valid by default.
 
-Complete contracts, new-file inventory/repository-tree additions, validation commands, safety boundaries and backup ? migration ? Admin ? existing Bot ? staged live acceptance rollout: [Rumble event automations V1](docs/RUMBLE_EVENT_AUTOMATIONS_V1.md). Visual evidence is in `.artifacts/event-automations/REVIEW.html`. Versions remain current/pending `0.1.0-alpha.0`.
+Event replay protection is always enabled. For a distinct later event, operators can skip an existing entrant or accumulate weight on the existing normalized Wheel row. Hidden entries remain hidden. Existing Wheel weight, capacity, revisions and atomic receipts/audit/counters remain authoritative. Shared field-specific validation explains incomplete input before saving; dry runs show the calculation without writing entries.
+
+Local additive `commerce-migrations/0035_rumble_automation_awards.sql` introduces version-2 action JSON and detailed award receipts because 0034 has no action-config column. **0034 is already production-applied: do not rerun it.** No remote migration or deployment was performed for V1.1. Bot already supplies the required evidence and remains unchanged; its matching protocol stays compatible. A future authorized Admin rollout requires 0035 first, with no Bot restart.
+
+Full contract, audit, file inventory, limits and verification: [Rumble automations V1.1](docs/RUMBLE_EVENT_AUTOMATIONS_V11.md). Historical V1 record: [V1 implementation](docs/RUMBLE_EVENT_AUTOMATIONS_V1.md). Local screenshot evidence is under `.artifacts/event-automations-v11/`. Package version remains `0.1.0-alpha.0`.
 
 
 Readability regression files: `tests/readability-browser.test.mjs` checks Products metadata, editor captions, semantic statuses, account identity geometry and Order detail text at desktop/mobile widths. `tests/readability-fixtures.mjs` reuses existing sanitized browser fixture factories without registering their suites. Run `node --test --test-concurrency=1 tests/readability-browser.test.mjs`. The cross-application route register and visual review evidence are ignored under `X:\GIT\ThirdRailify\.artifacts\readability-complete\`; no diagnostic assets ship with Admin.

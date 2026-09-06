@@ -57,7 +57,7 @@ test('migration, CRUD, activation, atomic exactly-once entries, counters, receip
   assert.equal((await listAutomationRules(env, 'wheel-fixture')).rules[0].counters.executed, 1);
   assert.equal((await listAutomationRules(env, 'other')).rules.length, 0);
   await assert.rejects(saveAutomationRule(env, 'admin', { ...r, revision: 99 }), e => e.code === 'automation_revision_conflict');
-  await assert.rejects(saveAutomationRule(env, 'admin', { ...base, targetWheelId: 'missing' }), e => e.code === 'wheel_not_found');
+  await assert.rejects(saveAutomationRule(env, 'admin', { ...base, targetWheelId: 'missing' }), e => e.code === 'automation_input_invalid' && e.issues[0].field === 'targetWheelId');
   const previous = r; r = (await saveAutomationRule(env, 'admin', { ...r, enabled: false })).rule;
   assert.equal(r.activatedAt, null); assert.equal((await botAutomationRules(env)).rules.length, 0);
   assert.equal(await send(event(r, 3)), 'inactive_rule');

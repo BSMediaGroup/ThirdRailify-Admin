@@ -1,36 +1,27 @@
 import { AuthFailure } from './auth-core.js';
 import { normalizePollTrigger } from './poll-normalization.js';
 
-export const EVENT_TYPES = Object.freeze(['rumble.chat.exact', 'rumble.rant', 'rumble.follow', 'rumble.subscribe', 'rumble.gift_purchase']);
-const fields = {
-  'rumble.chat.exact': ['exactText', 'badge', 'livestreamId'],
-  'rumble.rant': ['exactText', 'badge', 'minAmountCents', 'livestreamId'],
-  'rumble.follow': [],
-  'rumble.subscribe': ['minAmountCents'],
-  'rumble.gift_purchase': ['minGifts', 'giftType'],
-};
+import { EVENT_TYPES, defaultAction, ruleFieldErrors } from '../../src/lib/automation-model.mjs';
+export { EVENT_TYPES };
 export function invalid(code = 'automation_invalid', message = 'The automation input is invalid.') { throw new AuthFailure(400, code, message); }
 export function text(value, maximum, required = true) {
   if (typeof value !== 'string' || value.length > maximum || /[\p{Cc}\p{Cf}]/u.test(value)) return invalid();
   const result = value.trim(); if (required && !result) return invalid(); return result;
 }
+export function fieldFailure(fields) {
+  const error = new AuthFailure(400, 'automation_input_invalid', 'Review the highlighted rule fields.');
+  error.issues = Object.entries(fields).map(([field, message]) => ({ field, message }));
+  throw error;
+}
 export function validateRule(input) {
-  if (!input || typeof input !== 'object' || !EVENT_TYPES.includes(input.eventType)) invalid('automation_event_invalid', 'Choose an actor-bearing Rumble event. Livestream state cannot add an entrant.');
-  if (typeof input.enabled !== 'boolean' || input.actionType !== 'wheel.add_actor' || input.duplicatePolicy !== 'skip') invalid();
-  const sourceScope = text(input.sourceScope, 200);
-  if (!/^(channel|user):[A-Za-z0-9_-]{1,180}$/.test(sourceScope)) invalid('automation_source_invalid');
-  const raw = input.conditions;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some(key => !fields[input.eventType].includes(key))) invalid('automation_conditions_invalid');
-  const conditions = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (['minAmountCents', 'minGifts'].includes(key)) {
-      if (!Number.isSafeInteger(value) || value < 0 || value > 100000000) invalid('automation_threshold_invalid');
-      conditions[key] = value;
-    } else { conditions[key] = text(value, key === 'exactText' ? 500 : 160); }
-  }
-  if (input.eventType === 'rumble.chat.exact' && !conditions.exactText) invalid('automation_text_required', 'Enter the complete chat message to match.');
-  return { name: text(input.name, 100), description: text(input.description ?? '', 500, false), enabled: input.enabled,
-    sourceScope, eventType: input.eventType, conditions, actionType: 'wheel.add_actor', targetWheelId: text(input.targetWheelId, 160), duplicatePolicy: 'skip' };
+  const errors = ruleFieldErrors(input);
+  if (Object.keys(errors).length) fieldFailure(errors);
+  const actionConfig = input.actionConfig ?? defaultAction();
+  return { name: input.name.trim(), description: (input.description ?? '').trim(), enabled: input.enabled,
+    sourceScope: input.sourceScope.trim(), eventType: input.eventType,
+    conditions: Object.fromEntries(Object.entries(input.conditions).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])),
+    actionType: 'wheel.add_actor', targetWheelId: input.targetWheelId.trim(), actionConfig,
+    duplicatePolicy: actionConfig.repeatActorPolicy };
 }
 export function matches(rule, event) {
   const c = rule.conditions, d = event.evidence || {};
@@ -57,7 +48,7 @@ export function validateEvent(event) {
   if (d.badges !== undefined && (!Array.isArray(d.badges) || d.badges.length > 20 || d.badges.some(b => typeof b !== 'string' || b.length > 80))) invalid();
   for (const key of ['amountCents', 'totalGifts']) if (d[key] !== undefined && (!Number.isSafeInteger(d[key]) || d[key] < 0 || d[key] > 100000000)) invalid();
   if (['rumble.rant', 'rumble.subscribe'].includes(event.eventType) && d.amountCents === undefined) invalid();
-  if (event.eventType === 'rumble.gift_purchase') { if (d.totalGifts === undefined || !Number.isSafeInteger(d.videoId) || d.videoId < 0) invalid(); text(d.giftType, 160); }
+  if (event.eventType === 'rumble.gift_purchase') { if ((!Number.isSafeInteger(d.totalGifts) || d.totalGifts < 1) || !Number.isSafeInteger(d.videoId) || d.videoId < 0) invalid(); text(d.giftType, 160); }
   if (['rumble.chat.exact', 'rumble.rant'].includes(event.eventType)) text(event.livestreamId, 160);
   return event;
 }

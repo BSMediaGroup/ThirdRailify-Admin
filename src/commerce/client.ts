@@ -81,8 +81,9 @@ export type CustomerEmailsPayload = {
   provider: { name: "Resend"; configured: boolean; credentialConfigured: boolean; senderConfigured: boolean; replyToConfigured: boolean; externalVerification: "verified" | "unverified"; lastSuccessful: CustomerEmailDelivery | null; lastFailed: CustomerEmailDelivery | null };
   sender: { source: "server_environment"; providerCredentialConfigured: boolean; fromDisplayName: string | null; fromAddress: string | null; fromAddressConfigured: boolean; replyToAddress: string | null; replyToConfigured: boolean; sendingDomain: string | null; externallyVerified: false; businessDisplayName?: string | null; businessSupportEmail?: string | null };
   templates: CustomerEmailTemplate[];
+  verification: { status: "verified" | "failed" | "unavailable"; domain: string | null; domainId: string | null; source: string | null; observedAt: string | null };
   mergeVariables: Array<{ key: string; group: string; description: string }>;
-  readiness: { state: "ready" | "ready_but_disabled" | "incomplete" | "action_required"; configurationReady: boolean; configuredTemplates: number; totalTemplates: number; minimumReadyTemplates: number; customerSendsEnabled: boolean; productionLifecycleImplemented: boolean };
+  readiness: { state: "ready" | "ready_but_disabled" | "incomplete" | "action_required" | "unavailable"; delivery: { state: "active" | "disabled" | "action_required" | "unavailable"; blockers: string[]; dispatchConfigured: boolean | null; events: Array<{ templateKey: string; eligible: boolean; blockers: string[] }> }; configurationReady: boolean; configuredTemplates: number; totalTemplates: number; minimumReadyTemplates: number; customerSendsEnabled: boolean | null; productionLifecycleImplemented: boolean };
   dependencies: {
     business: { complete: boolean; canonicalReady: boolean; displayName: string | null; supportEmail: string | null; href: string };
     documents: { receipt: { configured: boolean; status: string; enabled: boolean; revision: number | null }; invoice: { configured: boolean; status: string; enabled: boolean; revision: number | null }; customerAccessEnabled: boolean; href: string };

@@ -48,6 +48,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0032_gaming_igdb_mapping.sql", import.meta.url),
   new URL("../commerce-migrations/0033_merchant_shipping_ratebook.sql", import.meta.url),
   new URL("../commerce-migrations/0034_rumble_event_automations.sql", import.meta.url),
+  new URL("../commerce-migrations/0035_rumble_automation_awards.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

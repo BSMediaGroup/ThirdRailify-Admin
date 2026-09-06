@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
-import { customerEmailsControlPlanePayload, renderCommerceTemplate, templatePreviewPayload } from "../functions/_shared/commerce-control-plane.js";
-import { updateTemplate } from "../functions/_shared/commerce-core.js";
+import { customerEmailsControlPlanePayload, renderCommerceTemplate, templatePreviewPayload, recordedEmailVerification } from "../functions/_shared/commerce-control-plane.js";
+import { processCommerceJobs } from "../functions/_shared/commerce-operations.js";
+import { encryptCommerceSecret, updateTemplate } from "../functions/_shared/commerce-core.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { commerceEnvironment, createCommerceDatabases } from "./commerce-test-helpers.mjs";
@@ -25,9 +26,9 @@ test("Customer Emails projects server sender state, actual template kinds, canon
 
   const payload = await customerEmailsControlPlanePayload(env, master);
   assert.deepEqual(payload.templates.map((item) => item.templateKey).sort(), ["cancellation", "invoice_notification", "order_confirmation", "payment_failure", "receipt_notification", "refund", "shipment_notification"]);
-  assert.equal(payload.provider.name, "Resend"); assert.equal(payload.provider.configured, true); assert.equal(payload.provider.externalVerification, "verified");
+  assert.equal(payload.provider.name, "Resend"); assert.equal(payload.provider.configured, true); assert.equal(payload.provider.externalVerification, "unverified");
   assert.equal(payload.sender.fromAddress, "receipts@notify.example.test"); assert.equal(payload.sender.sendingDomain, "notify.example.test"); assert.equal(payload.sender.replyToAddress, "support@example.test"); assert.equal(payload.sender.externallyVerified, false);
-  assert.equal(payload.readiness.configurationReady, true); assert.equal(payload.readiness.state, "ready_but_disabled"); assert.equal(payload.readiness.minimumReadyTemplates, 1); assert.deepEqual(payload.readiness.requiredTemplateKeys, ["order_confirmation"]); assert.equal(payload.readiness.customerSendsEnabled, false); assert.equal(payload.readiness.productionLifecycleImplemented, true);
+  assert.equal(payload.readiness.configurationReady, false); assert.equal(payload.readiness.state, "incomplete"); assert.equal(payload.readiness.minimumReadyTemplates, 1); assert.deepEqual(payload.readiness.requiredTemplateKeys, ["order_confirmation"]); assert.equal(payload.readiness.customerSendsEnabled, false); assert.equal(payload.readiness.productionLifecycleImplemented, true);
   assert.equal(payload.dependencies.documents.receipt.configured, true); assert.equal(payload.dependencies.documents.invoice.configured, false); assert.equal(payload.dependencies.paypalRequired, false);
   assert.deepEqual(payload.deliveries.counts, { total: 2, test: 1, live: 1, unknown: 0, sent: 1, failed: 1, pending: 0, sending: 0 });
   assert.equal(payload.deliveries.recent[0].maskedRecipient, "a***@example.test"); assert.equal(payload.deliveries.recent[1].maskedRecipient, "p***@example.test");
@@ -49,7 +50,7 @@ test("Customer Emails read and synthetic preview are non-mutating and never call
   const before = await authorityCounts(harness.commerceDb); let providerCalls = 0;
   const session = await authenticatedMaster(env); const url = `${ADMIN_ORIGIN}/api/admin/commerce/emails`;
   const response = await commerceRequest({ request: jsonRequest(url, { method: "GET", origin: ADMIN_ORIGIN, cookie: session.cookie }), env, data: { commerceFetch: async () => { providerCalls += 1; throw new Error("provider call forbidden"); } } });
-  assert.equal(response.status, 200); assert.equal((await response.json()).safety.providerCallsOnRead, false);
+  assert.equal(response.headers.get("Cache-Control"), "no-store"); assert.equal(response.status, 200); assert.equal((await response.json()).safety.providerCallsOnRead, false);
   const template = serializeTemplate(await harness.commerceDb.prepare("SELECT * FROM commerce_templates WHERE template_key='order_confirmation'").first());
   const preview = await templatePreviewPayload(env, master, "order_confirmation", { template });
   const after = await authorityCounts(harness.commerceDb);
@@ -140,3 +141,60 @@ async function authenticatedMaster(env) {
 }
 async function authorityCounts(db) { const [deliveries, documents, orders, audit] = await Promise.all([db.prepare("SELECT COUNT(*) count FROM commerce_email_deliveries").first(), db.prepare("SELECT COUNT(*) count FROM commerce_order_documents").first(), db.prepare("SELECT COUNT(*) count FROM commerce_orders").first(), db.prepare("SELECT COUNT(*) count FROM commerce_audit").first()]); return { deliveries: deliveries.count, documents: documents.count, orders: orders.count, audit: audit.count }; }
 function serializeTemplate(row) { return { templateKey: row.template_key, templateKind: row.template_kind, displayName: row.display_name, subject: row.subject, preheader: row.preheader, heading: row.heading, introduction: row.introduction, bodyBlocks: JSON.parse(row.body_blocks_json), ctaLabel: row.cta_label, ctaUrl: row.cta_url, supportText: row.support_text, footer: row.footer, accentColor: row.accent_color, status: row.status, enabled: row.enabled === 1, revision: Number(row.revision) }; }
+
+
+test("recorded domain evidence requires matching identity and never invents an observation", () => {
+  const settings = { resend_domain_verified: true, resend_domain_status: "verified", resend_domain_id: "recorded-domain-id", resend_domain_checked_at: "2026-09-01T04:03:30.000Z", resend_domain_dns_records: [{ name: "send.notify.thirdrailify.com", status: "verified" }] };
+  assert.equal(recordedEmailVerification(settings, "notify.thirdrailify.com").status, "verified");
+  assert.equal(recordedEmailVerification(settings, "different.test").status, "unavailable");
+  assert.equal(recordedEmailVerification({ resend_domain_verified: true }, "notify.thirdrailify.com").status, "unavailable");
+  assert.equal(recordedEmailVerification({ ...settings, resend_domain_checked_at: undefined }, "notify.thirdrailify.com").observedAt, null);
+  assert.equal(recordedEmailVerification({ ...settings, resend_domain_verified: false, resend_domain_status: "failure" }, "notify.thirdrailify.com").status, "failed");
+});
+
+test("enabled delivery projects runtime prerequisites and template eligibility independently of an empty ledger", async (t) => {
+  const harness = await createCommerceDatabases(); t.after(harness.dispose);
+  const env = commerceEnvironment(harness, { RESEND_API_KEY: "fixture-only", MAIL_FROM: "Sender <alerts@notify.thirdrailify.com>", COMMERCE_WORKER_SECRET: "x".repeat(32) });
+  const settings = { customer_document_access_enabled: true, transactional_email_enabled: true, resend_domain_verified: true, resend_domain_status: "verified", resend_domain_id: "recorded-domain-id", resend_domain_checked_at: "2026-09-01T04:03:30.000Z", resend_domain_dns_records: [{ name: "send.notify.thirdrailify.com", status: "verified" }], commerce_operations_worker_configured: true };
+  for (const [key,value] of Object.entries(settings)) await harness.commerceDb.prepare("INSERT INTO commerce_settings(setting_key,value_json,classification,updated_at) VALUES (?,?,'safe','2026-09-01') ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json").bind(key,JSON.stringify(value)).run();
+  await harness.commerceDb.prepare("UPDATE commerce_templates SET status='ready',enabled=1 WHERE template_key='order_confirmation'").run();
+  let payload = await customerEmailsControlPlanePayload(env, master);
+  assert.equal(payload.readiness.delivery.state, "active", JSON.stringify(payload.readiness.delivery));
+  assert.equal(payload.readiness.customerSendsEnabled, true);
+  assert.equal(payload.deliveries.counts.total, 0);
+  assert.equal(payload.readiness.delivery.events.find(e=>e.templateKey==='shipment_notification').eligible, false);
+  assert.equal(payload.verification.status, "verified");
+  payload = await customerEmailsControlPlanePayload({...env,COMMERCE_WORKER_SECRET:undefined}, master);
+  assert.equal(payload.readiness.delivery.state, "action_required");
+  assert.deepEqual(payload.readiness.delivery.blockers, ["Commerce Operations Worker dispatch is not configured"]);
+  await harness.commerceDb.prepare("UPDATE commerce_templates SET enabled=0 WHERE template_key='order_confirmation'").run();
+  payload = await customerEmailsControlPlanePayload(env, master);
+  assert.equal(payload.readiness.customerSendsEnabled, true);
+  assert.deepEqual(payload.readiness.delivery.blockers, ["order_confirmation template is disabled"]);
+  await harness.commerceDb.prepare("UPDATE commerce_settings SET value_json='false' WHERE setting_key='transactional_email_enabled'").run();
+  assert.equal((await customerEmailsControlPlanePayload(env,master)).readiness.delivery.state,"disabled");
+  const unavailable=await customerEmailsControlPlanePayload({...env,THIRDRAILIFY_COMMERCE_DB:undefined},master);
+  assert.equal(unavailable.readiness.customerSendsEnabled,null); assert.equal(unavailable.readiness.delivery.state,"unavailable");
+});
+
+
+test("existing dispatcher renders eligible shipment jobs, persists mocked outcomes and prevents duplicate delivery", async t => {
+  const harness=await createCommerceDatabases();t.after(harness.dispose);
+  const base=commerceEnvironment(harness,{RESEND_API_KEY:"fixture-only",MAIL_FROM:"Sender <sender@example.test>"});
+  const recipient=await encryptCommerceSecret(base,JSON.stringify({customerContact:{email:"synthetic@example.test",name:"Synthetic customer"}}),"order-delivery:ord-email-dispatch");
+  const db=harness.commerceDb;
+  const env={...base,THIRDRAILIFY_COMMERCE_DB:{prepare:sql=>sql==="SELECT recipient_ciphertext FROM commerce_order_delivery_snapshots WHERE order_id=?"?{bind:()=>({first:async()=>({recipient_ciphertext:recipient})})}:db.prepare(sql),batch:statements=>db.batch(statements)}};
+  await db.prepare("INSERT INTO commerce_orders(id,payment_status,fulfillment_status,currency_code,customer_gross_amount,environment,checkout_status,created_at,updated_at) VALUES ('ord-email-dispatch','paid','disabled','CAD',2500,'live','checkout_created','2026-09-01','2026-09-01')").run();
+  await db.prepare("UPDATE commerce_settings SET value_json='true' WHERE setting_key IN ('transactional_email_enabled','resend_domain_verified')").run();
+  await db.prepare("UPDATE commerce_templates SET status='ready',enabled=1 WHERE template_key='shipment_notification'").run();
+  await db.prepare("INSERT INTO commerce_operation_jobs(id,job_kind,event_key,order_id,environment,payload_digest,state,next_attempt_at,created_at,updated_at) VALUES ('coj_11111111-1111-4111-8111-111111111111','email_send','shipment:synthetic','ord-email-dispatch','live',?,'pending','2026-09-01','2026-09-01','2026-09-01')").bind('a'.repeat(64)).run();
+  let calls=0;
+  const mock=async(url,init)=>{calls++;assert.equal(url,"https://api.resend.com/emails");assert.ok(init.headers['Idempotency-Key']);assert.match(JSON.parse(init.body).html,/THIRD RAILIFY OFFICIAL/);return new Response(JSON.stringify({id:"mock-message"}),{status:200});};
+  assert.equal((await processCommerceJobs(env,mock)).results[0].state,"completed");
+  assert.equal((await db.prepare("SELECT status FROM commerce_email_deliveries").first()).status,"sent");
+  await db.prepare("UPDATE commerce_operation_jobs SET state='pending' WHERE id='coj_11111111-1111-4111-8111-111111111111'").run();
+  assert.equal((await processCommerceJobs(env,mock)).results[0].result.duplicate,true);assert.equal(calls,1);
+  await db.prepare("UPDATE commerce_settings SET value_json='false' WHERE setting_key='transactional_email_enabled'").run();
+  await db.prepare("UPDATE commerce_operation_jobs SET state='pending' WHERE id='coj_11111111-1111-4111-8111-111111111111'").run();
+  assert.equal((await processCommerceJobs(env,mock)).results[0].state,"action_required");assert.equal(calls,1);
+});

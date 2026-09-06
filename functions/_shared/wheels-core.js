@@ -1,3 +1,4 @@
+import { MAX_ENTRY_WEIGHT, calculateAward, defaultAction } from '../../src/lib/automation-model.mjs';
 import {
   AuthFailure,
   accessForAccount,
@@ -186,32 +187,51 @@ export async function executeAutomationWheelEntry(env, rule, event) {
         WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`).bind(timestamp, rule.id, id),
     ]);
     const receipt = await db.prepare('SELECT id FROM automation_receipts WHERE rule_id=? AND event_fingerprint=?').bind(rule.id, event.eventFingerprint).first();
+    if (receipt && receipt.id !== id) await db.prepare('UPDATE automation_rules SET duplicate_events=duplicate_events+1 WHERE id=?').bind(rule.id).run();
     return receipt ? receipt.id === id ? 'wheel_unavailable' : 'duplicate_event' : 'retry';
   }
-  const entries = await db.prepare('SELECT display_label FROM wheel_entries WHERE wheel_id=?').bind(wheel.id).all();
+  const entries = await db.prepare('SELECT id,display_label,weight,state FROM wheel_entries WHERE wheel_id=? ORDER BY display_order,id').bind(wheel.id).all();
+  const policy = await getWheelSettings(env);
+  const capacity = Math.min(MAX_ENTRIES, policy.settings.maximumParticipants || MAX_ENTRIES);
+  const action = rule.action_config_json ? JSON.parse(rule.action_config_json) : defaultAction();
+  const award = calculateAward(action, event.eventType, event.evidence);
   const normalize = value => value.normalize('NFKC').trim().toLowerCase();
-  const duplicate = entries.results.some(entry => normalize(entry.display_label) === normalize(event.actorLabel));
-  const outcome = wheel.editing_locked || wheel.lifecycle === 'archived' || entries.results.length >= MAX_ENTRIES ? 'wheel_unavailable' : duplicate ? 'duplicate_entrant' : 'added';
+  const duplicate = entries.results.find(entry => normalize(entry.display_label) === normalize(event.actorLabel));
+  // Hidden rows participate in normalization and retain their visibility and styling.
+  const accumulate = action.repeatActorPolicy === 'accumulate';
+  const total = entries.results.reduce((n, entry) => n + (entry.state === 'active' ? entry.weight : 0), 0);
+  const actionResult = wheel.editing_locked || wheel.lifecycle === 'archived' ? 'wheel_locked' :
+    award.reason || (duplicate && !accumulate ? 'skipped_existing' :
+      !duplicate && entries.results.length >= capacity ? 'capacity_exceeded' :
+      (duplicate?.weight || 0) + award.entries > MAX_ENTRY_WEIGHT || (duplicate?.state !== 'hidden' && total + award.entries > 0xffffffff) ? 'weight_limit_exceeded' :
+      duplicate ? 'accumulated' : 'created');
+  const outcome = ['created', 'accumulated'].includes(actionResult) ? 'added' : actionResult === 'skipped_existing' ? 'duplicate_entrant' : 'wheel_unavailable';
+  const awardedEntries = outcome === 'added' ? award.entries : 0;
   const receiptId = randomId(), entryId = randomId(), timestamp = nowIso();
   const result = await db.batch([
-    db.prepare(`INSERT OR IGNORE INTO automation_receipts(id,rule_id,rule_revision,event_fingerprint,event_type,provider_event_at,actor_key,actor_label,outcome,target_wheel_id,created_at)
-      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=?)
+    db.prepare(`INSERT OR IGNORE INTO automation_receipts(id,rule_id,rule_revision,event_fingerprint,event_type,provider_event_at,actor_key,actor_label,outcome,target_wheel_id,created_at,awarded_entries,action_result)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=?)
+      AND EXISTS (SELECT 1 FROM wheel_settings WHERE setting_key='global' AND revision=?)
       AND EXISTS (SELECT 1 FROM automation_rules WHERE id=? AND revision=? AND enabled=1 AND deleted_at IS NULL)`)
-      .bind(receiptId, rule.id, rule.revision, event.eventFingerprint, event.eventType, event.providerEventAt, event.actorKey, event.actorLabel, outcome, wheel.id, timestamp, wheel.id, wheel.revision, rule.id, rule.revision),
+      .bind(receiptId, rule.id, rule.revision, event.eventFingerprint, event.eventType, event.providerEventAt, event.actorKey, event.actorLabel, outcome, wheel.id, timestamp, awardedEntries, actionResult, wheel.id, wheel.revision, policy.revision, rule.id, rule.revision),
     db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at)
-      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),1,'active',?,?
-      WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND outcome='added')`)
-      .bind(entryId, wheel.id, event.actorLabel, wheel.id, timestamp, timestamp, receiptId),
+      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?
+      WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='created')`)
+      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, receiptId),
+    db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=? WHERE id=? AND wheel_id=?
+      AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='accumulated')`)
+      .bind(awardedEntries, timestamp, duplicate?.id || '', wheel.id, receiptId),
     db.prepare(`UPDATE wheels SET participant_count=(SELECT COUNT(*) FROM wheel_entries WHERE wheel_id=? AND state='active'),revision=revision+1,updated_at=?
       WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND outcome='added')`).bind(wheel.id, timestamp, wheel.id, receiptId),
     db.prepare(`UPDATE automation_rules SET matched=matched+1,executed=executed+?,duplicate_entrants=duplicate_entrants+?,failed=failed+?,last_match_at=?,last_outcome=?,last_fault=?
-      WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`).bind(Number(outcome === 'added'), Number(outcome === 'duplicate_entrant'), Number(outcome === 'wheel_unavailable'), timestamp, outcome, outcome === 'wheel_unavailable' ? outcome : null, rule.id, receiptId),
+      WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`).bind(Number(outcome === 'added'), Number(outcome === 'duplicate_entrant'), Number(outcome === 'wheel_unavailable'), timestamp, outcome, outcome === 'wheel_unavailable' ? actionResult : null, rule.id, receiptId),
     db.prepare(`INSERT INTO wheel_audit_events(id,wheel_id,actor_account_id,target_account_id,event_type,metadata_json,created_at)
       SELECT ?,?,NULL,NULL,'automation_entry_action',?,? WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`)
-      .bind(randomId(), wheel.id, JSON.stringify({ ruleId: rule.id, receiptId, outcome }), timestamp, receiptId),
+      .bind(randomId(), wheel.id, JSON.stringify({ ruleId: rule.id, receiptId, outcome, actionResult, awardedEntries, repeatActorPolicy: action.repeatActorPolicy, entryId: duplicate?.id || entryId }), timestamp, receiptId),
   ]);
   if (result[0].meta.changes === 1) return outcome;
   const received = await db.prepare('SELECT id FROM automation_receipts WHERE rule_id=? AND event_fingerprint=?').bind(rule.id, event.eventFingerprint).first();
+  if (received) await db.prepare('UPDATE automation_rules SET duplicate_events=duplicate_events+1 WHERE id=?').bind(rule.id).run();
   return received ? 'duplicate_event' : 'retry';
 }
 
@@ -532,7 +552,7 @@ function validateEntries(input, options = {}) {
     const colour = value.colour == null || value.colour === "" ? null : clean(value.colour, 7);
     if (colour && !HEX.test(colour)) throw new AuthFailure(400, "participant_colour_invalid", "Participant colours must be six-digit hex values.");
     const style = value.style == null ? null : validateSegmentStyle(value.style, colour || DEFAULT_CONFIG.palette[index % DEFAULT_CONFIG.palette.length]);
-    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", 100000), colour: style?.color || colour?.toUpperCase() || null, style, state: value.state === "hidden" ? "hidden" : "active" };
+    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", MAX_ENTRY_WEIGHT), colour: style?.color || colour?.toUpperCase() || null, style, state: value.state === "hidden" ? "hidden" : "active" };
   });
 }
 

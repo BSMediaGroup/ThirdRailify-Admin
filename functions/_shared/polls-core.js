@@ -105,6 +105,11 @@ export async function getPollCreatorAccess(env, accountId) {
 
 export async function getCreatorRumbleDiscovery(env, accountId) {
   await requireCreator(env, accountId);
+  return getSafeRumbleDiscovery(env);
+}
+
+// Sanitized discovery only; each caller must enforce its own capability boundary.
+export async function getSafeRumbleDiscovery(env) {
   const heartbeat = await requirePollDb(env).prepare("SELECT runtime_json,heartbeat_at FROM bot_runtime_heartbeat WHERE singleton_id=1").first();
   if (!heartbeat) return { ok: true, provider: "rumble", botState: "offline", freshness: null, source: null, livestreams: [], message: "Rumble source discovery temporarily unavailable." };
   const ageSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(heartbeat.heartbeat_at)) / 1000));
@@ -116,6 +121,7 @@ export async function getCreatorRumbleDiscovery(env, accountId) {
     ok: true,
     provider: "rumble",
     botState,
+    discoveryState: heartbeatState(discovery?.observedAt ? Math.max(ageSeconds, (Date.now() - Date.parse(discovery.observedAt)) / 1000) : null, heartbeatFreshness(runtime)),
     freshness: { heartbeatAt: heartbeat.heartbeat_at, ageSeconds, providerResponseAt: discovery?.providerResponseAt || null, observedAt: discovery?.observedAt || null },
     source: discovery?.source || null,
     livestreams: discovery?.livestreams || [],

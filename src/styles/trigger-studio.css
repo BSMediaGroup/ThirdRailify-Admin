@@ -48,6 +48,21 @@
 .event-activity { padding-top: 20px; border-top: 1px solid var(--line); }
 .event-activity p { color: var(--muted); font-size: .8rem; }
 .event-studio > .admin-alert { margin-top: 20px; }
+.event-source__status { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; color: var(--muted); }
+.event-source__choice, .event-source__options button { width: 100%; min-height: 52px; padding: 14px 16px; border: 1px solid #73612c; border-radius: 8px; background: #18170f; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.event-source__choice { display: flex; justify-content: space-between; gap: 16px; margin-block: 16px; }
+.event-source__options { padding: 8px; border: 1px solid var(--gold); border-radius: 8px; background: #0b0b09; margin-bottom: 16px; }
+.event-source__options button { display: grid; gap: 6px; }
+.event-source small { font-size: .76rem; line-height: 1.5; }
+.event-source summary { cursor: pointer; padding-block: 10px; color: var(--muted); font-size: .8rem; }
+.event-source summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.event-editor .event-field-error { display: block; color: #ffb5ab; font-size: .78rem; line-height: 1.55; }
+.event-fields [aria-invalid="true"] { border-color: #c97e73; }
+.event-editor .event-award { border-color: #73612c; background: linear-gradient(125deg, #19180f, #0c0c0a 65%); }
+.event-award__preview { display: grid; gap: 10px; padding: 18px; border-left: 3px solid var(--gold); background: #211e11; border-radius: 4px 9px 9px 4px; overflow-wrap: anywhere; }
+.event-award__preview strong { color: var(--gold); font-size: 1rem; line-height: 1.6; }
+.event-stream { border-top: 1px solid var(--line); }
+@media (forced-colors: active) { .event-source__choice, .event-source__options, .event-award__preview, .event-editor .event-award { border: 1px solid ButtonText; } .event-editor .event-field-error { color: CanvasText; } }
 @media (max-width: 560px) {
   .event-studio__heading { padding: 16px; }
   .event-studio > :not(.event-studio__heading) { margin-inline: 16px; }

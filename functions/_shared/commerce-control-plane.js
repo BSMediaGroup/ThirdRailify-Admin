@@ -249,7 +249,7 @@ export async function productionReadinessPayload(env, session) {
     catalogue:group(["catalogue","catalogue_migration_terminal"], `${plan.catalogue.eligibleSellableVariants} safe eligible variants are sellable.`, plan.catalogue),
     shipping:group(["shipping"], "Worldwide shipping; server-authoritative destination-specific Printful rates.", {strategy:plan.settings.shippingStrategy,markets:plan.shippingMarkets}),
     fulfillment:group(["printful_store","operations_worker","catalogue_migration_terminal"], "OPERATIONALLY READY uses draft creation, validation, confirmation and polling reconciliation. Signed webhook evidence is non-blocking.", {enabled:plan.settings.fulfillmentEnabled,orderMode:plan.settings.printfulOrderMode,pollingFallbackActive:byId.operations_worker.ready}),
-    communications:group(["order_confirmation_delivery"], "DOMAIN VERIFIED / DELIVERY READY when the required order-confirmation template is configured. The launch action enables sending.", {providerConfigured:plan.customerSending.providerConfigured,readyTemplates:plan.customerSending.configuredTemplates,sendEnabled:plan.settings.transactionalEmailEnabled}),
+    communications:group(["order_confirmation_delivery"], plan.settings.transactionalEmailEnabled ? "Customer sending is enabled. Eligible order confirmations use the existing delivery dispatcher; configuration readiness does not claim delivery success." : "Customer sending is disabled in Commerce settings. Template readiness does not enable delivery.", {providerConfigured:plan.customerSending.providerConfigured,readyTemplates:plan.customerSending.configuredTemplates,sendEnabled:plan.settings.transactionalEmailEnabled}),
     documents:group(["customer_documents"], "Retainable agreement and branded receipt access are enabled by launch. Tax invoices are NOT APPLICABLE under not_collecting.", {receiptTemplateReady:byId.customer_documents.ready,receiptReady:byId.customer_documents.ready,invoiceReady:false,invoiceStatus:"not_applicable",customerAccessEnabled:plan.settings.customerDocumentAccessEnabled}),
     checkout:group(["transaction_disclosure_checkout","emergency_pause_clear"], "Final agreement review, explicit acceptance, and immutable retained records precede PayPal order creation.", {normalCheckoutEnabled:plan.settings.paypalStoreCheckoutEnabled,transactionDisclosureEnabled:plan.settings.internetAgreementDisclosureEnabled,disclosureSchemaInstalled:byId.transaction_disclosure_checkout.ready,disclosureThresholdMinor:5000,donationsEnabled:plan.settings.paypalDonationsEnabled}),
   };
@@ -1083,7 +1083,8 @@ export async function customerEmailsControlPlanePayload(env, session) {
       provider: providerProjection(env, sender, null, null), sender,
       templates: [],
       mergeVariables: CUSTOMER_EMAIL_VARIABLES,
-      readiness: { state: "action_required", configurationReady: false, configuredTemplates: 0, totalTemplates: 0, minimumReadyTemplates: 1, requiredTemplateKeys: ["order_confirmation"], customerSendsEnabled: false, productionLifecycleImplemented: false },
+      readiness: { state: "unavailable", configurationReady: false, configuredTemplates: 0, totalTemplates: 0, minimumReadyTemplates: 1, requiredTemplateKeys: ["order_confirmation"], customerSendsEnabled: null, productionLifecycleImplemented: true, delivery: { state: "unavailable", blockers: ["Commerce D1 status unavailable"], dispatchConfigured: null, events: [] } },
+      verification: { status: "unavailable", domain: null, domainId: null, source: null, observedAt: null },
       dependencies: emptyEmailDependencies(),
       deliveries: emptyEmailDeliveries(),
       canonicalReadiness: null,
@@ -1097,7 +1098,7 @@ export async function customerEmailsControlPlanePayload(env, session) {
     templatesPayload(env, session),
     productionReadinessPayload(env, session),
     db.prepare("SELECT trading_name,currency_code,public_contact_email,support_email,legal_business_name_ciphertext,private_address_ciphertext FROM commerce_business_profiles WHERE id='primary'").first(),
-    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('transactional_email_enabled','customer_document_access_enabled','resend_domain_verified')").all(),
+    db.prepare("SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN ('transactional_email_enabled','customer_document_access_enabled','resend_domain_verified','resend_domain_id','resend_domain_status','resend_domain_checked_at','resend_domain_dns_records','commerce_emergency_paused','commerce_operations_worker_configured')").all(),
   ]);
   const [timestampsRead, recentRead, countsRead, lastSuccessRead, lastFailureRead] = await Promise.all([
     optionalD1Read(() => db.prepare("SELECT template_key,updated_at FROM commerce_templates WHERE template_kind='email' ORDER BY template_key").all(), { results: [] }),
@@ -1122,9 +1123,32 @@ export async function customerEmailsControlPlanePayload(env, session) {
   const documentTemplates = Object.fromEntries(templatePayload.templates.filter((template) => template.templateKind === "document").map((template) => [template.templateKey, template]));
   const settings = Object.fromEntries((settingsResult?.results || []).map((row) => [row.setting_key, json(row.value_json, false)]));
   const customerSendsEnabled = settings.transactional_email_enabled === true;
+  const verification = recordedEmailVerification(settings, sender.sendingDomain);
+  const dispatchConfigured = settings.commerce_operations_worker_configured === true && String(env?.COMMERCE_WORKER_SECRET || "").length >= 32;
+  const blockers = [];
+  if (settings.commerce_emergency_paused === true) blockers.push("Commerce emergency pause is active");
+  if (!sender.providerCredentialConfigured) blockers.push("Resend sending credential is not configured");
+  if (!sender.fromAddressConfigured) blockers.push("Sender address is not configured");
+  if (settings.resend_domain_verified !== true) blockers.push("Persisted domain verification gate is not verified");
+  if (verification.status !== "verified") blockers.push("Matching verified-domain evidence is unavailable");
+  if (!dispatchConfigured) blockers.push("Commerce Operations Worker dispatch is not configured");
+  if (!/^[A-Za-z0-9_-]{43}=?$/.test(String(env?.THIRDRAILIFY_COMMERCE_ENCRYPTION_KEY || "").trim())) blockers.push("Order recipient encryption is not configured");
+  const events = emailTemplates.map((template) => {
+    const reasons = [...blockers];
+    if (template.templateKey === "order_confirmation") {
+      if (settings.customer_document_access_enabled !== true) reasons.push("Customer receipt access is disabled");
+      if (!documentTemplates.payment_receipt || documentTemplates.payment_receipt.validity?.state === "invalid") reasons.push("Payment receipt template is unavailable or invalid");
+    }
+    if (!template.productionTriggerImplemented) reasons.push("Lifecycle trigger is not implemented");
+    if (template.validity?.state === "invalid") reasons.push(`${template.templateKey} template is invalid`);
+    else if (!template.enabled || template.status !== "ready") reasons.push(`${template.templateKey} template is ${!template.enabled ? "disabled" : template.status}`);
+    return { templateKey: template.templateKey, eligible: customerSendsEnabled && reasons.length === 0, blockers: reasons };
+  });
+  const orderBlockers = events.find((event) => event.templateKey === "order_confirmation")?.blockers || ["order_confirmation template is missing"];
+  const delivery = { state: !customerSendsEnabled ? "disabled" : orderBlockers.length ? "action_required" : "active", blockers: !customerSendsEnabled ? ["transactional_email_enabled is disabled in Commerce settings"] : orderBlockers, dispatchConfigured, events };
   const configuredTemplates = emailTemplates.filter((template) => template.validity?.state !== "invalid" && template.status === "ready" && template.enabled).length;
   const orderConfirmationReady = emailTemplates.some((template) => template.templateKey === "order_confirmation" && template.validity?.state !== "invalid" && template.status === "ready" && template.enabled);
-  const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && settings.resend_domain_verified === true && orderConfirmationReady;
+  const configurationReady = sender.providerCredentialConfigured && sender.fromAddressConfigured && verification.status === "verified" && orderConfirmationReady;
   const manageSensitiveEvidence = access.isMasterAdmin || access.capabilities.includes("commerce.templates.manage");
   const recent = (recentResult?.results || []).map((row) => serializeEmailDelivery(row, manageSensitiveEvidence));
   const counts = { total: 0, test: 0, live: 0, unknown: 0, sent: 0, failed: 0, pending: 0, sending: 0 };
@@ -1137,14 +1161,15 @@ export async function customerEmailsControlPlanePayload(env, session) {
   const communications = readiness.domains.communications;
   return {
     ok: true, databaseConfigured: true, authority: "Commerce D1 + server environment", access,
-    provider: { ...providerProjection(env, sender, lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null), externalVerification: settings.resend_domain_verified === true ? "verified" : "unverified" },
+    provider: { ...providerProjection(env, sender, lastSuccess ? serializeEmailDelivery(lastSuccess, manageSensitiveEvidence) : null, lastFailure ? serializeEmailDelivery(lastFailure, manageSensitiveEvidence) : null), externalVerification: verification.status === "verified" ? "verified" : "unverified" },
+    verification,
     sender: { ...sender, businessDisplayName: cleanText(profile?.trading_name, 160) || null, businessSupportEmail: cleanText(profile?.support_email || profile?.public_contact_email, 254) || null },
     templates: emailTemplates,
     mergeVariables: CUSTOMER_EMAIL_VARIABLES,
     readiness: {
-      state: customerSendsEnabled ? (communications.ready ? "ready" : "action_required") : configurationReady ? "ready_but_disabled" : "incomplete",
+      state: customerSendsEnabled ? (delivery.state === "active" ? "ready" : "action_required") : configurationReady ? "ready_but_disabled" : "incomplete",
       configurationReady, configuredTemplates, totalTemplates: emailTemplates.length, minimumReadyTemplates: 1, requiredTemplateKeys: ["order_confirmation"],
-      customerSendsEnabled, productionLifecycleImplemented: true,
+      customerSendsEnabled, productionLifecycleImplemented: true, delivery,
     },
     dependencies: {
       business: { complete: businessContactComplete, canonicalReady: readiness.domains.business.ready, displayName: cleanText(profile?.trading_name, 160) || null, supportEmail: cleanText(profile?.support_email || profile?.public_contact_email, 254) || null, href: "/commerce/business" },
@@ -1160,6 +1185,18 @@ export async function customerEmailsControlPlanePayload(env, session) {
     safety: emailSafety(customerSendsEnabled, true),
     checkedAt: nowIso(),
   };
+}
+
+// Existing reconciliation records are scoped to their recorded DNS names. No provider read.
+export function recordedEmailVerification(settings, sendingDomain) {
+  const records = settings.resend_domain_dns_records;
+  const matches = Boolean(sendingDomain && Array.isArray(records) && records.length && records.every((record) => {
+    const name = String(record?.name || "").toLowerCase().replace(/\.$/, "");
+    return name === sendingDomain || name.endsWith(`.${sendingDomain}`);
+  }));
+  const usable = matches && typeof settings.resend_domain_id === "string" && Boolean(settings.resend_domain_id);
+  const status = usable && settings.resend_domain_verified === true && settings.resend_domain_status === "verified" ? "verified" : usable && ["failure", "temporary_failure", "error"].includes(settings.resend_domain_status) ? "failed" : "unavailable";
+  return { status, domain: usable ? sendingDomain : null, domainId: usable ? settings.resend_domain_id : null, source: usable ? "Recorded Commerce D1 verification evidence" : null, observedAt: usable && typeof settings.resend_domain_checked_at === "string" && Number.isFinite(Date.parse(settings.resend_domain_checked_at)) ? settings.resend_domain_checked_at : null };
 }
 
 function emailTemplateProjection(template, updatedAt = null) {

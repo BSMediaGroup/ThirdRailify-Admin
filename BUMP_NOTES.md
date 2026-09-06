@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-07 - Rumble event automations V1.1 (local)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Shared Trigger Studio/per-Wheel editor now selects sanitized Bot-discovered sources and compatible livestreams, retains Advanced fallbacks and cached source labels, and exposes exact field validation.
+- Version-2 actions support fixed awards, gift-count multiplication to the purchaser, integer-cent Rant units, and selectable skip/accumulate behavior. Distinct events accumulate canonical Wheel weight; exact replays never repeat actions. Hidden state, limits, revision gates and atomic receipt/audit/counter updates are preserved.
+- New additive 0035 stores action JSON and detailed receipt quantities/results. Existing 0034 remains untouched. Bot evidence is already sufficient; its matching/outbox/HMAC protocol remains compatible and Bot source is unchanged.
+- Local contracts, exact verification and screenshot evidence: `docs/RUMBLE_EVENT_AUTOMATIONS_V11.md`. No deployment, remote migration, Bot restart, secret/config/DNS/provider/payment changes or Public/reference edits. Concurrent work preserved.
+
+
 ## 2026-09-07 - Rumble event automations V1 (local)
 
 CURRENT VER=0.1.0-alpha.0
