@@ -1,0 +1,8 @@
+﻿[
+    "functions/_shared/commerce-launch.js",
+    "functions/_shared/commerce-control-plane.js",
+    "src/commerce/StoreLaunchWorkspace.tsx",
+    "src/commerce/client.ts",
+    "src/pages/BusinessInformationPage.tsx",
+    "src/styles/global.css"
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "origin": "https://admin.thirdrailify.com",
+    "asset": "/assets/thirdadminfav2-Bg9Gen5C.ico",
+    "sha256": "4f9f3e4cf696d515f7df39b36b28b0f12a6d59b53189b2d7a9cecfcc58c6738d",
+    "identical": true
+  },
+  {
+    "origin": "https://admin.thirdrailify.com",
+    "asset": "/assets/index-Nmd40RGY.js",
+    "sha256": "62de474b3604a79312ccdddaf9001ea7e884fc38a29c0edd0f5965e906e97908",
+    "identical": true
+  },
+  {
+    "origin": "https://admin.thirdrailify.com",
+    "asset": "/assets/index-lQrBbTeU.css",
+    "sha256": "119a45f571515530080d71eaaf57e3a25a0a3a121a2cb3911c963e27c4d316cb",
+    "identical": true
+  },
+  {
+    "origin": "https://87c3ed2b.thirdrailify-admin.pages.dev",
+    "asset": "/assets/thirdadminfav2-Bg9Gen5C.ico",
+    "sha256": "4f9f3e4cf696d515f7df39b36b28b0f12a6d59b53189b2d7a9cecfcc58c6738d",
+    "identical": true
+  },
+  {
+    "origin": "https://87c3ed2b.thirdrailify-admin.pages.dev",
+    "asset": "/assets/index-Nmd40RGY.js",
+    "sha256": "62de474b3604a79312ccdddaf9001ea7e884fc38a29c0edd0f5965e906e97908",
+    "identical": true
+  },
+  {
+    "origin": "https://87c3ed2b.thirdrailify-admin.pages.dev",
+    "asset": "/assets/index-lQrBbTeU.css",
+    "sha256": "119a45f571515530080d71eaaf57e3a25a0a3a121a2cb3911c963e27c4d316cb",
+    "identical": true
+  }
+]

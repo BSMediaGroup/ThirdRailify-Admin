@@ -4,6 +4,10 @@ import { AuthFailure, cleanText, nowIso, randomId } from "./auth-core.js";
 import { prepareBusinessProfileMutation, requireCommerceDb, writeCommerceAudit, decryptCommerceSecret } from "./commerce-core.js";
 import { paypalCredentials } from "./paypal-client.js";
 import { paypalTechnicalReadiness, paypalWebhookUrl } from "./paypal-onboarding.js";
+import { COMMERCE_POLICIES } from "./commerce-policy-snapshot.js";
+
+export const TRANSACTION_DISCLOSURE_POLICY_REVISION = "2026.09-transaction-only-1";
+export const READINESS_EVIDENCE_STATUSES = Object.freeze(["STORED", "OPERATOR ATTESTED", "PROVIDER VERIFIED", "EXTERNALLY UNVERIFIED", "NOT APPLICABLE", "ACTION REQUIRED", "DEGRADED", "DISABLED BY OPERATOR DECISION"]);
 
 export const LIVE_ACTIVATION_CONFIRMATION = "SAVE, CONFIRM & ENABLE STORE";
 export const EMERGENCY_PAUSE_CONFIRMATION = "PAUSE LIVE COMMERCE";
@@ -27,7 +31,7 @@ export async function commerceLaunchPlan(env) {
   const db = requireCommerceDb(env);
   const authorityBefore = (await db.prepare(LAUNCH_AUTHORITY_SQL).first()).fingerprint;
   const [settingsResult, providersResult, launch, marketsResult, migration, counts, templates, jobs, printfulDeliveries, business, agreementSchema] = await Promise.all([
-    db.prepare("SELECT setting_key,value_json FROM commerce_settings").all(),
+    db.prepare("SELECT setting_key,value_json,updated_at FROM commerce_settings").all(),
     db.prepare("SELECT provider,status,environment,integration_mode,external_account_id,country_code,currency_code,safe_metadata_json,last_synchronized_at FROM commerce_provider_connections WHERE provider IN ('paypal','stripe','printful')").all(),
     db.prepare("SELECT * FROM commerce_launch_state WHERE id='production'").first(),
     db.prepare("SELECT country_code,display_name,status,strategy,revision FROM commerce_shipping_markets ORDER BY country_code").all(),
@@ -94,6 +98,10 @@ export async function commerceLaunchPlan(env) {
     gate("printful_signed_delivery", settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0, "At least one real signed Printful delivery has been processed. Absence is reported as no delivery evidence yet."),
   ];
   const ready = hardGates.every((entry) => entry.ready);
+  for (const entry of hardGates) {
+    if (entry.ready && entry.id === "merchant_identity" && Number(business?.owner_attested_revision) === Number(business?.revision)) entry.evidenceStatus = "OPERATOR ATTESTED";
+    if (entry.ready && entry.id === "tax_policy") entry.evidenceStatus = "OPERATOR ATTESTED";
+  }
   const plan = {
     ok: true,
     authority: "Commerce D1",
@@ -104,6 +112,9 @@ export async function commerceLaunchPlan(env) {
     ready,
     hardGates,
     advisories,
+    blockers: hardGates.filter((entry) => !entry.ready),
+    activationSettings: STORE_ACTIVATION_SETTINGS,
+    attestationPolicy: { disclosureRevision: TRANSACTION_DISCLOSURE_POLICY_REVISION, legalRevision: COMMERCE_POLICIES.terms.version, taxRevision: (settingsResult?.results || []).find((row) => row.setting_key === "tax_calculation_provider")?.updated_at || null },
     settings: {
       printfulOrderMode: settings.printful_order_mode,
       environment: settings.commerce_environment,
@@ -263,6 +274,7 @@ export async function activateCommerceLaunch(env, input, actorSession) {
   const nextRevision = plan.revision + 1;
   const afterBooleans = { ...plan.settings, checkoutEnabled:true, liveCaptureEnabled:true, fulfillmentEnabled:true, transactionalEmailEnabled:true, internetAgreementDisclosureEnabled:true, customerDocumentAccessEnabled:true, paypalStoreCheckoutEnabled:true, paypalLiveCaptureEnabled:true, stripeEnabled:false, stripeTaxEnabled:false };
   const audit = { readinessRevision:plan.digest, revision:nextRevision, businessProfileRevision:profileTargetRevision,
+    attestation: { accountId:actorAccountId, timestamp, profileRevision:profileTargetRevision, categories:["legal_identity","business_phone","business_premises_address","tax_policy"], legalPolicyRevision:plan.attestationPolicy.legalRevision, taxPolicyRevision:plan.attestationPolicy.taxRevision, taxPolicy:"not_collecting", disclosurePolicyRevision:plan.attestationPolicy.disclosureRevision, transactionDisclosureAuthorized:true, evidenceStatus:"OPERATOR ATTESTED" },
     before: booleanSettings(plan.settings), after: booleanSettings(afterBooleans) };
   try {
     await db.batch([
@@ -358,7 +370,11 @@ function setting(db, key, value, timestamp, actor) {
     .bind(key, JSON.stringify(value), timestamp, cleanText(actor, 160) || null);
 }
 
-function gate(id, ready, detail) { return { id, ready: Boolean(ready), state: ready ? "ready" : "blocked", detail }; }
+function gate(id, ready, detail) {
+  const href = id.startsWith("paypal") ? "/commerce/payments" : id.startsWith("merchant") ? "/commerce/business" : id === "tax_policy" || id === "customer_documents" ? "/commerce/tax" : id.includes("email") || id === "order_confirmation_delivery" ? "/commerce/emails" : id.startsWith("catalogue") ? "/products" : id.startsWith("printful") || id === "shipping" || id === "operations_worker" ? "/commerce/fulfillment" : "/commerce";
+  const evidenceStatus = !ready ? id.startsWith("printful_") && id !== "printful_store" ? "DEGRADED" : "ACTION REQUIRED" : ["paypal_live_credential","paypal_live_webhook","printful_store"].includes(id) ? "PROVIDER VERIFIED" : "STORED";
+  return { id, ready: Boolean(ready), state: ready ? "ready" : "blocked", evidenceStatus, href, detail };
+}
 function hasPrintfulSecret(env) { const value = String(env?.PRINTFUL_API_TOKEN || "").trim(); return value.length >= 16 && value.length <= 4096; }
 function hasPrintfulWebhookSecrets(env) { const publicKey = String(env?.PRINTFUL_WEBHOOK_V2_PUBLIC_KEY || "").trim(); const secret = String(env?.PRINTFUL_WEBHOOK_V2_SECRET_HEX || "").trim(); return /^[A-Za-z0-9+/_=-]{4,512}$/.test(publicKey) && /^[0-9a-fA-F]{64,1024}$/.test(secret) && secret.length % 2 === 0; }
 function transactionDisclosureAddressPresent(value) { const address = json(value, null); return Boolean(address && typeof address === "object" && !Array.isArray(address) && cleanText(address.line1, 160) && cleanText(address.city, 120) && cleanText(address.province, 120) && cleanText(address.postalCode, 64) && cleanText(address.country, 120)); }

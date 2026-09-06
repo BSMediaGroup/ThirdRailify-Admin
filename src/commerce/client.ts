@@ -45,11 +45,12 @@ export type CommerceTemplate = {
   ctaLabel: string; ctaUrl: string; supportText: string; footer: string; accentColor: string; status: "draft" | "disabled" | "ready"; enabled: boolean; revision: number;
   validity?: { state: "valid" | "invalid"; action: "none" | "action_required"; code: string | null; message: string | null };
 };
-export type CommerceLaunchGate = { id: string; ready: boolean; detail: string };
+export type CommerceLaunchGate = { id: string; ready: boolean; detail: string; evidenceStatus?: string; href?: string };
 export type CommerceLaunchPlan = {
   activatedAt: string | null; activatedBy: string | null;
   ok: true; state: "preflight" | "active" | "paused"; revision: number; ready: boolean; digest: string;
   hardGates: CommerceLaunchGate[]; advisories: CommerceLaunchGate[];
+  activationSettings: Record<string, boolean | string>;
   catalogue: { totalVariants: number; eligibleVariants: number; sellableVariants: number; eligibleSellableVariants: number; ineligibleSellableVariants: number };
   shippingMarkets: Array<{ countryCode: string; displayName: string; status: string; strategy: string; revision: number }>;
   settings: { customerDocumentAccessEnabled: boolean; checkoutEnabled: boolean; liveCaptureEnabled: boolean; fulfillmentEnabled: boolean; transactionalEmailEnabled: boolean; stripeTaxEnabled: boolean; emergencyPaused: boolean };

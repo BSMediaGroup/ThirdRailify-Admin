@@ -2762,6 +2762,7 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .store-launch-dialog label { display:flex; align-items:flex-start; gap:.8rem; padding:.8rem 0; }
 .store-launch-dialog input[type=checkbox] { flex:0 0 auto; width:20px; height:20px; }
 .store-launch-dialog .commerce-form__actions { flex-wrap:wrap; }
+.store-launch-dialog dt, .store-launch-dialog dd { overflow-wrap:anywhere; }
 .store-launch-edit { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin-top:1rem; }
 .store-launch-edit label { display:grid; gap:.4rem; min-width:0; }
 .store-launch-edit input { min-width:0; width:100%; }
