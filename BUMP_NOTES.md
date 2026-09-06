@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-06 - Micro-typography and complete country flags (local visual review)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Audited Overview and Audience Analytics in a real browser at 1920/1440/768/390px. Targeted Overview headings' eyebrows, Runtime Posture labels, checked timestamps, operational module metadata, activity sublabels and notice timestamps generally gain 1–2px. Added scoped `--microcopy-ink` for readable operational metadata; Analytics geography/session/route text was already normal-sized and receives contrast only. Tiny chart/popup annotations gain 1–2px. Major headings, body copy, account names, table values and controls retain their scale.
+- Root cause: `countryFlags.ts` had SVG sources only for AU/CA/US, so all other countries fell back despite the analytics response preserving country codes. New `countryCode.ts` validates trimmed/case-normalized input against the existing 249-country ISO dataset. The original three illustrations remain; 246 locally vendored flag-icons 7.5.0 SVGs cover the rest without a new dependency or runtime CDN call. React region lists and DOM popups share the source helper. Missing, malformed, pseudo-country and aggregate codes retain the neutral fallback. No ingestion, map extent/coordinates/markers or provider behavior changed.
+- ISO normalization/local-asset coverage and existing Analytics tests pass (9 tests). Analytics/Overview browser suites pass (5 tests), including decoded US/AU/LV/VN in one responsive fixture, CA/GB/DE/FR/NZ/JP and additional countries through the DOM helper, invalid-code fallback, aligned/untruncated Runtime labels and overflow checks. Runtime cells increase only 3px in height (56→59px); product and major-heading geometry checks remain stable in the paired audit. Desktop/mobile Overview and Analytics review images are in the Public repository's `.artifacts/micro-legibility/` directory.
+- Node 22.16.0: `npm run lint -- --ignore-pattern .artifacts/**`, `npm run typecheck`, `npm run build` and `git diff --check` pass; build retains its large-chunk warning. Focused commands: `node --experimental-strip-types --test --test-concurrency=1 tests/country-flags.test.mjs tests/analytics-inbox.test.mjs` and `node --test --test-concurrency=1 tests/analytics-browser.test.mjs tests/overview-browser.test.mjs`. Broad unrelated suites were not run.
+- README records the helper, vendored asset tree, license/source and validation commands. Existing `.env.example` work is preserved. Fixtures are local examples. No deployment, remote mutation, unrelated feature change or commit; awaiting Daniel's screenshot approval.
+
 ## 2026-09-06 - IGDB Workers transport repair and external search
 
 - Live activation exposed authentication transport failure before an HTTP response. Reproduced the exact defect in the pinned Workers runtime: `redirect: "error"` is rejected by Request construction. IGDB now uses `manual` and rejects 3xx without following or forwarding credentials; no endpoint or credential authority changed.

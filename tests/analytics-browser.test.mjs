@@ -118,6 +118,39 @@ test("Audience Analytics renders explicit migration and ready states responsivel
     }
   }
 
+  const flagContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const flagPage = await flagContext.newPage();
+  await flagPage.route("**/api/**", (route) => respond(route, "flags"));
+  await flagPage.goto(`${ORIGIN}/analytics`);
+  await flagPage.locator('.analytics-region-list [data-country-flag="VN"]').waitFor();
+  for (const width of [1920, 1440, 768, 390]) {
+    await flagPage.setViewportSize({ width, height: 900 });
+    const flags = await flagPage.locator(".analytics-region-list img").evaluateAll(async (images) => {
+      await Promise.all(images.map((image) => image.decode()));
+      return images.map((image) => ({ code: image.dataset.countryFlag, loaded: image.naturalWidth > 0, source: image.getAttribute("src") }));
+    });
+    assert.deepEqual(flags.map((flag) => flag.code), ["US", "AU", "LV", "VN"]);
+    assert.ok(flags.every((flag) => flag.loaded));
+    assert.match(flags[2].source, /\/lv\.svg$/);
+    assert.match(flags[3].source, /\/vn\.svg$/);
+    assert.equal(await flagPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `flag geography has no overflow at ${width}px`);
+  }
+  const helpers = await flagPage.evaluate(async () => {
+    const { flagSource, createCountryFlagElement } = await import("/src/components/countryFlags.ts");
+    const fallback = flagSource(null);
+    const codes = ["US", "AU", "LV", "VN", "CA", "GB", "DE", "FR", "NZ", "JP", "BR", "ZA", "IN", "AQ"];
+    const rendered = [];
+    for (const code of codes) {
+      const image = createCountryFlagElement(code.toLowerCase());
+      await image.decode();
+      rendered.push(image.dataset.countryFlag === code && image.naturalWidth > 0 && image.src !== new URL(fallback, location.href).href);
+    }
+    return { rendered, fallbacks: [undefined, "", "ZZ", "EU", "123", "U1"].map((code) => flagSource(code) === fallback) };
+  });
+  assert.ok(helpers.rendered.every(Boolean), "React list and DOM popup helper both resolve real local flags");
+  assert.ok(helpers.fallbacks.every(Boolean), "invalid and aggregate inputs retain the neutral SVG");
+  await flagContext.close();
+
   const motionContext = await browser.newContext({ viewport: { width: 1024, height: 768 }, reducedMotion: "no-preference" });
   const motionPage = await motionContext.newPage();
   await motionPage.route("**/api/**", (route) => respond(route, "ready"));
@@ -135,13 +168,19 @@ async function respond(route, mode) {
   if (pathname === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { submissions: 0, comments: 0, emailFailures: 0, total: 0 }, total: 0 }, latest: [] });
   if (pathname === "/api/admin/analytics") return mode === "migration"
     ? json(route, { ok: false, error: "analytics_migration_required", message: "Analytics database migration required." }, 503)
-    : json(route, readyReport());
+    : json(route, mode === "flags" ? flagReport() : readyReport());
   return json(route, { ok: false, error: "not_found" }, 404);
 }
 
 function readyReport() {
   const metric = { views: 3, sessions: 2, pagesPerSession: 1.5, comparisonComplete: false, previous: { views: 0, sessions: 0, pagesPerSession: null }, deltas: { views: { available: false, value: null, direction: "unavailable" }, sessions: { available: false, value: null, direction: "unavailable" } } };
   return { ok: true, range: "7d", generatedAt: new Date().toISOString(), timezone: "UTC", configured: true, coverage: { start: "2026-08-30T00:00:00.000Z", end: new Date().toISOString(), totalEvents: 3, lastIngestedAt: new Date().toISOString() }, windows: { "24h": metric, "7d": metric, "30d": metric, "90d": metric }, selected: metric, bucket: "day", series: [{ bucket: "2026-08-29T00:00:00.000Z", views: 1, sessions: 1 }, { bucket: "2026-08-30T00:00:00.000Z", views: 3, sessions: 2 }, { bucket: "2026-08-31T00:00:00.000Z", views: 2, sessions: 2 }], pages: [{ path: "/watch", views: 3, sessions: 2, latestAt: new Date().toISOString() }], sources: [{ source: "direct", views: 3, sessions: 2 }], devices: [{ device: "mobile", views: 3, sessions: 2 }], geography: [{ countryCode: "AU", countryName: "Australia", region: "New South Wales", city: "Sydney", latitude: -33.9, longitude: 151.2, views: 3, sessions: 2, latestAt: new Date().toISOString(), topPath: "/watch", topSource: "direct", memberViews: 1 }, { countryCode: "AU", countryName: "Australia", region: "New South Wales", city: "Newcastle", latitude: -32.9, longitude: 151.8, views: 12, sessions: 8, latestAt: new Date().toISOString(), topPath: "/wheels", topSource: "direct", memberViews: 0 }, { countryCode: "US", countryName: "United States", region: "California", city: "Los Angeles", latitude: 34.1, longitude: -118.2, views: 5, sessions: 4, latestAt: new Date().toISOString(), topPath: "/", topSource: "search", memberViews: 0 }], revenue: { available: true, partial: false, sources: { merchandise: true, donations: true }, unavailableReason: null, profitAvailable: false, profitUnavailableReason: "Complete direct-cost evidence is unavailable.", currencies: [] } };
+}
+
+function flagReport() {
+  const report = readyReport();
+  report.geography = [["US", "United States", "Los Angeles", 34.1, -118.2], ["AU", "Australia", "Sydney", -33.9, 151.2], ["lv", "Latvia", "Riga", 56.9, 24.1], ["vn", "Vietnam", "Hanoi", 21, 105.8]].map(([countryCode, countryName, city, latitude, longitude]) => ({ ...report.geography[0], countryCode, countryName, region: countryName, city, latitude, longitude }));
+  return report;
 }
 
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }

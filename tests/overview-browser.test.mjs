@@ -79,6 +79,13 @@ test("Admin overview reports real cross-system state responsively without deferr
     }).filter((item) => item.reasons.length));
     assert.deepEqual(buttonAudit, [], `visible enabled controls use the Admin design system at ${width}x${height}`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `no horizontal overflow at ${width}x${height}`);
+    const posture = await page.locator(".overview-posture__item").evaluateAll((items) => items.map((item) => {
+      const label = item.querySelector("span");
+      const box = item.getBoundingClientRect();
+      return { size: parseFloat(getComputedStyle(label).fontSize), labelFits: label.scrollWidth <= label.clientWidth + 1, height: box.height };
+    }));
+    assert.ok(posture.every((item) => item.size >= 9.5 && item.labelFits), `Runtime labels stay readable and untruncated at ${width}px`);
+    assert.ok(Math.max(...posture.map((item) => item.height)) - Math.min(...posture.map((item) => item.height)) <= 1, "Runtime cells remain aligned");
     assert.equal(await page.locator(".overview-analytics__panel").evaluate((node) => node.scrollWidth <= Math.ceil(node.getBoundingClientRect().width)), true, `analytics snapshot does not overflow at ${width}x${height}`);
     assert.deepEqual(errors, [], `no page errors at ${width}x${height}`);
     const copy = await page.locator("body").innerText(); const normalizedCopy = copy.replace(/\s+/g, " ");

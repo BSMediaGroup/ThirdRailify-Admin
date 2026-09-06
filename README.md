@@ -1,5 +1,11 @@
 # Third Railify Admin
 
+## Analytics country flags and microcopy
+
+`src/components/countryCode.ts` validates trimmed, case-normalized input against all 249 assigned ISO alpha-2 countries in the existing pinned `country-region-data@4.1.0` dataset. `countryFlags.ts` supplies both the React list and DOM map-popup renderer. Unknown, malformed and aggregate codes retain `unknown.svg`; the original AU/CA/US artwork is preserved. The remaining 246 SVGs are served locally from `public/assets/country-flags/`, vendored from [flag-icons 7.5.0](https://github.com/lipis/flag-icons/tree/v7.5.0/flags/4x3) with its MIT `LICENSE.flag-icons`. There is no runtime CDN request or new package dependency. Source tarball SHA-256: `c0b80bf0e08006a60f56621d6bc49f8c7131f4d1fef6737a165a673431f4b518`.
+
+Tree additions: `src/components/countryCode.ts`, `public/assets/country-flags/*.svg`, `public/assets/country-flags/LICENSE.flag-icons`, and `tests/country-flags.test.mjs`. No files removed. `src/styles/global.css` retains the existing scale; targeted Overview and Analytics metadata uses `--microcopy-ink` where the decorative `--quiet` color was too dim. Run `node --experimental-strip-types --test tests/country-flags.test.mjs` for ISO/asset coverage and `npm run test:browser:analytics` for real image decoding and responsive country fixtures.
+
 ## Gaming catalogue and Current Rotation
 
 ### Private IGDB lookup assistant (0.1.0-alpha.0)
