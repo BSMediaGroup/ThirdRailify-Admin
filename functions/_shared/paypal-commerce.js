@@ -39,7 +39,7 @@ export async function paypalPublicConfiguration(env) {
   const webhookReady = environment === "live" ? settings.paypal_live_webhook_configured === true : settings.paypal_sandbox_webhook_configured === true;
   let storeReadiness = { ready: environment !== "live", hardBlockerCount: null };
   if (environment === "live") {
-    try { const plan = await commerceLaunchPlan(env); storeReadiness = { ready: plan.ready, hardBlockerCount: plan.hardGates.filter(gate => !gate.ready).length }; }
+    try { const plan = await commerceLaunchPlan(env); storeReadiness = { ready: plan.state === "active" ? plan.operationalReady : plan.ready, hardBlockerCount: plan.hardGates.filter(gate => !gate.ready).length }; }
     catch { /* A store readiness failure must not interrupt existing donation authority. */ }
   }
   const paused = settings.commerce_emergency_paused === true || Number(state?.emergency_paused || 0) === 1;

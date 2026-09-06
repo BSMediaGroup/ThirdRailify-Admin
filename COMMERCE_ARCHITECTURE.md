@@ -263,3 +263,7 @@ Preserve donation enable/capture settings, `tax_calculation_provider=not_collect
 Emergency Pause atomically closes store checkout, live merchandise capture and fulfillment submission, preserving donation authority. Active UI shows timestamp/actor/settings and one pause action. Audit contains only IDs, revisions, timestamps and before/after booleans, never phone/address, bodies, secrets or provider payloads.
 
 Shipping correction (6 September 2026): the owner explicitly superseded the earlier Canada-only instruction. Worldwide destination selection is enabled in the existing D1 shipping-market authority, subject to Printful published exclusions and destination/product rate availability. Canadian merchant identity and CAD charging do not restrict customer geography. No provider API call or order was made to configure markets.
+
+## Active checkout projection and reconciliation (2026-09-07)
+
+See [production checkout repair](docs/COMMERCE_CHECKOUT_REPAIR.md) for evidence. The existing public catalogue/product endpoint now projects safe revisioned checkout readiness without caching dynamic activation gates. Master-only launch/reconcile restores drifted derived settings on an already active store with retained owner authority and transactional concurrency guards; it preserves original activation and provider/catalogue/order history. No schema migration.

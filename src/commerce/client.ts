@@ -61,6 +61,7 @@ export type CatalogueRepairReview = {
 };
 export type CommerceLaunchPlan = {
   activatedAt: string | null; activatedBy: string | null;
+  operationalState?: "preflight" | "active" | "paused" | "degraded"; operationalReady?: boolean; activationDrift?: string[];
   ok: true; state: "preflight" | "active" | "paused"; revision: number; ready: boolean; digest: string;
   hardGates: CommerceLaunchGate[]; advisories: CommerceLaunchGate[];
   activationSettings: Record<string, boolean | string>;
@@ -622,3 +623,5 @@ function chunks<T>(values: T[], size: number) {
 }
 
 export function revealPrivateBusinessProfile(csrfToken:string) { return adminApi<{ok:true;revision:number;legalBusinessName:string;privatePhone:string;privateAddress:Record<string,string>}>("/api/admin/commerce/business/reveal",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:"{}"}); }
+
+export function reconcileActiveCommerceStore(csrfToken: string, plan: CommerceLaunchPlan) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/reconcile", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmation: "RECONCILE ACTIVE STORE", expectedDigest: plan.digest, expectedRevision: plan.revision }) }); }

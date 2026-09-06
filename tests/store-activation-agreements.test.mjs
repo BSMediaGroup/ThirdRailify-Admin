@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCommerceDatabases, commerceEnvironment, insertTestProduct, insertTestVariant, insertTestShippingQuote } from "./commerce-test-helpers.mjs";
 import { updateBusinessProfile, revealPrivateBusinessProfile, browserSafeBusinessProjection } from "../functions/_shared/commerce-core.js";
-import { commerceLaunchPlan, activateCommerceLaunch, pauseCommerceLaunch, STORE_ACTIVATION_SETTINGS } from "../functions/_shared/commerce-launch.js";
+import { commerceLaunchPlan, activateCommerceLaunch, reconcileActiveCommerceStore, pauseCommerceLaunch, STORE_ACTIVATION_SETTINGS } from "../functions/_shared/commerce-launch.js";
+import { checkoutReadiness } from "../functions/_shared/checkout-readiness.js";
 import { offerCheckoutAgreement, prepareAgreementAcceptance, acceptedAgreementAppendix } from "../functions/_shared/commerce-agreements.js";
 import { productionReadinessPayload, businessInformationPayload, ensureCompletedOrderReceipt, customerDocumentByToken, renderOrderLifecycleEmail } from "../functions/_shared/commerce-control-plane.js";
 import { paypalPublicConfiguration, createPayPalStorePayment } from "../functions/_shared/paypal-commerce.js";
@@ -71,6 +72,44 @@ async function fixture(t) {
   const body={checkoutRequestId:"33333333-3333-4333-8333-333333333333",items:[{productId:"product-test-001",variantId:"variant-test-001",quantity:1}],recipient:shipping.recipient,quoteId:shipping.quoteId,shippingOptionId:shipping.shippingOptionId,customer:{mode:"guest",name:"Synthetic Customer",email:"customer@example.test"}};
   return {h,db,env,body};
 }
+
+test("publication exclusions do not disable safe checkout after activation", async t => {
+  const { env, db, body } = await fixture(t);
+  await activateCommerceLaunch(env, confirm(await commerceLaunchPlan(env)), master);
+  await insertTestProduct(db, { id: "hidden-product", slug: "hidden-product", visibility: "private", checkoutEnvironment: "live" });
+  await insertTestVariant(db, { id: "hidden-variant", productId: "hidden-product", isSellable: 1 });
+  const plan = await commerceLaunchPlan(env);
+  assert.equal(plan.hardGates.find(g => g.id === "catalogue").ready, false);
+  assert.equal(plan.operationalReady, true);
+  assert.equal((await paypalPublicConfiguration(env)).storeCheckoutEnabled, true);
+  assert.equal((await authoritativeCartLines(db, body.items, { gate: "normal", environment: "live" })).length, 1);
+  await assert.rejects(authoritativeCartLines(db, [{ productId: "hidden-product", variantId: "hidden-variant", quantity: 1 }], { gate: "normal", environment: "live" }));
+  await db.prepare("UPDATE commerce_products SET visibility='private'").run();
+  assert.equal((await commerceLaunchPlan(env)).operationalReady, false);
+});
+
+test("active reconciliation restores a drifted setting atomically and preserves original activation evidence", async t => {
+  const { env, db } = await fixture(t);
+  const active = await activateCommerceLaunch(env, confirm(await commerceLaunchPlan(env)), master);
+  const original = await db.prepare("SELECT * FROM commerce_launch_state").first();
+  const revision = (await checkoutReadiness(env)).revision;
+  await db.prepare("UPDATE commerce_settings SET value_json='false' WHERE setting_key='checkout_enabled'").run();
+  const drift = await commerceLaunchPlan(env);
+  assert.equal(drift.operationalState, "degraded");
+  assert.equal((await checkoutReadiness(env)).checkoutEnabled, false);
+  const repaired = await reconcileActiveCommerceStore(env, { confirmation: "RECONCILE ACTIVE STORE", expectedRevision: drift.revision, expectedDigest: drift.digest }, master);
+  assert.deepEqual(repaired.reconciliation.changedSettings, ["checkout_enabled"]);
+  assert.equal(repaired.activatedAt, active.activatedAt);
+  assert.deepEqual(await db.prepare("SELECT * FROM commerce_launch_state").first(), original);
+  assert.equal((await checkoutReadiness(env)).checkoutEnabled, true);
+  assert.notEqual((await checkoutReadiness(env)).revision, revision);
+  const repeat = await reconcileActiveCommerceStore(env, { confirmation: "RECONCILE ACTIVE STORE", expectedRevision: repaired.revision, expectedDigest: repaired.digest }, master);
+  assert.equal(repeat.reconciliation.idempotent, true);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM commerce_audit WHERE action='commerce.active_store_reconciled'").first()).n, 1);
+  await pauseCommerceLaunch(env, { confirmation: "PAUSE LIVE COMMERCE", expectedRevision: repaired.revision }, master.accountId);
+  const paused = await commerceLaunchPlan(env);
+  await assert.rejects(reconcileActiveCommerceStore(env, { confirmation: "RECONCILE ACTIVE STORE", expectedRevision: paused.revision, expectedDigest: paused.digest }, master), e => e.code === "commerce_reconcile_blocked");
+});
 
 test("safe unconventional private values persist, decrypt, reload and reject malformed replacements",async t=>{
   const {env,db}=await fixture(t);

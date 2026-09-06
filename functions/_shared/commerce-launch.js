@@ -78,9 +78,13 @@ export async function commerceLaunchPlan(env) {
   const advisories = [
     gate("shipment_email", settings.resend_domain_verified === true && configuredEmailTemplates >= 2, "Shipment notification delivery is ready. It is useful post-purchase communication, not payment or fulfillment authority."),
     gate("printful_v2_webhook", settings.printful_v2_webhook_configured === true && hasPrintfulWebhookSecrets(env) && (settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0), "Incoming Printful webhooks remain fail-closed without verified signing-secret custody and real signed-delivery evidence. Scheduled authenticated order reconciliation supplies the production lifecycle authority."),
-    gate("printful_signed_delivery", settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0, "At least one real signed Printful delivery has been processed. Absence is reported as no delivery evidence yet."),
+    gate("printful_signed_delivery", settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0, (settings.printful_v2_signed_delivery_verified === true || Number(printfulDeliveries?.count || 0) > 0) ? "A real signed Printful delivery has been verified." : "No signed Printful delivery has been verified. Inbound webhooks are optional and remain fail-closed; authenticated scheduled reconciliation supplies delivery lifecycle authority."),
   ];
   const ready = hardGates.every((entry) => entry.ready);
+  const activationDrift = Object.entries(STORE_ACTIVATION_SETTINGS).filter(([key, value]) => settings[key] !== value).map(([key]) => key);
+  // After activation, publication changes exclude individual items. Checkout
+  // still validates every line against current product and variant authority.
+  const operationalReady = launch?.state === "active" && !activationDrift.filter(key => key !== "transactional_email_enabled").length && hardGates.every(entry => entry.ready || entry.id === "order_confirmation_delivery" || (entry.id === "catalogue" && counts.counts.eligibleSellableVariants > 0));
   for (const entry of hardGates) {
     if (entry.ready && entry.id === "merchant_identity" && Number(business?.owner_attested_revision) === Number(business?.revision)) entry.evidenceStatus = "OPERATOR ATTESTED";
     if (entry.ready && entry.id === "tax_policy") entry.evidenceStatus = "OPERATOR ATTESTED";
@@ -93,6 +97,9 @@ export async function commerceLaunchPlan(env) {
     activatedBy: launch?.state === "active" ? launch?.updated_by_actor || null : null,
     revision: Number(launch?.revision || 1),
     ready,
+    operationalReady,
+    operationalState: settings.commerce_emergency_paused === true ? "paused" : launch?.state === "active" ? operationalReady ? "active" : "degraded" : "preflight",
+    activationDrift: launch?.state === "active" ? activationDrift : [],
     hardGates,
     advisories,
     blockers: hardGates.filter((entry) => !entry.ready),
@@ -294,6 +301,36 @@ export async function activateCommerceLaunch(env, input, actorSession) {
   await verifyActivationReadback(db, profileTargetRevision);
   const activated = await commerceLaunchPlan(env);
   return { ...activated, activationResult:{before:plan.settings,after:activated.settings,activatedAt:timestamp,actorAccountId,businessProfileRevision:profileTargetRevision,profileSaved:Boolean(profileMutation),idempotent:false} };
+}
+
+export async function reconcileActiveCommerceStore(env, input, session) {
+  if (!input || Object.keys(input).some(key => !["confirmation", "expectedDigest", "expectedRevision"].includes(key)) || input.confirmation !== "RECONCILE ACTIVE STORE") throw new AuthFailure(400, "commerce_reconcile_confirmation_required", "Review current store readiness before reconciling.");
+  const actor = cleanText(session?.accountId, 160);
+  if (!actor) throw new AuthFailure(403, "commerce_actor_required", "An authenticated Master Admin is required.");
+  const db = requireCommerceDb(env), plan = await commerceLaunchPlan(env);
+  if (input.expectedDigest !== plan.digest || input.expectedRevision !== plan.revision) throw new AuthFailure(409, "commerce_launch_revision_conflict", "Store authority changed. Refresh before reconciling.");
+  if (plan.state !== "active" || plan.settings.emergencyPaused || !plan.business.ownerConfirmed || !plan.business.disclosureAuthorized) throw new AuthFailure(409, "commerce_reconcile_blocked", "Reconciliation requires an active, unpaused store with current owner authority.");
+  if (!plan.activationDrift.length) {
+    await verifyActivationReadback(db, plan.business.revision);
+    return { ...plan, reconciliation: { changedSettings: [], idempotent: true } };
+  }
+  if (!plan.ready) throw new AuthFailure(409, "commerce_reconcile_blocked", "Restoring activation settings requires ready dependencies.");
+  const timestamp = nowIso();
+  // Restore only settings already authorized by the retained active-store record.
+  // No provider, catalogue, profile, order, or activation-evidence writes.
+  try {
+    await db.batch([
+      transactionGuard(db, `(${LAUNCH_AUTHORITY_SQL})=?`, [plan.authorityFingerprint]),
+      transactionGuard(db, "EXISTS (SELECT 1 FROM commerce_payment_provider_state WHERE id='primary' AND preferred_provider='paypal' AND stripe_enabled=0 AND paypal_store_checkout_enabled=1 AND paypal_live_capture_enabled=1 AND emergency_paused=0)"),
+      ...plan.activationDrift.map(key => setting(db, key, STORE_ACTIVATION_SETTINGS[key], timestamp, actor)),
+      db.prepare("INSERT INTO commerce_audit(id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,'commerce.active_store_reconciled','commerce_launch_state','production','success',?,?)").bind(randomId(), actor, JSON.stringify({ changedSettings: plan.activationDrift, revision: plan.revision, activatedAt: plan.activatedAt }), timestamp),
+    ]);
+  } catch (error) {
+    if (/commerce_transaction_conflict|malformed JSON/i.test(String(error?.message))) throw new AuthFailure(409, "commerce_launch_revision_conflict", "Store authority changed; reconciliation rolled back.");
+    throw error;
+  }
+  await verifyActivationReadback(db, plan.business.revision);
+  return { ...await commerceLaunchPlan(env), reconciliation: { changedSettings: plan.activationDrift, idempotent: false } };
 }
 
 async function verifyActivationReadback(db, revision) {

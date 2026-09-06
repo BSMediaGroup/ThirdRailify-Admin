@@ -1,5 +1,17 @@
 # Bump notes
 
+## 2026-09-07 - Production checkout projection repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added safe, revisioned checkout readiness to the existing public catalogue/product projection. Live lifecycle, pause, PayPal credential presence/configuration, fulfillment, destination and tax gates are explicit; optional Printful inbound evidence and recoverable email availability do not become global checkout blockers.
+- Active-store operational state distinguishes degraded settings. Master-only POST /api/admin/commerce/launch/reconcile restores only drifted previously authorized derived settings, guards the authority snapshot in one batch, and preserves activation timestamp/evidence, provider records, catalogue and orders. A coherent active store returns an idempotent no-op. Current production activation was coherent before repair.
+- Replaced duplicated pending-webhook warnings with optional/unverified evidence and a separate authenticated reconciliation lifecycle status. Signed-delivery detail now follows actual evidence. Customer Emails already renders authoritative Production sends enabled (7/7 templates); removed the obsolete disabled-email workspace description.
+- Validation/deployment evidence: docs/COMMERCE_CHECKOUT_REPAIR.md. Fresh D1 export recorded before quote/agreement acceptance probes. No manual SQL mutation or schema migration.
+
+
 ## 2026-09-07 - Rumble event automations V1.1 (local)
 
 CURRENT VER=0.1.0-alpha.0

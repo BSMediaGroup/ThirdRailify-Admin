@@ -2,16 +2,18 @@ import { AuthFailure, cleanText } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
 import { canonicalPublicMediaUrl } from "./media-origin.js";
 import { storefrontEligibility } from "./storefront-eligibility.js";
+import { checkoutReadiness } from "./checkout-readiness.js";
 
 export async function publicCataloguePayload(env) {
   const db = requireCommerceDb(env);
-  const [{ products, collections, currentProviderProducts, reconciliationApplied }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env), publicCheckoutEnabled(db)]);
+  const [{ products, collections, currentProviderProducts, reconciliationApplied }, readiness] = await Promise.all([loadPublicCatalogue(db, env), checkoutReadiness(env)]);
   if (reconciliationApplied && products.length > currentProviderProducts) throw new AuthFailure(503, "catalogue_projection_invalid", "The public catalogue exceeds the current provider authority.");
   return {
     ok: true,
     source: "commerce-d1",
     currency: "CAD",
-    checkoutEnabled,
+    checkoutEnabled: readiness.checkoutEnabled,
+    checkoutReadiness: readiness,
     authority: { currentProducts: currentProviderProducts, reconciled: reconciliationApplied },
     collections,
     products,
@@ -25,9 +27,9 @@ export async function publicProductPayload(env, slug) {
     throw new AuthFailure(404, "product_not_found", "The product was not found.");
   }
   const db = requireCommerceDb(env);
-  const [{ products, currentProviderProducts, reconciliationApplied }, checkoutEnabled] = await Promise.all([loadPublicCatalogue(db, env, normalizedSlug), publicCheckoutEnabled(db)]);
+  const [{ products, currentProviderProducts, reconciliationApplied }, readiness] = await Promise.all([loadPublicCatalogue(db, env, normalizedSlug), checkoutReadiness(env)]);
   if (!products.length) throw new AuthFailure(404, "product_not_found", "The product was not found.");
-  return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled, authority: { currentProducts: currentProviderProducts, reconciled: reconciliationApplied }, product: products[0] };
+  return { ok: true, source: "commerce-d1", currency: "CAD", checkoutEnabled: readiness.checkoutEnabled, checkoutReadiness: readiness, authority: { currentProducts: currentProviderProducts, reconciled: reconciliationApplied }, product: products[0] };
 }
 
 async function loadPublicCatalogue(db, env, slug = null) {
@@ -121,18 +123,6 @@ function serializePublicProduct(row, variants, collections, env) {
     available: variants.length ? variants.some((variant) => variant.availability === "active") : true,
     updatedAt: cleanText(row.updated_at, 80),
   };
-}
-
-async function publicCheckoutEnabled(db) {
-  const result = await db.prepare(`SELECT setting_key,value_json FROM commerce_settings WHERE setting_key IN (
-    'commerce_environment','preferred_payment_provider','paypal_sandbox_configured','paypal_sandbox_webhook_configured',
-    'paypal_live_configured','paypal_live_webhook_configured','paypal_store_checkout_enabled','paypal_live_capture_enabled',
-    'fulfillment_submission_enabled','commerce_emergency_paused')`).all();
-  const settings = Object.fromEntries((result?.results || []).map((row) => { try { return [row.setting_key, JSON.parse(row.value_json)]; } catch { return [row.setting_key, null]; } }));
-  const live = settings.commerce_environment === "production";
-  const credentialsReady = live ? settings.paypal_live_configured === true : settings.paypal_sandbox_configured === true;
-  const webhookReady = live ? settings.paypal_live_webhook_configured === true : settings.paypal_sandbox_webhook_configured === true;
-  return settings.preferred_payment_provider === "paypal" && settings.paypal_store_checkout_enabled === true && credentialsReady && webhookReady && settings.commerce_emergency_paused !== true && (!live || (settings.paypal_live_capture_enabled === true && settings.fulfillment_submission_enabled === true));
 }
 
 function serializePublicCollection(row, productIds) {

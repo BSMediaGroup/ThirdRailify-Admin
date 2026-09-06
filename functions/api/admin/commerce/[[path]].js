@@ -85,6 +85,7 @@ import {
 import {
   activatePayPalDonations,
   activateCommerceLaunch,
+  reconcileActiveCommerceStore,
   applyEligibleVariantSellability,
   commerceLaunchPlan,
   paypalDonationLaunchPlan,
@@ -268,6 +269,12 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     if (new URL(request.url).origin !== "https://admin.thirdrailify.com" || request.headers.get("Origin") !== "https://admin.thirdrailify.com") throw new AuthFailure(403,"production_origin_required","Store activation requires the exact production Admin origin.");
     payload = await activateCommerceLaunch(env, await readJsonBody(request), session);
     authEventType = "commerce_production_activated";
+  } else if (path === "launch/reconcile") {
+    await requireAdminCapability(env, session, "commerce.operations.manage");
+    if (!(await accessForSession(env, session)).isMasterAdmin) throw new AuthFailure(403, "master_admin_required", "Only Master Admin can reconcile the active store.");
+    if (new URL(request.url).origin !== "https://admin.thirdrailify.com" || request.headers.get("Origin") !== "https://admin.thirdrailify.com") throw new AuthFailure(403, "production_origin_required", "Store reconciliation requires the production Admin origin.");
+    payload = await reconcileActiveCommerceStore(env, await readJsonBody(request), session);
+    authEventType = "commerce_active_store_reconciled";
   } else if (path === "launch/donations-activate") {
     await requireAdminCapability(env, session, "commerce.operations.manage");
     payload = await activatePayPalDonations(env, await readJsonBody(request), session.accountId);
