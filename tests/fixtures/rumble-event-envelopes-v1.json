@@ -1,0 +1,83 @@
+[
+  {
+    "eventType": "rumble.follow",
+    "eventFingerprint": "79297d6657d538d394450426eaa8e326a3e78fef3cbfa0ee274fdd0bf36b22d2",
+    "sourceScope": "user:fixture",
+    "livestreamId": null,
+    "providerEventAt": "2026-07-30T15:41:11+00:00",
+    "actorKey": "rumble:user:fixture:sample viewer",
+    "actorLabel": "Sample Viewer",
+    "evidence": {},
+    "ruleId": "fixture-rule",
+    "ruleRevision": 1
+  },
+  {
+    "eventType": "rumble.gift_purchase",
+    "eventFingerprint": "f04a8100a554932401a6ccf30ba15f54f16fc6b24fe1653392f093c822716621",
+    "sourceScope": "user:fixture",
+    "livestreamId": null,
+    "providerEventAt": "2026-09-01T01:52:33+00:00",
+    "actorKey": "rumble:user:fixture:sample viewer",
+    "actorLabel": "Sample Viewer",
+    "evidence": {
+      "totalGifts": 5,
+      "giftType": "rumble",
+      "videoId": 444666132
+    },
+    "ruleId": "fixture-rule",
+    "ruleRevision": 1
+  },
+  {
+    "eventType": "rumble.subscribe",
+    "eventFingerprint": "8877c74b4b5f4465e0a88351440d51bfab9bf9038b81a79b0cadb001af5fcb1a",
+    "sourceScope": "user:fixture",
+    "livestreamId": null,
+    "providerEventAt": "2026-09-01T02:42:08+00:00",
+    "actorKey": "rumble:user:fixture:user:sample-user",
+    "actorLabel": "Sample Viewer",
+    "evidence": {
+      "amountCents": 0
+    },
+    "ruleId": "fixture-rule",
+    "ruleRevision": 1
+  },
+  {
+    "eventType": "rumble.rant",
+    "eventFingerprint": "07834e0c07504484a494f41dde599edf9535c53dc8966b2bb4bdcdff7c095e10",
+    "sourceScope": "user:fixture",
+    "livestreamId": "sample-live",
+    "providerEventAt": "2026-09-01T02:46:07+00:00",
+    "actorKey": "rumble:user:fixture:sample viewer",
+    "actorLabel": "Sample Viewer",
+    "evidence": {
+      "normalizedText": "enter",
+      "badges": [
+        "verified",
+        "moderator",
+        "recurring_subscription",
+        "whale-blue"
+      ],
+      "amountCents": 100
+    },
+    "ruleId": "fixture-rule",
+    "ruleRevision": 1
+  },
+  {
+    "eventType": "rumble.chat.exact",
+    "eventFingerprint": "eee431aa83dd5f486c70cc2e5917326ff8be02250ffb14d00df3210a6ef3928b",
+    "sourceScope": "user:fixture",
+    "livestreamId": "sample-live",
+    "providerEventAt": "2026-09-01T03:09:21+00:00",
+    "actorKey": "rumble:user:fixture:sample viewer",
+    "actorLabel": "Sample Viewer",
+    "evidence": {
+      "normalizedText": "enter",
+      "badges": [
+        "moderator",
+        "recurring_subscription"
+      ]
+    },
+    "ruleId": "fixture-rule",
+    "ruleRevision": 1
+  }
+]

@@ -1,5 +1,14 @@
 # Third Railify Admin
 
+## Rumble event automations V1 (local implementation)
+
+Trigger Studio and the per-Wheel Rumble Automation panel now manage operational exact-chat, Rant, follower, subscriber and gift-purchase rules. Admin owns revisions, activation boundaries, receipts, audit/counters and transactional writes to existing Wheel entries; the existing Bot remains the sole Rumble client. Every event attempts one weight-1 entry, with normalized duplicate labels skipped. The tester is a dry run; livestream transitions have no entrant-compatible action.
+
+Apply additive `commerce-migrations/0034_rumble_event_automations.sql` to local test storage before using the rule APIs. No remote migration or deployment was performed. Protected `/api/admin/automations/rules`, `/rules/delete` and `/test` require established Automations and Wheels capabilities; writes also require Admin origin and CSRF. Existing signed `/api/internal/bot/rules` and `/events` carry bounded safe projections/envelopes. Historical events before activation are ignored; persisted unique receipts prevent repeated Wheel actions across restarts.
+
+Complete contracts, new-file inventory/repository-tree additions, validation commands, safety boundaries and backup ? migration ? Admin ? existing Bot ? staged live acceptance rollout: [Rumble event automations V1](docs/RUMBLE_EVENT_AUTOMATIONS_V1.md). Visual evidence is in `.artifacts/event-automations/REVIEW.html`. Versions remain current/pending `0.1.0-alpha.0`.
+
+
 Readability regression files: `tests/readability-browser.test.mjs` checks Products metadata, editor captions, semantic statuses, account identity geometry and Order detail text at desktop/mobile widths. `tests/readability-fixtures.mjs` reuses existing sanitized browser fixture factories without registering their suites. Run `node --test --test-concurrency=1 tests/readability-browser.test.mjs`. The cross-application route register and visual review evidence are ignored under `X:\GIT\ThirdRailify\.artifacts\readability-complete\`; no diagnostic assets ship with Admin.
 
 ## Analytics country flags and microcopy

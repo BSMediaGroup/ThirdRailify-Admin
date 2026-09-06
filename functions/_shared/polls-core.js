@@ -337,7 +337,7 @@ export async function automationsStatus(env) {
     config: { desiredRevision: Number(config?.desired_revision || 1), desiredState: safeJson(config?.desired_state_json, {}), updatedAt: config?.updated_at || null },
     runtime: heartbeat ? { ...runtime, startupInstanceId: heartbeat.startup_instance_id, botVersion: heartbeat.bot_version, desiredRevision: Number(heartbeat.desired_revision), appliedRevision: Number(heartbeat.applied_revision), heartbeatAt: heartbeat.heartbeat_at, ageSeconds, state: ageSeconds <= 45 ? "online" : ageSeconds <= 180 ? "stale" : "offline" } : { state: "offline", configured: false },
     activePoll: activePoll ? await projectDetail(env, activePoll) : null,
-    deferred: { processControl: true, generalTriggerStudio: true, rants: true, wheelExecution: true },
+    deferred: { processControl: true, generalTriggerStudio: false, rants: false, wheelExecution: false },
     activity: activityRows?.results || [],
   };
 }
@@ -633,6 +633,10 @@ function sanitizeRuntime(input) {
   const value = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const allowed = ["discordConnected","rumbleConfigured","lastConfigSync","lastRumbleFetch","sourceLabel","sourceScopeType","livestreamId","livestreamTitle","pollLeaseActive","activePollId","activePollRevision","pollingIntervalSeconds","lastProviderTime","lastAcceptedVoteTime","backlogMayBeTruncated","errorCode","providerState","configSyncState","nextPollAt","backoffSeconds","counters"];
   const result = Object.fromEntries(allowed.filter((key) => key in value).map((key) => [key, sanitizeRuntimeValue(value[key])]));
+  if (value.eventAutomation && typeof value.eventAutomation === 'object') {
+    const eventKeys = ['activeRules','pending','dropped','malformed','transitions','lastTransition','lastSnapshotAt','lastConfigAt','lastFault','backoffSeconds'];
+    result.eventAutomation = Object.fromEntries(eventKeys.filter(key => key in value.eventAutomation).map(key => [key, sanitizeRuntimeValue(value.eventAutomation[key])]));
+  }
   const discovery = sanitizeRumbleDiscovery(value.rumbleDiscovery);
   if (discovery) result.rumbleDiscovery = discovery;
   return result;

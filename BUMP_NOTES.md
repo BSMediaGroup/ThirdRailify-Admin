@@ -1,5 +1,18 @@
 # Bump notes
 
+## 2026-09-07 - Rumble event automations V1 (local)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced deferred Trigger Studio and Wheels automation surfaces with typed CRUD, family-aware conditions, target selection, dry-run/redacted samples, optimistic revisions, activation boundaries, enable/disable, confirmed delete and bounded activity/counters.
+- Supports exact chat, populated Rants, followers, zero-value subscribers and gift purchasers. One qualifying event makes one entry attempt; normalized duplicates are skipped. Livestream transitions have no actor and expose no entry action.
+- Additive `0034_rumble_event_automations.sql` adds rules/unique receipts; existing Wheels authority transactionally writes entries, revisions, receipts, counters and audit. Existing Bot HMAC/replay protection and Admin capabilities/origin/CSRF remain authoritative. No unmatched chat archive or secret projection.
+- Focused server and real local-D1 browser acceptance passed, including rollback/concurrency, history/restart dedupe and 1920/1440/768/390px layouts. Typecheck/build, lint (existing artifact warnings), Functions compilation and Worker dry-run passed. Evidence/commands and exact rollout plan: `docs/RUMBLE_EVENT_AUTOMATIONS_V1.md`.
+- Requires separately authorized production backup/ledger check, migration, Admin release, existing Bot update/restart and staged live acceptance. No deployment, remote migration, live restart, secret/DNS/provider/payment/Discord mutation or reference-repository modification occurred. Concurrent work preserved; accumulated notes retained.
+
+
 ## 2026-09-07 - Printful mockup authority and scoped publication repair (local)
 
 CURRENT VER=0.1.0-alpha.0

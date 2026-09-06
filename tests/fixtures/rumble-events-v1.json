@@ -1,0 +1,113 @@
+{
+  "user_id": "fixture",
+  "max_num_results": 50,
+  "livestreams": [
+    {
+      "id": "sample-live",
+      "created_on": "2026-09-01T01:40:53+00:00",
+      "is_live": true,
+      "chat": {
+        "recent_messages": [
+          {
+            "username": "Sample Viewer",
+            "badges": [
+              "moderator",
+              "recurring_subscription"
+            ],
+            "text": "ENTER",
+            "created_on": "2026-09-01T03:09:21+00:00"
+          }
+        ],
+        "latest_message": {
+          "username": "Sample Viewer",
+          "badges": [
+            "moderator",
+            "recurring_subscription"
+          ],
+          "text": "ENTER",
+          "created_on": "2026-09-01T03:09:21+00:00"
+        },
+        "recent_rants": [
+          {
+            "username": "Sample Viewer",
+            "badges": [
+              "verified",
+              "moderator",
+              "recurring_subscription",
+              "whale-blue"
+            ],
+            "text": "ENTER",
+            "created_on": "2026-09-01T02:46:07+00:00",
+            "expires_on": "2026-09-01T02:48:07+00:00",
+            "amount_cents": 100,
+            "amount_dollars": 1
+          }
+        ],
+        "latest_rant": {
+          "username": "Sample Viewer",
+          "badges": [
+            "verified",
+            "moderator",
+            "recurring_subscription",
+            "whale-blue"
+          ],
+          "text": "ENTER",
+          "created_on": "2026-09-01T02:46:07+00:00",
+          "expires_on": "2026-09-01T02:48:07+00:00",
+          "amount_cents": 100,
+          "amount_dollars": 1
+        }
+      }
+    }
+  ],
+  "followers": {
+    "recent_followers": [
+      {
+        "username": "Sample Viewer",
+        "followed_on": "2026-07-30T11:41:11-04:00"
+      }
+    ],
+    "latest_follower": {
+      "username": "Sample Viewer",
+      "followed_on": "2026-07-30T11:41:11-04:00"
+    }
+  },
+  "subscribers": {
+    "recent_subscribers": [
+      {
+        "user": "sample-user",
+        "username": "Sample Viewer",
+        "amount_cents": 0,
+        "amount_dollars": 0,
+        "subscribed_on": "2026-09-01T02:42:08+00:00"
+      }
+    ],
+    "latest_subscriber": {
+      "user": "sample-user",
+      "username": "Sample Viewer",
+      "amount_cents": 0,
+      "amount_dollars": 0,
+      "subscribed_on": "2026-09-01T02:42:08+00:00"
+    }
+  },
+  "gifted_subs": {
+    "recent_gifted_subs": [
+      {
+        "purchased_by": "Sample Viewer",
+        "total_gifts": 5,
+        "gift_type": "rumble",
+        "remaining_gifts": 0,
+        "video_id": 444666132,
+        "gifted_on": "2026-09-01T01:52:33+00:00"
+      }
+    ],
+    "latest_gifted_sub": {
+      "purchased_by": "Sample Viewer",
+      "total_gifts": 5,
+      "gift_type": "rumble",
+      "remaining_gifts": 0,
+      "video_id": 444666132,
+      "gifted_on": "2026-09-01T01:52:33+00:00"
+    }
+  }
+}

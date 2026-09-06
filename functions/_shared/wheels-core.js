@@ -169,6 +169,52 @@ export async function createWheel(env, accountId, input) {
   return getPublicWheel(env, slug, accountId);
 }
 
+// Service-only entry action. The caller revalidates the signed rule and condition;
+// this authority owns all entry/revision/receipt writes in one D1 transaction.
+export async function executeAutomationWheelEntry(env, rule, event) {
+  const db = requireWheelDb(env);
+  const prior = await db.prepare('SELECT id FROM automation_receipts WHERE rule_id=? AND event_fingerprint=?').bind(rule.id, event.eventFingerprint).first();
+  if (prior) { await db.prepare('UPDATE automation_rules SET duplicate_events=duplicate_events+1 WHERE id=?').bind(rule.id).run(); return 'duplicate_event'; }
+  const wheel = await db.prepare('SELECT * FROM wheels WHERE id=?').bind(rule.target_wheel_id).first();
+  if (!wheel) {
+    const id = randomId(), timestamp = nowIso();
+    await db.batch([
+      db.prepare(`INSERT OR IGNORE INTO automation_receipts(id,rule_id,rule_revision,event_fingerprint,event_type,provider_event_at,actor_key,actor_label,outcome,target_wheel_id,created_at)
+        SELECT ?,?,?,?,?,?,?,?,'wheel_unavailable',NULL,? WHERE EXISTS (SELECT 1 FROM automation_rules WHERE id=? AND revision=? AND enabled=1 AND deleted_at IS NULL)`)
+        .bind(id, rule.id, rule.revision, event.eventFingerprint, event.eventType, event.providerEventAt, event.actorKey, event.actorLabel, timestamp, rule.id, rule.revision),
+      db.prepare(`UPDATE automation_rules SET matched=matched+1,failed=failed+1,last_match_at=?,last_outcome='wheel_unavailable',last_fault='wheel_unavailable'
+        WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`).bind(timestamp, rule.id, id),
+    ]);
+    const receipt = await db.prepare('SELECT id FROM automation_receipts WHERE rule_id=? AND event_fingerprint=?').bind(rule.id, event.eventFingerprint).first();
+    return receipt ? receipt.id === id ? 'wheel_unavailable' : 'duplicate_event' : 'retry';
+  }
+  const entries = await db.prepare('SELECT display_label FROM wheel_entries WHERE wheel_id=?').bind(wheel.id).all();
+  const normalize = value => value.normalize('NFKC').trim().toLowerCase();
+  const duplicate = entries.results.some(entry => normalize(entry.display_label) === normalize(event.actorLabel));
+  const outcome = wheel.editing_locked || wheel.lifecycle === 'archived' || entries.results.length >= MAX_ENTRIES ? 'wheel_unavailable' : duplicate ? 'duplicate_entrant' : 'added';
+  const receiptId = randomId(), entryId = randomId(), timestamp = nowIso();
+  const result = await db.batch([
+    db.prepare(`INSERT OR IGNORE INTO automation_receipts(id,rule_id,rule_revision,event_fingerprint,event_type,provider_event_at,actor_key,actor_label,outcome,target_wheel_id,created_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=?)
+      AND EXISTS (SELECT 1 FROM automation_rules WHERE id=? AND revision=? AND enabled=1 AND deleted_at IS NULL)`)
+      .bind(receiptId, rule.id, rule.revision, event.eventFingerprint, event.eventType, event.providerEventAt, event.actorKey, event.actorLabel, outcome, wheel.id, timestamp, wheel.id, wheel.revision, rule.id, rule.revision),
+    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at)
+      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),1,'active',?,?
+      WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND outcome='added')`)
+      .bind(entryId, wheel.id, event.actorLabel, wheel.id, timestamp, timestamp, receiptId),
+    db.prepare(`UPDATE wheels SET participant_count=(SELECT COUNT(*) FROM wheel_entries WHERE wheel_id=? AND state='active'),revision=revision+1,updated_at=?
+      WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND outcome='added')`).bind(wheel.id, timestamp, wheel.id, receiptId),
+    db.prepare(`UPDATE automation_rules SET matched=matched+1,executed=executed+?,duplicate_entrants=duplicate_entrants+?,failed=failed+?,last_match_at=?,last_outcome=?,last_fault=?
+      WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`).bind(Number(outcome === 'added'), Number(outcome === 'duplicate_entrant'), Number(outcome === 'wheel_unavailable'), timestamp, outcome, outcome === 'wheel_unavailable' ? outcome : null, rule.id, receiptId),
+    db.prepare(`INSERT INTO wheel_audit_events(id,wheel_id,actor_account_id,target_account_id,event_type,metadata_json,created_at)
+      SELECT ?,?,NULL,NULL,'automation_entry_action',?,? WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`)
+      .bind(randomId(), wheel.id, JSON.stringify({ ruleId: rule.id, receiptId, outcome }), timestamp, receiptId),
+  ]);
+  if (result[0].meta.changes === 1) return outcome;
+  const received = await db.prepare('SELECT id FROM automation_receipts WHERE rule_id=? AND event_fingerprint=?').bind(rule.id, event.eventFingerprint).first();
+  return received ? 'duplicate_event' : 'retry';
+}
+
 export async function saveWheel(env, accountId, slug, input) {
   await enforceWheelRateLimit(env, "save", accountId, 60, 3600);
   const db = requireWheelDb(env); const wheel = await wheelBySlug(env, slug);
