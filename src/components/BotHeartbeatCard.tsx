@@ -1,7 +1,7 @@
-import { useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AutomationPayload } from "../polls/admin-client";
-import { classifyRuntimeHealth, runtimeHealthObservation, type RuntimeHealthObservation, type RuntimeOverallState } from "../runtime-health";
+import { classifyRuntimeHealth, runtimeHeartbeatAge, runtimeHealthObservation, type RuntimeHealthObservation, type RuntimeOverallState } from "../runtime-health";
 import "../styles/bot-heartbeat.css";
 
 type BotHeartbeatCardProps = { payload: AutomationPayload | null; error?: string; loading?: boolean; compact?: boolean; linkTo?: string };
@@ -19,11 +19,13 @@ const SIGNAL_PATHS: Record<RuntimeOverallState, string> = {
 export function BotHeartbeatCard({ payload, error, loading = false, compact = false, linkTo }: BotHeartbeatCardProps) {
   const signalId = useId().replace(/:/g, "");
   const history = useRef<RuntimeHealthObservation[]>([]);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   if (payload) {
     const observation = runtimeHealthObservation(payload);
     if (observation && history.current.at(-1)?.sampledAt !== observation.sampledAt) history.current = [...history.current.slice(-23), observation];
   }
-  const status = classifyRuntimeHealth(payload, history.current, Date.now(), error ? "error" : loading ? "loading" : "ready");
+  const status = classifyRuntimeHealth(payload, history.current, now, error ? "error" : loading ? "loading" : "ready");
   const runtime = payload?.runtime;
   const desired = payload?.config.desiredRevision;
   const applied = optionalNumber(runtime?.appliedRevision);
@@ -46,7 +48,7 @@ export function BotHeartbeatCard({ payload, error, loading = false, compact = fa
       {!compact ? <p className="bot-heartbeat__disclaimer">Heartbeat, event-window, provider, revision, and delivery states are classified independently. Credential presence never implies provider health.</p> : null}
     </div>
     <dl className="bot-heartbeat__telemetry">
-      <HeartbeatFact label="Last heartbeat" value={heartbeatAt ? formatDateTime(heartbeatAt) : loading ? "Reading" : "Never"} subvalue={heartbeatAge(runtime?.ageSeconds, heartbeatAt)} />
+      <HeartbeatFact label="Last heartbeat" value={heartbeatAt ? formatDateTime(heartbeatAt) : loading ? "Reading" : "Never"} subvalue={heartbeatAge(payload ? runtimeHeartbeatAge(payload, now) : null, heartbeatAt)} />
       <HeartbeatFact label="Bot version" value={stringValue(runtime?.botVersion) || "Not reported"} subvalue="Runtime release" />
       <HeartbeatFact label="Discord runtime" value={status.providerLabel} subvalue={status.providerDetail} state={status.providerState} />
       <HeartbeatFact label="Revision state" value={revisionLabel(status.revisionState)} subvalue={desired !== undefined && applied !== null ? `Desired ${desired} / applied ${applied}` : "No revision signal"} state={status.revisionState} />
@@ -62,4 +64,4 @@ function revisionLabel(state: string) { return state === "synchronized" ? "Synch
 function stringValue(value: unknown) { return typeof value === "string" ? value : ""; }
 function optionalNumber(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) && parsed >= 0 ? parsed : null; }
 function formatDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Unknown" : new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" }).format(date); }
-function heartbeatAge(value: unknown, heartbeatAt: string) { const reported = optionalNumber(value); const seconds = reported ?? (heartbeatAt ? Math.max(0, Math.round((Date.now() - new Date(heartbeatAt).valueOf()) / 1000)) : 0); if (!heartbeatAt) return "No pulse recorded"; if (seconds < 60) return `${seconds}s ago`; if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`; return `${Math.floor(seconds / 3600)}h ago`; }
+function heartbeatAge(value: unknown, heartbeatAt: string) { const reported = optionalNumber(value); const seconds = Math.floor(reported ?? (heartbeatAt ? Math.max(0, (Date.now() - new Date(heartbeatAt).valueOf()) / 1000) : 0)); if (!heartbeatAt) return "No pulse recorded"; if (seconds < 60) return `${seconds}s ago`; if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`; return `${Math.floor(seconds / 3600)}h ago`; }

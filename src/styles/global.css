@@ -2770,3 +2770,11 @@ h3 { font-size: .98rem; letter-spacing: -.005em; text-transform: uppercase; }
 .store-launch-edit input { min-width:0; width:100%; }
 .store-launch-workspace details { margin:1rem 0; }
 @media(max-width:600px) { .store-launch-summary,.store-launch-edit { grid-template-columns:1fr; } .store-launch-primary { width:100%; white-space:normal; } }
+
+/* Shared bounded catalogue review in Commerce and Products. */
+.catalogue-repair-dialog { max-height: 85dvh; overflow: auto; width: min(46rem, calc(100vw - 2rem)); box-sizing: border-box; }
+.catalogue-repair-dialog select { max-width: 100%; }
+.catalogue-repair-records { padding-inline-start: 1.2rem; }
+.catalogue-repair-records li { margin-block: .7rem; overflow-wrap: anywhere; }
+.catalogue-repair-records small { display: block; }
+.catalogue-repair-dialog .commerce-form__actions { flex-wrap: wrap; }

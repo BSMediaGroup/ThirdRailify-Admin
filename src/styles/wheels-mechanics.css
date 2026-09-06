@@ -478,12 +478,24 @@
 }
 .wheels-overview-mechanics {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
   margin: 18px 0;
   padding: 22px;
 }
+.overview-mechanics-details { flex: 1 1 360px; min-width: 0; }
+.overview-mechanics-details .eyebrow { flex-wrap: wrap; gap: 4px 9px; }
+.overview-mechanics-details .eyebrow span { display: inline-block; width: auto; height: auto; background: none; }
+.overview-mechanics-values { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 14px 0 0; }
+.overview-mechanics-values dt { color: var(--muted); font-size: 12px; }
+.overview-mechanics-values dd { margin: 4px 0 0; color: var(--ink); font-family: "Geist Mono", monospace; font-size: 13px; font-variant-numeric: tabular-nums; }
+.overview-mechanics-values dd span { color: var(--muted); font-size: 11px; }
+.overview-mechanics-curve { flex: 0 1 240px; width: 240px; max-width: 100%; margin: 0; padding: 10px 12px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-soft); }
+.overview-mechanics-curve figcaption { color: var(--muted); font-family: "Geist Mono", monospace; font-size: 10px; }
+.overview-mechanics-curve .mechanics-curve-graph { display: block; width: 100%; height: auto; }
+.overview-mechanics-axis { display: flex; justify-content: space-between; color: var(--quiet); font-family: "Geist Mono", monospace; font-size: 10px; }
 .wheels-overview-jumps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -573,6 +585,8 @@
     align-items: flex-start;
     flex-direction: column;
   }
+  .overview-mechanics-details { flex-basis: auto; }
+  .overview-mechanics-curve { flex-basis: auto; align-self: center; }
   .wheels-overview-mechanics .primary-button {
     width: 100%;
     text-align: center;

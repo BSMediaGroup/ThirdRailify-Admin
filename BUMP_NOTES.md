@@ -839,3 +839,35 @@ Admin now carries the confirmed public sender identity and reply-to address as s
 - Deployed the isolated Content-page polish as Admin Production deployment `a603f8eb` (`https://a603f8eb.thirdrailify-admin.pages.dev`). The immutable and stable `/content` routes return `200` with matching `index-t2baMVKy.js` and `index-Qrrq_Twt.css` assets, and the previously released auth-cleanup route still fails closed with `401` when unauthenticated.
 
 Shipping correction (6 September 2026): the owner explicitly superseded the earlier Canada-only instruction. Worldwide destination selection is enabled in the existing D1 shipping-market authority, subject to Printful published exclusions and destination/product rate availability. Canadian merchant identity and CAD charging do not restrict customer geography. No provider API call or order was made to configure markets.
+
+
+## 2026-09-07 - Reviewed catalogue sellability and Trigger Studio polish (local)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added Commerce review/fix and Products selected/matching/all-current sellability repair with explicit catalogue-wide unsafe-flag cleanup. Bounded product/variant diagnostics distinguish eligible flags, existing publication choices and unresolved provider/mapping/price exclusions. Publication and owner activation remain separate.
+- Reused storefront eligibility for current-store safety across publication, readiness, repair and checkout; removed obsolete migration-status dependence for verified current evidence. Exact decimal identifiers, NULL evidence and wrong-store/archive/ignored/provider rules fail closed.
+- Existing protected Apply now checks the reviewed digest, guards current state inside one D1 batch, writes only changed flags/timestamps, and audits atomically. Exact completed-state replay is a no-op. No provider calls, migration, reconciliation/import or activation accompanies repair.
+- Trigger Studio now follows the dashboard's warm dark/gold theme with responsive metrics, consistent rule/editor surfaces and an honest recoverable schema-error state. No remote schema change.
+- Fixture and validation evidence, including local repair-to-owner-activation acceptance at 1440/768/390, is recorded in docs/CATALOGUE_SELLABILITY_REPAIR.md. No deployment, production records, live activation, secrets, bindings, DNS, commit or push.
+
+## 2026-09-07 - Production Rumble Automations schema and heartbeat acceptance
+
+- Exported production `thirdrailify-commerce` before applying the sole pending migration, `0034_rumble_event_automations.sql`, exactly once at 2026-09-06 15:50:48 UTC. Backup: `X:\GIT\_BACKUPS\ThirdRailify\thirdrailify-commerce-pre-0034-20260907-014947.sql`; 4,540,400 bytes; SHA-256 `3250EA5582D87ED5098ECF8AC6ADDE76A5E57894F2D34F8F947FAFB55ED1F68E`.
+- Verified the complete rule/receipt schema, five explicit indexes, primary/unique constraints, all foreign keys, unchanged prior ledger entries and zero FK violations. No pending migrations remain. Compared 3,017 existing Poll/Wheel/Commerce rows: only the existing scheduled Commerce worker's configured-setting timestamp advanced; all business values and prior records remained intact.
+- Migration alone repaired the stable authenticated rules/activity/Wheel-target response and removed the schema banner. Summary and rules return 200 JSON; valid empty Trigger Studio shows seven zero counters, no rules and no receipts. Created a disabled exact-chat acceptance rule through the real UI against Standard Wheel Test; verified save/r1, hard reload, edit/r2, hard reload, then confirmed UI deletion (retained disabled r3 tombstone). Zero matches, executions, receipts or new Wheel entries; original 190 entries retained.
+- Separately fixed the reported false delayed-heartbeat cycle in Admin: the Bot sends its pulse after the shared Rumble check at the signed 60-second cadence, while Admin had used a fixed 45-second threshold. Summary/discovery now derive freshness from the signed cadence with bounded scheduler/request allowance (live 93-second current / 210-second offline windows); retries do not extend freshness. Displayed age advances between reads, failed reads show unavailable, and Overview refreshes runtime telemetry automatically.
+- Released only the scoped heartbeat changes from an isolated `b4f2f50` baseline; concurrent Commerce/Trigger Studio edits were excluded. Preview `f93e40c2`; production `ff58d3bc`; stable asset `index-CD0WVvig.js`. Node 22.16.0 typecheck/lint/build/Functions compile passed; scoped final lint and diff check passed. Server coverage passed across full/focused runs after an isolated-checkout fixture-path correction and one bounded Miniflare startup retry. Cadence/frozen-reporter/responsive/reduced-motion browser coverage passed; Overview browser suite 4/4 passed.
+- Stable Automations remained healthy for 43 visual observations over 210 seconds without refresh clicks, including pulse ages beyond the old 45-second limit. Disabled-rule and final desktop/mobile screenshots were actually opened/viewed. Full schema, integrity, commands, validation limitations and visual evidence: `X:\GIT\_BACKUPS\ThirdRailify\rumble-0034-20260907\ROLLOUT.md`.
+- No Bot restart/source edit, live rule execution, Public/reference-repository change, unrelated migration, secret/DNS/provider/payment mutation, commit or push. Existing background services continued; unrelated concurrent work preserved.
+
+## 2026-09-07 - Wheels Overview mechanics card (local)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added the saved velocity curve thumbnail using the existing Mechanics compiler/renderer, with launch/stop labels and saved policy revision. Fixed corrupted range separators, loading text and directory arrow; launch speed, spin duration and cooldown now have clear labels and monospaced values.
+- Verified desktop, tablet and 390px screenshots, saved preset/custom curve parity, no extra policy requests or writes, typecheck/build, focused lint and diff checks. No migration, deployment or mechanics setting changes.

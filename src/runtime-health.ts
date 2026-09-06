@@ -16,11 +16,13 @@ export const RUNTIME_HEALTH_THRESHOLDS = Object.freeze({
 });
 
 export type RuntimeSnapshot = {
+  receivedAt?: number;
   config?: { desiredRevision?: number };
   runtime?: Record<string, unknown> & {
     state?: "online" | "stale" | "offline";
     heartbeatAt?: string;
     ageSeconds?: number;
+    freshness?: { expectedIntervalSeconds: number | null; currentSeconds: number; offlineSeconds: number };
     appliedRevision?: number;
     desiredRevision?: number;
     discordConnected?: boolean;
@@ -85,10 +87,10 @@ export function classifyRuntimeHealth(
   now = Date.now(),
   requestState: "ready" | "loading" | "error" = "ready",
 ): RuntimeHealthModel {
-  if (!snapshot) return unavailableModel(requestState);
+  if (!snapshot || requestState === "error") return unavailableModel(requestState);
   const runtime = snapshot.runtime || {};
   const observations = normalizeHistory(history, runtimeHealthObservation(snapshot));
-  const heartbeatState = classifyHeartbeat(runtime, now);
+  const heartbeatState = classifyHeartbeat(snapshot, now);
   const revisionState = classifyRevision(snapshot);
   const pipelineState = classifyPipeline(runtime, observations);
   const providerState = classifyProvider(runtime, observations);
@@ -118,15 +120,24 @@ export function classifyRuntimeHealth(
   };
 }
 
-function classifyHeartbeat(runtime: NonNullable<RuntimeSnapshot["runtime"]>, now: number): HeartbeatState {
-  if (runtime.state === "offline") return "offline";
-  if (runtime.state === "stale") return "stale";
+export function runtimeHeartbeatAge(snapshot: RuntimeSnapshot, now = Date.now()): number | null {
+  const runtime = snapshot.runtime || {};
   const heartbeatAt = text(runtime.heartbeatAt);
   const computedAge = heartbeatAt && !Number.isNaN(Date.parse(heartbeatAt)) ? Math.max(0, (now - Date.parse(heartbeatAt)) / 1000) : null;
-  const age = finite(runtime.ageSeconds) ? Number(runtime.ageSeconds) : computedAge;
-  if (age === null) return runtime.state === "online" ? "healthy" : "unknown";
-  if (age > RUNTIME_HEALTH_THRESHOLDS.heartbeatOfflineSeconds) return "offline";
-  if (age > RUNTIME_HEALTH_THRESHOLDS.heartbeatCurrentSeconds) return "stale";
+  if (typeof runtime.ageSeconds === "number" && Number.isFinite(runtime.ageSeconds)) {
+    return Math.max(0, runtime.ageSeconds) + (typeof snapshot.receivedAt === "number" ? Math.max(0, now - snapshot.receivedAt) / 1000 : 0);
+  }
+  return computedAge;
+}
+
+function classifyHeartbeat(snapshot: RuntimeSnapshot, now: number): HeartbeatState {
+  const runtime = snapshot.runtime || {};
+  const age = runtimeHeartbeatAge(snapshot, now);
+  if (age === null) return runtime.state === "offline" ? "offline" : runtime.state === "stale" ? "stale" : runtime.state === "online" ? "healthy" : "unknown";
+  const current = runtime.freshness?.currentSeconds ?? RUNTIME_HEALTH_THRESHOLDS.heartbeatCurrentSeconds;
+  const offline = runtime.freshness?.offlineSeconds ?? RUNTIME_HEALTH_THRESHOLDS.heartbeatOfflineSeconds;
+  if (age > offline) return "offline";
+  if (age > current) return "stale";
   return "healthy";
 }
 

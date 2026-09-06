@@ -1,3 +1,4 @@
+import { storefrontEligibility } from "./storefront-eligibility.js";
 import { AuthFailure, cleanText, enforceRateLimit, nowIso, randomId, verifyTurnstile } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
 import { merchantCartRates, validateMerchantSelection } from "./shipping-ratebook.js";
@@ -73,19 +74,20 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
   const [productResult, variantCountResult, currentAuthority] = await Promise.all([
     db.prepare(
       `SELECT id,title,safe_metadata_json,currency_code,status,unit_amount,checkout_environment,visibility,max_checkout_quantity,
-              requires_shipping,migration_status,target_printful_product_id,provider_presence
+              requires_shipping,migration_status,target_printful_product_id,provider_presence,provider_store_id,provider_reconciliation_status,archived_at
        FROM commerce_products WHERE id IN (${placeholders})`,
     ).bind(...items.map((item) => item.productId)).all(),
     db.prepare(`SELECT product_id,COUNT(*) variant_count FROM commerce_product_variants WHERE product_id IN (${placeholders}) GROUP BY product_id`).bind(...items.map((item) => item.productId)).all(),
     db.prepare("SELECT 1 current FROM commerce_products WHERE provider_presence='current' LIMIT 1").first(),
   ]);
+  const providerStore = currentAuthority ? await db.prepare("SELECT external_account_id FROM commerce_provider_connections WHERE provider='printful'").first() : null;
   const products = new Map((productResult?.results || []).map((row) => [row.id, row]));
   const variantCounts = new Map((variantCountResult?.results || []).map((row) => [row.product_id, Number(row.variant_count)]));
   const variantIds = items.map((item) => item.variantId).filter(Boolean);
   const variantResult = variantIds.length ? await db.prepare(
     `SELECT id,product_id,status,visibility,is_sellable,availability_status,unit_amount,currency_code,sku,
             size_label,color_label,option_values_json,fulfillment_provider,fulfillment_mapping_status,migration_status,
-            target_printful_product_id,target_printful_sync_variant_id,target_catalogue_variant_id,provider_presence
+            target_printful_product_id,target_printful_sync_variant_id,target_catalogue_variant_id,provider_presence,provider_store_id,archived_at,is_ignored,safe_metadata_json
      FROM commerce_product_variants WHERE id IN (${variantIds.map(() => "?").join(",")})`,
   ).bind(...variantIds).all() : { results: [] };
   const variants = new Map((variantResult?.results || []).map((row) => [row.id, row]));
@@ -103,10 +105,11 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
     if (item.variantId && (!variant || variant.product_id !== item.productId)) throw new AuthFailure(400, "checkout_variant_unknown", "The requested product variant does not exist.");
     if (currentAuthority && variant && variant.provider_presence !== "current") throw new AuthFailure(409, "checkout_variant_provider_inactive", "The requested product variant is no longer present in the current provider catalogue.");
     if (variant && (variant.status !== "active" || variant.visibility !== "public" || variant.is_sellable !== 1 || variant.availability_status !== "active")) throw new AuthFailure(409, "checkout_variant_unavailable", "The requested product variant is not sellable and available.");
+    if (product.provider_presence === "current" && (!variant || !storefrontEligibility(product, [variant], providerStore?.external_account_id).displayable)) throw new AuthFailure(409, "checkout_variant_eligibility_invalid", "The current variant has invalid provider, publication or mapping evidence.");
     const requiresShipping = product.requires_shipping === 1;
     if (requiresShipping && (!variant || variant.fulfillment_provider !== "printful" || variant.fulfillment_mapping_status !== "mapped" || !variant.target_printful_sync_variant_id)) throw new AuthFailure(409, "checkout_variant_fulfillment_unavailable", "The requested physical variant has no authoritative fulfillment mapping.");
     if (gate === "shipping_quote" && requiresShipping && !numericProviderId(variant?.target_catalogue_variant_id)) throw new AuthFailure(409, "shipping_catalogue_variant_unavailable", "The requested physical variant has no authoritative Printful Catalog variant mapping.");
-    if (gate === "controlled_test" && (product.migration_status !== "target_verified" || !product.target_printful_product_id || !variant || variant.migration_status !== "target_verified" || !variant.target_printful_product_id || variant.target_printful_product_id !== product.target_printful_product_id)) throw new AuthFailure(409, "checkout_variant_migration_unverified", "The controlled test variant is not fully verified against its target mapping.");
+    if (gate === "controlled_test" && product.provider_presence !== "current" && (product.migration_status !== "target_verified" || !product.target_printful_product_id || !variant || variant.migration_status !== "target_verified" || !variant.target_printful_product_id || variant.target_printful_product_id !== product.target_printful_product_id)) throw new AuthFailure(409, "checkout_variant_migration_unverified", "The controlled test variant is not fully verified against its target mapping.");
     if (variant && String(variant.currency_code || "").toUpperCase() !== "CAD") throw new AuthFailure(409, "checkout_variant_currency_invalid", "The requested product variant is not priced in CAD.");
     const unitAmount = Number(variant ? variant.unit_amount : product.unit_amount);
     const maxQuantity = Number(product.max_checkout_quantity);

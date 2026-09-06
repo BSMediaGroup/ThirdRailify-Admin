@@ -1,8 +1,9 @@
+import { catalogueSellabilityReview, catalogueReviewDigest } from "./catalogue-sellability.js";
 import { worldwideShippingMarkets } from "./shipping-core.js";
 import { activeRatebook, shippingWeightCoverage } from "./shipping-ratebook.js";
-import { transactionGuard, LAUNCH_AUTHORITY_SQL } from "./commerce-transaction-guards.js";
+import { transactionGuard, LAUNCH_AUTHORITY_SQL, CATALOGUE_AUTHORITY_SQL } from "./commerce-transaction-guards.js";
 import { AuthFailure, cleanText, nowIso, randomId } from "./auth-core.js";
-import { prepareBusinessProfileMutation, requireCommerceDb, writeCommerceAudit, decryptCommerceSecret } from "./commerce-core.js";
+import { prepareBusinessProfileMutation, requireCommerceDb, decryptCommerceSecret } from "./commerce-core.js";
 import { paypalCredentials } from "./paypal-client.js";
 import { paypalTechnicalReadiness, paypalWebhookUrl } from "./paypal-onboarding.js";
 import { COMMERCE_POLICIES } from "./commerce-policy-snapshot.js";
@@ -14,20 +15,6 @@ export const LIVE_ACTIVATION_CONFIRMATION = "SAVE, CONFIRM & ENABLE STORE";
 export const EMERGENCY_PAUSE_CONFIRMATION = "PAUSE LIVE COMMERCE";
 export const LIVE_DONATIONS_CONFIRMATION = "ACTIVATE LIVE PAYPAL DONATIONS";
 
-const ELIGIBLE_VARIANT_PREDICATE = `
-  p.status='active' AND p.visibility='public' AND p.requires_shipping=1
-  AND p.provider_presence='current' AND v.provider_presence='current'
-  AND v.status='active' AND v.visibility='public' AND v.availability_status='active'
-  AND v.is_ignored=0 AND v.unit_amount>0 AND v.currency_code='CAD'
-  AND v.fulfillment_provider='printful' AND v.fulfillment_mapping_status='mapped'
-  AND v.migration_status IN ('target_verified','target_native')
-  AND p.migration_status IN ('target_verified','target_native')
-  AND v.target_printful_sync_variant_id GLOB '[1-9]*'
-  AND v.target_catalogue_variant_id GLOB '[1-9]*'
-  AND v.target_printful_product_id IS NOT NULL
-  AND p.target_printful_product_id IS NOT NULL
-  AND v.target_printful_product_id=p.target_printful_product_id`;
-
 export async function commerceLaunchPlan(env) {
   const db = requireCommerceDb(env);
   const authorityBefore = (await db.prepare(LAUNCH_AUTHORITY_SQL).first()).fingerprint;
@@ -37,14 +24,7 @@ export async function commerceLaunchPlan(env) {
     db.prepare("SELECT * FROM commerce_launch_state WHERE id='production'").first(),
     db.prepare("SELECT country_code,display_name,status,strategy,revision FROM commerce_shipping_markets ORDER BY country_code").all(),
     db.prepare("SELECT status,phase,step_lease_token,safe_state_json FROM commerce_catalogue_migrations WHERE id='permanent-printful-2026-08'").first(),
-    db.prepare(`SELECT
-      COUNT(*) total_variants,
-      SUM(CASE WHEN v.is_sellable=1 THEN 1 ELSE 0 END) sellable_variants,
-      SUM(CASE WHEN ${ELIGIBLE_VARIANT_PREDICATE} THEN 1 ELSE 0 END) eligible_variants,
-      SUM(CASE WHEN v.is_sellable=1 AND ${ELIGIBLE_VARIANT_PREDICATE} THEN 1 ELSE 0 END) eligible_sellable_variants,
-      SUM(CASE WHEN v.is_sellable=1 AND NOT (${ELIGIBLE_VARIANT_PREDICATE}) THEN 1 ELSE 0 END) ineligible_sellable_variants,
-      SUM(CASE WHEN NOT (${ELIGIBLE_VARIANT_PREDICATE}) THEN 1 ELSE 0 END) blocked_variants
-      FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id`).first(),
+    catalogueSellabilityReview(env),
     db.prepare("SELECT * FROM commerce_templates").all(),
     db.prepare("SELECT state,COUNT(*) count FROM commerce_operation_jobs GROUP BY state").all(),
     db.prepare("SELECT COUNT(*) count FROM commerce_provider_webhook_events WHERE provider='printful' AND processing_status='processed'").first(),
@@ -87,7 +67,7 @@ export async function commerceLaunchPlan(env) {
     gate("paypal_live_webhook", paypalLiveTechnical.webhookReadbackVerified, "The exact PayPal LIVE webhook URL and event set were read back and its identifier is stored as a server secret."),
     gate("tax_policy", settings.tax_calculation_provider === "not_collecting", "An explicit server-authoritative tax policy is configured without inventing registrations."),
     gate("printful_store", printful?.status === "connected" && printful?.integration_mode === "fulfillment" && String(printful?.external_account_id || "") === "18668025" && printful?.metadata?.api_configured === true && hasPrintfulSecret(env), "The native Printful target store 18668025 is verified."),
-    gate("catalogue", Number(counts?.eligible_variants || 0) > 0 && Number(counts?.eligible_sellable_variants || 0) === Number(counts?.eligible_variants || 0) && Number(counts?.ineligible_sellable_variants || 0) === 0, "Every eligible target-verified variant is sellable and blocked variants remain unavailable."),
+    gate("catalogue", counts.counts.eligibleVariants > 0 && counts.counts.eligibleNeedingEnablement === 0 && counts.counts.ineligibleSellableVariants === 0, `${counts.counts.eligibleNeedingEnablement} eligible variants need enablement; ${counts.disable} unsafe flags need disabling. ${counts.counts.eligibleVariants ? "Excluded variants remain unavailable." : "No eligible published variants: review publication choices and data blockers."}`),
     gate("catalogue_migration_terminal", new Set(["completed", "completed_with_blocked_products"]).has(migration?.status) && migration?.phase === "completed" && !migration?.step_lease_token && new Set(["completed", "completed_with_blocked_products"]).has(migrationState.finalStatus || migration?.status), "The permanent catalogue migration is terminal with no active lease and remains outside the launch workflow."),
     gate("shipping", (settings.shipping_strategy === "printful_dynamic" || Boolean(merchantPolicy && merchantCoverage && !merchantCoverage.missing.length)) && worldwideShippingMarkets().every(market => activeMarkets.some(active => active.country_code === market.countryCode)), merchantPolicy ? `Merchant weight-band rates published; ${merchantCoverage.covered}/${merchantCoverage.total} usable variant weights. Finite method ceilings are valid; out-of-range carts fail individually. Printful still determines serviceability.` : "Worldwide shipping destinations are configured; server-issued Printful rates determine product and destination availability."),
     gate("customer_documents", receiptReady, "The branded receipt renderer is ready; accepted agreements are retained with completed orders. Tax invoices are not applicable under not_collecting."),
@@ -139,14 +119,7 @@ export async function commerceLaunchPlan(env) {
     },
     business: { revision: Number(business?.revision || 0), tradingName: business?.trading_name || "", legalNameConfigured: Boolean(business?.legal_business_name_ciphertext), phoneConfigured: Boolean(business?.private_phone_ciphertext), addressConfigured: Boolean(business?.private_address_ciphertext), ownerConfirmed: Number(business?.owner_attested_revision || 0) === Number(business?.revision || 0), disclosureAuthorized: Number(business?.transaction_disclosure_authorized_revision || 0) === Number(business?.revision || 0), ownerAttestedAt: business?.owner_attested_at || null, disclosureAuthorizedAt: business?.transaction_disclosure_authorized_at || null },
     customerSending: { providerConfigured: Boolean(env?.RESEND_API_KEY && env?.MAIL_FROM), domainVerified: settings.resend_domain_verified === true, configuredTemplates: configuredEmailTemplates, totalTemplates:emailTemplates.length,requiredTemplatesReady,allLifecycleTemplatesReady,globallyEnabled: settings.transactional_email_enabled === true },
-    catalogue: {
-      totalVariants: number(counts?.total_variants),
-      eligibleVariants: number(counts?.eligible_variants),
-      sellableVariants: number(counts?.sellable_variants),
-      eligibleSellableVariants: number(counts?.eligible_sellable_variants),
-      ineligibleSellableVariants: number(counts?.ineligible_sellable_variants),
-      blockedVariants: number(counts?.blocked_variants),
-    },
+    catalogue: { ...counts.counts, review: counts },
     shippingMarkets: markets.map((market) => ({ countryCode: market.country_code, displayName: market.display_name, status: market.status, strategy: market.strategy, revision: Number(market.revision) })),
     jobs: Object.fromEntries((jobs?.results || []).map((row) => [row.state, number(row.count)])),
     checkedAt: nowIso(),
@@ -158,19 +131,36 @@ export async function commerceLaunchPlan(env) {
   return plan;
 }
 
-export async function applyEligibleVariantSellability(env, actorAccountId = null) {
+export async function applyEligibleVariantSellability(env, actorAccountId = null, input = {}, session = null) {
+  if (!input || Object.keys(input).some(k => !["confirmation", "expectedDigest", "scope"].includes(k)) || input.confirmation !== "APPLY ELIGIBLE SELLABILITY" || !/^[a-f0-9]{64}$/.test(input.expectedDigest || "")) throw new AuthFailure(400, "commerce_catalogue_confirmation_required", "Review the catalogue and confirm Apply catalogue fixes.");
   const db = requireCommerceDb(env);
-  const before = await eligibilityCounts(db);
+  const before = await catalogueSellabilityReview(env, input.scope, session);
+  if (before.digest !== input.expectedDigest) {
+    const previous = await db.prepare("SELECT metadata_json FROM commerce_audit WHERE action='commerce.catalogue_sellability_applied' AND actor_account_id IS ? AND json_extract(metadata_json,'$.digest')=? ORDER BY created_at DESC LIMIT 1").bind(actorAccountId, input.expectedDigest).first();
+    if (previous && JSON.parse(previous.metadata_json).afterDigest === before.digest) return { ok: true, enabled: 0, disabled: 0, unchanged: true, idempotent: true, before: before.counts, after: before.counts };
+    throw new AuthFailure(409, "catalogue_refresh_required", "Catalogue changed after Preview. Refresh the review before applying.");
+  }
+  if (!before.enable && !before.disable) return { ok: true, enabled: 0, disabled: 0, unchanged: true, before: before.counts, after: before.counts };
   const timestamp = nowIso();
-  const [enabled, disabled] = await db.batch([
-    db.prepare(`UPDATE commerce_product_variants AS v SET is_sellable=1,updated_at=?
-      WHERE is_sellable=0 AND EXISTS (SELECT 1 FROM commerce_products p WHERE p.id=v.product_id AND ${ELIGIBLE_VARIANT_PREDICATE})`).bind(timestamp),
-    db.prepare(`UPDATE commerce_product_variants AS v SET is_sellable=0,updated_at=?
-      WHERE is_sellable=1 AND NOT EXISTS (SELECT 1 FROM commerce_products p WHERE p.id=v.product_id AND ${ELIGIBLE_VARIANT_PREDICATE})`).bind(timestamp),
-  ]);
-  const after = await eligibilityCounts(db);
-  await writeCommerceAudit(env, { actorAccountId, action: "commerce.catalogue_sellability_applied", targetType: "commerce_product_variants", targetId: "eligible-production-catalogue", result: "success", metadata: { before, after, enabled: changes(enabled), disabled: changes(disabled) } });
-  return { ok: true, before, after, enabled: changes(enabled), disabled: changes(disabled) };
+  const expectedAfter = JSON.parse(before.fingerprint);
+  const enabledIds = new Set(before.enableIds), disabledIds = new Set(before.disableIds);
+  for (const row of expectedAfter.variants) {
+    if (enabledIds.has(row.id) || disabledIds.has(row.id)) { row.is_sellable = enabledIds.has(row.id) ? 1 : 0; row.updated_at = timestamp; }
+  }
+  const afterDigest = await catalogueReviewDigest(JSON.stringify(expectedAfter), env, before.scope);
+  try {
+    await db.batch([
+      transactionGuard(db, `(${CATALOGUE_AUTHORITY_SQL})=?`, [before.fingerprint]),
+      db.prepare("UPDATE commerce_product_variants SET is_sellable=1,updated_at=? WHERE id IN (SELECT value FROM json_each(?)) AND is_sellable IS NOT 1").bind(timestamp, JSON.stringify(before.enableIds)),
+      db.prepare("UPDATE commerce_product_variants SET is_sellable=0,updated_at=? WHERE id IN (SELECT value FROM json_each(?)) AND is_sellable=1").bind(timestamp, JSON.stringify(before.disableIds)),
+      db.prepare("INSERT INTO commerce_audit (id,actor_account_id,action,target_type,target_id,result,metadata_json,created_at) VALUES (?,?,'commerce.catalogue_sellability_applied','commerce_product_variants','eligible-production-catalogue','success',?,?)").bind(randomId(), actorAccountId, JSON.stringify({ digest: before.digest, afterDigest, scope: before.scope, enabled: before.enable, disabled: before.disable, disableOutsideScope: before.disableOutsideScope }), timestamp),
+    ]);
+  } catch (error) {
+    if (String(error?.message).includes("malformed JSON") || String(error?.message).includes("commerce_transaction_conflict")) throw new AuthFailure(409, "catalogue_refresh_required", "Catalogue changed during Apply. No fixes were applied; refresh the review.");
+    throw error;
+  }
+  const after = await catalogueSellabilityReview(env);
+  return { ok: true, before: before.counts, after: after.counts, enabled: before.enable, disabled: before.disable };
 }
 
 export async function paypalDonationLaunchPlan(env) {
@@ -360,14 +350,6 @@ function requireTransitionInput(input, confirmation, reasonAllowed = false) {
   }
 }
 
-async function eligibilityCounts(db) {
-  const row = await db.prepare(`SELECT COUNT(*) total,
-    SUM(CASE WHEN ${ELIGIBLE_VARIANT_PREDICATE} THEN 1 ELSE 0 END) eligible,
-    SUM(CASE WHEN v.is_sellable=1 THEN 1 ELSE 0 END) sellable
-    FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id`).first();
-  return { total: number(row?.total), eligible: number(row?.eligible), sellable: number(row?.sellable) };
-}
-
 function setting(db, key, value, timestamp, actor) {
   return db.prepare("INSERT INTO commerce_settings(setting_key,value_json,classification,updated_at,updated_by_account_id) VALUES(?,?,'safe',?,?) ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json,classification='safe',updated_at=excluded.updated_at,updated_by_account_id=excluded.updated_by_account_id")
     .bind(key, JSON.stringify(value), timestamp, cleanText(actor, 160) || null);
@@ -381,7 +363,8 @@ function gate(id, ready, detail) {
 function hasPrintfulSecret(env) { const value = String(env?.PRINTFUL_API_TOKEN || "").trim(); return value.length >= 16 && value.length <= 4096; }
 function hasPrintfulWebhookSecrets(env) { const publicKey = String(env?.PRINTFUL_WEBHOOK_V2_PUBLIC_KEY || "").trim(); const secret = String(env?.PRINTFUL_WEBHOOK_V2_SECRET_HEX || "").trim(); return /^[A-Za-z0-9+/_=-]{4,512}$/.test(publicKey) && /^[0-9a-fA-F]{64,1024}$/.test(secret) && secret.length % 2 === 0; }
 function transactionDisclosureAddressPresent(value) { const address = json(value, null); return Boolean(address && typeof address === "object" && !Array.isArray(address) && cleanText(address.line1, 160) && cleanText(address.city, 120) && cleanText(address.province, 120) && cleanText(address.postalCode, 64) && cleanText(address.country, 120)); }
-function changes(result) { return Number(result?.meta?.changes || 0); }
 function number(value) { const result = Number(value); return Number.isSafeInteger(result) && result >= 0 ? result : 0; }
 function json(value, fallback) { try { return JSON.parse(String(value ?? "")); } catch { return fallback; } }
 async function sha256Hex(value) { const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value))); return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
+
+function changes(result) { return Number(result?.meta?.changes || 0); }

@@ -15,6 +15,34 @@ test("runtime pulse states, transitions, reduced motion, and responsive geometry
   t.after(() => server.kill()); await waitForServer();
   const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
 
+  // Advance the browser clock through complete normal cycles and a stopped reporter.
+  const cadence = await openSequence(browser, { width: 1440, height: 900 }, [runtime({
+    ageSeconds: 50, pollingIntervalSeconds: 60,
+    freshness: { expectedIntervalSeconds: 60, currentSeconds: 93, offlineSeconds: 210 },
+  })], "no-preference", true);
+  await expectTone(cadence.page, "healthy");
+  let reportedAge = 50;
+  let reads = 0;
+  await cadence.page.route("**/api/admin/automations", route => {
+    reads += 1;
+    return json(route, runtime({ ageSeconds: reportedAge, pollingIntervalSeconds: 60, freshness: { expectedIntervalSeconds: 60, currentSeconds: 93, offlineSeconds: 210 } }));
+  });
+  for (const age of [60, 0, 15, 30, 45, 60, 0]) {
+    reportedAge = age;
+    const response = cadence.page.waitForResponse(r => new URL(r.url()).pathname === "/api/admin/automations");
+    await cadence.page.clock.fastForward(15000);
+    await response;
+    await expectTone(cadence.page, "healthy");
+  }
+  assert.ok(reads >= 7, "automatic refresh spans multiple heartbeats without clicks");
+  // Freeze network delivery: the last successful report must continue to age.
+  await cadence.page.route("**/api/admin/automations", () => {});
+  await cadence.page.clock.fastForward(95000);
+  await expectTone(cadence.page, "warning");
+  await cadence.page.clock.fastForward(120000);
+  await expectTone(cadence.page, "offline");
+  await cadence.context.close();
+
   for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }]) {
     await captureInitial(browser, viewport, "healthy", [runtime({ heartbeatAt: iso(0) })], "healthy", "rgb(85, 243, 160)");
     await captureInitial(browser, viewport, "catching-up", [runtime({ heartbeatAt: iso(0), pollLeaseActive: true, backlogMayBeTruncated: true })], "catching_up", "rgb(243, 201, 40)");
@@ -102,10 +130,11 @@ async function captureInitial(browser, viewport, name, sequence, tone, color) {
   await opened.page.screenshot({ path: path.join(ARTIFACTS, `${name}-${viewport.width}x${viewport.height}.png`), fullPage: true });
   await opened.context.close();
 }
-async function openSequence(browser, viewport, sequence, reducedMotion = "no-preference") {
+async function openSequence(browser, viewport, sequence, reducedMotion = "no-preference", clock = false) {
   let index = 0;
   const context = await browser.newContext({ viewport, reducedMotion });
   const page = await context.newPage(); const errors = [];
+  if (clock) await page.clock.install();
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => respond(route, sequence[Math.min(index, sequence.length - 1)]));
@@ -119,6 +148,7 @@ async function respond(route, automation) {
   if (requestPath === "/api/auth/session") return json(route, { ok: true, authenticated: true, csrfToken: "health-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master", providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: iso(0), source: "test", locked: true } });
   if (requestPath === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { total: 0, goats: { total: 0 } } });
   if (requestPath === "/api/admin/automations") return json(route, automation);
+  if (requestPath === "/api/admin/automations/rules") return json(route, { ok: true, rules: [], wheels: [], activity: [] });
   if (requestPath === "/api/admin/polls") return json(route, { ok: true, items: [], count: 0 });
   if (requestPath === "/api/admin/wheels" || requestPath === "/api/admin/wheels/stages") return json(route, { ok: true, items: [] });
   return json(route, { ok: false, error: "not_found" }, 404);

@@ -2088,7 +2088,7 @@ function serializeMerchandisingVariant(row) {
 
 function fulfillmentReadiness(variants) { if (variants.some((variant) => variant.migrationStatus === "blocked" || variant.fulfillmentMappingStatus === "conflict")) return "blocked"; if (variants.length && variants.every((variant) => variant.fulfillmentMappingStatus === "mapped")) return "mapped"; return "pending"; }
 function formatCadMinor(value) { return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value / 100); }
-function normalizeProductListOptions(input = {}) {
+export function normalizeProductListOptions(input = {}) {
   const value = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const pageValue = Number.parseInt(String(value.page ?? "1"), 10);
   const pageSizeValue = Number.parseInt(String(value.pageSize ?? "20"), 10);
@@ -2106,7 +2106,7 @@ function normalizeProductListOptions(input = {}) {
     sort: choice(cleanText(value.sort, 40), ["display", "name", "price"], "display"),
   };
 }
-function filterMerchandisingProducts(products, options) {
+export function filterMerchandisingProducts(products, options) {
   const hasCurrentAuthority = products.some((product) => product.provider.presence === "current");
   const next = products.filter((product) => {
     const searchable = `${product.title} ${product.slug} ${product.categories.join(" ")} ${product.tags.join(" ")}`.toLowerCase();

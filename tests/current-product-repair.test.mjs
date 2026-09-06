@@ -97,8 +97,8 @@ test("real local D1/R2 repair is protected, stages before activation, preserves 
   preview=await previewCurrentProductRepair(env,session,{...body,restoreOverride:true},fetchAll,{intervalMs:0});assert.equal(preview.blockers.length,0);
 });
 test("eligibility rejects wrong-store, archived, ignored and invalid prices independently of local intent", () => {
-  const p={provider_presence:"current",provider_store_id:STORE,provider_reconciliation_status:"current",target_printful_product_id:"100",status:"active",visibility:"public",currency_code:"CAD",safe_metadata_json:JSON.stringify({publicImage:PREVIEW})};
-  const v={id:"1",provider_presence:"current",provider_store_id:STORE,is_ignored:0,availability_status:"active",currency_code:"CAD",unit_amount:2500,target_printful_sync_variant_id:"1",target_catalogue_variant_id:"1001",target_printful_product_id:"100",fulfillment_mapping_status:"mapped",status:"active",visibility:"public",is_sellable:1};
+  const p={requires_shipping:1,provider_presence:"current",provider_store_id:STORE,provider_reconciliation_status:"current",target_printful_product_id:"100",status:"active",visibility:"public",currency_code:"CAD",safe_metadata_json:JSON.stringify({publicImage:PREVIEW})};
+  const v={fulfillment_provider:"printful",id:"1",provider_presence:"current",provider_store_id:STORE,is_ignored:0,availability_status:"active",currency_code:"CAD",unit_amount:2500,target_printful_sync_variant_id:"1",target_catalogue_variant_id:"1001",target_printful_product_id:"100",fulfillment_mapping_status:"mapped",status:"active",visibility:"public",is_sellable:1};
   assert.equal(storefrontEligibility(p,[v],STORE).displayable,true);
   for(const patch of [{provider_store_id:"other"},{archived_at:"today"},{is_ignored:1},{currency_code:"USD"},{unit_amount:0},{target_printful_product_id:"another-product"}]) assert.equal(storefrontEligibility(p,[{...v,...patch}],STORE).displayable,false);
   assert.equal(storefrontEligibility({...p,visibility:"private"},[v],STORE).displayable,false);

@@ -16,9 +16,11 @@ if (command === "plan" || command === "donations-plan" || !execute) {
 }
 if (command === "activate") fail("Owner attestation and transaction disclosure authorization must be completed at https://admin.thirdrailify.com/commerce using SAVE, CONFIRM & ENABLE STORE.");
 if (!csrf) fail("COMMERCE_ADMIN_CSRF_TOKEN is required for an executed mutation.");
+const catalogueDigest = process.argv.find(arg => arg.startsWith("--expected-digest="))?.slice("--expected-digest=".length);
+if (command === "catalogue-apply" && !/^[a-f0-9]{64}$/.test(catalogueDigest || "")) fail("First review catalogue.review in the dry run, then pass its digest with --expected-digest=<reviewed digest>. The scope is all current products plus catalogue-wide unsafe-flag cleanup.");
 
 const body = command === "catalogue-apply"
-  ? { confirmation: "APPLY ELIGIBLE SELLABILITY" }
+  ? { confirmation: "APPLY ELIGIBLE SELLABILITY", scope: { kind: "all_current" }, expectedDigest: catalogueDigest }
   : command === "activate"
     ? { confirmation: "ACTIVATE LIVE COMMERCE", expectedRevision: current.revision }
     : command === "donations-activate"

@@ -66,3 +66,45 @@ function authConfig() { return { configured: true, emailSignupConfigured: true, 
 function session() { return { ok: true, authenticated: true, csrfToken: "admin-wheel-csrf", access: { isAdmin: true, isMasterAdmin: true }, account: { id: "master", email: "master@example.test", displayName: "Master Admin", username: null, avatarUrl: null, providers: ["email"], role: "admin", adminLevel: "master", status: "active", emailVerified: true, createdAt: "2026-08-29T00:00:00.000Z", lastLoginAt: null, source: "env_master", locked: true } }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function wait() { for (let attempt = 0; attempt < 60; attempt += 1) { try { if ((await fetch(ORIGIN)).ok) return; } catch { /* starting */ } await new Promise((resolve) => setTimeout(resolve, 100)); } throw new Error("Admin preview did not start."); }
+
+
+test("saved mechanics overview thumbnail matches Mechanics across responsive layouts", async (t) => {
+  const artifacts = fileURLToPath(new URL("../.artifacts/wheels-overview-card/", import.meta.url));
+  await mkdir(artifacts, { recursive: true });
+  const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4179"], { stdio: "ignore" });
+  t.after(() => server.kill()); await wait();
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true }); t.after(() => browser.close());
+  const paths = [];
+  for (const [width, profile] of [[1440, "suspense-tail"], [768, "suspense-tail"], [390, "suspense-tail"], [1440, "custom-shape"]]) {
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: "reduce" });
+    const page = await context.newPage(); const errors = []; let reads = 0; let writes = 0;
+    page.on("pageerror", error => errors.push(error.message));
+    await page.route("**/api/**", route => {
+      if (route.request().method() !== "GET") writes++;
+      if (new URL(route.request().url()).pathname === "/api/admin/wheels/settings") {
+        reads++; const payload = settings(null, "GET"); payload.revision = 14;
+        payload.settings.mechanics.curveProfile = profile;
+        return json(route, payload);
+      }
+      return respond(route);
+    });
+    await page.goto(`${ORIGIN}/wheels`);
+    const card = page.locator(".wheels-overview-mechanics"); await card.waitFor();
+    assert.match(await card.innerText(), /POLICY REVISION 14/);
+    assert.equal(await card.locator("dd").first().innerText(), "2.8\u20134.5 rev/s");
+    assert.equal(await card.locator("dd").nth(1).innerText(), "2\u201360 sec");
+    assert.equal(await card.locator("dd").nth(2).innerText(), "2 sec");
+    assert.doesNotMatch(await card.innerText(), /[\u00c2\u00c3]/);
+    const geometry = await card.evaluate(node => ({ eyebrow: node.querySelector('.eyebrow').getBoundingClientRect().bottom, heading: node.querySelector('h2').getBoundingClientRect().top, revisionHeight: node.querySelector('.eyebrow span').getBoundingClientRect().height }));
+    assert.ok(geometry.revisionHeight > 10 && geometry.eyebrow <= geometry.heading, "revision is readable and does not overlap the heading");
+    const path = await card.locator(".graph-line").last().getAttribute("d"); paths.push(path);
+    assert.equal(reads, 1, "thumbnail reuses the overview policy request");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await card.screenshot({ path: `${artifacts}/overview-${width}-${profile}.png` });
+    await card.getByRole("link", { name: "Tune mechanics" }).click();
+    await page.locator(".curve-preset-card.is-selected").waitFor();
+    assert.equal(await page.locator(".curve-preset-card.is-selected .graph-line").last().getAttribute("d"), path);
+    assert.equal(writes, 0); assert.deepEqual(errors, []); await context.close();
+  }
+  assert.notEqual(paths[0], paths[3], "saved custom shape changes the thumbnail");
+});

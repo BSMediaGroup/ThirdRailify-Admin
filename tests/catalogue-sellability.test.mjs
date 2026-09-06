@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { catalogueFixture } from './catalogue-repair-fixture.mjs';
+import { catalogueSellabilityReview } from '../functions/_shared/catalogue-sellability.js';
+import { applyEligibleVariantSellability, commerceLaunchPlan } from '../functions/_shared/commerce-launch.js';
+import { publicCataloguePayload } from '../functions/_shared/public-catalogue.js';
+import { authoritativeCartLines } from '../functions/_shared/shipping-core.js';
+import { createSession, loadAccountByEmail } from '../functions/_shared/auth-core.js';
+import { cookiePair } from './auth-test-helpers.mjs';
+const input = review => ({ confirmation: 'APPLY ELIGIBLE SELLABILITY', expectedDigest: review.digest, scope: review.scope });
+
+test('real protected handler repairs multiple pages, preserves other state, classifies NULLs and supports exact replay', async t => {
+  const { h, db, env, send, session, account } = await catalogueFixture(t);
+  const originalProducts = (await db.prepare('SELECT * FROM commerce_products ORDER BY id').all()).results;
+  const originalVariants = (await db.prepare('SELECT * FROM commerce_product_variants ORDER BY id').all()).results;
+  const originalSettings = (await db.prepare('SELECT * FROM commerce_settings ORDER BY setting_key').all()).results;
+  const before = await commerceLaunchPlan(env); assert.deepEqual(before.hardGates.filter(g => !g.ready).map(g => g.id), ['catalogue']);
+  assert.equal(before.catalogue.eligibleVariants, 19); assert.equal(before.catalogue.eligibleNeedingEnablement, 18); assert.equal(before.catalogue.ineligibleSellableVariants, 4); assert.equal(before.catalogue.excludedUnavailableVariants, 3);
+  for (const overrides of [{ cookie: '' }, { csrfToken: undefined }, { origin: 'https://wrong.example.test' }]) assert.ok([401,403].includes((await send('launch/catalogue-preview', {}, overrides)).status));
+  for (const overrides of [{ cookie: '' }, { csrfToken: undefined }, { origin: 'https://wrong.example.test' }]) assert.ok([401,403].includes((await send('launch/catalogue-apply', input(before.catalogue.review), overrides)).status));
+  assert.equal((await send('launch/catalogue-apply', { confirmation: 'APPLY ELIGIBLE SELLABILITY' })).status, 400);
+  await h.authDb.prepare("INSERT INTO accounts(id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES('repair-reader','reader@example.test','Reader','admin','full','active','fixture','fixture','fixture','test')").run();
+  await h.authDb.prepare("INSERT INTO admin_role_capability_denials(role,capability,denied_by_account_id,created_at,updated_at) VALUES('full','commerce.operations.manage',?,'fixture','fixture')").bind(account.id).run();
+  const reader = await createSession(env, new Request(env.THIRDRAILIFY_ADMIN_ORIGIN), await loadAccountByEmail(env, 'reader@example.test'), env.THIRDRAILIFY_ADMIN_ORIGIN);
+  for (const path of ['launch/catalogue-preview','launch/catalogue-apply']) assert.equal((await send(path, input(before.catalogue.review), { cookie: cookiePair(reader.cookie), csrfToken: reader.csrfToken })).status, 403);
+  const review = await (await send('launch/catalogue-preview', { scope: { kind: 'all_current' } })).json();
+  assert.equal(review.selectedProducts, 25); assert.equal(review.disableOutsideScope, 1); assert.ok(review.diagnostics.rows.length <= 20); assert.ok(!JSON.stringify(review).includes('safe_metadata_json'));
+  const selected = await catalogueSellabilityReview(env, { kind: 'selected', productIds: ['repair-product-0'] }); assert.equal(selected.enable, 1); assert.equal(selected.disableOutsideScope, 4);
+  const matching = await catalogueSellabilityReview(env, { kind: 'matching', matching: { catalogue: 'current' } }, session); assert.equal(matching.selectedProducts, 25); assert.equal(matching.enable, 18);
+  const applied = await send('launch/catalogue-apply', input(review)); assert.equal(applied.status, 200); const result = await applied.json(); assert.equal(result.enabled, 18); assert.equal(result.disabled, 4);
+  assert.deepEqual((await db.prepare('SELECT * FROM commerce_products ORDER BY id').all()).results, originalProducts);
+  assert.deepEqual((await db.prepare('SELECT * FROM commerce_settings ORDER BY setting_key').all()).results, originalSettings);
+  const next = (await db.prepare('SELECT * FROM commerce_product_variants ORDER BY id').all()).results;
+  for (const v of next) { const old = originalVariants.find(x => x.id === v.id); const { is_sellable, updated_at, ...other } = v; const { is_sellable: oldFlag, updated_at: oldTime, ...oldOther } = old; assert.deepEqual(other, oldOther); if (oldFlag === is_sellable) assert.equal(updated_at, oldTime); }
+  assert.equal((await db.prepare("SELECT is_sellable FROM commerce_product_variants WHERE id='repair-variant-24'").first()).is_sellable, 1);
+  const replay = await send('launch/catalogue-apply', input(review)); assert.equal(replay.status, 200); assert.equal((await replay.json()).idempotent, true);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM commerce_audit WHERE action='commerce.catalogue_sellability_applied'").first()).n, 1);
+  const after = await commerceLaunchPlan(env); assert.equal(after.ready, true); assert.equal(after.catalogue.eligibleSellableVariants, 19); assert.equal(after.catalogue.excludedUnavailableVariants, 7);
+  const page2 = await catalogueSellabilityReview(env, undefined, null, 2, 'correct'); assert.equal(page2.diagnostics.total, 26); assert.equal(page2.diagnostics.rows.length, 6);
+  assert.equal((await publicCataloguePayload(env)).products.length, 19);
+  for (const i of [0,1,24]) assert.equal((await authoritativeCartLines(db, [{ productId: `repair-product-${i}`, variantId: `repair-variant-${i}`, quantity: 1 }], { environment: 'live' })).length, 1);
+  for (const i of [2,3,4,5,7,8,25]) await assert.rejects(authoritativeCartLines(db, [{ productId: `repair-product-${i}`, variantId: `repair-variant-${i}`, quantity: 1 }], { environment: 'live' }));
+  assert.equal(after.settings.checkoutEnabled, false);
+});
+
+test('stale reviews, in-batch races and failed writes leave flags and audit atomic; no eligible records stay blocked', async t => {
+  const { db, env, session } = await catalogueFixture(t);
+  let review = await catalogueSellabilityReview(env);
+  await db.prepare("UPDATE commerce_product_variants SET unit_amount=2600 WHERE id='repair-variant-0'").run();
+  await assert.rejects(applyEligibleVariantSellability(env, session.accountId, input(review)), e => e.code === 'catalogue_refresh_required');
+  review = await catalogueSellabilityReview(env);
+  const race = { ...env, THIRDRAILIFY_COMMERCE_DB: { prepare: sql => db.prepare(sql), batch: async statements => { await db.prepare("UPDATE commerce_product_variants SET target_catalogue_variant_id=NULL WHERE id='repair-variant-0'").run(); return db.batch(statements); } } };
+  await assert.rejects(applyEligibleVariantSellability(race, session.accountId, input(review)), e => e.code === 'catalogue_refresh_required');
+  review = await catalogueSellabilityReview(env);
+  const failing = { ...env, THIRDRAILIFY_COMMERCE_DB: { prepare: sql => db.prepare(sql), batch: statements => db.batch([...statements, db.prepare("INSERT INTO commerce_settings(setting_key,value_json) VALUES(NULL,NULL)")]) } };
+  await assert.rejects(applyEligibleVariantSellability(failing, session.accountId, input(review)));
+  assert.equal((await catalogueSellabilityReview(env)).digest, review.digest);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM commerce_audit WHERE action='commerce.catalogue_sellability_applied'").first()).n, 0);
+  await db.prepare("UPDATE commerce_product_variants SET safe_metadata_json=json_set(safe_metadata_json,'$.publicationIntent','operator_hidden') WHERE id='repair-variant-6'").run();
+  review = await catalogueSellabilityReview(env); assert.ok(!review.enableIds.includes('repair-variant-6'));
+  const unpublished = await catalogueSellabilityReview(env, undefined, null, 1, 'unpublished'); assert.ok(unpublished.diagnostics.rows.some(r => r.variantId === 'repair-variant-6' && r.reasons.includes('variant_hidden_by_operator')));
+  await db.prepare("UPDATE commerce_products SET visibility='private'").run();
+  review = await catalogueSellabilityReview(env); await applyEligibleVariantSellability(env, session.accountId, input(review));
+  const empty = await commerceLaunchPlan(env); assert.equal(empty.ready, false); assert.equal(empty.catalogue.eligibleVariants, 0); assert.match(empty.hardGates.find(g => g.id === 'catalogue').detail, /No eligible published variants/);
+});

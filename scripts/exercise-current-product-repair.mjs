@@ -89,7 +89,7 @@ try {
   await page.screenshot({path:path('admin-before.png'),fullPage:true});
   await page.getByRole('button',{name:'Bulk edit',exact:true}).click();
   await page.getByRole('button',{name:'Select current page',exact:true}).click();
-  await page.getByRole('button',{name:'Show in store',exact:true}).click();
+  await page.getByRole('button',{name:'Publish with eligible variants',exact:true}).click();
   const repair=page.getByRole('region',{name:'Current product repair'});
   await repair.getByRole('button',{name:'Refresh Printful mockups',exact:true}).click();
   await repair.getByRole('heading',{name:'Mockup refresh Preview'}).waitFor();
@@ -115,7 +115,7 @@ try {
     await dialog.getByRole('button',{name:'Close editor',exact:true}).click();
   }
   await page.setViewportSize({width:1440,height:1000});
-  await page.getByRole('button',{name:'Bulk edit',exact:true}).click();await page.getByRole('button',{name:'Select current page',exact:true}).click();await page.getByRole('button',{name:'Show in store',exact:true}).click();
+  await page.getByRole('button',{name:'Bulk edit',exact:true}).click();await page.getByRole('button',{name:'Select current page',exact:true}).click();await page.getByRole('button',{name:'Publish with eligible variants',exact:true}).click();
   const publication=page.getByRole('region',{name:'Current product repair'});
   await publication.getByRole('button',{name:'Publish product with eligible variants',exact:true}).click();
   await publication.getByRole('heading',{name:'Publication Preview'}).waitFor();

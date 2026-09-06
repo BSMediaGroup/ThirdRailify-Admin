@@ -9,16 +9,18 @@ test("launch planning and sellability use one exact eligibility predicate", asyn
   await insertTestProduct(harness.commerceDb, { targetPrintfulProductId: "9001", migrationStatus: "target_verified", requiresShipping: 1 });
   await insertTestVariant(harness.commerceDb, { isSellable: 0, targetPrintfulProductId: "9001", targetPrintfulSyncVariantId: "7001", targetCatalogueVariantId: "11576", migrationStatus: "target_verified" });
   await harness.commerceDb.batch([
-    harness.commerceDb.prepare("UPDATE commerce_products SET provider_presence='current' WHERE id='product-test-001'"),
-    harness.commerceDb.prepare("UPDATE commerce_product_variants SET provider_presence='current' WHERE id='variant-test-001'"),
+    harness.commerceDb.prepare("UPDATE commerce_products SET provider_presence='current',provider_store_id='18668025',provider_reconciliation_status='current',safe_metadata_json=json_set(safe_metadata_json,'$.publicImage','https://example.test/fixture.png') WHERE id='product-test-001'"),
+    harness.commerceDb.prepare("UPDATE commerce_product_variants SET provider_presence='current',provider_store_id='18668025' WHERE id='variant-test-001'"),
   ]);
-  const env = commerceEnvironment(harness);
+  const env = commerceEnvironment(harness, { PRINTFUL_STORE_ID: "18668025" });
   const before = await commerceLaunchPlan(env);
   assert.equal(before.catalogue.eligibleVariants, 1); assert.equal(before.catalogue.eligibleSellableVariants, 0); assert.equal(before.ready, false);
   assert.equal(before.hardGates.some((gate) => gate.id === "printful_v2_webhook"), false);
   assert.equal(before.advisories.some((gate) => gate.id === "printful_v2_webhook"), true);
-  const [first, second] = await Promise.all([applyEligibleVariantSellability(env, "master"), applyEligibleVariantSellability(env, "master")]);
-  assert.equal(first.after.eligible, 1); assert.equal(second.after.eligible, 1);
+  const first = await applyEligibleVariantSellability(env, "master", { confirmation: "APPLY ELIGIBLE SELLABILITY", expectedDigest: before.catalogue.review.digest });
+  const fresh = await commerceLaunchPlan(env);
+  const second = await applyEligibleVariantSellability(env, "master", { confirmation: "APPLY ELIGIBLE SELLABILITY", expectedDigest: fresh.catalogue.review.digest });
+  assert.equal(first.after.eligibleVariants, 1); assert.equal(second.enabled, 0);
   const after = await commerceLaunchPlan(env);
   assert.equal(after.catalogue.eligibleSellableVariants, 1); assert.equal(after.catalogue.ineligibleSellableVariants, 0);
   assert.equal((await harness.commerceDb.prepare("SELECT is_sellable FROM commerce_product_variants WHERE id='variant-test-001'").first()).is_sellable, 1);

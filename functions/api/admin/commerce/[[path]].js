@@ -1,3 +1,4 @@
+import { catalogueSellabilityReview } from "../../../_shared/catalogue-sellability.js";
 import { previewCurrentProductRepair, applyCurrentProductRepair } from "../../../_shared/current-product-repair.js";
 import {
   AuthFailure,
@@ -252,13 +253,14 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.payments.manage");
     payload = await verifyStripeAccount(env, session, fetchImpl);
     authEventType = "stripe_account_verified";
-  } else if (path === "launch/catalogue-apply") {
+  } else if (path === "launch/catalogue-preview") {
     await requireAdminCapability(env, session, "commerce.operations.manage");
     const body = await readJsonBody(request);
-    if (!body || Object.keys(body).length !== 1 || body.confirmation !== "APPLY ELIGIBLE SELLABILITY") {
-      throw new AuthFailure(400, "commerce_catalogue_confirmation_required", "Type APPLY ELIGIBLE SELLABILITY exactly to continue.");
-    }
-    payload = await applyEligibleVariantSellability(env, session.accountId);
+    if (!body || Object.keys(body).some(k => !["scope", "page", "group"].includes(k))) throw new AuthFailure(400, "catalogue_preview_invalid", "Review a valid catalogue scope.");
+    payload = await catalogueSellabilityReview(env, body.scope, session, body.page, body.group);
+  } else if (path === "launch/catalogue-apply") {
+    await requireAdminCapability(env, session, "commerce.operations.manage");
+    payload = await applyEligibleVariantSellability(env, session.accountId, await readJsonBody(request), session);
     authEventType = "commerce_catalogue_sellability_applied";
   } else if (path === "launch/activate") {
     await requireAdminCapability(env, session, "commerce.operations.manage");

@@ -24,10 +24,10 @@ test('operational Trigger Studio and Wheel panel: real local D1 CRUD and dry run
       actorKey: `rumble:user:fixture:sample viewer ${i}`, actorLabel: `Sample Viewer ${i}`, providerEventAt: new Date(Date.now() + 1000).toISOString(), livestreamId: 'sample-live',
       evidence: { normalizedText: 'enter', amountCents: 500, totalGifts: 5, giftType: 'random', videoId: 123 } }] });
   }
-  const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '44206'], { stdio: 'ignore' }); t.after(() => server.kill());
+  const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '44206'], { stdio: 'ignore' }); t.after(() => server.kill());
   for (let i = 0; i < 80; i++) { try { if ((await fetch(ORIGIN)).ok) break; } catch { /* startup */ } await new Promise(r => setTimeout(r, 100)); }
   const browser = await chromium.launch({ executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless: true }); t.after(() => browser.close());
-  let fault = false;
+  let fault = false, schemaError = false;
   for (const width of [1920, 1440, 768, 390]) {
     const context = await browser.newContext({ viewport: { width, height: width < 800 ? 1000 : 1080 }, reducedMotion: 'reduce' }); const page = await context.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -39,6 +39,7 @@ test('operational Trigger Studio and Wheel panel: real local D1 CRUD and dry run
         if (path === '/api/auth/session') return json({ ok: true, authenticated: true, csrfToken: 'fixture-csrf', access: { isAdmin: true, isMasterAdmin: true }, account: { id: 'master', email: 'master@example.test', displayName: 'Master Admin', avatarUrl: null, providers: ['email'], role: 'admin', adminLevel: 'master', status: 'active', emailVerified: true, createdAt: now, source: 'env_master' } });
         if (path === '/api/admin/inbox/summary') return json({ ok: true, unread: 0, actionable: { goats: { total: 0 } } });
         if (path === '/api/admin/automations') { const state = await automationsStatus(env); state.runtime = { state: fault ? 'stale' : 'online', ageSeconds: fault ? 90 : 2, desiredRevision: 1, appliedRevision: 1, discordConnected: true, rumbleConfigured: true, providerState: 'live', heartbeatAt: now, rumbleDiscovery: { source: { scope: 'user:fixture' } }, eventAutomation: { activeRules: 4, pending: fault ? 3 : 0, transitions: 2, lastTransition: 'rumble.livestream.stopped', lastSnapshotAt: now, lastFault: fault ? 'event_submission_failed' : '' } }; return json(state); }
+        if (path === '/api/admin/automations/rules' && schemaError) return json({ message: 'The service database schema is not compatible with this deployment.' }, 503);
         if (path === '/api/admin/automations/rules') return json(route.request().method() === 'POST' ? await saveAutomationRule(env, 'admin', body) : await listAutomationRules(env, url.searchParams.get('wheelId') || ''));
         if (path === '/api/admin/automations/rules/delete') return json(await deleteAutomationRule(env, 'admin', body));
         if (path === '/api/admin/automations/test') return json(dryRunAutomation(body));
@@ -85,7 +86,15 @@ test('operational Trigger Studio and Wheel panel: real local D1 CRUD and dry run
     await page.reload({ waitUntil: 'networkidle' }); await card.getByRole('button', { name: 'Disable', exact: true }).waitFor();
     await card.getByRole('button', { name: 'Disable', exact: true }).click(); await card.getByRole('button', { name: 'Enable', exact: true }).waitFor(); await capture('15-disabled-rule', card);
     page.once('dialog', dialog => dialog.accept()); await card.getByRole('button', { name: 'Delete', exact: true }).click(); await card.waitFor({ state: 'detached' });
-    fault = true; await page.reload({ waitUntil: 'networkidle' }); await page.getByText(/Event engine: event_submission_failed/).waitFor(); await capture('16-stale-event-engine'); fault = false;
+    fault = true; await page.reload({ waitUntil: 'networkidle' }); await page.locator('.event-runtime').getByText('Needs attention', { exact: true }).waitFor(); await capture('16-stale-event-engine'); fault = false;
+    schemaError = true; await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('Rules unavailable', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Loading rules\u2026', { exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Create automation', exact: true }).isDisabled(), true);
+    assert.equal(await page.locator('.event-studio').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(11, 11, 9)');
+    await capture('17-schema-error');
+    schemaError = false; await page.getByRole('button', { name: 'Refresh rules', exact: true }).click();
+    await page.getByRole('heading', { name: 'Chat entrants', exact: true }).waitFor();
     await page.goto(`${ORIGIN}/wheels/wheel-fixture`, { waitUntil: 'networkidle' }); await page.getByRole('heading', { name: 'Wheel automation', exact: true }).waitFor(); await page.getByRole('heading', { name: 'Chat entrants', exact: true }).waitFor();
     await capture('13-wheel-panel'); await capture('14-wheel-activity', page.locator('.event-activity'));
     await page.getByRole('button', { name: 'Create automation', exact: true }).click(); assert.equal(await editor.getByLabel('Target Wheel', { exact: true }).inputValue(), 'wheel-fixture');

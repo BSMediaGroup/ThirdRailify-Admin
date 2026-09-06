@@ -69,6 +69,28 @@ export function OverviewPage() {
   }, [analyticsRead, automationsRead, bannerRead, commerceRead, csrfToken, goatsRead, startLoading, watchRead]);
 
   useEffect(() => { void load(); return () => { requestSequence.current += 1; }; }, [load]);
+  useEffect(() => {
+    if (!automationsRead) return;
+    let disposed = false;
+    let pending = false;
+    const refresh = async () => {
+      if (document.hidden || pending) return;
+      pending = true;
+      try {
+        const automations = await getAutomations();
+        if (!disposed) {
+          setSnapshot(current => ({ ...current, automations }));
+          setErrors(current => ({ ...current, automations: undefined }));
+        }
+      } catch (reason) {
+        if (!disposed) setErrors(current => ({ ...current, automations: reason instanceof Error ? reason.message : "Runtime request failed." }));
+      } finally { pending = false; }
+    };
+    const timer = window.setInterval(() => void refresh(), 15000);
+    const visible = () => { void refresh(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { disposed = true; window.clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+  }, [automationsRead]);
 
   const expectedSources = 1 + [analyticsRead, commerceRead, watchRead, goatsRead, bannerRead, automationsRead].filter(Boolean).length;
   const reportingSources = Object.values(snapshot).filter(Boolean).length;

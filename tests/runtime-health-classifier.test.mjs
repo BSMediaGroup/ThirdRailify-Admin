@@ -105,6 +105,16 @@ test("revision drift, delayed heartbeat, and offline heartbeat retain independen
   assert.equal(classifyRuntimeHealth(offline, [], Date.parse(offline.runtime.heartbeatAt)).overallState, "offline");
 });
 
+test("cadence-aware age advances without refresh and failed reads never display healthy cached telemetry", () => {
+  const snapshot = { ...fixture({ ageSeconds: 50, freshness: { expectedIntervalSeconds: 60, currentSeconds: 93, offlineSeconds: 210 } }), receivedAt: 100000 };
+  assert.equal(classifyRuntimeHealth(snapshot, [], 100000).heartbeatState, "healthy");
+  assert.equal(classifyRuntimeHealth(snapshot, [], 144000).heartbeatState, "stale");
+  assert.equal(classifyRuntimeHealth(snapshot, [], 261000).heartbeatState, "offline");
+  assert.equal(classifyRuntimeHealth(snapshot, [], 100000, "error").overallState, "unknown");
+  const renewed = { ...snapshot, runtime: { ...snapshot.runtime, ageSeconds: 0 }, receivedAt: 262000 };
+  assert.equal(classifyRuntimeHealth(renewed, [], 262000).heartbeatState, "healthy");
+});
+
 function fixture(overrides = {}) {
   return {
     config: { desiredRevision: 3 },

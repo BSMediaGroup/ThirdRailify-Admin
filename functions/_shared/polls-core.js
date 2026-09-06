@@ -11,6 +11,7 @@ import {
 } from "./auth-core.js";
 import { normalizePollTrigger, validatePollTrigger } from "./poll-normalization.js";
 import { projectPollMediaAsset } from "./poll-media.js";
+import { heartbeatFreshness, heartbeatState } from "./heartbeat-freshness.js";
 
 const STATES = new Set(["draft", "open", "closed", "archived"]);
 const WEB_MODES = new Set(["anyone", "signed_in"]);
@@ -109,7 +110,8 @@ export async function getCreatorRumbleDiscovery(env, accountId) {
   const ageSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(heartbeat.heartbeat_at)) / 1000));
   const runtime = safeJson(heartbeat.runtime_json, {});
   const discovery = sanitizeRumbleDiscovery(runtime.rumbleDiscovery);
-  const botState = ageSeconds <= 45 ? "healthy" : ageSeconds <= 180 ? "stale" : "offline";
+  const reportState = heartbeatState(ageSeconds, heartbeatFreshness(runtime));
+  const botState = reportState === "online" ? "healthy" : reportState;
   return {
     ok: true,
     provider: "rumble",
@@ -332,10 +334,11 @@ export async function automationsStatus(env) {
   ]);
   const runtime = safeJson(heartbeat?.runtime_json, {});
   const ageSeconds = heartbeat ? Math.max(0, Math.floor((Date.now() - Date.parse(heartbeat.heartbeat_at)) / 1000)) : null;
+  const freshness = heartbeatFreshness(runtime);
   return {
     ok: true,
     config: { desiredRevision: Number(config?.desired_revision || 1), desiredState: safeJson(config?.desired_state_json, {}), updatedAt: config?.updated_at || null },
-    runtime: heartbeat ? { ...runtime, startupInstanceId: heartbeat.startup_instance_id, botVersion: heartbeat.bot_version, desiredRevision: Number(heartbeat.desired_revision), appliedRevision: Number(heartbeat.applied_revision), heartbeatAt: heartbeat.heartbeat_at, ageSeconds, state: ageSeconds <= 45 ? "online" : ageSeconds <= 180 ? "stale" : "offline" } : { state: "offline", configured: false },
+    runtime: heartbeat ? { ...runtime, startupInstanceId: heartbeat.startup_instance_id, botVersion: heartbeat.bot_version, desiredRevision: Number(heartbeat.desired_revision), appliedRevision: Number(heartbeat.applied_revision), heartbeatAt: heartbeat.heartbeat_at, ageSeconds, freshness, state: heartbeatState(ageSeconds, freshness) } : { state: "offline", configured: false },
     activePoll: activePoll ? await projectDetail(env, activePoll) : null,
     deferred: { processControl: true, generalTriggerStudio: false, rants: false, wheelExecution: false },
     activity: activityRows?.results || [],

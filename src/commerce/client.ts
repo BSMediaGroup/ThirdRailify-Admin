@@ -46,14 +46,27 @@ export type CommerceTemplate = {
   validity?: { state: "valid" | "invalid"; action: "none" | "action_required"; code: string | null; message: string | null };
 };
 export type CommerceLaunchGate = { id: string; ready: boolean; detail: string; evidenceStatus?: string; href?: string };
+export type CatalogueRepairScope = { kind: "all_current" } | { kind: "selected"; productIds: string[] } | { kind: "matching"; matching: Omit<ProductListFilters, "page" | "pageSize"> };
+export type CatalogueCounts = {
+  currentProducts: number; currentVariants: number; totalVariants: number; eligibleVariants: number;
+  eligibleSellableVariants: number; eligibleNeedingEnablement: number; ineligibleSellableVariants: number;
+  excludedUnavailableVariants: number; intentionallyUnpublishedProducts: number; intentionallyUnpublishedVariants: number;
+  dataBlockedVariants: number; sellableVariants: number; blockedVariants: number;
+};
+export type CatalogueRepairReview = {
+  ok: true; digest: string; scope: CatalogueRepairScope; selectedProducts: number; enable: number; disable: number; disableOutsideScope: number;
+  counts: CatalogueCounts;
+  groups: Record<"enable" | "disable" | "correct" | "unpublished" | "blockers", number>;
+  diagnostics: { group: keyof CatalogueRepairReview["groups"]; page: number; pageSize: number; total: number; rows: Array<{ productId: string; variantId: string | null; label: string; href: string; reasons: string[] }> };
+};
 export type CommerceLaunchPlan = {
   activatedAt: string | null; activatedBy: string | null;
   ok: true; state: "preflight" | "active" | "paused"; revision: number; ready: boolean; digest: string;
   hardGates: CommerceLaunchGate[]; advisories: CommerceLaunchGate[];
   activationSettings: Record<string, boolean | string>;
-  catalogue: { totalVariants: number; eligibleVariants: number; sellableVariants: number; eligibleSellableVariants: number; ineligibleSellableVariants: number };
+  catalogue: CatalogueCounts & { review: CatalogueRepairReview };
   shippingMarkets: Array<{ countryCode: string; displayName: string; status: string; strategy: string; revision: number }>;
-  settings: { customerDocumentAccessEnabled: boolean; checkoutEnabled: boolean; liveCaptureEnabled: boolean; fulfillmentEnabled: boolean; transactionalEmailEnabled: boolean; stripeTaxEnabled: boolean; emergencyPaused: boolean };
+  settings: { shippingStrategy: string; customerDocumentAccessEnabled: boolean; checkoutEnabled: boolean; liveCaptureEnabled: boolean; fulfillmentEnabled: boolean; transactionalEmailEnabled: boolean; stripeTaxEnabled: boolean; emergencyPaused: boolean };
   business: { tradingName:string; revision:number;legalNameConfigured:boolean;phoneConfigured:boolean;addressConfigured:boolean;ownerConfirmed:boolean;disclosureAuthorized:boolean;ownerAttestedAt:string|null;disclosureAuthorizedAt:string|null };
   customerSending:{providerConfigured:boolean;domainVerified:boolean;configuredTemplates:number;totalTemplates:number;requiredTemplatesReady:boolean;allLifecycleTemplatesReady:boolean;globallyEnabled:boolean};
 };
@@ -358,7 +371,8 @@ type SnapshotContinuationPayload = {
 
 export function getCommerceOverview() { return adminApi<CommerceOverviewPayload>("/api/admin/commerce/overview"); }
 export function getCommerceLaunchPlan() { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch"); }
-export function applyCommerceCatalogueSellability(csrfToken: string) { return adminApi<{ ok: true }>("/api/admin/commerce/launch/catalogue-apply", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmation: "APPLY ELIGIBLE SELLABILITY" }) }); }
+export function previewCommerceCatalogueSellability(csrfToken: string, scope: CatalogueRepairScope, page = 1, group: keyof CatalogueRepairReview["groups"] = "enable") { return adminApi<CatalogueRepairReview>("/api/admin/commerce/launch/catalogue-preview", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ scope, page, group }) }); }
+export function applyCommerceCatalogueSellability(csrfToken: string, review: CatalogueRepairReview) { return adminApi<{ ok: true; enabled: number; disabled: number }>("/api/admin/commerce/launch/catalogue-apply", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ confirmation: "APPLY ELIGIBLE SELLABILITY", expectedDigest: review.digest, scope: review.scope }) }); }
 export function activateCommerceLaunch(csrfToken: string, plan: CommerceLaunchPlan, profile?: Record<string, unknown>) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/activate", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedDigest:plan.digest,profile,expectedRevision:plan.revision,businessProfileRevision:plan.business.revision,confirmation:"SAVE, CONFIRM & ENABLE STORE",ownerAttestation:true,transactionDisclosureAuthorization:true,productionEnvironment:"production" }) }); }
 export function pauseCommerceLaunch(csrfToken: string, expectedRevision: number, reason: string) { return adminApi<CommerceLaunchPlan>("/api/admin/commerce/launch/pause", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedRevision, confirmation: "PAUSE LIVE COMMERCE", reason }) }); }
 export function getPaymentsControlPlane() { return adminApi<PaymentsControlPlanePayload>("/api/admin/commerce/payments"); }

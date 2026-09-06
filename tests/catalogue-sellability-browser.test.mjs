@@ -1,0 +1,80 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { spawn } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
+import { chromium } from 'playwright-core';
+import { catalogueFixture, ORIGIN } from './catalogue-repair-fixture.mjs';
+import { onRequest } from '../functions/api/admin/commerce/[[path]].js';
+import { commerceLaunchPlan } from '../functions/_shared/commerce-launch.js';
+const LOCAL = 'http://127.0.0.1:44217';
+test('catalogue review to owner activation uses real handlers and local D1 at desktop, tablet and 390px', async t => {
+  const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '44217', '--strictPort'], { stdio: 'ignore', windowsHide: true }); t.after(() => server.kill());
+  for (let i = 0; i < 80; i++) { try { if ((await fetch(LOCAL)).ok) break; } catch {} await new Promise(r => setTimeout(r, 100)); }
+  const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true }); t.after(() => browser.close());
+  await mkdir('.artifacts/catalogue-repair', { recursive: true });
+  for (const width of [1440,768,390]) await t.test(`${width}px`, async st => {
+    const { env, db, made, cookie, account } = await catalogueFixture(st);
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: 'reduce' }); st.after(() => context.close());
+    const requests = [], errors = [];
+    const page = await context.newPage(); page.setDefaultTimeout(20000); page.on('pageerror', e => errors.push(e.message));
+    await context.route('**/*', async route => {
+      const r = route.request(), url = new URL(r.url());
+      if (url.origin !== LOCAL) return route.abort();
+      if (!url.pathname.startsWith('/api/')) return route.continue();
+      requests.push(`${r.method()} ${url.pathname}`);
+      const json = body => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+      if (url.pathname === '/api/auth/config') return json({ configured: true, emailSignupConfigured: false, oauthProviders: [], oauthProviderStates: [], publicOrigin: 'https://thirdrailify.com', adminOrigin: ORIGIN, environment: 'test', cookieMode: 'host-only' });
+      if (url.pathname === '/api/auth/session') return json({ ok: true, authenticated: true, csrfToken: made.csrfToken, account: { ...account, displayName: 'Local owner', providers: ['email'], role: 'admin', adminLevel: 'master', status: 'active', emailVerified: true }, access: { isAdmin: true, isMasterAdmin: true } });
+      if (url.pathname === '/api/admin/inbox/summary') return json({ ok: true, unread: 0, actionable: { goats: { total: 0 } } });
+      if (!url.pathname.startsWith('/api/admin/commerce/')) return json({ ok: true });
+      // Real authenticated handler, exact production URL/origin, entirely local D1.
+      const headers = new Headers(r.headers()); headers.set('Origin', ORIGIN); headers.set('Cookie', cookie);
+      const response = await onRequest({ env, request: new Request(ORIGIN + url.pathname + url.search, { method: r.method(), headers, ...(r.method() === 'POST' ? { body: r.postData() } : {}) }), data: { commerceFetch: () => { throw new Error('External calls forbidden'); } } });
+      return route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() });
+    });
+    if (width === 1440) {
+      await page.goto(`${LOCAL}/products`);
+      await page.getByRole('button', { name: 'Bulk edit', exact: true }).click();
+      await page.getByRole('button', { name: 'Select all 25 matching', exact: true }).click();
+      await page.getByRole('button', { name: 'Review matching catalogue fixes', exact: true }).click();
+      let review = page.getByRole('dialog', { name: 'Review catalogue fixes' });
+      await review.getByText('18 to enable; 4 to disable.', { exact: true }).waitFor();
+      assert.match(await review.innerText(), /25 products in the enablement scope/);
+      await review.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await page.getByRole('button', { name: 'Review all current catalogue fixes', exact: true }).click();
+      review = page.getByRole('dialog', { name: 'Review catalogue fixes' });
+      await review.getByText('18 to enable; 4 to disable.', { exact: true }).waitFor();
+      await review.getByRole('button', { name: 'Cancel', exact: true }).click();
+    }
+    await page.goto(`${LOCAL}/commerce`);
+    const enable = page.getByRole('button', { name: 'ENABLE STORE', exact: true });
+    await page.getByRole('heading', { name: 'Store status: ACTION REQUIRED' }).waitFor(); assert.equal(await enable.isDisabled(), true);
+    await page.getByRole('button', { name: 'Review and fix catalogue', exact: true }).click();
+    const review = page.getByRole('dialog', { name: 'Review catalogue fixes' });
+    await review.getByText('18 to enable; 4 to disable.', { exact: true }).waitFor();
+    assert.equal(await review.evaluate(el => el.scrollWidth <= el.clientWidth), true);
+    await review.getByLabel('Diagnostics group').selectOption('disable');
+    await review.getByText('4 records · page 1 of 1', { exact: true }).waitFor();
+    assert.match(await review.innerText(), /mapping_invalid/); assert.match(await review.innerText(), /wrong_store/);
+    await page.screenshot({ path: `.artifacts/catalogue-repair/review-${width}.png` });
+    const applyBefore = requests.filter(p => p.endsWith('/launch/catalogue-apply')).length;
+    await review.getByRole('button', { name: 'Apply catalogue fixes', exact: true }).click();
+    await page.getByRole('heading', { name: 'Store status: READY TO ENABLE' }).waitFor();
+    assert.equal(requests.filter(p => p.endsWith('/launch/catalogue-apply')).length - applyBefore, 1);
+    assert.equal((await commerceLaunchPlan(env)).settings.checkoutEnabled, false);
+    await page.reload(); await page.getByRole('heading', { name: 'Store status: READY TO ENABLE' }).waitFor();
+    assert.equal(await enable.isEnabled(), true);
+    await enable.click(); const activation = page.getByRole('dialog', { name: 'Review catalogue fixes' }); assert.equal(await activation.isVisible(), false);
+    const finalDialog = page.locator('dialog[open]'); const final = finalDialog.getByRole('button', { name: 'ENABLE STORE', exact: true });
+    assert.equal(await final.isDisabled(), true);
+    await finalDialog.getByLabel('I confirm the current merchant facts as the owner.').check(); assert.equal(await final.isDisabled(), true);
+    await finalDialog.getByLabel('I authorize transaction-only disclosure and production activation.').check();
+    await page.screenshot({ path: `.artifacts/catalogue-repair/owner-confirmation-${width}.png` });
+    await final.click(); await page.getByRole('heading', { name: 'Store status: LIVE / ACTIVE' }).waitFor();
+    await page.reload(); await page.getByRole('heading', { name: 'Store status: LIVE / ACTIVE' }).waitFor();
+    const active = await commerceLaunchPlan(env); assert.equal(active.business.ownerConfirmed, true); assert.equal(active.business.disclosureAuthorized, true); assert.equal(active.catalogue.ineligibleSellableVariants, 0);
+    assert.equal((await db.prepare("SELECT COUNT(*) n FROM commerce_orders").first()).n, 0);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); assert.deepEqual(errors, []);
+    await page.screenshot({ path: `.artifacts/catalogue-repair/active-${width}.png`, fullPage: true });
+  });
+});

@@ -283,6 +283,11 @@ test("creator grants, ownership, option locks, signed voting, and desired/applie
   assert.equal(status.runtime.state, "online");
   assert.equal(status.runtime.appliedRevision, 2);
   assert.equal(status.runtime.secret, undefined);
+  await harness.commerceDb.prepare("UPDATE bot_runtime_heartbeat SET runtime_json=json_set(runtime_json,'$.pollingIntervalSeconds',60),heartbeat_at=? WHERE singleton_id=1")
+    .bind(new Date(Date.now() - 75_000).toISOString()).run();
+  const normalCadence = await automationsStatus(env);
+  assert.equal(normalCadence.runtime.state, "online");
+  assert.equal(normalCadence.runtime.freshness.currentSeconds, 93);
   assert.equal(JSON.stringify(status).includes("must-not-project"), false);
   const discovery = await getCreatorRumbleDiscovery(env, "owner");
   assert.equal(discovery.source.scope, "user:1sl8zm");
@@ -291,7 +296,7 @@ test("creator grants, ownership, option locks, signed voting, and desired/applie
   assert.equal(JSON.stringify(discovery).includes("server_url"), false);
   await assert.rejects(getCreatorRumbleDiscovery(env, "unapproved"), (error) => error.code === "poll_creator_not_approved");
   await harness.commerceDb.prepare("UPDATE bot_runtime_heartbeat SET heartbeat_at=? WHERE singleton_id=1")
-    .bind(new Date(Date.now() - 90_000).toISOString()).run();
+    .bind(new Date(Date.now() - 100_000).toISOString()).run();
   const staleDiscovery = await getCreatorRumbleDiscovery(env, "owner");
   assert.equal(staleDiscovery.botState, "stale");
   assert.equal(staleDiscovery.source.scope, "user:1sl8zm");
