@@ -1,5 +1,12 @@
 # Bump notes
 
+## 2026-09-06 - Admin-only IGDB production prerequisites
+
+- Verified encrypted production `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` on `thirdrailify-admin`; neither exists on Public `thirdrailify`. Secret values remain outside source/configuration. Pinned Wrangler 4.60.0 does not support `secrets.required` for Pages, so the existing `wrangler.jsonc` remains unchanged.
+- Exported the full production Commerce D1 before applying the sole pending migration, `0032_gaming_igdb_mapping.sql`. Backup: `C:\Users\TempAdmin\.codex\backups\thirdrailify-commerce\thirdrailify-commerce-before-0032-20260906-214514.sql`, 4,076,935 bytes, SHA-256 `80A619BE5EEF92FAADBAAC6454415DADB5917CC14B85DB33CC03B8D9CE9D8D22`.
+- Remote verification found no pending migrations, nullable TEXT IGDB fields initially NULL, all original values across six games/four rotation entries/seven media records unchanged, all six Gaming indexes retained, and zero foreign-key violations. No unrelated migration or provider data write occurred.
+- Deployment and live provider acceptance must follow these verified prerequisites; this entry does not assert their completion. Public source/configuration/deployment is outside this activation.
+
 ## 2026-09-06 - Current-product image delivery and completeness follow-up
 
 CURRENT VER=0.1.0-alpha.0
