@@ -36,6 +36,7 @@ export async function getIgdbAccessToken({ env, fetchImpl = fetch, now = Date.no
       body: new URLSearchParams({ client_id: env.IGDB_CLIENT_ID, client_secret: env.IGDB_CLIENT_SECRET, grant_type: "client_credentials" }).toString(),
     }, { fetchImpl, timeoutMs });
     if (typeof data?.access_token !== "string" || !data.access_token || !Number.isFinite(data.expires_in) || data.expires_in <= 0 || data.token_type?.toLowerCase() !== "bearer") throw fail(502, "response_invalid", "IGDB authentication returned invalid data.");
+    console.info("igdb_token_acquired");
     tokens.set(env, { token: data.access_token, expiresAt: now() + Math.max(0, data.expires_in - Math.min(60, data.expires_in / 10)) * 1000 });
     return data.access_token;
   })();
@@ -45,9 +46,12 @@ export async function getIgdbAccessToken({ env, fetchImpl = fetch, now = Date.no
 
 async function requestJson(url, init, { fetchImpl = fetch, timeoutMs = 4500 }) {
   const controller = new AbortController();
+  const stage = url === "https://id.twitch.tv/oauth2/token" ? "authentication" : "games";
+  let providerStatus = null;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, { ...init, method: "POST", redirect: "error", signal: controller.signal });
+    providerStatus = response.status;
     if (response.status === 401 || response.status === 403) throw fail(502, "auth_failed", "IGDB authentication was rejected.");
     if (response.status === 429) throw fail(429, "rate_limited", "IGDB is busy. Try again shortly.");
     if (!response.ok) throw fail(502, "unavailable", "IGDB lookup is unavailable.");
@@ -58,6 +62,7 @@ async function requestJson(url, init, { fetchImpl = fetch, timeoutMs = 4500 }) {
     const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch (error) {
+    console.warn("igdb_request_failed", { stage, status: providerStatus, code: error instanceof AuthFailure ? error.code : controller.signal.aborted ? "igdb_timeout" : "igdb_response_invalid" });
     if (error instanceof AuthFailure) throw error;
     if (controller.signal.aborted || error?.name === "AbortError") throw fail(504, "timeout", "IGDB lookup timed out.");
     throw fail(502, "response_invalid", "IGDB returned unavailable or invalid data.");
