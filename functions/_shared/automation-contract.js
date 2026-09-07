@@ -1,7 +1,7 @@
 import { AuthFailure } from './auth-core.js';
 import { normalizePollTrigger } from './poll-normalization.js';
 
-import { EVENT_TYPES, defaultAction, ruleFieldErrors } from '../../src/lib/automation-model.mjs';
+import { EVENT_TYPES, RAID_TYPE, RAID_METHOD, RAID_TEXT, defaultAction, ruleFieldErrors } from '../../src/lib/automation-model.mjs';
 export { EVENT_TYPES };
 export function invalid(code = 'automation_invalid', message = 'The automation input is invalid.') { throw new AuthFailure(400, code, message); }
 export function text(value, maximum, required = true) {
@@ -25,7 +25,8 @@ export function validateRule(input) {
 }
 export function matches(rule, event) {
   const c = rule.conditions, d = event.evidence || {};
-  return event.eventType === rule.eventType && event.sourceScope === rule.sourceScope
+  return (event.eventType !== RAID_TYPE || (d.detectionMethod === RAID_METHOD && normalizePollTrigger(d.announcement || '') === RAID_TEXT))
+    && event.eventType === rule.eventType && event.sourceScope === rule.sourceScope
     && (!c.livestreamId || c.livestreamId === event.livestreamId)
     && (!c.exactText || normalizePollTrigger(c.exactText) === d.normalizedText)
     && (!c.badge || (d.badges || []).some(b => normalizePollTrigger(b) === normalizePollTrigger(c.badge)))
@@ -43,12 +44,18 @@ export function validateEvent(event) {
   if (typeof event.providerEventAt !== 'string' || !Number.isFinite(Date.parse(event.providerEventAt)) || Date.parse(event.providerEventAt) > Date.now() + 300000) invalid('automation_timestamp_invalid');
   const d = event.evidence;
   if (!d || typeof d !== 'object' || Array.isArray(d)) invalid();
-  if (Object.keys(d).some(key => !['normalizedText', 'badges', 'amountCents', 'totalGifts', 'giftType', 'videoId'].includes(key))) invalid('automation_evidence_invalid');
+  if (Object.keys(d).some(key => !['normalizedText', 'badges', 'amountCents', 'totalGifts', 'giftType', 'videoId', 'announcement', 'detectionMethod'].includes(key))) invalid('automation_evidence_invalid');
   if (d.normalizedText !== undefined && (typeof d.normalizedText !== 'string' || d.normalizedText.length > 500 || normalizePollTrigger(d.normalizedText) !== d.normalizedText)) invalid();
   if (d.badges !== undefined && (!Array.isArray(d.badges) || d.badges.length > 20 || d.badges.some(b => typeof b !== 'string' || b.length > 80))) invalid();
   for (const key of ['amountCents', 'totalGifts']) if (d[key] !== undefined && (!Number.isSafeInteger(d[key]) || d[key] < 0 || d[key] > 100000000)) invalid();
   if (['rumble.rant', 'rumble.subscribe'].includes(event.eventType) && d.amountCents === undefined) invalid();
   if (event.eventType === 'rumble.gift_purchase') { if ((!Number.isSafeInteger(d.totalGifts) || d.totalGifts < 1) || !Number.isSafeInteger(d.videoId) || d.videoId < 0) invalid(); text(d.giftType, 160); }
   if (['rumble.chat.exact', 'rumble.rant'].includes(event.eventType)) text(event.livestreamId, 160);
+  if (event.eventType === RAID_TYPE) {
+    text(event.livestreamId, 160);
+    if (typeof d.announcement !== 'string' || d.announcement.length > 500) invalid('automation_raid_evidence_invalid');
+    if (d.detectionMethod !== RAID_METHOD || normalizePollTrigger(d.announcement) !== RAID_TEXT
+      || Object.keys(d).some(k => !['announcement', 'detectionMethod'].includes(k))) invalid('automation_raid_evidence_invalid');
+  } else if (d.announcement !== undefined || d.detectionMethod !== undefined) invalid('automation_evidence_invalid');
   return event;
 }

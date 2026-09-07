@@ -909,3 +909,13 @@ PENDING VER=0.1.0-alpha.0
 
 - Added the saved velocity curve thumbnail using the existing Mechanics compiler/renderer, with launch/stop labels and saved policy revision. Fixed corrupted range separators, loading text and directory arrow; launch speed, spin duration and cooldown now have clear labels and monospaced values.
 - Verified desktop, tablet and 390px screenshots, saved preset/custom curve parity, no extra policy requests or writes, typecheck/build, focused lint and diff checks. No migration, deployment or mechanics setting changes.
+
+## 2026-09-07 - Chat-derived Raid Received (local)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Extended the shared Rumble snapshot/event pipeline and Admin rule editor with exact Raid Received notification matching, honest Chat-derived attribution, fixed weighted awards and per-rule replay safety.
+- Added bounded versioned evidence revalidation, legacy-safe rules projection, current-runtime support status, compact synthetic tests and actual Python-signed-envelope to local D1 acceptance. Existing gift/Rant/Poll/discovery/heartbeat behavior is retained.
+- Raid depends on existing 0035, new 0036, updated Admin and updated/restarted Bot. No remote mutation or live restart occurred. See `docs/RUMBLE_RAID_LOCAL.md` for evidence, file inventory and validation details.

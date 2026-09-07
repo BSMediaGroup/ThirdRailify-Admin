@@ -1,4 +1,7 @@
 export type ActionConfig = { version: 2; repeatActorPolicy: 'skip' | 'accumulate'; award: { mode: 'fixed' | 'per_gift' | 'per_amount'; entriesPerUnit: number; unitCents: number } };
+export const RAID_TYPE: string;
+export const RAID_METHOD: string;
+export const RAID_TEXT: string;
 export const MAX_ENTRY_WEIGHT: number;
 export const EVENT_TYPES: readonly string[];
 export const CONDITION_FIELDS: Record<string, string[]>;

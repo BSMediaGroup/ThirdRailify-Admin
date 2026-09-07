@@ -1,10 +1,22 @@
-import { defaultAction, calculateAward } from '../../src/lib/automation-model.mjs';
+import { RAID_TYPE, RAID_METHOD, defaultAction, calculateAward } from '../../src/lib/automation-model.mjs';
 import { AuthFailure, nowIso, randomId } from './auth-core.js';
 import { getSafeRumbleDiscovery, requirePollDb } from './polls-core.js';
 import { executeAutomationWheelEntry } from './wheels-core.js';
 import { fieldFailure, invalid, matches, validateEvent, validateRule } from './automation-contract.js';
 import { normalizePollTrigger } from './poll-normalization.js';
 
+export async function automationReadiness(env) {
+  const db = requirePollDb(env);
+  const table = await db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='automation_rules'").first();
+  const columns = (await db.prepare('PRAGMA table_info(automation_rules)').all()).results;
+  const awards = columns.some(c => c.name === 'action_config_json');
+  const raidSchema = awards && Boolean(table?.sql?.includes("'rumble.raid.received'"));
+  const heartbeat = await db.prepare('SELECT runtime_json,heartbeat_at FROM bot_runtime_heartbeat WHERE singleton_id=1').first();
+  let runtime = {}; try { runtime = JSON.parse(heartbeat?.runtime_json || '{}'); } catch { /* fail closed */ }
+  const age = Date.now() - Date.parse(heartbeat?.heartbeat_at);
+  const raidRuntime = runtime.eventAutomation?.raidNoticeVersion === 1 && age >= -300000 && age <= 45000;
+  return { awards, raidSchema, raidRuntime, raidStatus: !raidSchema ? 'schema_required' : !raidRuntime ? 'pending_capable_bot' : 'ready' };
+}
 export function projectRule(row) {
   const actionConfig = row.action_config_json ? JSON.parse(row.action_config_json) : defaultAction();
   return { id: row.id, name: row.name, description: row.description, enabled: Boolean(row.enabled), sourceScope: row.source_scope,
@@ -14,23 +26,28 @@ export function projectRule(row) {
       duplicateEntrants: row.duplicate_entrants, rejected: row.rejected, failed: row.failed }, lastMatchAt: row.last_match_at, lastOutcome: row.last_outcome, lastFault: row.last_fault };
 }
 export async function listAutomationRules(env, wheelId = '') {
-  const db = requirePollDb(env);
+  const db = requirePollDb(env), readiness = await automationReadiness(env);
+  if (!readiness.awards) throw new AuthFailure(503, 'automation_schema_required', 'Automation awards require migration 0035 before editing rules.');
   const rows = await db.prepare(`SELECT r.*, w.title AS wheel_title FROM automation_rules r LEFT JOIN wheels w ON w.id=r.target_wheel_id
     WHERE r.deleted_at IS NULL AND (?='' OR r.target_wheel_id=?) ORDER BY r.updated_at DESC LIMIT 200`).bind(wheelId, wheelId).all();
   const wheels = await db.prepare("SELECT id,title,lifecycle,editing_locked FROM wheels ORDER BY title LIMIT 500").all();
-  const activity = await db.prepare(`SELECT a.id,a.rule_id,a.actor_label,a.outcome,a.awarded_entries,a.action_result,a.created_at FROM automation_receipts a
+  const activity = await db.prepare(`SELECT a.id,a.rule_id,a.event_type,a.actor_label,a.outcome,a.awarded_entries,a.action_result,a.created_at FROM automation_receipts a
     WHERE (?='' OR a.target_wheel_id=?) ORDER BY a.created_at DESC LIMIT 40`).bind(wheelId, wheelId).all();
-  return { ok: true, rules: rows.results.map(projectRule), wheels: wheels.results, activity: activity.results, discovery: await getSafeRumbleDiscovery(env) };
+  return { ok: true, readiness, rules: rows.results.map(row => ({ ...projectRule(row), ...(row.event_type === RAID_TYPE ? { runtimeStatus: readiness.raidStatus } : {}) })), wheels: wheels.results, activity: activity.results, discovery: await getSafeRumbleDiscovery(env) };
 }
-export async function botAutomationRules(env) {
+export async function botAutomationRules(env, raidCapable = false) {
+  const readiness = await automationReadiness(env);
   const rows = await requirePollDb(env).prepare(`SELECT * FROM automation_rules WHERE enabled=1 AND deleted_at IS NULL AND target_wheel_id IS NOT NULL ORDER BY id LIMIT 201`).all();
   if (rows.results.length > 200) throw new AuthFailure(503, 'automation_projection_limit', 'Rule projection exceeds its limit.');
   // Legacy duplicatePolicy is a matching-protocol compatibility token only. Bot never executes awards.
-  return { ok: true, rules: rows.results.map(row => { const r = projectRule(row); return { id: r.id, revision: r.revision, activatedAt: r.activatedAt,
+  return { ok: true, rules: rows.results.filter(row => row.event_type !== RAID_TYPE || (raidCapable && readiness.raidSchema)).map(row => { const r = projectRule(row); return { id: r.id, revision: r.revision, activatedAt: r.activatedAt,
     sourceScope: r.sourceScope, eventType: r.eventType, conditions: r.conditions, actionType: r.actionType, targetWheelId: r.targetWheelId, duplicatePolicy: 'skip' }; }), fetchedAt: nowIso() };
 }
 export async function saveAutomationRule(env, actorId, input) {
   const db = requirePollDb(env), rule = validateRule(input), timestamp = nowIso();
+  const readiness = await automationReadiness(env);
+  if (!readiness.awards) throw new AuthFailure(503, 'automation_schema_required', 'Apply migration 0035 before saving automation awards.');
+  if (rule.eventType === RAID_TYPE && !readiness.raidSchema) fieldFailure({ eventType: 'Raid Received requires migration 0036 after 0035. Controls remain unavailable until storage is ready.' });
   const wheel = await db.prepare('SELECT id FROM wheels WHERE id=?').bind(rule.targetWheelId).first();
   if (!wheel) fieldFailure({ targetWheelId: 'Choose an existing Wheel.' });
   const id = input.id || randomId();
@@ -72,11 +89,12 @@ export function dryRunAutomation(input) {
   const actorLabel = typeof sample.actorLabel === 'string' ? sample.actorLabel.trim().slice(0, 120) : 'Sample Viewer';
   const normalizedText = normalizePollTrigger(String(sample.text || '').slice(0, 500));
   const event = { eventType: rule.eventType, sourceScope: rule.sourceScope, livestreamId: sample.livestreamId || '', evidence: {
-    normalizedText, amountCents: Number(sample.amountCents || 0), totalGifts: Number(sample.totalGifts || 0), giftType: String(sample.giftType || ''), badges: String(sample.badge || '').split(',').map(s => s.trim()) } };
+    normalizedText, ...(rule.eventType === RAID_TYPE ? { detectionMethod: RAID_METHOD, announcement: String(sample.text || '').slice(0, 500) } : {}), amountCents: Number(sample.amountCents || 0), totalGifts: Number(sample.totalGifts || 0), giftType: String(sample.giftType || ''), badges: String(sample.badge || '').split(',').map(s => s.trim()) } };
   const award = calculateAward(rule.actionConfig, rule.eventType, event.evidence);
   const matched = Boolean(actorLabel) && matches(rule, event);
   return { ok: true, dryRun: true, matched, normalizedText, sourceScope: rule.sourceScope, eventType: rule.eventType,
-    actorKey: `rumble:${rule.sourceScope}:${normalizePollTrigger(actorLabel)}`, actorLabel, ...award,
+    actorKey: `rumble:${rule.sourceScope}:${normalizePollTrigger(actorLabel)}`, actorLabel, ...award, livestreamId: event.livestreamId,
+    ...(rule.eventType === RAID_TYPE ? { classification: 'Chat-derived / not independently verified', detectionMethod: RAID_METHOD } : {}),
     repeatActorPolicy: rule.actionConfig.repeatActorPolicy,
     action: !matched ? 'Would add 0 entries: conditions did not match. No action will be executed.' : award.reason ? `Would add 0 entries: ${award.reason.replaceAll('_', ' ')}. No action will be executed.` :
       `Would add ${award.entries} entries${rule.eventType === 'rumble.gift_purchase' ? ' to purchaser' : ''}. ${rule.actionConfig.repeatActorPolicy === 'skip' ? 'Existing entrants would be skipped.' : 'Existing entrants would receive additional weight; hidden entrants remain hidden.'} Wheel locks and limits are checked during execution. No action will be executed.` };
@@ -87,12 +105,21 @@ export async function ingestAutomationEvents(env, input) {
   const db = requirePollDb(env), results = [];
   for (const item of input.events) {
     let event;
-    try { event = validateEvent(item); } catch { results.push({ ruleId: item?.ruleId, eventFingerprint: item?.eventFingerprint, outcome: 'invalid_event' }); continue; }
+    try {
+      event = validateEvent(item);
+      if (event.eventType === RAID_TYPE) {
+        const material = JSON.stringify(['rumble-raid-notice-v1', event.sourceScope, event.livestreamId,
+          normalizePollTrigger(event.actorLabel), event.providerEventAt, event.evidence.announcement]);
+        const expected = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material))), b => b.toString(16).padStart(2, '0')).join('');
+        if (expected !== event.eventFingerprint) invalid('automation_raid_fingerprint_invalid');
+      }
+    } catch { results.push({ ruleId: item?.ruleId, eventFingerprint: item?.eventFingerprint, outcome: 'invalid_event' }); continue; }
     const row = await db.prepare('SELECT * FROM automation_rules WHERE id=?').bind(event.ruleId).first();
     let outcome;
     if (!row || row.deleted_at || !row.enabled) outcome = 'inactive_rule';
     else if (row.revision !== event.ruleRevision) outcome = 'stale_revision';
     else if (!Number.isFinite(Date.parse(row.activated_at)) || Date.parse(event.providerEventAt) < Date.parse(row.activated_at)) outcome = 'before_activation';
+    else if (event.eventType === RAID_TYPE && projectRule(row).actionConfig.award.mode !== 'fixed') outcome = 'condition_rejected';
     else if (!matches(projectRule(row), event)) outcome = 'condition_rejected';
     if (outcome) {
       if (row) await db.batch([

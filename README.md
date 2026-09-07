@@ -1,5 +1,14 @@
 # Third Railify Admin
 
+## Raid Received automation (local, current/pending 0.1.0-alpha.0)
+
+The existing Rumble event pipeline now supports explicitly enabled, **Chat-derived** Raid Received rules for the complete announcement `has raided this stream!`. System origin is not independently verified. Awards go to the named account using fixed entries and skip-existing or accumulation; no participant list or raid size is inferred. Replay protection is per rule, with activation boundaries and atomic weighted receipts retained.
+
+Raid requires **0035 then new 0036**, updated Admin, and an updated/restarted Bot. The prior V1.1 Admin-only rollout statement below applies to gift/Rant awards, not Raid. Nothing was deployed, migrated remotely, restarted live or enabled in production. See [source limitations, contracts, audit and acceptance](docs/RUMBLE_RAID_LOCAL.md).
+
+Created `commerce-migrations/0036_rumble_raid_received.sql`, `tests/raid-automations.test.mjs`, `tests/raid-automations-browser.test.mjs`, and `docs/RUMBLE_RAID_LOCAL.md`. Extended `functions/_shared/automation-contract.js`, `automation-core.js`, `polls-core.js`, `functions/api/internal/bot/[[path]].js`, the shared `src/components/AutomationRuleEditor.tsx`/`TriggerStudio.tsx`, `src/lib/automation-model.mjs`/`.d.mts`/`automation-client.ts`, and `tests/commerce-test-helpers.mjs`. The canonical `wheels-core.js` executor and completed 0034/0035 migrations are unchanged. No files removed.
+
+
 ## Rumble event automations V1.1 (local implementation)
 
 Trigger Studio and each Wheel use the same detected-source rule editor. The safe Bot discovery projection preselects ThirdRailify when present; raw `user:<id>` / `channel:<id>` entry is available under Advanced / Custom source. Saved authoritative labels survive offline discovery. Chat and Rant rules can select detected livestreams; gifts, followers and subscribers have no unproven stream mapping.

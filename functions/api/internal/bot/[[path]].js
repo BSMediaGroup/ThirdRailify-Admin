@@ -11,6 +11,7 @@ export async function onRequest({ request, env }) {
       if (path === "config") return response(await botDesiredConfig(env));
       if (path === "poll") return response(await botActivePoll(env));
       if (path === "rules") return response(await botAutomationRules(env));
+      if (path === "rules-v2") return response(await botAutomationRules(env, true));
     }
     if (request.method === "POST") {
       const { body, raw } = await readPollJson(request, ['votes', 'events'].includes(path) ? 128 * 1024 : 32 * 1024); await verifyBotServiceRequest(request, env, raw);

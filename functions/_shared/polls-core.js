@@ -643,7 +643,7 @@ function sanitizeRuntime(input) {
   const allowed = ["discordConnected","rumbleConfigured","lastConfigSync","lastRumbleFetch","sourceLabel","sourceScopeType","livestreamId","livestreamTitle","pollLeaseActive","activePollId","activePollRevision","pollingIntervalSeconds","lastProviderTime","lastAcceptedVoteTime","backlogMayBeTruncated","errorCode","providerState","configSyncState","nextPollAt","backoffSeconds","counters"];
   const result = Object.fromEntries(allowed.filter((key) => key in value).map((key) => [key, sanitizeRuntimeValue(value[key])]));
   if (value.eventAutomation && typeof value.eventAutomation === 'object') {
-    const eventKeys = ['activeRules','pending','dropped','malformed','transitions','lastTransition','lastSnapshotAt','lastConfigAt','lastFault','backoffSeconds'];
+    const eventKeys = ['raidNoticeVersion','unsupportedRules','activeRules','pending','dropped','malformed','transitions','lastTransition','lastSnapshotAt','lastConfigAt','lastFault','backoffSeconds'];
     result.eventAutomation = Object.fromEntries(eventKeys.filter(key => key in value.eventAutomation).map(key => [key, sanitizeRuntimeValue(value.eventAutomation[key])]));
   }
   const discovery = sanitizeRumbleDiscovery(value.rumbleDiscovery);

@@ -1,7 +1,11 @@
 // Shared editor/server contract. Wheel schema and validateEntries use this same ceiling.
 export const MAX_ENTRY_WEIGHT = 100000;
-export const EVENT_TYPES = Object.freeze(['rumble.chat.exact', 'rumble.rant', 'rumble.follow', 'rumble.subscribe', 'rumble.gift_purchase']);
+export const EVENT_TYPES = Object.freeze(['rumble.chat.exact', 'rumble.raid.received', 'rumble.rant', 'rumble.follow', 'rumble.subscribe', 'rumble.gift_purchase']);
+export const RAID_TYPE = 'rumble.raid.received';
+export const RAID_METHOD = 'chat-announcement-v1';
+export const RAID_TEXT = 'has raided this stream!';
 export const CONDITION_FIELDS = {
+  [RAID_TYPE]: ['livestreamId'],
   'rumble.chat.exact': ['exactText', 'badge', 'livestreamId'],
   'rumble.rant': ['exactText', 'badge', 'minAmountCents', 'livestreamId'],
   'rumble.follow': [], 'rumble.subscribe': ['minAmountCents'], 'rumble.gift_purchase': ['minGifts', 'giftType'],
