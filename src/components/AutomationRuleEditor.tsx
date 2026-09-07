@@ -15,8 +15,9 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
   const [test, setTest] = useState<TestResult | null>(null);
   const [sample, setSample] = useState({ actorLabel: 'ExampleUser', text: '', amountCents: 500, totalGifts: 5, giftType: 'random', badge: '', livestreamId: '' });
   const action = rule.actionConfig || defaultAction();
-  const errors = { ...ruleFieldErrors(rule), ...serverErrors };
-  const valid = !Object.keys(errors).length;
+  const localErrors = ruleFieldErrors(rule);
+  const errors = { ...localErrors, ...serverErrors };
+  const valid = !Object.keys(localErrors).length;
   const textEvent = ['rumble.chat.exact', 'rumble.rant'].includes(rule.eventType);
   const raid = rule.eventType === RAID_TYPE;
   const streamEvent = textEvent || raid;
@@ -44,7 +45,7 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
     catch (e) { setTestError(e instanceof AutomationRequestError && e.issues.length ? e.issues.map(i => i.message).join(' ') : e instanceof Error ? e.message : 'Dry run unavailable.'); }
     finally { setTesting(false); }
   };
-  return <form className="event-editor" aria-label="Automation rule editor" noValidate onSubmit={e => { e.preventDefault(); if (valid && (!raid || readiness?.raidSchema) && !(streamEvent && streamMode !== 'any' && !rule.conditions.livestreamId)) onSave(); }}>
+  return <form className="event-editor" aria-label="Automation rule editor" noValidate onSubmit={e => { e.preventDefault(); if (valid && !busy && canManage && !(streamEvent && streamMode !== 'any' && !rule.conditions.livestreamId)) onSave(); }}>
     <header><div><p className="eyebrow">RULE SETUP</p><h3>{rule.id ? 'Edit automation' : 'Create automation'}</h3></div><button type="button" className="secondary-button" onClick={onClose}>Close editor</button></header>
     <div className="event-fields">
       <label>Rule name<input aria-label="Rule name" required maxLength={100} value={rule.name} {...invalid('name')} onChange={e => update({ name: e.target.value })} />{hint('name')}</label>
@@ -62,7 +63,7 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
     </fieldset>
     <div className="event-fields"><label>Event family<select aria-label="Event family" value={rule.eventType} onChange={e => { const eventType = e.target.value; const conditions = Object.fromEntries(Object.entries(rule.conditions).filter(([key]) => CONDITION_FIELDS[eventType]?.includes(key))); update({ eventType, conditions, actionConfig: { ...action, award: { ...action.award, mode: 'fixed' } } }); if (!conditions.livestreamId) setStreamMode('any'); }}>{families.map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select>{hint('eventType')}</label></div>
     <p className="event-family-note">{families.find(f => f[0] === rule.eventType)?.[2]}</p>
-    {raid ? <div className="event-incompatible" role="status"><strong className="poll-status">Chat-derived</strong><p>Entries are awarded to the account named on the notification. Individual raid participants and raid size are not supplied.</p><p>An identical user-authored message cannot be distinguished from a system announcement. Not independently verified.</p><p>{!readiness?.raidSchema ? 'Storage unavailable: migration 0036 is required after 0035.' : !readiness?.raidRuntime ? 'Pending capable Bot: save is available, execution awaits the updated Bot and a current support report.' : 'Capable Bot reporting. Only enabled rules can execute.'}</p></div> : null}
+    {raid ? <div className="event-incompatible" role="status"><strong className="poll-status">Chat-derived</strong><p>Entries are awarded to the account named on the notification. Individual raid participants and raid size are not supplied.</p><p>An identical user-authored message cannot be distinguished from a system announcement. Not independently verified.</p><p>{!readiness?.raidSchema ? 'Storage readiness is not confirmed. Saving will check the current server schema.' : !readiness?.raidRuntime ? 'Pending capable Bot: save is available, execution awaits the updated Bot and a current support report.' : 'Capable Bot reporting. Only enabled rules can execute.'}</p></div> : null}
     {overlap ? <p role="status">Overlap: another enabled rule can match this announcement for this Wheel. Replay protection is per rule; both rules may deliberately award entries.</p> : null}
     {stateOnly ? <div className="event-incompatible" role="status"><strong>Wheel entry action incompatible</strong><p>Livestream transitions have no actor. Add actor to Wheel is unavailable.</p></div> : <>
       <fieldset><legend>Conditions</legend><div className="event-fields">
@@ -100,7 +101,9 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
       {test ? <div className="event-test-result" role="status"><strong>{test.matched ? 'Matched' : 'No match'}</strong><p>Source: {sourceName} · {families.find(f => f[0] === rule.eventType)?.[1]}</p><p>Actor: {test.actorLabel}{gift ? ' (purchaser)' : ''}</p>{test.classification ? <p>{test.classification} | Receiving source: {test.sourceScope} | Livestream: {test.livestreamId || 'Any containing livestream'}</p> : null}<p>{test.calculation}</p><p>Repeat actor: {test.repeatActorPolicy === 'accumulate' ? 'Accumulate' : 'Skip existing'}</p><p>{test.action}</p></div> : null}
       </fieldset>
       {(!valid || (streamEvent && streamMode !== 'any' && !rule.conditions.livestreamId)) ? <p className="event-field-error" role="status">Complete the highlighted fields before saving or testing.</p> : null}
-      <button className="primary-button" disabled={busy || !canManage || !valid || (raid && !readiness?.raidSchema) || (streamEvent && streamMode !== 'any' && !rule.conditions.livestreamId)} type="submit">{busy ? 'Working…' : rule.enabled ? 'Save and enable' : 'Save paused rule'}</button>
+      {raid && !readiness?.raidSchema ? <p className="event-field-error" role="status">Save will check storage again. If migration 0036 is missing, it must be applied after 0035 before this rule can be stored.</p> : null}
+      {Object.keys(serverErrors).length ? <div className="event-field-error" role="alert"><strong>Rule was not saved.</strong>{Object.entries(serverErrors).map(([field, message]) => <p key={field}>{message}</p>)}</div> : null}
+      <button className="primary-button" disabled={busy || !canManage || !valid || (streamEvent && streamMode !== 'any' && !rule.conditions.livestreamId)} type="submit">{busy ? 'Working…' : rule.enabled ? 'Save and enable' : 'Save paused rule'}</button>
     </>}
   </form>;
 }

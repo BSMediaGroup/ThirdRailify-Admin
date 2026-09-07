@@ -427,3 +427,10 @@ The Wheels Overview mechanics card reuses the Mechanics velocity graph thumbnail
 # Printful fulfillment operations update
 
 The existing `PRINTFUL_WEBHOOK_V2_PUBLIC_KEY` and `PRINTFUL_WEBHOOK_V2_SECRET_HEX` encrypted Pages bindings are managed by `scripts/rotate-printful-v2-webhook.mjs --execute-rotation`. This intentionally rotates keys and temporarily disables provider event delivery while the tested receiver build is deployed. Routine Master readback uses `/api/admin/commerce/fulfillment/webhook-reconcile` and never rotates keys. See [operations](docs/PRINTFUL_FULFILLMENT_OPERATIONS.md) before operating either path. Secret values must never be logged, committed or returned to the browser.
+
+
+### 2026-09-07 production Save repair (explicitly authorized after local acceptance)
+
+Production inspection confirmed 0035 applied and 0036 missing. Applied only pending 0036 with Wrangler D1 migrations apply. Readback: Raid enum present, both existing receipts retained, foreign_key_check empty. Current Bot heartbeat already reports raidNoticeVersion=1; no restart performed. Deployed Admin production main: https://23d215f7.thirdrailify-admin.pages.dev.
+
+Shared editor now lets the server recheck schema on Save rather than disabling on missing/stale readiness. Server schema/auth validation remains authoritative. Server errors appear beside Save and permit retry. Browser coverage passed at four widths, including missing readiness and stale false readiness followed by successful save/reload. Typecheck, focused lint and production build passed. No production rules or Wheel entries were created or enabled by this repair.

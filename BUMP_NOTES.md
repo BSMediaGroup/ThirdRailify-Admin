@@ -919,3 +919,10 @@ PENDING VER=0.1.0-alpha.0
 - Extended the shared Rumble snapshot/event pipeline and Admin rule editor with exact Raid Received notification matching, honest Chat-derived attribution, fixed weighted awards and per-rule replay safety.
 - Added bounded versioned evidence revalidation, legacy-safe rules projection, current-runtime support status, compact synthetic tests and actual Python-signed-envelope to local D1 acceptance. Existing gift/Rant/Poll/discovery/heartbeat behavior is retained.
 - Raid depends on existing 0035, new 0036, updated Admin and updated/restarted Bot. No remote mutation or live restart occurred. See `docs/RUMBLE_RAID_LOCAL.md` for evidence, file inventory and validation details.
+
+
+### 2026-09-07 production Save repair (explicitly authorized after local acceptance)
+
+Production inspection confirmed 0035 applied and 0036 missing. Applied only pending 0036 with Wrangler D1 migrations apply. Readback: Raid enum present, both existing receipts retained, foreign_key_check empty. Current Bot heartbeat already reports raidNoticeVersion=1; no restart performed. Deployed Admin production main: https://23d215f7.thirdrailify-admin.pages.dev.
+
+Shared editor now lets the server recheck schema on Save rather than disabling on missing/stale readiness. Server schema/auth validation remains authoritative. Server errors appear beside Save and permit retry. Browser coverage passed at four widths, including missing readiness and stale false readiness followed by successful save/reload. Typecheck, focused lint and production build passed. No production rules or Wheel entries were created or enabled by this repair.

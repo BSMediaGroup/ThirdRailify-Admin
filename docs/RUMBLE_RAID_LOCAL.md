@@ -127,3 +127,10 @@ All eight captured screenshots were opened and visually inspected under `.artifa
 - `06-wheel-editor-768.png`
 
 Final scope audit: 12 maintained files modified and four created here; no removals. The operator-added raw sample is separate and unchanged. No staging/reset/stash, reference-repository writes, remote operation or live restart occurred. Bot validation is recorded in `../THIRD-RAIL-BOT/docs/RUMBLE_RAID_LOCAL.md`.
+
+
+### 2026-09-07 production Save repair (explicitly authorized after local acceptance)
+
+Production inspection confirmed 0035 applied and 0036 missing. Applied only pending 0036 with Wrangler D1 migrations apply. Readback: Raid enum present, both existing receipts retained, foreign_key_check empty. Current Bot heartbeat already reports raidNoticeVersion=1; no restart performed. Deployed Admin production main: https://23d215f7.thirdrailify-admin.pages.dev.
+
+Shared editor now lets the server recheck schema on Save rather than disabling on missing/stale readiness. Server schema/auth validation remains authoritative. Server errors appear beside Save and permit retry. Browser coverage passed at four widths, including missing readiness and stale false readiness followed by successful save/reload. Typecheck, focused lint and production build passed. No production rules or Wheel entries were created or enabled by this repair.
