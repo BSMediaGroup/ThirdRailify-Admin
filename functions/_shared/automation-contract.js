@@ -19,7 +19,7 @@ export function validateRule(input) {
   const actionConfig = input.actionConfig ?? defaultAction();
   return { name: input.name.trim(), description: (input.description ?? '').trim(), enabled: input.enabled,
     sourceScope: input.sourceScope.trim(), eventType: input.eventType,
-    conditions: Object.fromEntries(Object.entries(input.conditions).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])),
+    conditions: Object.fromEntries(Object.entries(input.conditions).filter(([k, v]) => !(input.eventType === 'rumble.rant' && k === 'exactText' && !v.trim())).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])),
     actionType: 'wheel.add_actor', targetWheelId: input.targetWheelId.trim(), actionConfig,
     duplicatePolicy: actionConfig.repeatActorPolicy };
 }

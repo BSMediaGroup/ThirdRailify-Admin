@@ -30,7 +30,7 @@ export function ruleFieldErrors(input) {
       if (!CONDITION_FIELDS[r.eventType]?.includes(key)) errors.conditions = 'Remove conditions that do not belong to this event family.';
       else if (['minGifts', 'minAmountCents'].includes(key)) {
         if (!integer(value, 0, 100000000)) errors[key] = 'Enter a whole number from 0 to 100,000,000.';
-      } else if (!validText(value, key === 'exactText' ? 500 : 160)) errors[key] = `Enter valid text (at most ${key === 'exactText' ? 500 : 160} characters).`;
+      } else if (!validText(value, key === 'exactText' ? 500 : 160, !(r.eventType === 'rumble.rant' && key === 'exactText'))) errors[key] = `Enter valid text (at most ${key === 'exactText' ? 500 : 160} characters).`;
     }
   }
   if (r.eventType === 'rumble.chat.exact' && (typeof c?.exactText !== 'string' || !c.exactText.trim())) errors.exactText = 'Enter the complete chat message to match.';

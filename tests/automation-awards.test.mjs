@@ -145,3 +145,14 @@ test('weighted awards, distinct events, replay, thresholds, hidden normalization
   assert.equal(await send(event(fixed, 'existing-at-capacity', gifts(1))), 'added'); assert.equal((await row()).weight, 100000);
   assert.equal((await db.prepare('PRAGMA foreign_key_check').all()).results.length, 0);
 });
+
+
+test('optional Rant exact text accepts blank, omits its filter, and retains minimum cents', () => {
+  for (const exactText of ['', '   ']) {
+    const rule = { ...base, eventType: 'rumble.rant', conditions: { exactText, minAmountCents: 100 }, actionConfig: config('per_amount', 1) };
+    assert.deepEqual(validateRule(rule).conditions, { minAmountCents: 100 });
+    assert.equal(dryRunAutomation({ rule, sample: { actorLabel: 'ExampleUser', text: 'Any rant message', amountCents: 100 } }).matched, true);
+    assert.equal(dryRunAutomation({ rule, sample: { actorLabel: 'ExampleUser', text: 'Different message', amountCents: 99 } }).matched, false);
+    assert.throws(() => validateRule({ ...rule, eventType: 'rumble.chat.exact', conditions: { exactText }, actionConfig: config('fixed', 1) }));
+  }
+});

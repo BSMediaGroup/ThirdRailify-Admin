@@ -926,3 +926,8 @@ PENDING VER=0.1.0-alpha.0
 Production inspection confirmed 0035 applied and 0036 missing. Applied only pending 0036 with Wrangler D1 migrations apply. Readback: Raid enum present, both existing receipts retained, foreign_key_check empty. Current Bot heartbeat already reports raidNoticeVersion=1; no restart performed. Deployed Admin production main: https://23d215f7.thirdrailify-admin.pages.dev.
 
 Shared editor now lets the server recheck schema on Save rather than disabling on missing/stale readiness. Server schema/auth validation remains authoritative. Server errors appear beside Save and permit retry. Browser coverage passed at four widths, including missing readiness and stale false readiness followed by successful save/reload. Typecheck, focused lint and production build passed. No production rules or Wheel entries were created or enabled by this repair.
+
+
+### 2026-09-07 optional Rant message repair
+
+Blank or space-only optional Rant exact text is accepted by shared validation and omitted from saved conditions. Minimum cents and other filters remain enforced. Exact Chat still requires text. Updated automation award regression coverage proves unrestricted message matching at the configured amount and rejection below it. No migration or Bot change required.
