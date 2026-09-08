@@ -68,7 +68,7 @@ export async function bracketLibrary(env, search = '', archived = false) {
 }
 async function pollSource(env, l, actor = '') {
   const db = dbFor(env), row = await db.prepare('SELECT * FROM polls WHERE id=?').bind(l.pollId).first();
-  if (!row || (!actor && (!row.is_public || !['open', 'closed'].includes(row.state)))) return { state: 'unavailable', fingerprint: null, protected: true };
+  if (!row || (!actor && (!row.is_public || !(['open', 'closed'].includes(row.state) || (row.state === 'draft' && !row.opened_at))))) return { state: 'unavailable', fingerprint: null, protected: true };
   let p; try { p = (await getPublicPoll(env, row.public_slug, actor, Boolean(actor))).poll; } catch (e) { if (e.status === 404 || e.statusCode === 404) return { state: 'unavailable', fingerprint: null, protected: true }; throw e; }
   const mapping = Object.entries(l.mapping);
   const valid = p.presentationType === 'abootnothing' && p.options.length === 2 && mapping.length === 2 && new Set(mapping.map(x => x[1])).size === 2 && mapping.every(([, id]) => p.options.some(o => o.id === id));

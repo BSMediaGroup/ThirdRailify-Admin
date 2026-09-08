@@ -1,3 +1,4 @@
+import { PollStreamField } from './PollStreamField';
 import { useState, type FormEvent } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { Lightbox } from '../brackets/Lightbox';
@@ -22,7 +23,7 @@ export function PollEditDialog({ poll, onClose, onSaved }: { poll: EditablePoll;
     try {
       await pollAdminRequest(`/api/admin/polls/${encodeURIComponent(poll.slug)}/save`, csrfToken, {
         revision: poll.revision, title: draft.title, description: draft.description,
-        webVotingMode: draft.webVotingMode,
+        webVotingMode: draft.webVotingMode, streamUrl: draft.streamUrl || null,
         ...(locked ? {} : { options: draft.options }),
       });
       onSaved();
@@ -35,7 +36,7 @@ export function PollEditDialog({ poll, onClose, onSaved }: { poll: EditablePoll;
       <fieldset disabled={busy || !canManage}>
         <label>Poll title<input required maxLength={140} value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
         <label>Description<textarea value={draft.description || ''} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
-        <label>Who can vote<select value={draft.webVotingMode} onChange={e => setDraft({ ...draft, webVotingMode: e.target.value as AdminPoll['webVotingMode'] })}><option value="anyone">Anyone</option><option value="signed_in">Signed-in accounts</option></select></label>
+        <PollStreamField value={draft.streamUrl || ''} onChange={streamUrl => setDraft({ ...draft, streamUrl })} slug={poll.slug} disabled={busy || !canManage} /><label>Who can vote<select value={draft.webVotingMode} onChange={e => setDraft({ ...draft, webVotingMode: e.target.value as AdminPoll['webVotingMode'] })}><option value="anyone">Anyone</option><option value="signed_in">Signed-in accounts</option></select></label>
         {locked ? <p>Options and triggers are protected while voting is open or voting history exists. Poll title, description and voting policy can still be edited.</p> : null}
         {draft.options.map((option, index) => <div className="poll-edit-option" key={option.id}>
           <label>Option {index + 1}<input required maxLength={160} disabled={locked} value={option.label} onChange={e => setDraft({ ...draft, options: draft.options.map((item, i) => i === index ? { ...item, label: e.target.value } : item) })} /></label>

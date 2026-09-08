@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  getPollStreamCandidates,
   incrementPollVotes,
   automationsStatus,
   botActivePoll,
@@ -406,4 +407,30 @@ test('Upcoming and Admin reset preserve history while restarting ordinary and ma
   ({poll}=await changePollLifecycle(env,'reset-admin',poll.slug,{revision:poll.revision,action:'reset'}));
   assert.equal(poll.history.length,2);assert.equal(poll.history[0].totalVotes,1);assert.equal(poll.totalVotes,0);
  }
+});
+
+
+test('Rumble stream links validate, persist, clear and hydrate only from this Poll vote evidence', async t => {
+  const h = await createCommerceDatabases(); t.after(h.dispose);
+  const env = commerceEnvironment(h, { THIRDRAILIFY_PUBLIC_ORIGIN: 'https://public.example', THIRDRAILIFY_POLL_VOTER_SECRET: HMAC_SECRET });
+  await account(h.authDb, 'stream-admin', 'Stream Admin', { role: 'admin', adminLevel: 'full' });
+  await account(h.authDb, 'stream-outsider', 'Outsider');
+  const url = 'https://rumble.com/v7f6eco-example.html';
+  for (const type of ['regular', 'abootnothing']) {
+    let {poll} = await createPoll(env, 'stream-admin', {...pollInput('Stream '+type), presentationType:type, streamUrl:url+'?tracking=test'});
+    assert.equal(poll.streamUrl,url);
+    ({poll}=await updatePoll(env,'stream-admin',poll.slug,{revision:poll.revision,title:'Updated '+type}));
+    assert.equal(poll.streamUrl,url);
+    for (const invalid of ['javascript:alert(1)','https://rumble.com.evil.test/v123.html','https://rumble.com/api/secret','https://user:secret@rumble.com/v123.html']) await assert.rejects(updatePoll(env,'stream-admin',poll.slug,{revision:poll.revision,streamUrl:invalid}),{code:'poll_stream_url_invalid'});
+    ({poll}=await updatePoll(env,'stream-admin',poll.slug,{revision:poll.revision,streamUrl:''}));
+    assert.equal(poll.streamUrl,null);
+    assert.deepEqual((await getPollStreamCandidates(env,'stream-admin',poll.slug)).items,[]);
+    await assert.rejects(getPollStreamCandidates(env,'stream-outsider',poll.slug));
+    ({poll}=await changePollLifecycle(env,'stream-admin',poll.slug,{revision:poll.revision,action:'open'}));
+    await ingestRumbleVotes(env,{pollId:poll.id,pollRevision:poll.revision,events:[{eventFingerprint:(type === 'regular' ? 'a' : 'b').repeat(64),sourceScope:poll.rumbleSourceScope,livestreamId:'7d01f6',actorKey:'stream-viewer',actorLabel:'Viewer',optionId:poll.options[0].id,providerEventAt:new Date().toISOString()}]});
+    t.mock.method(globalThis,'fetch',async()=>Response.json({items:[{platform:'rumble',embedUrl:'https://rumble.com/embed/v7d01f6',watchUrl:url,title:'Matched stream'},{platform:'rumble',embedUrl:'https://rumble.com/embed/v99999',watchUrl:'https://rumble.com/v99999-wrong.html',title:'Wrong stream'}]}));
+    assert.deepEqual((await getPollStreamCandidates(env,'stream-admin',poll.slug)).items,[{url,title:'Matched stream'}]);
+    t.mock.restoreAll();
+    ({poll}=await changePollLifecycle(env,'stream-admin',poll.slug,{revision:poll.revision,action:'close'}));
+  }
 });

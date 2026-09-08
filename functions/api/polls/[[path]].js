@@ -1,5 +1,6 @@
 import { AuthFailure, errorResponse, jsonResponse } from "../../_shared/auth-core.js";
 import {
+  getPollStreamCandidates,
   incrementPollVotes,
   changePollLifecycle,
   changePollVisibility,
@@ -65,6 +66,8 @@ async function internalAction(method, env, path, body) {
   if (method === "POST" && path === "discovery") return getCreatorRumbleDiscovery(env, accountId);
   if (method === "POST" && path === "mine") return listCreatorPolls(env, accountId, body.input || {});
   if (method === "POST" && path === "create") return createPoll(env, accountId, body.input || {});
+  const streams = path.match(/^([^/]+)\/stream-links$/);
+  if (method === 'POST' && streams) return getPollStreamCandidates(env, accountId, decode(streams[1]));
   const read = path.match(/^([^/]+)\/read$/);
   if (method === "POST" && read) return getPublicPoll(env, decode(read[1]), accountId, true);
   const save = path.match(/^([^/]+)\/save$/);

@@ -1,7 +1,7 @@
 import { uploadPollMedia, pollMediaResponse } from '../../../_shared/poll-media.js';
 import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
 import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
-import { getSafeRumbleDiscovery, createPoll, updatePoll, adminPollAccess, adminPollLibrary, changePollLifecycle, changePollVisibility, getPublicPoll, mutatePollCreatorGrant, readPollJson } from "../../../_shared/polls-core.js";
+import { getPollStreamCandidates, getSafeRumbleDiscovery, createPoll, updatePoll, adminPollAccess, adminPollLibrary, changePollLifecycle, changePollVisibility, getPublicPoll, mutatePollCreatorGrant, readPollJson } from "../../../_shared/polls-core.js";
 
 const PREFIX = "/api/admin/polls";
 
@@ -14,6 +14,8 @@ export async function onRequest({ request, env }) {
       await requireAdminCapability(env, request, "polls.view");
       if (!path) { const url = new URL(request.url); return response(await adminPollLibrary(env, { state: url.searchParams.get("state"), owner: url.searchParams.get("owner"), type: url.searchParams.get("type") }), request, env); }
       if (/^media\/[A-Za-z0-9_-]{16,80}$/.test(path)) { const session = await requireAdminCapability(env, request, "polls.view"); return pollMediaResponse(env, path.slice(6), request, session.accountId); }
+      const streams = path.match(/^([^/]+)\/stream-links$/);
+      if (streams) return response(await getPollStreamCandidates(env, (await requireAdminCapability(env, request, 'polls.manage')).accountId, decode(streams[1])), request, env);
       if (path === "discovery") return response(await getSafeRumbleDiscovery(env), request, env);
       if (path === "access") return response(await adminPollAccess(env), request, env);
       const payload = await getPublicPoll(env, decode(path), (await requireAdminCapability(env, request, "polls.view")).accountId, true);

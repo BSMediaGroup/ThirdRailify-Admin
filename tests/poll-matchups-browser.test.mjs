@@ -90,12 +90,14 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       await page.getByRole('row').filter({ hasText: 'Editable ordinary Poll' }).getByRole('button', { name: 'Edit Poll', exact: true }).click();
       const editor = page.getByRole('dialog', { name: 'Edit Poll', exact: true });
       await editor.getByLabel('Trigger for Coffee', { exact: true }).fill('java');
+      await editor.getByLabel('Rumble stream link (optional)',{exact:true}).fill('https://rumble.com/v12345-regular.html');
       await page.screenshot({ path: `${artifacts}/ordinary-poll-editor-${width}.png` });
       assert.ok(await editor.evaluate(n => { const r = n.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
       await editor.getByRole('button', { name: 'Save Poll', exact: true }).click();
       await editor.waitFor({ state: 'detached' });
       const saved = (await getPublicPoll(env, regular.poll.slug, account.id, true)).poll;
       assert.equal(saved.options[0].trigger, 'java');
+      assert.equal(saved.streamUrl,'https://rumble.com/v12345-regular.html');
       assert.equal(saved.presentationType, 'regular');
       assert.equal(saved.options[0].id, regular.poll.options[0].id);
       await page.getByRole('row').filter({ hasText: created.poll.title }).getByRole('button', { name: 'Edit Poll', exact: true }).click();
@@ -121,6 +123,7 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
     await page.getByRole('button',{name:'Edit Poll',exact:true}).click();
     geometry.push({ width, route: 'admin', fits: await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth) });
     if (width === 1440) {
+      await page.getByLabel('Rumble stream link (optional)',{exact:true}).fill('https://rumble.com/v67890-matchup.html');
       await page.screenshot({ path: `${artifacts}/admin-editor.png`, fullPage: true });
       await page.getByRole('button', { name: 'Save matchup' }).click(); await page.waitForTimeout(500);
       await page.locator('.admin-toast').filter({ hasText: 'Matchup saved' }).waitFor();
@@ -145,7 +148,11 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       assert.equal((await getPublicPoll(env, created.poll.slug)).poll.options[0].image.id, afterImage);
       const poll = (await getPublicPoll(env, created.poll.slug)).poll;
       await changePollLifecycle(env, account.id, poll.slug, { revision: poll.revision, action: 'close' });
-      await page.goto(PUBLIC + `/polls/${created.poll.slug}`); await page.locator('.poll-credit-status').waitFor(); await page.waitForTimeout(1200);
+      await page.goto(PUBLIC + `/polls/${created.poll.slug}`);
+      const watch=page.getByRole('link',{name:'Watch stream',exact:true});
+      await watch.waitFor(); assert.equal(await watch.getAttribute('href'),'https://rumble.com/v67890-matchup.html');assert.equal(await watch.getAttribute('target'),'_blank');assert.equal(await watch.locator('img').count(),1);
+      await watch.screenshot({path:`${artifacts}/watch-stream-button.png`});
+      await page.locator('.poll-credit-status').waitFor(); await page.waitForTimeout(1200);
       await page.goto(ADMIN + '/automations#poll-reconciliation'); await page.getByRole('heading', { name: 'Credit reconciliation' }).waitFor();
       const lot = page.locator('.poll-credit-queue>article').filter({ hasText: '25 earned' }); await lot.scrollIntoViewIfNeeded(); await page.waitForTimeout(1200); await lot.getByLabel('Audit reason').fill('Local browser acceptance'); await lot.getByRole('button', { name: 'Allocate credits' }).click();
       await page.waitForFunction(() => [...document.querySelectorAll('.poll-credit-queue>article')].some(e => e.textContent.includes('25 committed')));
@@ -287,6 +294,22 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
         await page.getByRole('dialog').getByRole('button',{name:'Close Poll',exact:true}).waitFor();
         assert.equal((await getPublicPoll(env,fresh.poll.slug)).poll.state,'open');
         await page.screenshot({path:`${artifacts}/public-admin-open-${type}.png`,fullPage:true});
+      }
+      for (const type of ['abootnothing','regular']) {
+        const {poll:upcomingPoll}=await createPoll(env,account.id,{title:`Publish upcoming ${type}`,presentationType:type,options:[{label:'First',trigger:'1'},{label:'Second',trigger:'2'}]});
+        assert.equal(upcomingPoll.public,true);
+        await h.commerceDb.prepare('UPDATE polls SET is_public=0 WHERE id=?').bind(upcomingPoll.id).run();
+        await page.goto(ADMIN+(type==='abootnothing'?'/polls/abootnothing':'/polls'));
+        const item=type==='abootnothing'?page.locator('.aboot-library article').filter({hasText:upcomingPoll.title}):page.locator('tbody tr').filter({hasText:upcomingPoll.title});
+        await item.getByRole('button',{name:'Publish Upcoming',exact:true}).click();
+        await item.getByRole('button',{name:'Hide from gallery',exact:true}).waitFor();
+        await item.screenshot({path:`${artifacts}/published-admin-${type}.png`});
+        const published=(await getPublicPoll(env,upcomingPoll.slug)).poll;
+        assert.equal(published.upcoming,true);assert.equal(published.totalVotes,0);assert.equal(published.openedAt,null);
+        await page.goto(PUBLIC+(type==='abootnothing'?'/polls/abootnothing':'/polls'));
+        const region=page.getByRole('region',{name:type==='abootnothing'?'Upcoming Matchups':'Upcoming Polls',exact:true});
+        await region.getByRole('button',{name:`Quick view ${upcomingPoll.title}`,exact:true}).click();
+        assert.equal(await page.getByRole('dialog').getByRole('button',{name:'Voting opens soon',exact:true}).first().isDisabled(),true);
       }
       publicAuthorized = false;
       await page.goto(PUBLIC + '/polls/' + regular.poll.slug); await page.locator('.poll-options').waitFor();

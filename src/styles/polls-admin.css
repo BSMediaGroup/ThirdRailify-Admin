@@ -24,3 +24,7 @@
 .aboot-admin .poll-heading>div:last-child { display:flex; flex-wrap:wrap; gap:1rem; align-items:center; }
 .poll-voting-panel input:focus-visible,.aboot-admin input:focus-visible,.aboot-admin select:focus-visible,.poll-voting-panel select:focus-visible { outline:2px solid #f3c928; outline-offset:2px; }
 @media(max-width:700px) { .aboot-admin-grid { grid-template-columns:1fr; } }
+
+.poll-stream-field { display:grid; gap:10px; }
+.poll-stream-field>div { display:flex; gap:8px; flex-wrap:wrap; }
+.poll-stream-field small,.poll-stream-field p { font-size:13px; color:#afa995; margin:0; }
