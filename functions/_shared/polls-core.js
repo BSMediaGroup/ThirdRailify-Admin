@@ -138,7 +138,7 @@ export async function listCreatorPolls(env, accountId, input = {}) {
   return listPublicPolls(env, { ...input, view: "mine" }, accountId);
 }
 
-export async function createPoll(env, accountId, input) {
+export async function createPoll(env, accountId, input, transactionExtension = null) {
   await requireCreator(env, accountId);
   const validated = validatePollInput(input, { creating: true });
   const db = requirePollDb(env);
@@ -164,6 +164,7 @@ export async function createPoll(env, accountId, input) {
       (id,poll_id,display_position,label,short_description,trigger_raw,trigger_normalized,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?)`).bind(option.id, id, option.position, option.label, option.description, option.triggerRaw, option.triggerNormalized, timestamp, timestamp)),
     ...metadata,
+    ...(transactionExtension ? transactionExtension({ id, slug, options }) : []),
   ]);
   await activity(env, id, accountId, "poll_created", "success", { slug });
   return getPublicPoll(env, slug, accountId, true);
@@ -183,6 +184,14 @@ export async function updatePoll(env, accountId, slug, input) {
   const hasCredits = upgraded && Boolean(await db.prepare('SELECT 1 FROM poll_credit_lots WHERE poll_id=? LIMIT 1').bind(row.id).first());
   if ((hasVotes || hasCredits) && validated.presentationType !== (row.presentation_type || 'regular')) throw new AuthFailure(409, 'poll_structure_locked', 'The Poll category is locked after voting begins.');
   let structural = Array.isArray(input.options);
+  const bracketSchema = await db.prepare("SELECT name FROM sqlite_schema WHERE name='aboot_poll_links'").first();
+  const bracketLinked = bracketSchema && await db.prepare('SELECT id FROM aboot_poll_links WHERE poll_id=? AND active=1').bind(row.id).first();
+  if (bracketLinked && validated.presentationType !== row.presentation_type) throw new AuthFailure(409, 'poll_bracket_identity_locked', 'Detach the canonical bracket link before changing this Poll category.');
+  if (bracketLinked && structural) {
+    const unchanged = input.options.length === existingOptions.results.length && input.options.every((o, i) => o.id === existingOptions.results[i].id && o.label === existingOptions.results[i].label && normalizePollTrigger(o.trigger) === existingOptions.results[i].trigger_normalized);
+    if (!unchanged) throw new AuthFailure(409, 'poll_bracket_identity_locked', 'This Poll has a canonical bracket link. Detach it through the audited Studio correction workflow before changing opponent identities.');
+    structural = false;
+  }
   if (row.state === 'open' && structural) throw new AuthFailure(409, 'poll_structure_locked', 'Close the Poll before changing options or triggers.');
   if (structural && (hasVotes || hasCredits || row.state === 'open')) {
     const stable = input.options.length === existingOptions.results.length && input.options.every((o, i) => o.id === existingOptions.results[i].id && normalizePollTrigger(o.trigger) === existingOptions.results[i].trigger_normalized);

@@ -1,4 +1,25 @@
 # Third Railify Admin
+## Aboot Nothing Matchup Studio
+
+Admin `/polls/abootnothing/brackets` and `/:id` add private planning, stable single-elimination graphs, a reviewed historical sample, Poll creation/linkage, audited settlement/advancement/correction, publication lightboxes, durable images and finalization. Public Season Roadmaps show only explicitly published revisions. Existing Poll and credit authorities remain unchanged. See [workflow, privacy, schema, release and acceptance](docs/MATCHUP_STUDIO.md).
+
+Created file tree (no removed files):
+```text
+commerce-migrations/0043_aboot_matchup_studio.sql
+functions/_shared/brackets-core.js
+functions/api/admin/brackets/[[path]].js
+functions/api/brackets/[[path]].js
+src/brackets/
+  model.mjs, model.d.mts, types.ts, status.ts
+  MatchupStudio.tsx, BracketCanvas.tsx, Lightbox.tsx, brackets.css
+src/polls/AbootPollFields.tsx
+scripts/matchup-operator-session.mjs
+scripts/matchup-stable-acceptance.mjs
+tests/brackets.test.mjs
+tests/brackets-browser.test.mjs
+docs/MATCHUP_STUDIO.md
+```
+
 
 ## Typed Wheel entry identity (local)
 
@@ -472,3 +493,5 @@ docs/POLLS_CREDITS_CONTRACT.md
 ```
 
 Existing Poll core/API, signed Bot API, automation API, Poll pages/styles, navigation/capability registry and migration test helper were extended. No historical migration or file was removed. `npm.cmd run test:polls` includes the ledger suite; `npm.cmd run test:browser:poll-matchups` runs coupled offline browser acceptance after both frontend builds. Concurrent Wheel migration 0042 is outside this Poll release set.
+
+Release preserves deployed Poll workspace styling (`src/styles/poll-workspaces.css`), pending-artwork handling and feedback. Verification recovery coverage: `tests/turnstile-recovery-browser.test.mjs`.

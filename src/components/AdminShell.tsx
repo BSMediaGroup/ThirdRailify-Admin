@@ -90,6 +90,7 @@ export function AdminShell() {
   }, [mobileOpen]);
 
   const currentArea = adminAreas.find((area) => area.path.toLowerCase() === location.pathname.toLowerCase())
+    ?? (location.pathname.startsWith("/polls/abootnothing/brackets/") ? adminAreas.find(area => area.path === "/polls/abootnothing/brackets") : undefined)
     ?? (location.pathname.startsWith("/goats/") ? adminAreas.find((area) => area.path === "/goats") : undefined);
 
   const badgeFor = (path: string) => {
@@ -139,7 +140,7 @@ export function AdminShell() {
                 </div>
                 <div id={controlId} className="nav-group__children" hidden={!open}>
                   {children.map((child) => (
-                    <NavLink key={child.path} to={child.path} aria-label={child.label} className={({ isActive }) => isActive ? "nav-link nav-link--nested nav-link--active" : "nav-link nav-link--nested"}>
+                    <NavLink key={child.path} to={child.path} end={child.path === "/polls/abootnothing"} aria-label={child.label} className={({ isActive }) => isActive ? "nav-link nav-link--nested nav-link--active" : "nav-link nav-link--nested"}>
                       <AdminIcon name={child.icon} size={17} />
                       <span>{child.label}</span>
                       {badgeFor(child.path) ? <b className="nav-badge nav-badge--nested" aria-label={`${badgeFor(child.path)} items need attention`}>{formatBadge(badgeFor(child.path))}</b> : null}

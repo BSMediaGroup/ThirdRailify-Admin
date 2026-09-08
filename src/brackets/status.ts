@@ -1,0 +1,1 @@
+export const statusLabel = (state?: string) => ({ open: 'Voting open', scheduled: 'Not open', unsettled: 'Awaiting reconciliation', settled: 'Settled result', tie: 'Tie — decision required', no_votes: 'No votes', unavailable: 'Source unavailable', mapping_changed: 'Opponent mapping changed' }[state || ''] || 'Upcoming');

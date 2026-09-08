@@ -39,12 +39,13 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
   const ingested = await botHandler({ env, request: new Request(ADMIN + servicePath, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-ThirdRailify-Timestamp': ts, 'X-ThirdRailify-Request-Id': id, 'X-ThirdRailify-Signature': signature }, body }) }); assert.equal(ingested.status, 200, await ingested.text());
   const adminProbe = await adminPollHandler({ env, request: new Request(ADMIN + '/api/admin/polls', { headers: { Cookie: cookie } }) });
   assert.equal(adminProbe.status, 200, await adminProbe.text());
-  for (const [cwd, port] of [['X:/GIT/ThirdRailify', '44931'], ['X:/GIT/ThirdRailify-Admin', '44932']]) {
+  for (const [cwd, port] of [[new URL('../../ThirdRailify/',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'), '44931'], [process.cwd(), '44932']]) {
     const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', port], { cwd, stdio: 'ignore' }); t.after(() => server.kill());
   }
   for (const origin of [PUBLIC, ADMIN]) { let ready = false; for (let i = 0; i < 60; i++) { try { if ((await fetch(origin)).ok) { ready = true; break; } } catch { /* local startup */ } await new Promise(r => setTimeout(r, 100)); } assert.ok(ready); }
   const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true }); t.after(() => browser.close());
   const errors = [], geometry = [];
+  let failNextArtwork = false;
   async function routes(context) {
     await context.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
@@ -54,7 +55,8 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       const headers = { ...request.headers(), ...(isAdmin ? { Cookie: cookie } : {}) };
       const req = new Request(request.url(), { method: request.method(), headers, ...(request.postDataBuffer() ? { body: request.postDataBuffer() } : {}) });
       let response;
-      if (url.pathname === '/api/auth/config') response = Response.json({ configured: true, emailSignupConfigured: false, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: PUBLIC, adminOrigin: ADMIN, environment: 'test', cookieMode: 'host-only' });
+      if (failNextArtwork && request.method() === 'POST' && url.pathname.includes('/media/')) { failNextArtwork = false; response = Response.json({ message: 'Test upload interruption' }, { status: 503 }); }
+      else if (url.pathname === '/api/auth/config') response = Response.json({ configured: true, emailSignupConfigured: false, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: PUBLIC, adminOrigin: ADMIN, environment: 'test', cookieMode: 'host-only' });
       else if (url.pathname === '/api/auth/session') response = Response.json(isAdmin ? await sessionEnvelope(env, await resolveSession(env, req), session.csrfToken) : { ok: true, authenticated: false, account: null });
       else if (url.pathname === '/api/admin/inbox/summary') response = Response.json({ ok: true, unread: 0, actionable: { goats: { total: 0, submissions: 0, comments: 0, emailFailures: 0 } } });
       else if (url.pathname.startsWith('/api/admin/polls')) response = await adminPollHandler({ request: req, env });
@@ -84,9 +86,20 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
     if (width === 1440) {
       await page.screenshot({ path: `${artifacts}/admin-editor.png`, fullPage: true });
       await page.getByRole('button', { name: 'Save matchup' }).click(); await page.waitForTimeout(500);
+      await page.locator('.admin-toast').filter({ hasText: 'Matchup saved' }).waitFor();
+      for (const toastWidth of [1440, 390]) {
+        await page.setViewportSize({ width: toastWidth, height: 1000 });
+        const toastFit = await page.waitForFunction(() => { const n = document.querySelector('.admin-toast-region'); if (!n) return false; return ((n) => { const r = n.getBoundingClientRect(); return getComputedStyle(n).position === 'fixed' && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })(n); });
+        assert.ok(toastFit, JSON.stringify(await page.locator(".admin-toast-region").evaluate(n => ({rect:n.getBoundingClientRect().toJSON(),position:getComputedStyle(n).position,width:innerWidth,height:innerHeight}))));
+        await page.screenshot({ path: `${artifacts}/save-toast-${toastWidth}.png` });
+      }
+      await page.locator('.admin-toast').filter({ hasText: 'Matchup saved' }).waitFor({ state: 'detached', timeout: 7000 });
+      await page.setViewportSize({ width: 1440, height: 1000 });
+
       const png = await sharp({ create: { width: 256, height: 256, channels: 4, background: '#efc65c' } }).png().toBuffer();
       await page.getByLabel('Square artwork').first().setInputFiles({ name: 'synthetic-square.png', mimeType: 'image/png', buffer: png });
       await page.locator('.aboot-admin-preview').first().waitFor();
+      await page.waitForFunction(() => !document.querySelector('input[type=file]').disabled);
       const beforeImage = (await getPublicPoll(env, created.poll.slug)).poll.options[0].image.id;
       await page.getByLabel('Square artwork').first().setInputFiles({ name: 'replacement-square.png', mimeType: 'image/png', buffer: png });
       await page.waitForTimeout(500);
@@ -101,6 +114,15 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       await page.waitForFunction(() => [...document.querySelectorAll('.poll-credit-queue>article')].some(e => e.textContent.includes('25 committed')));
       await page.waitForTimeout(1200);
       await page.screenshot({ path: `${artifacts}/admin-reconciled.png`, fullPage: true });
+      for (const panelWidth of [1920, 768, 390, 1440]) {
+        await page.setViewportSize({ width: panelWidth, height: 1000 });
+        await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth);
+        const panel = page.locator('#poll-voting');
+        const fit = await panel.evaluate(n => { const body = n.querySelector('.poll-workspace-body'); return { fits: document.documentElement.scrollWidth <= innerWidth, padding: parseFloat(getComputedStyle(body).paddingLeft) }; });
+        assert.ok(fit.fits && fit.padding >= 18, JSON.stringify(fit));
+        await panel.screenshot({ path: `${artifacts}/voting-panel-${panelWidth}.png` });
+      }
+
       await page.goto(PUBLIC + `/polls/${created.poll.slug}`); await page.locator('.aboot-vote-cards').waitFor(); assert.equal(await page.getByRole('button', { name: 'Vote', exact: true }).count(), 0); assert.equal(await page.locator('.poll-credit-status').count(), 0);
       assert.equal((await getPublicPoll(env, poll.slug)).poll.totalVotes, 35); assert.equal((await getPublicPoll(env, poll.slug)).poll.options[0].image.id, afterImage); await page.screenshot({ path: `${artifacts}/closed-settled.png`, fullPage: true });
       await page.waitForTimeout(1200);
@@ -110,6 +132,33 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       await page.goto(PUBLIC + '/abootnothing'); await page.waitForURL('**/polls/abootnothing');
       await page.goto(PUBLIC + '/polls'); await page.locator('.aboot-feature .poll-card').first().waitFor();
       await page.goto(PUBLIC + '/polls/new'); await page.getByRole('heading', { name: 'Sign in required' }).waitFor();
+    }
+    if (width === 1440) {
+      await page.goto(ADMIN + '/polls/abootnothing');
+      await page.getByRole('button', { name: 'Create matchup', exact: true }).click();
+      await page.getByLabel('Poll title', { exact: true }).fill('Artwork before first save');
+      const png = await sharp({ create: { width: 256, height: 256, channels: 4, background: '#6cc9d9' } }).png().toBuffer();
+      const file = { name: 'new-artwork.png', mimeType: 'image/png', buffer: png };
+      const count = async () => (await h.commerceDb.prepare('SELECT COUNT(*) AS n FROM polls').first()).n;
+      const beforeCount = await count();
+      for (const input of await page.locator('input[type=file]').all()) { assert.equal(await input.isEnabled(), true); await input.setInputFiles(file); }
+      await page.waitForFunction(() => document.querySelectorAll('.aboot-admin-preview').length === 3);
+      assert.equal(await count(), beforeCount);
+      await page.locator('.aboot-matchup-editor').screenshot({ path: `${artifacts}/new-artwork-preview.png` });
+      failNextArtwork = true;
+      await page.getByRole('button', { name: 'Save matchup', exact: true }).click();
+      await page.getByText('Test upload interruption', { exact: true }).waitFor();
+      assert.equal(await count(), beforeCount + 1);
+      await page.getByRole('button', { name: 'Save matchup', exact: true }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.aboot-admin-preview').length === 3 && !document.querySelector('input[type=file]').disabled && !document.querySelector('[role=alert]'));
+      assert.equal(await count(), beforeCount + 1);
+      await page.getByLabel('Poll title', { exact: true }).fill('Unsaved title survives artwork replacement');
+      await page.getByLabel('Square artwork').first().setInputFiles(file);
+      await page.waitForFunction(() => !document.querySelector('input[type=file]').disabled);
+      assert.equal(await page.getByLabel('Poll title', { exact: true }).inputValue(), 'Unsaved title survives artwork replacement');
+      await page.reload();
+      await page.locator('.aboot-admin-grid article').filter({ hasText: 'Artwork before first save' }).getByRole('button', { name: 'Edit matchup' }).click();
+      assert.equal(await page.locator('.aboot-admin-preview').count(), 3);
     }
     const video = page.video(); await context.close();
     if (video) await video.saveAs(`${artifacts}/matchup-state-change.webm`);

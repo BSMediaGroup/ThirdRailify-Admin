@@ -982,3 +982,18 @@ PENDING VER=0.1.0-alpha.0
 - Ordinary current votes retain weight one. Rants earn floor(cents/100); gifts earn total_gifts*5. Unresolved credits are conserved and excluded from totals until allocated. Existing creator/media/source authority is retained.
 - Root README documents new files; the Admin `docs/POLLS_CREDITS_CONTRACT.md` records exact migration 0041, acceptance results, provider limits and controlled rollout order. Versions are unchanged for this local milestone.
 - No remote migration/deployment/push, provider event, live vote, paid enablement or Bot restart. Concurrent unrelated workspace changes are preserved. The existing Admin heartbeat browser fixture mismatch remains a documented validation limitation.
+
+## 2026-09-08 - Aboot Nothing Matchup Studio and Season Roadmaps
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added private Admin season planning, a reviewed historical 16-contender template, stable single-elimination graphs, durable artwork, shared Poll creation, paginated explicit option linking, source-checked advancement, audited correction and finalization.
+- Working drafts and immutable public revisions are separate. Public payloads exclude private planning and hidden Poll data; unpublish revokes roadmap/media access. Existing ordinary/paid Poll ledgers remain authoritative; no Bot or Wheel mechanics change.
+- Applied only `0043_aboot_matchup_studio.sql` remotely at 2026-09-08 08:54:27 UTC using the reviewed isolated ledger directory. Existing 0041 was already applied. All measured business-record counts stayed unchanged; foreign-key check clean. The migration ledger gained one row; normal Bot nonce churn changed 74 to 72 independently of the additive schema.
+- Protected full backup: `X:\GIT\_BACKUPS\ThirdRailify\matchup-studio-20260908\commerce-before.sql`, 5,073,599 bytes; SHA-256 `54BEB66AD9824BD1F24E930E91F9579AD17548663D7C05E2B707F84AC8547004`.
+- Real-D1 tests, connected responsive browser acceptance, Poll/credit/auth/media regressions, Public Poll browser regressions, production builds, maintained-source lint, Pages Functions and unchanged media-worker compilation are recorded in `.artifacts/matchup-studio`. Public retains two existing lint warnings. Route-policy and isolated-fixture-path failures were repaired and the focused rerun passed.
+- Source is isolated from concurrent shared Admin edits. Runtime heartbeat proves protocol 2 with zero backlog/fault; Bot source and process were left untouched. Stable authenticated acceptance requires the legitimate operator session and is tracked independently from local evidence. Deployment results are appended after actual completion.
+- New file trees and authority/privacy details: root README and `docs/MATCHUP_STUDIO.md`. No files removed and no version change.
+- Matchup Studio reuses the existing black-and-gold surfaces and dialog styling. Turnstile keeps its widget on errors and provides explicit retry; verification remains mandatory. The operator confirmed failure was limited to the separate automated browser.

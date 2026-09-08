@@ -38,6 +38,7 @@ const policies: Record<string, AdminRoutePolicy> = {
   "/wheels/results": { view: "wheels.view", manage: "wheels.manage" },
   "/polls": { view: "polls.view", manage: "polls.manage" },
   "/polls/abootnothing": { view: "polls.view", manage: "polls.manage" },
+  "/polls/abootnothing/brackets": { view: "polls.view", manage: "polls.manage" },
   "/polls/access": { view: "polls.view", manage: "polls.manage" },
   "/automations": { view: "automations.view", manage: "automations.manage" },
   "/media": { view: "media.view" },

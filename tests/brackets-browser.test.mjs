@@ -1,0 +1,92 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { chromium } from 'playwright-core';
+import sharp from 'sharp';
+import { createCommerceDatabases, commerceEnvironment } from './commerce-test-helpers.mjs';
+import { applyMigration } from './auth-test-helpers.mjs';
+import { createSession, resolveSession, sessionEnvelope } from '../functions/_shared/auth-core.js';
+import { onRequest as admin } from '../functions/api/admin/brackets/[[path]].js';
+import { onRequest as authority } from '../functions/api/brackets/[[path]].js';
+import { onRequest as relay } from '../../ThirdRailify/functions/api/brackets/[[path]].js';
+import { onRequest as polls } from '../functions/api/admin/polls/[[path]].js';
+import { changePollLifecycle, submitWebVote } from '../functions/_shared/polls-core.js';
+
+const ADMIN='http://127.0.0.1:44941', PUBLIC='http://127.0.0.1:44942', artifacts=`.artifacts/matchup-studio/browser-${Date.now()}`;
+test('connected Studio, historical sample, media, publication privacy and responsive public roadmap', { timeout:180000 }, async t => {
+  await mkdir(artifacts,{recursive:true});
+  const h=await createCommerceDatabases({withMedia:true}); t.after(h.dispose);
+  await applyMigration(h.commerceDb,await readFile(new URL('../commerce-migrations/0043_aboot_matchup_studio.sql',import.meta.url),'utf8'));
+  const env=commerceEnvironment(h,{ THIRDRAILIFY_PUBLIC_ORIGIN:PUBLIC, THIRDRAILIFY_ADMIN_ORIGIN:ADMIN, THIRDRAILIFY_PROFILE_MEDIA:h.media });
+  const at=new Date().toISOString();
+  await h.authDb.prepare("INSERT INTO accounts(id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES ('browser-studio','studio@example.test','Studio Admin','admin','full','active',?,?,?,'test')").bind(at,at,at).run();
+  const account=await h.authDb.prepare("SELECT * FROM accounts WHERE id='browser-studio'").first();
+  const session=await createSession(env,new Request(ADMIN),account,ADMIN), cookie=session.cookie.split(';')[0];
+  for (const [cwd,port] of [[process.cwd(),'44941'],[new URL('../../ThirdRailify/',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),'44942']]) { const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','preview','--host','127.0.0.1','--port',port],{cwd,stdio:'ignore'});t.after(()=>server.kill()); }
+  for(const origin of [ADMIN,PUBLIC]) { let ready=false;for(let i=0;i<60;i++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));} assert.ok(ready); }
+  const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});t.after(()=>browser.close());
+  const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
+  const failures=[];context.on('page',p=>p.on('pageerror',e=>failures.push(e.message)));
+  await context.route('**/*',async route=>{
+    const r=route.request(),u=new URL(r.url());if(![ADMIN,PUBLIC].includes(u.origin))return route.abort();if(!u.pathname.startsWith('/api/'))return route.continue();
+    const req=new Request(r.url(),{method:r.method(),headers:{...r.headers(),...(u.origin===ADMIN?{Cookie:cookie}:{})},...(r.postDataBuffer()?{body:r.postDataBuffer()}:{})});let response;
+    if(u.pathname==='/api/auth/config')response=Response.json({configured:true,emailSignupConfigured:false,turnstileSiteKey:null,oauthProviders:[],oauthProviderStates:[],publicOrigin:PUBLIC,adminOrigin:ADMIN,environment:'test',cookieMode:'host-only'});
+    else if(u.pathname==='/api/auth/session')response=Response.json(u.origin===ADMIN?await sessionEnvelope(env,await resolveSession(env,req),session.csrfToken):{ok:true,authenticated:false,account:null});
+    else if(u.pathname.startsWith('/api/admin/brackets'))response=await admin({request:req,env});
+    else if(u.pathname.startsWith('/api/admin/polls'))response=await polls({request:req,env});
+    else if(u.pathname.startsWith('/api/brackets'))response=await relay({request:req,env,data:{bracketsFetch:(url,init)=>authority({request:new Request(url,init),env})}});
+    else response=Response.json({ok:true,items:[],unread:0,count:0,actionable:{goats:{total:0,submissions:0,comments:0,emailFailures:0}}});
+    await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())});
+  });
+  const page=await context.newPage();await page.goto(ADMIN+'/polls/abootnothing/brackets');
+  await page.getByRole('button',{name:'Review reference template',exact:true}).click();
+  await page.getByRole('button',{name:'Import reviewed private sample'}).click();
+  await page.getByRole('heading',{name:'Reference sample — private historical draft',exact:true}).waitFor();
+  const draftUrl=page.url();assert.match(draftUrl,/bracket_/);
+  await page.bringToFront();await page.screenshot({path:artifacts+'/admin-sample-1440.png',fullPage:true});
+  await page.locator('.bracket-bench-item summary').first().click();
+  await page.locator('.bracket-bench-item').first().getByLabel('Private notes',{exact:true}).fill('PRIVATE PRODUCTION NOTE');
+  const png=await sharp({create:{width:640,height:360,channels:4,background:'#bc8c35'}}).png().toBuffer();
+  await page.locator('.bracket-bench-item').first().getByLabel('Artwork',{exact:true}).setInputFiles({name:'acceptance.png',mimeType:'image/png',buffer:png});
+  await page.locator('.bracket-bench-item').first().locator('img').waitFor();
+  await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.bracket-save-state')?.textContent.includes('Saved'));
+  await page.reload();await page.locator('.bracket-bench-item summary').first().waitFor(); await page.bringToFront();await page.screenshot({path:artifacts+'/reload-debug.png',fullPage:true}); if ((await page.locator('.bracket-bench-item').first().getAttribute('open')) === null) await page.locator('.bracket-bench-item summary').first().click();
+  await page.bringToFront();await page.screenshot({path:artifacts+'/reload-open-debug.png',fullPage:true}); assert.equal(await page.locator('.bracket-bench-item').first().locator('textarea').nth(1).inputValue(),'PRIVATE PRODUCTION NOTE');
+  await page.getByRole('button',{name:'Review publication',exact:true}).click();
+  await page.bringToFront();await page.screenshot({path:artifacts+'/dialog-debug.png'}); const dialog=page.getByRole('dialog');await dialog.getByLabel('Public title',{exact:true}).fill('Local acceptance roadmap');await dialog.getByLabel('Public URL slug',{exact:true}).fill('local-acceptance');
+  for(const [i,label] of ['Feature / thumbnail image','Wide cover image'].entries()){await dialog.getByLabel(label,{exact:true}).setInputFiles({name:'cover.png',mimeType:'image/png',buffer:png}); await page.waitForFunction(n=>document.querySelectorAll('dialog .bracket-upload-preview').length>=n,i+2);}
+  await page.waitForFunction(()=>document.querySelectorAll('dialog .bracket-upload-preview').length>=3);
+  await page.bringToFront();await page.screenshot({path:artifacts+'/publication-dialog.png'});
+  await dialog.getByRole('button',{name:'Publish reviewed roadmap'}).click();await dialog.waitFor({state:'hidden'});
+  const publicPage=await context.newPage();await publicPage.goto(PUBLIC+'/polls/abootnothing/brackets/local-acceptance');await publicPage.getByRole('heading',{name:'Local acceptance roadmap',exact:true}).waitFor(); if(await publicPage.getByRole('button',{name:'Reject non-essential',exact:true}).count()) await publicPage.getByRole('button',{name:'Reject non-essential',exact:true}).click();
+  const payload=await publicPage.evaluate(async()=>JSON.stringify(await(await fetch('/api/brackets/local-acceptance')).json()));assert.ok(!payload.includes('PRIVATE'));assert.ok(!payload.includes('notes'));
+  const geometry=[];
+  for(const width of [1920,1440,768,390]){
+    await publicPage.setViewportSize({width,height:1000});await publicPage.bringToFront();await publicPage.bringToFront();await publicPage.screenshot({path:`${artifacts}/public-${width}.png`,fullPage:true});
+    geometry.push({width,overflow:await publicPage.evaluate(()=>document.documentElement.scrollWidth-innerWidth)});
+    assert.ok(geometry.at(-1).overflow<=1);
+    await page.setViewportSize({width,height:1000});await page.bringToFront();await page.bringToFront();await page.screenshot({path:`${artifacts}/admin-${width}.png`});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)<=1);
+  }
+  await publicPage.getByRole('tab',{name:'Round 2',exact:true}).click();await publicPage.locator('.bracket-round.is-mobile-round .bracket-match').first().click();await publicPage.getByRole('dialog').waitFor();await publicPage.keyboard.press('Escape');await publicPage.getByRole('dialog').waitFor({state:'hidden'});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.getByLabel('Working title',{exact:true}).fill('Private renamed working title');await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.bracket-save-state')?.textContent.includes('Saved'));
+  await publicPage.reload();await publicPage.getByRole('heading',{name:'Local acceptance roadmap',exact:true}).waitFor(); if(await publicPage.getByRole('button',{name:'Reject non-essential',exact:true}).count()) await publicPage.getByRole('button',{name:'Reject non-essential',exact:true}).click();
+  await page.locator('.bracket-round').first().locator('.bracket-match').last().click();await page.getByRole('button',{name:'Create Poll',exact:true}).click();await page.bringToFront();await page.screenshot({path:artifacts+'/poll-create.png'});await page.getByRole('button',{name:'Create and link private Poll'}).click();await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.getByRole('link',{name:'Edit Poll',exact:true}).waitFor();assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) n FROM polls').first()).n,1);
+  const linked=await h.commerceDb.prepare('SELECT public_slug,revision,id FROM polls').first();
+  let live=(await changePollLifecycle(env,account.id,linked.public_slug,{action:'open',revision:linked.revision})).poll;
+  await submitWebVote(env,{namespace:'web_anonymous',key:'local-browser-studio-vote'},linked.public_slug,{optionId:live.options[0].id});
+  live=(await changePollLifecycle(env,account.id,linked.public_slug,{action:'close',revision:live.revision})).poll;
+  await page.reload();await page.locator('.bracket-round').first().locator('.bracket-match').last().click();
+  await page.getByRole('button',{name:'Confirm winner & advance',exact:true}).click();await page.getByText('Accepted poll decision · X-Men: The Animated Series',{exact:true}).waitFor();
+  await page.bringToFront();await page.screenshot({path:artifacts+'/result-advancement.png'});
+  await changePollLifecycle(env,account.id,linked.public_slug,{action:'open',revision:live.revision});await page.reload();await page.locator('.bracket-round').first().locator('.bracket-match').last().click();await page.getByText('Needs review. An accepted source or upstream result changed.',{exact:true}).waitFor();
+  await page.bringToFront();await page.screenshot({path:artifacts+'/source-review.png'});
+  await page.getByRole('button',{name:'Correction impact',exact:true}).click();await page.getByRole('dialog').waitFor();await page.bringToFront();await page.screenshot({path:artifacts+'/correction.png'});await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Unpublish',exact:true}).click();await page.getByRole('button',{name:'Confirm unpublish',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});
+  await publicPage.reload();await publicPage.getByRole('heading',{name:'Roadmap unavailable'}).waitFor();await publicPage.bringToFront();await publicPage.screenshot({path:artifacts+'/unpublished.png'});
+  assert.deepEqual(failures,[]);await writeFile(artifacts+'/geometry.json',JSON.stringify(geometry,null,2));
+});

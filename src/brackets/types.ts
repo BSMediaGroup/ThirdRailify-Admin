@@ -1,0 +1,3 @@
+import type { Graph, Decision } from './model.mjs';
+export type Source = { state: string; fingerprint?: string; scores?: Record<string, number | null>; winnerId?: string; slug?: string; title?: string; revision?: number; totalVotes?: number; unresolved?: number; public?: boolean };
+export type Bracket = { id: string; revision: number; finalized: boolean; archived: boolean; published: boolean; publicationId?: string; slug?: string; updatedAt?: string; graph: Graph; publication?: Graph; decisions: Decision[]; links: Array<{ id: string; matchId: string; pollId: string; mapping: Record<string, string> }>; sources: Record<string, Source>; needsReview: string[] };
