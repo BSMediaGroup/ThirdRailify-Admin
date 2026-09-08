@@ -1021,3 +1021,15 @@ PENDING VER=0.1.0-alpha.0
 - Matchup Studio reuses the existing black-and-gold surfaces and dialog styling. Turnstile keeps its widget on errors and provides explicit retry; verification remains mandatory. The operator confirmed failure was limited to the separate automated browser.
 
 - Production release recorded in `docs/MATCHUP_STUDIO.md`: Admin 4083ee10 / 9dd9c44, Public 6861272d / 738a24e. Stable assets/API/public-library checks pass. Authenticated Studio acceptance remains blocked by browser transport failure; no acceptance records created.
+
+## 2026-09-08 - Matchup canvas and winner presentation repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Fullscreen now uses the available viewport height; Fit view accounts for both dimensions. Measured SVG connectors follow actual source cards and destination opponent rows at every zoom.
+- Admin Ideas bench collapses and keeps scrolling without a visible scrollbar. Match editing uses a native modal from each pencil button or double-click, including fullscreen. Focus finds and centres the contender, switches mobile rounds, and explains empty or unmatched searches. Studio library cards have full-card links and more generous typography/spacing.
+- Confirmed winners have a trophy badge, gold feature row, and hover/keyboard glow, shimmer and sparkles. Reduced-motion preference keeps a static treatment. Existing result/review authority and publication privacy remain unchanged.
+- Focused browser coverage verifies connector endpoints, fullscreen bottom reachability and Fit view, mobile Focus, modal editing with save/reload, bench collapse, full-card navigation, and winner animation/reduced motion. The connected local D1/R2 publication/Poll workflow also passes. These are local fixture results; authenticated stable-domain acceptance remains incomplete because the browser transport is unavailable.
+- No schema migration, Bot action, live bracket mutation or provider/paid-voting change. Source is integrated with current main before release; deployment evidence is appended separately.

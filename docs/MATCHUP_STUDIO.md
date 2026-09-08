@@ -58,3 +58,15 @@ Preserved the Poll workspace and pending-artwork changes already serving in depl
 - Production state at 09:16 UTC: zero brackets, zero publications, six pre-existing Polls. No acceptance data was created. Bot unchanged; fresh heartbeat protocol 2, backlog 0, no fault. No provider or paid-voting enablement changes.
 - LIVE AUTHENTICATED ACCEPTANCE IS INCOMPLETE. Existing browser tool briefly displayed a legitimate Master Admin session, then disconnected with `Transport closed`. The separate Playwright-launched Chrome failed verification; user confirmed normal Chrome works. No credentials/cookies/profile were extracted. Remaining: authenticated create/save/reload/link/advance/publication/republish/unpublish/archive sequence and its stable screenshots. Local tests do not substitute for these gates.
 - Original shared worktrees remain unchanged by source edits. Their already-deployed Poll workspace/artwork and Public hero/SEO changes were preserved in the isolated release. No Bot source or process changes, no force push or main reset.
+
+## 2026-09-08 - Matchup canvas and winner presentation repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Fullscreen now uses the available viewport height; Fit view accounts for both dimensions. Measured SVG connectors follow actual source cards and destination opponent rows at every zoom.
+- Admin Ideas bench collapses and keeps scrolling without a visible scrollbar. Match editing uses a native modal from each pencil button or double-click, including fullscreen. Focus finds and centres the contender, switches mobile rounds, and explains empty or unmatched searches. Studio library cards have full-card links and more generous typography/spacing.
+- Confirmed winners have a trophy badge, gold feature row, and hover/keyboard glow, shimmer and sparkles. Reduced-motion preference keeps a static treatment. Existing result/review authority and publication privacy remain unchanged.
+- Focused browser coverage verifies connector endpoints, fullscreen bottom reachability and Fit view, mobile Focus, modal editing with save/reload, bench collapse, full-card navigation, and winner animation/reduced motion. The connected local D1/R2 publication/Poll workflow also passes. These are local fixture results; authenticated stable-domain acceptance remains incomplete because the browser transport is unavailable.
+- No schema migration, Bot action, live bracket mutation or provider/paid-voting change. Source is integrated with current main before release; deployment evidence is appended separately.

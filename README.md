@@ -22,6 +22,7 @@ scripts/matchup-operator-session.mjs
 scripts/matchup-stable-acceptance.mjs
 tests/brackets.test.mjs
 tests/brackets-browser.test.mjs
+tests/bracket-canvas-ux-browser.test.mjs
 docs/MATCHUP_STUDIO.md
 ```
 
@@ -500,3 +501,5 @@ docs/POLLS_CREDITS_CONTRACT.md
 Existing Poll core/API, signed Bot API, automation API, Poll pages/styles, navigation/capability registry and migration test helper were extended. No historical migration or file was removed. `npm.cmd run test:polls` includes the ledger suite; `npm.cmd run test:browser:poll-matchups` runs coupled offline browser acceptance after both frontend builds. Concurrent Wheel migration 0042 is outside this Poll release set.
 
 Release preserves deployed Poll workspace styling (`src/styles/poll-workspaces.css`), pending-artwork handling and feedback. Verification recovery coverage: `tests/turnstile-recovery-browser.test.mjs`.
+
+Matchup Studio canvas repair (2026-09-08): collapsible Ideas bench, measured connectors, viewport-sized fullscreen, reliable contender Focus, per-match modal editing and fully clickable season cards. Confirmed winners carry a trophy and gold hover sparkle treatment, with reduced-motion support. Run the two bracket browser files serially with `node --test --test-concurrency=1 tests/bracket-canvas-ux-browser.test.mjs tests/brackets-browser.test.mjs` after building both applications.
