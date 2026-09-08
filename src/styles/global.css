@@ -157,8 +157,10 @@ img { display: block; max-width: 100%; }
 .nav-link svg { flex: none; color: currentColor; }
 .nav-group { display: grid; gap: 3px; }
 .nav-group__row { position: relative; }
-.nav-group__row .nav-link { padding-right: 43px; }
-.nav-group__toggle { position: absolute; top: 50%; right: 5px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; color: var(--quiet); border: 0; border-radius: 7px; background: transparent; cursor: pointer; transform: translateY(-50%); transition: color .18s ease, background-color .18s ease; }
+.nav-group__row .nav-link { padding-right: 52px; }
+.nav-group__toggle { position: absolute; inset: 0 1px 0 auto; display: grid; width: 44px; height: auto; min-height: 0; place-items: center; padding: 0; color: var(--quiet); border: 0; border-radius: 7px; background: transparent; cursor: pointer; transform: none; touch-action: manipulation; transition: color .18s ease, background-color .18s ease; }
+/* Keep the pointer target stationary while pressed; only the chevron rotates. */
+.nav-group__toggle:active:not(:disabled) { transform: none; }
 .nav-group__toggle:hover { color: var(--gold-hot); background: rgba(243,201,40,.07); }
 .nav-group__toggle svg { transition: transform .18s ease; }
 .nav-group--open .nav-group__toggle svg { transform: rotate(90deg); }
