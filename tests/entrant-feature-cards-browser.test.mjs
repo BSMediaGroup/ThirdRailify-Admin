@@ -31,6 +31,7 @@ test('shared cards group IDs and preserve keyboard focus, pending, rollback and 
         if (path === '/api/auth/session') return json({ ok: true, authenticated: true, csrfToken: 'fixture', access: { isAdmin: true, isMasterAdmin: true }, account: { id: 'master', email: 'master@example.test', displayName: 'Master Admin', providers: ['email'], role: 'admin', adminLevel: 'master', status: 'active', emailVerified: true, createdAt: new Date().toISOString(), source: 'env_master' } });
         if (path === '/api/admin/inbox/summary') return json({ ok: true, unread: 0, actionable: { goats: { total: 0 } } });
         if (path === '/api/admin/automations') return json(await automationsStatus(env));
+        if (path === '/api/admin/automations/poll-voting') return json({ ok: true, policies: [], lots: [], livestreams: [], botCompatible: false, protocol: 1, heartbeatAt: null });
         if (path === '/api/admin/automations/rules') {
           if (method === 'POST') { writes++; if (delay) await new Promise(r => setTimeout(r, delay)); if (failure) return json({ message: `Local simulated ${failure}; rule was not saved.` }, failure); return json(await saveAutomationRule(env, 'master', route.request().postDataJSON())); }
           reads++; return json(await listAutomationRules(env, url.searchParams.get('wheelId') || '', url.searchParams.get('ruleId') || ''));

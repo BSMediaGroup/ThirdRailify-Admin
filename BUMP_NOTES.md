@@ -8,6 +8,7 @@ PENDING VER=0.1.0-alpha.0
 
 - Fixed the successful 15-second runtime refresh leaving an undefined error property that the banner counted as an outage. Isolated unchanged-source evidence reproduces the warning with all reads successful.
 - Added coordinated per-source reads, accepted generations, last-good timestamps, bounded deadlines/retries, session-expiry handling, named diagnostics, targeted retry and sanitized copy/reference logging. Existing heartbeat thresholds, Wheel mechanics and appearance remain unchanged.
+- Deployed exact Admin repair commit `b2b67f2` as `688d59f8-3f39-4365-83f5-6eff486ef40f`; stable JS/CSS match the isolated build. Overview and entrant local regressions pass; authenticated live timing/save acceptance remains blocked by sign-in verification.
 - Verified appearance migration 0040 is already applied and both current production commits include the approved entrant feature. No repeat migration is required. Full manifest and honest live-authentication limits: `docs/OVERVIEW_SOURCE_HEALTH.md`.
 
 
