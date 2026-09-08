@@ -997,3 +997,5 @@ PENDING VER=0.1.0-alpha.0
 - Source is isolated from concurrent shared Admin edits. Runtime heartbeat proves protocol 2 with zero backlog/fault; Bot source and process were left untouched. Stable authenticated acceptance requires the legitimate operator session and is tracked independently from local evidence. Deployment results are appended after actual completion.
 - New file trees and authority/privacy details: root README and `docs/MATCHUP_STUDIO.md`. No files removed and no version change.
 - Matchup Studio reuses the existing black-and-gold surfaces and dialog styling. Turnstile keeps its widget on errors and provides explicit retry; verification remains mandatory. The operator confirmed failure was limited to the separate automated browser.
+
+- Production release recorded in `docs/MATCHUP_STUDIO.md`: Admin 4083ee10 / 9dd9c44, Public 6861272d / 738a24e. Stable assets/API/public-library checks pass. Authenticated Studio acceptance remains blocked by browser transport failure; no acceptance records created.
