@@ -1,5 +1,16 @@
 # Bump notes
 
+## 2026-09-08 - Overview source health and delayed false-warning repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Fixed the successful 15-second runtime refresh leaving an undefined error property that the banner counted as an outage. Isolated unchanged-source evidence reproduces the warning with all reads successful.
+- Added coordinated per-source reads, accepted generations, last-good timestamps, bounded deadlines/retries, session-expiry handling, named diagnostics, targeted retry and sanitized copy/reference logging. Existing heartbeat thresholds, Wheel mechanics and appearance remain unchanged.
+- Verified appearance migration 0040 is already applied and both current production commits include the approved entrant feature. No repeat migration is required. Full manifest and honest live-authentication limits: `docs/OVERVIEW_SOURCE_HEALTH.md`.
+
+
 ## 2026-09-08 - Wheel identity migration 0042 applied live
 
 CURRENT VER=0.1.0-alpha.0

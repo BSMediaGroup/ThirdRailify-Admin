@@ -1,18 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useOutletContext } from "react-router-dom";
-import { adminApi } from "../auth/client";
-import { getAnalytics, type AnalyticsReport } from "../analytics/client";
+import { useOverviewSources } from "../overview/useOverviewSources";
+import { SourceDiagnostics } from "../overview/SourceDiagnostics";
+import type { SourceId } from "../overview/sources.mjs";
+import { type AnalyticsReport } from "../analytics/client";
 import { useAuth } from "../auth/AuthProvider";
 import { adminCapabilityIds } from "../auth/capabilities";
-import { readBannerSettings, type BannerSettings } from "../banner/client";
-import { getCommerceOverview, type CommerceOverviewPayload } from "../commerce/client";
+import { type BannerSettings } from "../banner/client";
+import { type CommerceOverviewPayload } from "../commerce/client";
 import { AccountAccessIcon } from "../components/AccountAccessBadge";
 import { AdminIcon } from "../components/AdminIcon";
 import type { AdminShellOutletContext } from "../components/AdminShell";
 import { BotHeartbeatCard } from "../components/BotHeartbeatCard";
 import { getGoatsOverview, type GoatAdminSummary } from "../goats/client";
-import { getAutomations, type AutomationPayload } from "../polls/admin-client";
-import { manageWatch, type WatchAdminPayload } from "../watch/client";
+import { type AutomationPayload } from "../polls/admin-client";
+import { type WatchAdminPayload } from "../watch/client";
 
 type StatusPayload = {
   ok: boolean;
@@ -29,16 +31,11 @@ type Source = keyof Snapshot;
 type SourceErrors = Partial<Record<Source, string>>;
 type Priority = { title: string; detail: string; to: string; label: string; tone: "attention" | "danger" | "info" };
 
-const EMPTY_SNAPSHOT: Snapshot = { status: null, analytics: null, watch: null, commerce: null, goats: null, banner: null, automations: null };
+
 
 export function OverviewPage() {
-  const { startLoading, inboxSummary } = useOutletContext<AdminShellOutletContext>();
-  const { access, csrfToken, hasCapability } = useAuth();
-  const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
-  const [errors, setErrors] = useState<SourceErrors>({});
-  const [loading, setLoading] = useState(true);
-  const [refreshedAt, setRefreshedAt] = useState("");
-  const requestSequence = useRef(0);
+  const { inboxSummary } = useOutletContext<AdminShellOutletContext>();
+  const { access, csrfToken, hasCapability, openAuth } = useAuth();
   const analyticsRead = hasCapability("analytics.view");
   const commerceRead = hasCapability("commerce.view");
   const watchRead = hasCapability("watch.view") && Boolean(csrfToken);
@@ -46,57 +43,17 @@ export function OverviewPage() {
   const bannerRead = hasCapability("content.view");
   const automationsRead = hasCapability("automations.view");
 
-  const load = useCallback(async () => {
-    const sequence = ++requestSequence.current;
-    const stopLoading = startLoading("Refreshing operational overview");
-    setLoading(true); setErrors({});
-    const [status, analytics, commerce, watch, goats, banner, automations] = await Promise.all([
-      capture(adminApi<StatusPayload>("/api/admin/status")),
-      analyticsRead ? capture(getAnalytics("24h")) : restricted<AnalyticsReport>(),
-      commerceRead ? capture(getCommerceOverview()) : restricted<CommerceOverviewPayload>(),
-      watchRead ? capture(manageWatch("read", csrfToken)) : restricted<WatchAdminPayload>(),
-      goatsRead ? capture(getGoatsOverview()) : restricted<GoatsOverviewPayload>(),
-      bannerRead ? capture(readBannerSettings()) : restricted<BannerSettings>(),
-      automationsRead ? capture(getAutomations()) : restricted<AutomationPayload>(),
-    ]);
-    if (requestSequence.current === sequence) {
-      setSnapshot({ status: status.value, analytics: analytics.value, commerce: commerce.value, watch: watch.value, goats: goats.value, banner: banner.value, automations: automations.value });
-      setErrors(compactErrors({ status: status.error, analytics: analytics.error, commerce: commerce.error, watch: watch.error, goats: goats.error, banner: banner.error, automations: automations.error }));
-      setRefreshedAt(new Date().toISOString());
-      setLoading(false);
-    }
-    stopLoading();
-  }, [analyticsRead, automationsRead, bannerRead, commerceRead, csrfToken, goatsRead, startLoading, watchRead]);
-
-  useEffect(() => { void load(); return () => { requestSequence.current += 1; }; }, [load]);
-  useEffect(() => {
-    if (!automationsRead) return;
-    let disposed = false;
-    let pending = false;
-    const refresh = async () => {
-      if (document.hidden || pending) return;
-      pending = true;
-      try {
-        const automations = await getAutomations();
-        if (!disposed) {
-          setSnapshot(current => ({ ...current, automations }));
-          setErrors(current => ({ ...current, automations: undefined }));
-        }
-      } catch (reason) {
-        if (!disposed) setErrors(current => ({ ...current, automations: reason instanceof Error ? reason.message : "Runtime request failed." }));
-      } finally { pending = false; }
-    };
-    const timer = window.setInterval(() => void refresh(), 15000);
-    const visible = () => { void refresh(); };
-    document.addEventListener("visibilitychange", visible);
-    return () => { disposed = true; window.clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
-  }, [automationsRead]);
-
-  const expectedSources = 1 + [analyticsRead, commerceRead, watchRead, goatsRead, bannerRead, automationsRead].filter(Boolean).length;
-  const reportingSources = Object.values(snapshot).filter(Boolean).length;
+  const eligible = ['status', ...(analyticsRead ? ['analytics'] : []), ...(commerceRead ? ['commerce'] : []), ...(watchRead ? ['watch'] : []), ...(goatsRead ? ['goats'] : []), ...(bannerRead ? ['banner'] : []), ...(automationsRead ? ['automations'] : [])].join(',');
+  const { sources, loading, refresh: load, health } = useOverviewSources(eligible, csrfToken);
+  const snapshot = Object.fromEntries(Object.entries(sources).map(([id, source]) => [id, source.data ?? null])) as Snapshot;
+  const errors = Object.fromEntries(Object.entries(sources).flatMap(([id, source]) => source.outcome === 'not_applicable' ? [[id, 'restricted']] : !health.sessionExpired && source.error ? [[id, source.error.message]] : [])) as SourceErrors;
+  const expectedSources = health.expected;
+  const reportingSources = health.reporting;
+  const errorCount = health.failed.length;
   const priorities = operationalPriorities(snapshot, errors);
-  const hasSnapshot = reportingSources > 0;
-  const errorCount = Object.keys(errors).filter((key) => errors[key as Source] !== "restricted").length;
+  const hasSnapshot = Object.values(snapshot).some(Boolean);
+  const refreshedAt = Object.values(sources).map(source => source.attemptAt || '').sort().at(-1) || '';
+  const staleMarker = (id: SourceId) => sources[id].outcome === 'failure' && sources[id].data ? <p className="overview-source-stale">{sources[id].label}: retained / stale data. Last updated {sources[id].lastSuccess ? formatTime(sources[id].lastSuccess!) : 'unknown'}. See component diagnostics.</p> : null;
 
   return <div className="overview-page">
     <section className="overview-hero" aria-labelledby="overview-title">
@@ -120,17 +77,20 @@ export function OverviewPage() {
       </aside>
     </section>
 
-    {errorCount > 0 && <div className="overview-partial" role="alert"><AdminIcon name="signal" size={21} /><div><strong>Partial operational snapshot</strong><p>{errorCount} {errorCount === 1 ? "authority did" : "authorities did"} not report. Missing values remain unavailable rather than being replaced with zero.</p></div><button type="button" onClick={() => void load()} disabled={loading}>Retry</button></div>}
+    <SourceDiagnostics sources={health.eligible} failures={health.failed} sessionExpired={health.sessionExpired} loading={loading} retry={load} signIn={() => openAuth('signin')} />
 
     <section className="overview-section overview-section--heartbeat" aria-labelledby="bot-runtime-title">
       <OverviewHeading eyebrow="Signed runtime authority" title="Bot heartbeat" id="bot-runtime-title" detail={snapshot.automations?.runtime.heartbeatAt ? `Last pulse ${formatTime(String(snapshot.automations.runtime.heartbeatAt))}` : automationsRead ? "Reading current signal" : "Access restricted"} />
+      {staleMarker('automations')}
       <BotHeartbeatCard payload={snapshot.automations} error={errors.automations === "restricted" ? undefined : errors.automations} loading={loading && automationsRead} compact linkTo="/automations" />
     </section>
 
+    {staleMarker('analytics')}
     <AnalyticsOverview data={snapshot.analytics} error={errors.analytics} loading={loading} />
 
     <section className="overview-section" aria-labelledby="operations-title">
-      <OverviewHeading eyebrow="Current authority" title="Operational workspaces" id="operations-title" detail={refreshedAt ? `Refreshed ${formatTime(refreshedAt)}` : "Reading current state"} />
+      <OverviewHeading eyebrow="Current authority" title="Operational workspaces" id="operations-title" detail="Individual source timestamps in component diagnostics" />
+      {(['watch', 'commerce', 'goats', 'banner', 'status'] as SourceId[]).map(id => <div key={id}>{staleMarker(id)}</div>)}
       <div className="overview-module-grid">
         <WatchModule data={snapshot.watch} error={errors.watch} loading={loading} restricted={!watchRead} />
         <CommerceModule data={snapshot.commerce} error={errors.commerce} loading={loading} />
@@ -174,35 +134,35 @@ export function OverviewPage() {
 
 function WatchModule({ data, error, loading, restricted }: { data: WatchAdminPayload | null; error?: string; loading: boolean; restricted: boolean }) {
   const primary = data?.current?.primary;
-  const state = restricted ? "Restricted" : error ? "Unavailable" : primary ? presentationLabel(primary.presentationState) : data ? "No current signal" : loading ? "Checking" : "Unavailable";
-  return <ModuleCard icon="watch" eyebrow="Broadcast" title="Watch / signal" status={state} tone={primary?.presentationState === "live" ? "live" : error ? "danger" : data ? "safe" : "muted"} to="/watch" linkLabel="Open broadcast control">
+  const state = restricted ? "Restricted" : error ? data ? "Retained / stale" : "Unavailable" : primary ? presentationLabel(primary.presentationState) : data ? "No current signal" : loading ? "Checking" : "Unavailable";
+  return <ModuleCard icon="watch" eyebrow="Broadcast" title="Watch / signal" status={state} tone={error ? "danger" : primary?.presentationState === "live" ? "live" : data ? "safe" : "muted"} to="/watch" linkLabel="Open broadcast control">
     {data ? <><div className="overview-module__metric"><strong>{data.summary.retained}<small>/ 24</small></strong><span>retained episodes</span></div><dl><Fact label="Visible" value={data.summary.visible} /><Fact label="Hidden" value={data.summary.hidden} /><Fact label="Open slots" value={data.summary.remaining} /></dl><p className="overview-module__note">{primary?.title || "No live, upcoming, or latest candidate is selected."}</p></> : <ModuleState text={restricted ? "Watch viewing is restricted for this role." : error || (loading ? "Reading Watch authority…" : "Watch authority is unavailable.")} />}
   </ModuleCard>;
 }
 
 function CommerceModule({ data, error, loading }: { data: CommerceOverviewPayload | null; error?: string; loading: boolean }) {
   const readiness = data?.readiness;
-  return <ModuleCard icon="commerce" eyebrow="Store operations" title="Commerce" status={error ? "Unavailable" : readiness?.productionReady ? "Production ready" : data ? "Pre-cutover" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : readiness?.productionReady ? "safe" : data ? "attention" : "muted"} to="/commerce" linkLabel="Open commerce overview">
+  return <ModuleCard icon="commerce" eyebrow="Store operations" title="Commerce" status={error ? data ? "Retained / stale" : "Unavailable" : readiness?.productionReady ? "Production ready" : data ? "Pre-cutover" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : readiness?.productionReady ? "safe" : data ? "attention" : "muted"} to="/commerce" linkLabel="Open commerce overview">
     {data ? <><div className="overview-module__metric"><strong>{displayNumber(data.counts.products)}</strong><span>catalogue products</span></div><dl><Fact label="Orders" value={displayNumber(data.counts.orders)} /><Fact label="Templates" value={displayNumber(data.counts.templates)} /><Fact label="Readiness" value={readiness?.productionReady ? "Ready" : "Blocked"} /></dl><div className="overview-guardrails"><span>Checkout <b>{postureValue(data, "checkout")}</b></span><span>Live payments <b>{postureValue(data, "livePaymentCapture")}</b></span><span>Fulfillment <b>{postureValue(data, "fulfillmentSubmission")}</b></span></div></> : <ModuleState text={error || (loading ? "Reading Commerce D1…" : "Commerce authority is unavailable.")} />}
   </ModuleCard>;
 }
 
 function GoatsModule({ data, error, loading, restricted }: { data: GoatsOverviewPayload | null; error?: string; loading: boolean; restricted: boolean }) {
   const failed = data ? numberOrNull(data.email.failed) : null;
-  return <ModuleCard icon="goats" eyebrow="Community moderation" title="GOATS in the Wild" status={restricted ? "Restricted" : error ? "Unavailable" : data?.counts.pending ? `${data.counts.pending} pending` : data ? "Queue clear" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : data?.counts.pending || failed ? "attention" : data ? "safe" : "muted"} to={data?.counts.pending ? "/goats/pending" : "/goats"} linkLabel={data?.counts.pending ? "Review pending GOATS" : "Open GOATS workspace"}>
+  return <ModuleCard icon="goats" eyebrow="Community moderation" title="GOATS in the Wild" status={restricted ? "Restricted" : error ? data ? "Retained / stale" : "Unavailable" : data?.counts.pending ? `${data.counts.pending} pending` : data ? "Queue clear" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : data?.counts.pending || failed ? "attention" : data ? "safe" : "muted"} to={data?.counts.pending ? "/goats/pending" : "/goats"} linkLabel={data?.counts.pending ? "Review pending GOATS" : "Open GOATS workspace"}>
     {data ? <><div className="overview-module__metric"><strong>{data.counts.pending}</strong><span>awaiting moderation</span></div><dl><Fact label="Approved" value={data.counts.approved} /><Fact label="Hidden" value={data.counts.hidden} /><Fact label="Email failed" value={failed ?? "—"} /></dl><p className="overview-module__note">{data.recent[0] ? `Latest: ${data.recent[0].displayName}` : "No recent submissions."}</p></> : <ModuleState text={restricted ? "GOATS viewing is restricted for this role." : error || (loading ? "Reading moderation authority…" : "GOATS authority is unavailable.")} />}
   </ModuleCard>;
 }
 
 function BannerModule({ data, error, loading, restricted }: { data: BannerSettings | null; error?: string; loading: boolean; restricted: boolean }) {
   const active = Boolean(data?.config.normal.enabled || data?.config.live.enabled);
-  return <ModuleCard icon="content" eyebrow="Public presentation" title="Site content" status={restricted ? "Restricted" : error ? "Unavailable" : data ? active ? "Configured active" : "Standing by" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : active ? "attention" : data ? "safe" : "muted"} to="/content" linkLabel="Open banner controls">
+  return <ModuleCard icon="content" eyebrow="Public presentation" title="Site content" status={restricted ? "Restricted" : error ? data ? "Retained / stale" : "Unavailable" : data ? active ? "Configured active" : "Standing by" : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : active ? "attention" : data ? "safe" : "muted"} to="/content" linkLabel="Open banner controls">
     {data ? <><div className="overview-module__metric"><strong>{data.config.normal.messages.length}</strong><span>announcement messages</span></div><dl><Fact label="Normal rail" value={enabledLabel(data.config.normal.enabled)} /><Fact label="Live takeover" value={enabledLabel(data.config.live.enabled)} /><Fact label="Revision" value={data.revision} /></dl><p className="overview-module__note">Updated {formatTime(data.updatedAt)}</p></> : <ModuleState text={restricted ? "Site-content viewing is restricted for this role." : error || (loading ? "Reading banner configuration…" : "Site-content authority is unavailable.")} />}
   </ModuleCard>;
 }
 
 function AccountsModule({ data, error, loading }: { data: StatusPayload | null; error?: string; loading: boolean }) {
-  return <ModuleCard icon="users" eyebrow="Identity authority" title="Users / access" status={error ? "Unavailable" : data ? `${data.accounts.admins} admins` : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : data ? "safe" : "muted"} to="/access" linkLabel="Open account controls">
+  return <ModuleCard icon="users" eyebrow="Identity authority" title="Users / access" status={error ? data ? "Retained / stale" : "Unavailable" : data ? `${data.accounts.admins} admins` : loading ? "Checking" : "Unavailable"} tone={error ? "danger" : data ? "safe" : "muted"} to="/access" linkLabel="Open account controls">
     {data ? <><div className="overview-module__metric"><strong>{data.accounts.total}</strong><span>total accounts</span></div><dl><Fact label="Regular" value={data.accounts.regular} /><Fact label="Pending" value={data.accounts.pending} /><Fact label="Disabled" value={data.accounts.disabled} /></dl><p className="overview-module__note">Roles and session state resolve from Account D1.</p></> : <ModuleState text={error || (loading ? "Reading account authority…" : "Account authority is unavailable.")} />}
   </ModuleCard>;
 }
@@ -213,7 +173,7 @@ function ModuleCard({ icon, eyebrow, title, status, tone, to, linkLabel, childre
 
 function AnalyticsOverview({ data, error, loading }: { data: AnalyticsReport | null; error?: string; loading: boolean }) {
   const [activePoint, setActivePoint] = useState<number | null>(null);
-  const detail = error ? "Analytics authority unavailable" : data ? data.configured ? data.coverage.lastIngestedAt ? `Latest signal ${formatTime(data.coverage.lastIngestedAt)}` : "No retained events in this window" : "Collection not configured" : loading ? "Reading analytics authority" : "Analytics authority unavailable";
+  const detail = error ? data ? "Retained / stale analytics" : "Analytics authority unavailable" : data ? data.configured ? data.coverage.lastIngestedAt ? `Latest signal ${formatTime(data.coverage.lastIngestedAt)}` : "No retained events in this window" : "Collection not configured" : loading ? "Reading analytics authority" : "Analytics authority unavailable";
   const metrics = data?.configured ? [
     { label: "Page views", value: String(data.selected.views), note: "Exact first-party views" },
     { label: "Anonymous sessions", value: String(data.selected.sessions), note: "Mathematically valid sessions" },
@@ -325,9 +285,6 @@ function operationalPriorities(snapshot: Snapshot, errors: SourceErrors): Priori
   return priorities;
 }
 
-async function capture<T>(request: Promise<T>): Promise<{ value: T | null; error?: string }> { try { return { value: await request }; } catch (reason) { return { value: null, error: reason instanceof Error ? reason.message : "Authority unavailable." }; } }
-async function restricted<T>(): Promise<{ value: T | null; error?: string }> { return { value: null, error: "restricted" }; }
-function compactErrors(errors: Record<Source, string | undefined>) { return Object.fromEntries(Object.entries(errors).filter(([, value]) => value)) as SourceErrors; }
 function sourceFallback(loading: boolean, error?: string) { return loading ? "Checking" : error ? error === "restricted" ? "Restricted" : "Unavailable" : "Unavailable"; }
 function configuredLabel(value: boolean | undefined, loading: boolean, error?: string) { return value === true ? "Configured" : value === false ? "Not configured" : sourceFallback(loading, error); }
 function configuredTone(value: boolean | undefined, error?: string) { return error ? error === "restricted" ? "muted" : "danger" : value === true ? "safe" : value === false ? "attention" : "muted"; }

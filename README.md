@@ -1,4 +1,9 @@
 # Third Railify Admin
+
+## Overview source health
+
+Overview now derives source counts, incidents and component diagnostics from coordinated per-source reads. Runtime heartbeat cadence and classification remain unchanged. See [source health architecture, release manifest and evidence limits](docs/OVERVIEW_SOURCE_HEALTH.md) for the new `src/overview/` files, scoped route middleware and regression tests. No files were removed.
+
 ## Aboot Nothing Matchup Studio
 
 Admin `/polls/abootnothing/brackets` and `/:id` add private planning, stable single-elimination graphs, a reviewed historical sample, Poll creation/linkage, audited settlement/advancement/correction, publication lightboxes, durable images and finalization. Public Season Roadmaps show only explicitly published revisions. Existing Poll and credit authorities remain unchanged. See [workflow, privacy, schema, release and acceptance](docs/MATCHUP_STUDIO.md).

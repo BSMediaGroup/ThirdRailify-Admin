@@ -1,0 +1,12 @@
+.overview-diagnostics { margin-block: 16px; min-width: 0; }
+.overview-diagnostics summary { cursor: pointer; padding-block: 12px; }
+.overview-diagnostics button { padding: 9px 14px; margin: 6px 12px 6px 0; }
+.overview-diagnostics__rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.overview-diagnostics article { border: 1px solid #48432f; border-radius: 12px; padding: 16px; min-width: 0; overflow-wrap: anywhere; }
+.overview-diagnostics article[data-outcome="failure"] { border-color: #b98b44; }
+.overview-diagnostics h3 { margin: 0; font-family: inherit; font-size: 16px; }
+.overview-diagnostics h3 small { display: block; margin-top: 6px; font-weight: 400; }
+.overview-diagnostics dl div { margin-block: 8px; }
+.overview-diagnostics dt { color: #c7bfa6; }
+.overview-diagnostics dd { margin: 2px 0 0; font-size: 14px; }
+.overview-source-stale { color: #e5c383; border-left: 2px solid currentColor; padding-left: 10px; font-size: 13px; }
