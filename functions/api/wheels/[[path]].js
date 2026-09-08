@@ -36,7 +36,7 @@ export async function onRequest(context) {
     if (request.method === "GET" || request.method === "HEAD") return await handlePublicRead(request, env, path);
     if (!path.startsWith("internal/")) throw new AuthFailure(404, "wheel_route_not_found", "The wheel route was not found.");
     const internalPath = path.slice("internal/".length);
-    const mediaUpload = internalPath.match(/^([^/]+)\/media\/(background|centre|segment-fill)$/);
+    const mediaUpload = internalPath.match(/^([^/]+)\/media\/(background|centre|segment-fill|avatar)$/);
     if (request.method === "POST" && mediaUpload) return noStore(await handleMediaUpload(request, env, mediaUpload));
     const { body, raw } = await readWheelJson(request);
     await verifyWheelInternalRequest(request, env, raw);

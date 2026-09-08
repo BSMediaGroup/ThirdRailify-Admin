@@ -54,3 +54,16 @@ function bmp(width, height) { const bytes = new Uint8Array(54 + width * height *
 function memoryBucket() { const objects = new Map(); return { objects, async put(key, bytes, options) { const value = new Uint8Array(bytes); objects.set(key, { bytes: value, options }); }, async get(key) { const value = objects.get(key); return value ? { body: value.bytes, size: value.bytes.byteLength, httpMetadata: value.options?.httpMetadata } : null; }, async delete(key) { objects.delete(key); } }; }
 function input() { return { title: "Media Test Wheel", visibility: "public", lifecycle: "active", config: { themePreset: "third-rail-gold", palette: ["#F3C928", "#B8182F"], pointerAccent: "#F3C928", spinDurationMs: 3000 }, entries: [{ label: "Alpha", weight: 1 }, { label: "Beta", weight: 1 }] }; }
 async function insertAccount(db, id, name, email, role = "user", admin = "none", source = "test") { const now = new Date().toISOString(); await db.prepare("INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES (?,?,?,?,?,'active',?,?,?,?)").bind(id,email,name,role,admin,now,now,now,source).run(); }
+
+test("avatar uploads retain independent assets and persist as participant overrides", async t => {
+ const h=await createCommerceDatabases();t.after(h.dispose);const env=commerceEnvironment(h,{THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET:"avatar-upload-test",THIRDRAILIFY_PROFILE_MEDIA:memoryBucket()});
+ await insertAccount(h.authDb,"master","Master","master@example.test","admin","master","env_master");await insertAccount(h.authDb,"owner","Owner","owner@example.test");await mutateCreatorGrant(env,"master",{accountId:"owner",action:"approve"});
+ const {wheel}=await createWheel(env,"owner",input());
+ const a=await uploadWheelMedia(env,wheel.slug,"avatar","owner",PNG,"image/png","face.png");
+ const b=await uploadWheelMedia(env,wheel.slug,"avatar","owner",SAFE_SVG,"image/svg+xml","face2.svg");
+ assert.notEqual(a.asset.id,b.asset.id);
+ assert.equal((await wheelMediaResponse(env,a.asset.id,new Request("https://example.test"))).status,200);
+ const saved=await saveWheel(env,"owner",wheel.slug,{...wheel,entries:wheel.entries.map((e,i)=>({...e,customAvatarUrl:'https://thirdrailify.com'+(i?a:b).asset.url}))});
+ assert.equal(saved.wheel.entries[0].avatarUrl,'https://thirdrailify.com'+b.asset.url);
+ assert.equal((await uploadWheelMedia(env,wheel.slug,"avatar","owner",PNG,"image/png")).reused,true);
+});

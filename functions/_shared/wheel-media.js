@@ -10,7 +10,7 @@ import {
 import { publicMediaUrl } from "./media-origin.js";
 
 const MEDIA_BINDING = "THIRDRAILIFY_PROFILE_MEDIA";
-const PURPOSES = new Set(["background", "centre", "segment_fill"]);
+const PURPOSES = new Set(["background", "centre", "segment_fill", "avatar"]);
 const TYPES = new Map([
   ["image/png", "png"],
   ["image/jpeg", "jpg"],
@@ -21,6 +21,7 @@ const TYPES = new Map([
 ]);
 const LIMITS = Object.freeze({
   background: { bytes: 8 * 1024 * 1024, maxWidth: 10000, maxHeight: 10000, maxPixels: 40_000_000 },
+  avatar: { bytes: 2 * 1024 * 1024, maxWidth: 2048, maxHeight: 2048, maxPixels: 4_194_304 },
   centre: { bytes: 4 * 1024 * 1024, maxWidth: 5000, maxHeight: 5000, maxPixels: 12_000_000 },
   segment_fill: { bytes: 2 * 1024 * 1024, staticBytes: Math.floor(1.5 * 1024 * 1024), svgBytes: 512 * 1024, maxWidth: 2048, maxHeight: 2048, maxPixels: 4_194_304, maxActiveAssets: 20, maxActiveBytes: 12 * 1024 * 1024 },
 });
@@ -39,13 +40,19 @@ export async function uploadWheelMedia(env, slugValue, purposeValue, accountIdVa
     const usage = await db.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(byte_size), 0) AS bytes FROM wheel_media_assets WHERE wheel_id = ? AND purpose = 'segment_fill' AND lifecycle = 'active'").bind(wheel.id).first();
     if (Number(usage?.count || 0) >= LIMITS.segment_fill.maxActiveAssets || Number(usage?.bytes || 0) + image.bytes.byteLength > LIMITS.segment_fill.maxActiveBytes) throw new AuthFailure(409, "wheel_segment_media_budget_exceeded", "A wheel may use at most 20 active segment images and 12 MB combined.");
   }
+  if (purpose === "avatar") {
+    const duplicate = await db.prepare("SELECT * FROM wheel_media_assets WHERE wheel_id=? AND purpose='avatar' AND sha256=? AND lifecycle='active'").bind(wheel.id, hash).first();
+    if (duplicate) return { ok: true, reused: true, asset: projectAsset(duplicate) };
+    const usage = await db.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(byte_size),0) AS bytes FROM wheel_media_assets WHERE wheel_id=? AND purpose='avatar' AND lifecycle='active'").bind(wheel.id).first();
+    if (usage.count >= 1000 || usage.bytes + image.bytes.byteLength > 100 * 1024 * 1024) throw new AuthFailure(409, "avatar_budget_exceeded", "This wheel has reached its avatar storage limit.");
+  }
   const objectKey = `wheels/${wheel.id}/${purpose}/${hash}-${id}.${TYPES.get(image.contentType)}`;
-  const previous = purpose === "segment_fill" ? null : await db.prepare("SELECT id, object_key FROM wheel_media_assets WHERE wheel_id = ? AND purpose = ? AND lifecycle = 'active'").bind(wheel.id, purpose).first();
+  const previous = (purpose === "segment_fill" || purpose === "avatar") ? null : await db.prepare("SELECT id, object_key FROM wheel_media_assets WHERE wheel_id = ? AND purpose = ? AND lifecycle = 'active'").bind(wheel.id, purpose).first();
   const filename = cleanFilename(filenameValue, TYPES.get(image.contentType));
   await bucket.put(objectKey, image.bytes, { httpMetadata: { contentType: image.contentType, cacheControl: "public, max-age=31536000, immutable" }, customMetadata: { sha256: hash, purpose } });
   try {
     await db.batch([
-      ...(purpose === "segment_fill" ? [] : [db.prepare("UPDATE wheel_media_assets SET lifecycle = 'deleted', deleted_at = ?, updated_at = ? WHERE wheel_id = ? AND purpose = ? AND lifecycle = 'active'").bind(timestamp, timestamp, wheel.id, purpose)]),
+      ...((purpose === "segment_fill" || purpose === "avatar") ? [] : [db.prepare("UPDATE wheel_media_assets SET lifecycle = 'deleted', deleted_at = ?, updated_at = ? WHERE wheel_id = ? AND purpose = ? AND lifecycle = 'active'").bind(timestamp, timestamp, wheel.id, purpose)]),
       db.prepare(`INSERT INTO wheel_media_assets
         (id, wheel_id, purpose, object_key, sha256, content_type, byte_size, width, height, original_filename, lifecycle, uploaded_by_account_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`).bind(id, wheel.id, purpose, objectKey, hash, image.contentType, image.bytes.byteLength, image.width, image.height, filename, accountId, timestamp, timestamp),
@@ -87,7 +94,7 @@ export async function mediaForWheel(env, wheelId, options = {}) {
     ORDER BY purpose, created_at DESC`).bind(wheelId).all();
   if (options.includeDeleted) return (rows?.results || []).map((row) => ({ ...projectAsset(row), lifecycle: row.lifecycle }));
   const projected = { background: null, centre: null, segmentFills: [] };
-  for (const row of rows?.results || []) { const asset = projectAsset(row, env, options.public === true); if (row.purpose === "segment_fill") projected.segmentFills.push(asset); else if (!projected[row.purpose]) projected[row.purpose] = asset; }
+  for (const row of rows?.results || []) { if (row.purpose === "avatar") continue; const asset = projectAsset(row, env, options.public === true); if (row.purpose === "segment_fill") projected.segmentFills.push(asset); else if (!projected[row.purpose]) projected[row.purpose] = asset; }
   return projected;
 }
 
