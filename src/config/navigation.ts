@@ -3,7 +3,7 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "analytics" | "content" | "watch" | "gaming" | "wheels" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "overview" | "analytics" | "content" | "watch" | "gaming" | "wheels" | "wheelStages" | "bracket" | "versus" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
@@ -95,7 +95,7 @@ export const adminAreas: AdminArea[] = [
     parentPath: "/wheels",
     label: "Wheel Stages",
     shortLabel: "Stages",
-    icon: "wheels",
+    icon: "wheelStages",
     summary: "Multi-Wheel Stage ownership, visibility, lifecycle, and membership.",
     futureScope: ["Stage moderation", "Ordered Wheel membership", "Safe deletion"],
   },
@@ -135,10 +135,10 @@ export const adminAreas: AdminArea[] = [
     futureScope: ["Authoritative aggregate results", "Approved creators", "One Rumble Poll per source"],
   },
   {
-    path: "/polls/abootnothing/brackets", parentPath: "/polls", label: "Matchup Studio", shortLabel: "Matchup Studio", icon: "polls", summary: "Private seasons and published roadmaps.", futureScope: [],
+    path: "/polls/abootnothing/brackets", parentPath: "/polls", label: "Matchup Studio", shortLabel: "Matchup Studio", icon: "bracket", summary: "Private seasons and published roadmaps.", futureScope: [],
   },
   {
-    path: "/polls/abootnothing", parentPath: "/polls", label: "Aboot Nothing", shortLabel: "Aboot Nothing", icon: "polls", summary: "Matchup content, lifecycle and results.", futureScope: [],
+    path: "/polls/abootnothing", parentPath: "/polls", label: "Aboot Nothing", shortLabel: "Aboot Nothing", icon: "versus", summary: "Matchup content, lifecycle and results.", futureScope: [],
   },
   {
     path: "/polls/access",
