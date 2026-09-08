@@ -1,5 +1,15 @@
 # Bump notes
 
+## 2026-09-08 - Overview diagnostics presentation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced the bare disclosure row with a framed charcoal/gold panel, source-status badge, icon, dedicated expand control, and a structured card grid with aligned diagnostic fields and management footers. Copy, retry and source-health semantics are unchanged.
+- Responsive collapsed/expanded, keyboard Enter/Space, failure and recovery validation covers 390/768/1440/1920 widths. Native disclosure, visible focus, reduced-motion and forced-colour support are retained. No source polling, backend, heartbeat or Wheel changes.
+
+
 ## 2026-09-08 - Overview source health and delayed false-warning repair
 
 CURRENT VER=0.1.0-alpha.0

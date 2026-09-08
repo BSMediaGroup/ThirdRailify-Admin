@@ -27,9 +27,14 @@ test('Overview delayed healthy, retained failure and automatic recovery share on
   const record=async label=>state.push({label,pulse:await page.locator('.overview-pulse').innerText(),warning:await page.locator('.overview-partial').allTextContents(),runtimeReads});
   for(const milliseconds of [10000,6000,15000,15000]){await page.clock.runFor(milliseconds);await page.waitForTimeout(150);assert.equal(await page.locator('.overview-partial').count(),0);assert.equal(await page.getByText('7/7',{exact:true}).count(),1);await record(`healthy +${milliseconds}ms`);}
   await page.screenshot({path:`.artifacts/overview-release/healthy-${width}.png`});
+  const panel=page.locator('.overview-diagnostics__panel');
+  await panel.screenshot({path:`.artifacts/overview-release/styled-collapsed-${width}.png`});
+  await page.locator('.overview-diagnostics__toggle').focus();await page.keyboard.press('Enter');assert.equal(await panel.getAttribute('open'), '');
+  await page.locator('.overview-diagnostics__toggle').scrollIntoViewIfNeeded();await page.screenshot({path:`.artifacts/overview-release/styled-expanded-${width}.png`});
+  await page.keyboard.press('Space');assert.equal(await panel.getAttribute('open'),null);
   fail=true;await page.clock.runFor(15000);await page.locator('.overview-partial').waitFor();await record('simulated failure');
   assert.match(await page.locator('.overview-partial').innerText(),/Bot runtime.*retained/i);assert.equal(await page.getByText('6/7',{exact:true}).count(),1);
-  await page.getByText(/Component diagnostics ·/).click();
+  await page.getByText('Component diagnostics', {exact:true}).click();
   const diagnostic=page.locator('[data-source="automations"]');assert.match(await diagnostic.innerText(),/Retained \/ stale/i);assert.match(await diagnostic.innerText(),/503/);assert.doesNotMatch(await page.locator('body').innerText(),/PRIVATE upstream/);
   const lastSuccess=await diagnostic.locator('dd').nth(1).innerText();
   await page.screenshot({path:`.artifacts/overview-release/failure-${width}.png`,fullPage:false});
