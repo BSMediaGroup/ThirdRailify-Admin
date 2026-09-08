@@ -17,6 +17,8 @@ const definition = (id, group, label, description, options = {}) => Object.freez
 });
 
 export const ADMIN_CAPABILITIES = Object.freeze([
+  definition("rumble_intelligence.view", "rumble-intelligence", "View Rumble Intelligence", "Read private source-scoped subscriber observations."),
+  definition("rumble_intelligence.manage", "rumble-intelligence", "Import subscriber history", "Preview and audit historical subscriber imports."),
   definition("overview.view", "overview", "View Overview", "View cross-system Admin posture and operational summaries."),
   definition("analytics.view", "analytics", "View audience analytics", "View privacy-minimized audience reporting and revenue signals."),
   definition("inbox.view", "inbox", "View Admin Inbox", "Read Admin notices, delivery alerts, and actionable queues."),

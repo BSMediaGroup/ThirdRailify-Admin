@@ -37,11 +37,14 @@ import { WheelAdminDetailPage, WheelsAccessPage, WheelsLibraryPage, WheelsResult
 import { WheelsMechanicsPage, WheelsOverviewPage } from "./pages/WheelsMechanicsPages";
 import { IntegrationsOperationsPage, MediaOperationsPage, MembershipOperationsPage, SettingsOperationsPage } from "./pages/OperationsPages";
 import { AutomationsPage, PollCreatorAccessPage, PollManagementPage } from "./pages/PollsAdminPages";
+import { RumbleIntelligencePage } from "./pages/RumbleIntelligencePage";
 import { GamingAdminPage } from "./pages/GamingAdminPage";
 import { AdminCapabilityBoundary } from "./auth/AdminCapabilityBoundary";
 import { adminRoutePolicy } from "./auth/capabilities";
 
 const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/gaming", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/media", "/membership", "/integrations", "/settings", "/goats", "/wheels", "/wheels/library", "/wheels/stages", "/wheels/mechanics", "/wheels/access", "/wheels/results", "/polls", "/polls/abootnothing/brackets", "/polls/abootnothing", "/polls/access", "/automations"]);
+
+implementedPaths.add('/rumble-intelligence');
 
 export function App() {
   return (
@@ -69,6 +72,7 @@ export function App() {
         <Route path="polls/abootnothing/brackets" element={guard("/polls", <MatchupStudio />)} /><Route path="polls/abootnothing/brackets/:id" element={guard("/polls", <MatchupStudio />)} /><Route path="polls/abootnothing" element={guard("/polls", <AbootNothingPage />)} />
         <Route path="polls/access" element={guard("/polls/access", <PollCreatorAccessPage />)} />
         <Route path="automations" element={guard("/automations", <AutomationsPage />)} />
+        <Route path="rumble-intelligence" element={guard("/rumble-intelligence", <RumbleIntelligencePage />)} />
         <Route path="shop" element={guard("/shop", <Navigate to="/products" replace />)} />
         <Route path="products" element={guard("/products", <CommerceProductsPage />)} />
         <Route path="collections" element={guard("/collections", <CommerceCollectionsPage />)} />

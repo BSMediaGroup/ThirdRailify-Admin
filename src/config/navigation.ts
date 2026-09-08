@@ -9,6 +9,7 @@ export type AdminArea = {
 };
 
 export const adminAreas: AdminArea[] = [
+  { path: "/rumble-intelligence", label: "Rumble Intelligence", shortLabel: "Subscribers", icon: "users", summary: "Private subscriber registry and observation history.", futureScope: [] },
   {
     path: "/",
     label: "Overview",

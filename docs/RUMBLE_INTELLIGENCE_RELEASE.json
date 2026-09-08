@@ -1,0 +1,208 @@
+{
+    "databaseId":  "3dd23a7e-7c64-49cb-a52c-c1540b41db1c",
+    "version":  1,
+    "baselineAdminCommit":  "4efc3cced73f6665f43ca26adac52d301a51bfde",
+    "baselineBotCommit":  "ff59bf29882dd07d68b8056eedda17f57344f69b",
+    "liveAcceptance":  "blocked: operator cannot sign in until quota recovery",
+    "backup":  {
+                   "sqliteRestoreVerified":  true,
+                   "path":  "X:\\GIT\\_BACKUPS\\ThirdRailify\\rumble-intelligence-20260909-before.sql",
+                   "sha256":  "506d906d14bc3e1b11fd07fa3dc5a17e3123ebf6039c1f2d0a4dfe43c141ae84",
+                   "bytes":  5179162,
+                   "acl":  "Operator, SYSTEM, Administrators"
+               },
+    "project":  "thirdrailify-admin",
+    "database":  "thirdrailify-commerce",
+    "status":  "blocked_d1_quota_7500_before_migration",
+    "accountId":  "b98c3fe4118854c1a58982da6dae38a4",
+    "approvedMigration":  {
+                              "additive":  true,
+                              "sha256":  "4ecc443cc730ff58a8dd1aaf3f0c1e1774e16980498ab9c5d0b1cc4a8f046eef",
+                              "lineEndings":  "LF",
+                              "file":  "0045_rumble_intelligence.sql"
+                          },
+    "referenceRepositoriesModified":  false,
+    "predecessorInventory":  [
+                                 {
+                                     "sha256":  "0ea8638921e35bdf292291518d79a33f04b289b71a970be77a4e2703f4131dff",
+                                     "file":  "0001_commerce_control_plane.sql"
+                                 },
+                                 {
+                                     "sha256":  "481a77c5d002705faae2e795ab7898032dc5841b9444883d42e63ad25a3b6326",
+                                     "file":  "0002_stripe_webhook_events.sql"
+                                 },
+                                 {
+                                     "sha256":  "e8dc61a06901c0ef6906ea587096ea2c910e68261b420c20973695503f513093",
+                                     "file":  "0003_product_merchandising.sql"
+                                 },
+                                 {
+                                     "sha256":  "9ef05d2c523233b46fb023d99d38af318470852dd8711950b7b6260d90e9f8dd",
+                                     "file":  "0004_goats_community.sql"
+                                 },
+                                 {
+                                     "sha256":  "2612c3d438f2c11f6c540a467ae881de0c3692448abc8e4bdeccbce57074e930",
+                                     "file":  "0005_commerce_product_variants.sql"
+                                 },
+                                 {
+                                     "sha256":  "3f99b978834fed81fb77ac71c9e28c22fa5cf08204bcd3cfa207e7f9634d4749",
+                                     "file":  "0006_site_banner.sql"
+                                 },
+                                 {
+                                     "sha256":  "b05fce21d26b806a73c3486a39cf3b5ce1b4ea9786a9d07d79c95337de8b523b",
+                                     "file":  "0007_goats_engagement_and_wix_import.sql"
+                                 },
+                                 {
+                                     "sha256":  "b5b1cbfe7e8ea39d33f3e2b15fc211ff335f092c38c7eb18f135d3f9131a7dec",
+                                     "file":  "0008_goats_profile_gif.sql"
+                                 },
+                                 {
+                                     "sha256":  "6d125fa8161917bbea74eaffa99a5ff031962fabab239672e9a2b9a36c39ff9f",
+                                     "file":  "0009_commerce_collections.sql"
+                                 },
+                                 {
+                                     "sha256":  "5ef8df74f7625e68c9d5fac3ba9a1c378d24c697731b0c0a3f1eb20e61809b16",
+                                     "file":  "0010_commerce_production_control_plane.sql"
+                                 },
+                                 {
+                                     "sha256":  "cfb081e7e5ad228476120b6d25f6efdde89b7a06c7df0547b00033bbc9ac5d72",
+                                     "file":  "0011_goats_geocoder.sql"
+                                 },
+                                 {
+                                     "sha256":  "21a21ef03245c0c858d9602c8292bccf220125b2c68e95f1de3f0be01555746d",
+                                     "file":  "0012_admin_inbox_and_reaction_reset.sql"
+                                 },
+                                 {
+                                     "sha256":  "2aad316c166c3f356033ac5674c620c004b6126ff5499098c00530f87606af6f",
+                                     "file":  "0013_homepage_content_rail.sql"
+                                 },
+                                 {
+                                     "sha256":  "cc53ef2ceb766752e2d78e50c76ec659d3a65f9fdd323cc14e7b2f69452f43fd",
+                                     "file":  "0014_wheels_v1.sql"
+                                 },
+                                 {
+                                     "sha256":  "92290f5b85c384f75fdebd85efac83670b539cf359985d8202f9d5ce3aedd251",
+                                     "file":  "0015_checkout_shipping_foundation.sql"
+                                 },
+                                 {
+                                     "sha256":  "03db41e6ba21f24a99d05386cf17afa33f694005a74e59a308db3d62412ac76c",
+                                     "file":  "0016_wheels_media.sql"
+                                 },
+                                 {
+                                     "sha256":  "6e404bf27843a72b267f8930b72058e538e86de3acab2d3b85f89d8dfff6cc00",
+                                     "file":  "0017_commerce_customers.sql"
+                                 },
+                                 {
+                                     "sha256":  "46c16b08f4d306c6adbb934b099ca523707982268b15b2a4b8550f9dc01d758a",
+                                     "file":  "0018_printful_fulfillment_lifecycle.sql"
+                                 },
+                                 {
+                                     "sha256":  "4292589d00972f1ddf834f64f588ad89bc7196db9c40f547f2723824c5eba756",
+                                     "file":  "0019_account_address_book.sql"
+                                 },
+                                 {
+                                     "sha256":  "0397182304d822d9719770178d9affef1b4e70f85b4ec3052a1f90b2b784d5cb",
+                                     "file":  "0020_commerce_launch_operations.sql"
+                                 },
+                                 {
+                                     "sha256":  "50ba3efb3f40a1ae3e5dd889d9bd6ee46025c476316907f0d0ac945886924c13",
+                                     "file":  "0021_paypal_direct_merchant.sql"
+                                 },
+                                 {
+                                     "sha256":  "59d5a05792d0c3522e97660dd246a55861012cb7bc6c2e586115989feb7b9c8a",
+                                     "file":  "0022_wheels_segment_styles.sql"
+                                 },
+                                 {
+                                     "sha256":  "e29699008e2e3fd431993fe1f42d90bb63e08d1a50308242f21b50cfdf9c68b9",
+                                     "file":  "0023_wheels_stages_v1.sql"
+                                 },
+                                 {
+                                     "sha256":  "ff3eac4884149c3c92ba3c7d9cf3bc1e076518907845dffaab83999bfad34a9d",
+                                     "file":  "0024_analytics_and_message_controls.sql"
+                                 },
+                                 {
+                                     "sha256":  "f7f0441298acbf51e96794cdb1bb5653f9ac089206d71a1e8b800597b09f3a02",
+                                     "file":  "0025_automations_polls_v1.sql"
+                                 },
+                                 {
+                                     "sha256":  "3ffb5866ee02c056634fa40f43d151468608adbc95d71ed37ecf48af152c5cbb",
+                                     "file":  "0026_printful_catalogue_reconciliation.sql"
+                                 },
+                                 {
+                                     "sha256":  "bcbae88a445e937c7724a12ccb38fe911adcba3f957d9994ea1e3fa1b146e53a",
+                                     "file":  "0027_polls_v11_media.sql"
+                                 },
+                                 {
+                                     "sha256":  "1f52da79eb45ce648d8d5931e21e2f5ed529d7913add5ae1349d7033c66264fc",
+                                     "file":  "0028_gaming_catalogue.sql"
+                                 },
+                                 {
+                                     "sha256":  "2d33a5f8c0555fc26462fef2d5c367d17e7c67a81670d4f837ea10db3c83889b",
+                                     "file":  "0029_paypal_donation_capture_authority.sql"
+                                 },
+                                 {
+                                     "sha256":  "7207f8aac04b9131e7d3779eb74f8eaff3614925a7cc0dfa41e2da1a16f45a26",
+                                     "file":  "0030_business_profile_compliance_separation.sql"
+                                 },
+                                 {
+                                     "sha256":  "87427ef04811f10c8c71382b5bd2d9b08c23c18268e43e3b39a2c74706a7c177",
+                                     "file":  "0031_store_activation_and_agreements.sql"
+                                 },
+                                 {
+                                     "sha256":  "f7fdb14079d541426a4188c59884a5501591fc4a72ffb3817818aca5565faf4d",
+                                     "file":  "0032_gaming_igdb_mapping.sql"
+                                 },
+                                 {
+                                     "sha256":  "385d543f6545fa5f008d6cbc184ee78dd5a16148a0c8a2353afcc613c88f2810",
+                                     "file":  "0033_merchant_shipping_ratebook.sql"
+                                 },
+                                 {
+                                     "sha256":  "79401c36336b97ad9a5587f3bcd692642e1f00b67a5123006b9f06223f9a290f",
+                                     "file":  "0034_rumble_event_automations.sql"
+                                 },
+                                 {
+                                     "sha256":  "7e6ca1c6e468f6d6b7eabcafa554357f3068cd2579ec9a099ee36370db620597",
+                                     "file":  "0035_rumble_automation_awards.sql"
+                                 },
+                                 {
+                                     "sha256":  "dbdd2a3092cd58833021435423ccafcfa4c90fe114fdc6181a2a0e649970470d",
+                                     "file":  "0036_rumble_raid_received.sql"
+                                 },
+                                 {
+                                     "sha256":  "aebaa331afe5e68050031861e929650920fd80378805bb33804697ac3b549199",
+                                     "file":  "0037_wheel_entrant_avatars.sql"
+                                 },
+                                 {
+                                     "sha256":  "f21523baa5b978b63b7e569898ea6f3245af94f61a7004b70fd28f94053254c6",
+                                     "file":  "0038_wheel_source_avatars.sql"
+                                 },
+                                 {
+                                     "sha256":  "1af36e512d5ff504217925787e4fa7375314307c2be643e8c29981b386ccfcc0",
+                                     "file":  "0039_wheel_avatar_uploads.sql"
+                                 },
+                                 {
+                                     "sha256":  "dc52d25216254ba53efa82dfc1578427035699259c0e7488ad1f3c039447e2af",
+                                     "file":  "0040_wheel_entrant_appearance.sql"
+                                 },
+                                 {
+                                     "sha256":  "e2e2e4f12ecc45c28bbb8241cfd1a3af7f25ffd12990d839d7a376ece74e94a2",
+                                     "file":  "0041_poll_matchups_and_credits.sql"
+                                 },
+                                 {
+                                     "sha256":  "2fb3d536439cfd5a697d235dfaaac8b239456ec0e18be1dde42e0cd128ac4b4e",
+                                     "file":  "0042_wheel_entrant_identity.sql"
+                                 },
+                                 {
+                                     "sha256":  "52caeba76c56630b76fa0e81802a9ebfc09958760a715392e3e21935c4c6f4e9",
+                                     "file":  "0043_aboot_matchup_studio.sql"
+                                 },
+                                 {
+                                     "sha256":  "e084518fff6fcd723adedcdb7a21862baf046dd7d12036e6bae2210d212939b0",
+                                     "file":  "0043_poll_manual_votes.sql"
+                                 },
+                                 {
+                                     "sha256":  "bf91df95b0e76e6310cc12d233f63500fb16365525ef8736d7998e8d0c34381d",
+                                     "file":  "0044_poll_upcoming_history.sql"
+                                 }
+                             ],
+    "productionBefore":  "24ec2b67-440d-41f3-af4b-32f740211743"
+}

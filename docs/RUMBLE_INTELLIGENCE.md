@@ -1,0 +1,60 @@
+# Rumble Intelligence V1
+
+## Pre-edit audit, 9 September 2026
+
+Admin main HEAD and origin/main: `4efc3cced73f6665f43ca26adac52d301a51bfde`; production Pages deployment `24ec2b67-440d-41f3-af4b-32f740211743` identifies that revision. Current/pending version is `0.1.0-alpha.0`. Existing untracked `migrations/RUMBLE_SUBSCRIBER_AUDIT.{md,json}` are preserved analytical references.
+
+Bot main HEAD and origin/main: `ff59bf29882dd07d68b8056eedda17f57344f69b`; current/pending `1.1.0`. Existing modified `logs/bot.log` is preserved. Initial process inventory did not identify a THIRD-RAIL-BOT Python process; other applications' Python processes are outside scope. Runtime release verification remains required.
+
+Local Accounts migrations: 0001,0002. Commerce inventory: 0001 through 0042, both distinct 0043 files (`aboot_matchup_studio`, `poll_manual_votes`), and 0044. Complete remote Commerce ledger read succeeded: all 45 files applied, last 0044 at 2026-09-08 13:24:40 UTC. Next additive migration is 0045. No historical migration is changed. D1 allowance is exhausted/intermittent per operator: successful metadata reads do not establish runtime availability.
+
+## Implementation contract
+
+This private report describes currently API-listed subscriptions, not verified billing entitlements. Operator rule `amount-v1`: integer 500 cents = Self-paid; integer 0 = Gifted; all other values = Needs review. A person's current records can establish Self-paid + gifted. Unexpected evidence takes the primary Needs review label while retaining both positive evidence flags. Historical paid records never confer current paid status. Gift purchases and badges are not personal-payment evidence.
+
+Names use source-scoped NFKC, outer trim, lowercase. No fuzzy or cross-source matching. Record fingerprints include version, source, normalized name, raw reported date and amount evidence; they exclude avatar, array position and observation time. Without provider subscription IDs, identical grants cannot be distinguished; raw duplicate counts remain visible.
+
+Reported subscription date is retained verbatim with validated UTC and a separate initial 30-day review date. Neither is a renewal, cancellation or paid-through date. Repeated observations never create payments or extend the review date.
+
+Immutable membership sets retain record versions and observation references. New observations reuse identical sets. Atomic D1 batches insert sets, observations and conditionally promote the current pointer; older deliveries cannot move it backwards. Provider time must advance to confirm freshness or disappearance. Repeated provider time retains latest transport attempt separately. Qualified observations require unfiltered user/channel context, valid time, complete array, consistent raw count and no truncation signal. Count equality is not a provider completeness guarantee. Partial/failure observations never promote an empty roster. Distinct newer qualified absences confirm missing on the second observation; this is an observation interval, never an exact cancellation date.
+
+History views show at most 180 qualified checkpoints, with explicit bounded coverage and gaps. Immutable stored observations are retained in V1; no destructive retention job runs. Initial bootstrap has unknown arrivals/removals, not synthetic churn. Historical imports retain provider time, unknown actual Bot fetch time, import receipt time and historical provenance. The separate danielclancy fixture is rejected by the ThirdRailify import workflow. Imports cannot dispatch automation events.
+
+Admin Refresh reads existing storage only. Bot consumes the existing successful snapshot, before the no-Poll guard, using the existing HMAC client and a separate durable bounded retry outbox. Unchanged membership checkpoints are rate-bounded; membership changes are retained. No public roster, new provider polling loop, Wheel, Poll-credit or Discord side effects are added.
+
+## Release evidence
+
+Protected full Commerce D1 backup: `X:\GIT\_BACKUPS\ThirdRailify\rumble-intelligence-20260909-before.sql`, 5,179,162 bytes, SHA-256 `506d906d14bc3e1b11fd07fa3dc5a17e3123ebf6039c1f2d0a4dfe43c141ae84`. NTFS access restricted to the operator, SYSTEM and Administrators. Successfully restored into an in-memory SQLite database for inspection; baseline includes 12 Wheels, 262 entries, 13 automation receipts and 37 Poll votes. The additive migration has no business-table writes or triggers.
+
+Reviewed 0045 SHA-256: `4ecc443cc730ff58a8dd1aaf3f0c1e1774e16980498ab9c5d0b1cc4a8f046eef`. `.gitattributes` preserves LF. `scripts/release-rumble-intelligence-schema.ps1` verifies the full backup and migration hashes, checks every predecessor against the remote ledger and exposes only 0045 to Wrangler's supported migration procedure. It stops on native-command failure. Windows execution policy was not changed; the reviewed command block was invoked in the existing PowerShell session.
+
+**Production blocker:** subsequent ledger checks and the isolated `wrangler d1 migrations apply` failed with Cloudflare error 7500 (daily row-read quota). A further read through the Cloudflare connector failed with the same error. No 0045 application was acknowledged and no schema mutation was confirmed. No Admin deployment or Bot start/restart proceeds after this failed gate. Production remains the pre-task deployment `24ec2b67-440d-41f3-af4b-32f740211743`. Authenticated production browser acceptance cannot run while sign-in is blocked; no operator login was requested, no cookie database was copied, and no synthetic production session was created.
+
+Local tests reproduce all four original sources/timestamps/counts, including 122 raw / 116 names / 9 self-paid-only / 105 gifted-only / 2 mixed for the latest historical ThirdRailify sample. These are **fixture counts, not live production counts**. The connected test runs the actual Python extractor and HMAC HTTP client into the real Admin ingestion handler, local D1, real authenticated reporting and an actual Chrome browser. It validates source isolation, import preview fingerprint/CSRF/idempotency, continued observations without duplicate membership or arrivals, keyboard details, filters, reload persistence, unauthorized denial and zero automation/Poll receipts. Screenshots are local, not stable production proof.
+
+History overview is bounded to 180 qualified provider checkpoints. The detail drawer separately reads up to 500 distinct retained record identities across all stored history with first/last provider, Bot observation and Admin receipt times. Historical imports have no invented Bot observation time. Outbox corruption is preserved and isolated from other Bot services; explicit terminal validation rejection increments durable lost-coverage diagnostics instead of blocking all later observations. The Bot publishes unchanged membership at most once per five minutes; membership changes are retained up to the documented hard bounds. Latest attempt in this report is the latest **published** attempt, not every high-frequency provider transport attempt.
+
+Readiness uses zero-row column checks cached for five minutes, not repeated sqlite_master catalogue scans. Private report refresh never fetches Rumble. No new secret/resource, Public edit/deployment, Wheel selector, credit write, billing integration or automation parser rewrite is included.
+
+## File tree
+
+```text
+commerce-migrations/0045_rumble_intelligence.sql
+functions/_shared/rumble-intelligence.js
+functions/api/admin/rumble-intelligence/[[path]].js
+src/pages/RumbleIntelligencePage.tsx
+src/styles/rumble-intelligence.css
+scripts/release-rumble-intelligence-schema.ps1
+tests/rumble-intelligence.test.mjs
+tests/rumble-intelligence-connected.test.mjs
+docs/RUMBLE_INTELLIGENCE.md
+docs/RUMBLE_INTELLIGENCE_RELEASE.json
+```
+
+Extended: shared Admin capability registry, client route policies, navigation, App, internal Bot route, scoped CSP/avatar allowlist, Pages routing and LF attributes. Root README and BUMP_NOTES document current/pending 0.1.0-alpha.0. Original provider samples and both untracked analytical audit files are unchanged. No files removed.
+
+## Validation limits
+
+Focused capability/Raid/schema regressions: 10/10 passed on the isolated recheck, including actual D1 quota metadata reuse and transactional award rollback. New intelligence contract/connected tests pass. Production build/typecheck, changed-file ESLint, Functions compilation and diff checks pass. Bot full pytest: 351 passed, plus a final six-test intelligence recheck after stricter corrupted-state validation; scoped Ruff and compile/offline launcher checks pass.
+
+The broad `test:functions` run encountered Miniflare `fetch failed` errors during unrelated Commerce fixture initialization and an unrelated Commerce readiness assertion (`undefined` versus `true`). The latter was reproduced on clean pre-task commit `4efc3cc` in the isolated release worktree, so it is not attributed to this feature. The broad run was stopped after these failures; it is not reported as a full-suite pass. Full-root Admin ESLint also fails on the pre-existing generated `.artifacts/catalogue-repair/functions-worker.js` parse error (plus generated-artifact warnings). No unrelated generated artifacts or Commerce code were changed to conceal these failures. Full Bot Ruff reports its pre-existing `event_automation.py` import order issue.

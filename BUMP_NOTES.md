@@ -1160,3 +1160,15 @@ PENDING VER=0.1.0-alpha.0
 - Added Clear accepted result and navigation from a dependent review to its changed source. Recovery actions save pending draft edits before submitting, instead of remaining disabled. Open/tied/unsettled sources cannot be accepted; revision and fingerprint guards reject stale corrections.
 - Real production read-only inspection confirmed the affected later branch has neither linked Polls nor accepted decisions. No production result, vote, or publication was changed by this release. Administrator correction reasons remain required.
 - Six backend tests pass, including audited replacement, stale fingerprint/empty reason rejection and downstream result protection. Build/typecheck and focused lint pass. Extended the connected Admin/Public browser test for correction with unsaved notes and automatic downstream display. No new files or migration.
+
+
+## 2026-09-09 - Rumble Intelligence V1 (production blocked by D1 quota)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added private /rumble-intelligence with named current roster, amount-v1 self-paid/gifted/mixed classifications, original dates and initial 30-day review information, source/observation health, retained record evidence, bounded history, filters, accessible details, responsive cards, safe avatars and filtered CSV.
+- Added intelligence-only immutable membership sets, distinct observations, atomic monotonic promotion, conservative missing confirmations, source isolation and audited/idempotent historical imports. Reused service HMAC and introduced narrow Full/Master Admin capabilities; no Wheel, Poll-credit or Discord effects.
+- Original four samples reproduce their exact source/count contracts; latest fixture is 122 raw records, 116 names, 9 self-paid-only, 105 gifted-only and 2 mixed. Actual Python serializer/HMAC -> Admin -> local D1 -> real authenticated reporting/browser passes, including 1920/1440/768/390 layouts. These are local fixture results, not production counts.
+- Protected 5,179,162-byte full D1 backup verified and restored locally; reviewed migration 0045 and fail-fast isolated migration procedure prepared. Supported live ledger/apply attempts returned quota error 7500. No production schema success, Admin deployment or Bot restart is claimed. See docs/RUMBLE_INTELLIGENCE.md and release manifest for hashes, tests and limitations. Original audit files and unrelated work preserved.

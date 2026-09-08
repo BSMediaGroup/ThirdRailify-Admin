@@ -1,5 +1,9 @@
 # Third Railify Admin
 
+## Rumble Intelligence V1
+
+Private `/rumble-intelligence` provides the named API-listed subscriber registry, amount-derived Self-paid/Gifted/mixed classifications, source/freshness evidence, per-record 30-day review dates, history, filters, CSV and controlled historical imports. It consumes the existing Bot fetch through a dedicated HMAC ingestion route. No Wheel integration or billing/renewal claims. See [implementation, file tree and release evidence](docs/RUMBLE_INTELLIGENCE.md) and [reviewed migration manifest](docs/RUMBLE_INTELLIGENCE_RELEASE.json). Production migration/release is currently blocked by D1 quota error 7500; local connected acceptance is complete.
+
 Schema reporting uses `functions/_shared/schema-capabilities.js` to share bounded metadata reads across Poll, Matchup and Automation authorities. Live results and permissions are not cached. See [D1 quota repair and validation](docs/D1_SCHEMA_QUOTA_REPAIR.md); regression files are `tests/schema-capabilities.test.mjs` and `tests/schema-quota.test.mjs`.
 
 ## Overview source health
