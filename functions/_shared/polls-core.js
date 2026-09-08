@@ -1,3 +1,4 @@
+import { paidSchema, activePaidContext, bonusOptions, creditProjection, publicPollPolicy } from './poll-credits.js';
 import {
   AuthFailure,
   accessForAccount,
@@ -54,22 +55,25 @@ export async function listPublicPolls(env, input = {}, accountId = "") {
   const search = clean(input.search, 100).toLowerCase();
   const page = boundedListInteger(input.page, 1, 10_000, 1);
   const pageSize = boundedListInteger(input.pageSize, 1, PUBLIC_MAX_PAGE_SIZE, PUBLIC_PAGE_SIZE);
-  const where = view === "mine"
+  let where = view === "mine"
     ? "p.owner_account_id = ?"
     : view === "closed"
       ? "p.is_public = 1 AND p.state = 'closed'"
       : view === "recent"
         ? "p.is_public = 1 AND p.state IN ('open','closed')"
         : "p.is_public = 1 AND p.state = 'open'";
+  if (input.type && !['regular', 'abootnothing'].includes(input.type)) throw new AuthFailure(400, 'poll_type_invalid', 'Choose a supported Poll collection.');
+  if (input.type) { await paidSchema(env); where += ` AND p.presentation_type='${input.type}'`; }
   const bindings = view === "mine" ? [accountId] : [];
   bindings.push(search, `%${escapeLike(search)}%`, `%${escapeLike(search)}%`);
-  const order = view === "closed"
+  let order = view === "closed"
     ? "p.closed_at DESC, p.updated_at DESC, p.id ASC"
     : view === "open"
       ? "p.opened_at DESC, p.updated_at DESC, p.id ASC"
       : view === "recent"
         ? "CASE p.state WHEN 'open' THEN 0 ELSE 1 END, COALESCE(p.closed_at,p.opened_at,p.updated_at) DESC, p.id ASC"
         : "p.updated_at DESC, p.id ASC";
+  if (input.type === 'abootnothing' && view === 'recent') order = "CASE p.state WHEN 'open' THEN 0 ELSE 1 END, CASE WHEN CAST(json_extract(p.presentation_json,'$.featuredOrder') AS INTEGER)>0 THEN 0 ELSE 1 END, CAST(json_extract(p.presentation_json,'$.featuredOrder') AS INTEGER), COALESCE(p.closed_at,p.opened_at,p.updated_at) DESC,p.id ASC";
   const predicate = `${where}
       AND (?='' OR lower(p.title) LIKE ? ESCAPE '\\' OR lower(COALESCE(p.description,'')) LIKE ? ESCAPE '\\')`;
   const [count, rows] = await Promise.all([
@@ -142,6 +146,12 @@ export async function createPoll(env, accountId, input) {
   const slug = await uniqueSlug(db, input.slug || validated.title);
   const timestamp = nowIso();
   const options = validateOptions(input.options);
+  if (validated.presentationType === 'abootnothing' && options.length !== 2) throw new AuthFailure(400, 'poll_matchup_requires_two', 'Aboot Nothing requires exactly two opposing items.');
+  const upgraded = await paidSchema(env, false);
+  if (validated.presentationType !== 'regular' || input.presentation) await paidSchema(env);
+  const metadata = upgraded ? [db.prepare('UPDATE polls SET presentation_type=?,presentation_json=? WHERE id=?').bind(validated.presentationType, JSON.stringify(validated.presentation), id)] : [];
+  // Check media projection prerequisites before creating anything.
+  if (!(await db.prepare("SELECT name FROM sqlite_master WHERE name='poll_media_assets'").first())) throw new AuthFailure(503, 'poll_media_schema_required', 'Apply the reviewed Poll media schema before creating Polls.');
   await db.batch([
     db.prepare(`INSERT INTO polls
       (id,public_slug,owner_account_id,title,description,state,is_public,web_voting_mode,rumble_enabled,rumble_source_scope,
@@ -153,6 +163,7 @@ export async function createPoll(env, accountId, input) {
     ...options.map((option) => db.prepare(`INSERT INTO poll_options
       (id,poll_id,display_position,label,short_description,trigger_raw,trigger_normalized,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?)`).bind(option.id, id, option.position, option.label, option.description, option.triggerRaw, option.triggerNormalized, timestamp, timestamp)),
+    ...metadata,
   ]);
   await activity(env, id, accountId, "poll_created", "success", { slug });
   return getPublicPoll(env, slug, accountId, true);
@@ -164,7 +175,20 @@ export async function updatePoll(env, accountId, slug, input) {
   const revision = integer(input.revision, 1, 1_000_000, "poll_revision_invalid");
   if (revision !== Number(row.revision)) throw new AuthFailure(409, "poll_revision_conflict", "This Poll changed after it was loaded.");
   const validated = validatePollInput(input, { creating: false, current: row });
-  const structural = Array.isArray(input.options);
+  const upgraded = await paidSchema(env, false);
+  if (input.presentationType || input.presentation) await paidSchema(env);
+  const existingOptions = await db.prepare('SELECT * FROM poll_options WHERE poll_id=? ORDER BY display_position').bind(row.id).all();
+  if (validated.presentationType === 'abootnothing' && (input.options || existingOptions.results).length !== 2) throw new AuthFailure(400, 'poll_matchup_requires_two', 'Aboot Nothing requires exactly two stable options.');
+  const hasVotes = Number((await db.prepare('SELECT COUNT(*) count FROM poll_votes WHERE poll_id=?').bind(row.id).first()).count) > 0;
+  const hasCredits = upgraded && Boolean(await db.prepare('SELECT 1 FROM poll_credit_lots WHERE poll_id=? LIMIT 1').bind(row.id).first());
+  if ((hasVotes || hasCredits) && validated.presentationType !== (row.presentation_type || 'regular')) throw new AuthFailure(409, 'poll_structure_locked', 'The Poll category is locked after voting begins.');
+  let structural = Array.isArray(input.options);
+  if (row.state === 'open' && structural) throw new AuthFailure(409, 'poll_structure_locked', 'Close the Poll before changing options or triggers.');
+  if (structural && (hasVotes || hasCredits || row.state === 'open')) {
+    const stable = input.options.length === existingOptions.results.length && input.options.every((o, i) => o.id === existingOptions.results[i].id && normalizePollTrigger(o.trigger) === existingOptions.results[i].trigger_normalized);
+    if (!stable) throw new AuthFailure(409, 'poll_structure_locked', 'Option IDs and triggers are locked after voting begins.');
+    structural = false;
+  }
   if (row.state === "open" && structural) throw new AuthFailure(409, "poll_structure_locked", "Close the Poll before changing options or triggers.");
   const rumbleToggle = Object.prototype.hasOwnProperty.call(input, "rumbleEnabled") && validated.rumbleEnabled !== Boolean(row.rumble_enabled);
   const bindingChanged = validated.rumbleEnabled && Boolean(row.rumble_enabled) && (
@@ -180,6 +204,8 @@ export async function updatePoll(env, accountId, slug, input) {
     WHERE id=? AND revision=?`).bind(validated.title, validated.description, validated.webVotingMode, validated.rumbleEnabled ? 1 : 0,
       validated.rumbleSourceScope, validated.livestreamMode, validated.livestreamId, validated.intervalSeconds,
       JSON.stringify(validated.theme), nextRevision, timestamp, row.id, revision)];
+  if (upgraded) statements.push(db.prepare('UPDATE polls SET presentation_type=?,presentation_json=? WHERE id=? AND revision=?').bind(validated.presentationType, JSON.stringify(validated.presentation), row.id, nextRevision));
+  if (!structural && Array.isArray(input.options)) statements.push(...input.options.map(o => db.prepare('UPDATE poll_options SET label=?,short_description=? WHERE id=? AND poll_id=?').bind(required(o.label, 1, 160, 'poll_option_label_invalid'), optional(o.description, 240), o.id, row.id)));
   if (row.state === "open" && rumbleToggle) {
     if (validated.rumbleEnabled) {
       await requireRumbleLeaseAvailable(db, validated.rumbleSourceScope, row.id);
@@ -191,6 +217,10 @@ export async function updatePoll(env, accountId, slug, input) {
   if (structural) {
     const options = validateOptions(input.options);
     const existing = await db.prepare("SELECT id FROM poll_options WHERE poll_id=?").bind(row.id).all();
+    for (const option of options) {
+      const existingOwner = await db.prepare('SELECT poll_id FROM poll_options WHERE id=?').bind(option.id).first();
+      if (existingOwner && existingOwner.poll_id !== row.id) throw new AuthFailure(400, 'poll_option_invalid', 'An option belongs to another Poll.');
+    }
     const desiredIds = new Set(options.map((option) => option.id));
     const removed = (existing?.results || []).map((item) => item.id).filter((id) => !desiredIds.has(id));
     if (removed.length) {
@@ -204,8 +234,11 @@ export async function updatePoll(env, accountId, slug, input) {
       short_description=excluded.short_description,trigger_raw=excluded.trigger_raw,trigger_normalized=excluded.trigger_normalized,updated_at=excluded.updated_at`)
       .bind(option.id, row.id, option.position, option.label, option.description, option.triggerRaw, option.triggerNormalized, timestamp, timestamp)));
   }
+  const transactionGuard = await pollMutationGuard(env, row.id, revision);
+  if (transactionGuard) { statements.unshift(transactionGuard[0]); statements.push(transactionGuard[1]); }
   try { await db.batch(statements); }
   catch (error) {
+    if (/CHECK constraint failed: valid/.test(String(error?.message || error))) throw new AuthFailure(409, 'poll_revision_conflict', 'The Poll changed during this operation. Refresh and retry.');
     if (/UNIQUE constraint failed: poll_rumble_leases/i.test(String(error?.message || error))) throw new AuthFailure(409, "rumble_source_poll_conflict", "Another open Poll already owns this Rumble source.");
     throw error;
   }
@@ -241,8 +274,11 @@ export async function changePollLifecycle(env, accountId, slug, input) {
     closed_at=CASE WHEN ?='closed' THEN ? WHEN ?='open' THEN NULL ELSE closed_at END
     WHERE id=? AND revision=?`).bind(target, target, target, nextRevision, timestamp,
       target, timestamp, target, timestamp, target, row.id, revision));
+  const transactionGuard = await pollMutationGuard(env, row.id, revision);
+  if (transactionGuard) { statements.unshift(transactionGuard[0]); statements.push(transactionGuard[1]); }
   try { await db.batch(statements); }
   catch (error) {
+    if (/CHECK constraint failed: valid/.test(String(error?.message || error))) throw new AuthFailure(409, 'poll_revision_conflict', 'The Poll changed during this operation. Refresh and retry.');
     if (/UNIQUE constraint failed: poll_rumble_leases/i.test(String(error?.message || error))) throw new AuthFailure(409, "rumble_source_poll_conflict", "Another open Poll already owns this Rumble source.");
     throw error;
   }
@@ -268,6 +304,11 @@ export async function changePollVisibility(env, accountId, slug, input) {
   return getPublicPoll(env, row.public_slug, accountId, true);
 }
 
+async function pollMutationGuard(env, id, revision) {
+  if (!await paidSchema(env, false)) return null;
+  const db = requirePollDb(env), token = randomId();
+  return [db.prepare('INSERT INTO poll_credit_guards VALUES (?,CASE WHEN EXISTS(SELECT 1 FROM polls WHERE id=? AND revision=?) THEN 1 ELSE 0 END)').bind(token, id, revision), db.prepare('DELETE FROM poll_credit_guards WHERE id=?').bind(token)];
+}
 async function requireRumbleLeaseAvailable(db, sourceScope, pollId) {
   const conflict = await db.prepare(`SELECT p.title,p.public_slug FROM poll_rumble_leases l
     JOIN polls p ON p.id=l.poll_id WHERE l.source_scope=? AND l.poll_id<>? LIMIT 1`).bind(sourceScope, pollId).first();
@@ -302,10 +343,13 @@ export async function submitWebVote(env, actor, slug, input) {
 export async function adminPollLibrary(env, input = {}) {
   const state = STATES.has(input.state) ? input.state : "all";
   const owner = clean(input.owner, 160);
+  const type = clean(input.type, 20);
+  if (type && !['regular', 'abootnothing'].includes(type)) throw new AuthFailure(400, 'poll_type_invalid', 'Choose a supported Poll collection.');
+  if (type) await paidSchema(env);
   const db = requirePollDb(env);
   const rows = await db.prepare(`SELECT p.*,(SELECT COUNT(*) FROM poll_votes v WHERE v.poll_id=p.id) AS total_votes
-    FROM polls p WHERE (?='all' OR p.state=?) AND (?='' OR p.owner_account_id=?) ORDER BY p.updated_at DESC LIMIT 250`)
-    .bind(state, state, owner, owner).all();
+    FROM polls p WHERE (?='all' OR p.state=?) AND (?='' OR p.owner_account_id=?) ${type ? 'AND p.presentation_type=?' : ''} ORDER BY p.updated_at DESC LIMIT 250`)
+    .bind(state, state, owner, owner, ...(type ? [type] : [])).all();
   return { ok: true, items: await Promise.all((rows?.results || []).map((row) => projectSummary(env, row))), count: (rows?.results || []).length };
 }
 
@@ -432,7 +476,8 @@ export async function botActivePoll(env) {
     WHERE p.state='open' AND p.rumble_enabled=1 LIMIT 1`).first();
   if (!row) return { ok: true, activePoll: null, fetchedAt: nowIso() };
   const options = await optionsForPoll(env, row.id);
-  return { ok: true, activePoll: { id: row.id, revision: Number(row.revision), openedAt: row.opened_at, sourceScope: row.rumble_source_scope,
+  const paidContext = await activePaidContext(env, row, options);
+  return { ok: true, activePoll: { id: row.id, paidContext, presentationType: row.presentation_type || "regular", revision: Number(row.revision), openedAt: row.opened_at, sourceScope: row.rumble_source_scope,
     livestreamMode: row.rumble_livestream_mode, livestreamId: row.rumble_livestream_id || null, requestedIntervalSeconds: Number(row.requested_interval_seconds),
     options: options.map((option) => ({ id: option.id, normalizedTrigger: option.normalizedTrigger })) }, fetchedAt: nowIso() };
 }
@@ -444,6 +489,11 @@ export async function recordBotHeartbeat(env, input) {
   const desired = integer(input.desiredRevision, 0, 1_000_000, "config_revision_invalid");
   const applied = integer(input.appliedRevision, 0, 1_000_000, "config_revision_invalid");
   const runtime = sanitizeRuntime(input.runtime);
+  runtime.pollCreditProtocol = input.runtime?.pollCreditProtocol === 2 ? 2 : 0;
+  runtime.pollCreditWindowId = clean(input.runtime?.pollCreditWindowId, 180);
+  runtime.pollCreditPolicyRevision = Number.isSafeInteger(input.runtime?.pollCreditPolicyRevision) ? input.runtime.pollCreditPolicyRevision : 0;
+  runtime.pollCreditBacklog = Number.isSafeInteger(input.runtime?.pollCreditBacklog) ? input.runtime.pollCreditBacklog : 0;
+  runtime.pollCreditFault = clean(input.runtime?.pollCreditFault, 80);
   const timestamp = nowIso();
   await requirePollDb(env).prepare(`INSERT INTO bot_runtime_heartbeat
     (singleton_id,startup_instance_id,bot_version,desired_revision,applied_revision,runtime_json,heartbeat_at,updated_at)
@@ -502,10 +552,10 @@ async function projectSummary(env, row) {
     optionResults(env, row.id, publicVisible),
     requirePollDb(env).prepare("SELECT * FROM poll_media_assets WHERE poll_id=? AND purpose='banner' AND lifecycle='active' LIMIT 1").bind(row.id).first(),
   ]);
-  return { id: row.id, slug: row.public_slug, title: row.title, description: row.description || null, state: row.state,
+  return { id: row.id, presentationType: row.presentation_type || "regular", presentation: safeJson(row.presentation_json, {}), resultsRevision: Number(row.results_revision || 0), credits: await creditProjection(env, row.id), votingPolicy: await publicPollPolicy(env, row.id), slug: row.public_slug, title: row.title, description: row.description || null, state: row.state,
     public: Boolean(row.is_public), webVotingMode: row.web_voting_mode, rumbleEnabled: Boolean(row.rumble_enabled),
-    rumbleSourceScope: row.rumble_source_scope || null, revision: Number(row.revision), totalVotes: Number(row.total_votes ?? options.reduce((sum, item) => sum + item.votes, 0)),
-    options, owner: await accountProjection(env, row.owner_account_id), theme: projectTheme(safeJson(row.theme_json, {})),
+    rumbleSourceScope: row.rumble_source_scope || null, revision: Number(row.revision), totalVotes: options.reduce((sum, item) => sum + item.votes, 0),
+    options, ordinaryVoterIdentities: options.reduce((sum, item) => sum + item.ordinaryVotes, 0), owner: await accountProjection(env, row.owner_account_id), theme: projectTheme(safeJson(row.theme_json, {})),
     media: { banner: projectPollMediaAsset(banner, env, publicVisible) }, updatedAt: row.updated_at, openedAt: row.opened_at || null, closedAt: row.closed_at || null };
 }
 
@@ -527,8 +577,9 @@ async function optionResults(env, pollId, publicVisible = false) {
     (SELECT COUNT(*) FROM poll_votes v WHERE v.poll_id=o.poll_id AND v.option_id=o.id) AS votes
     FROM poll_options o LEFT JOIN poll_media_assets a ON a.poll_option_id=o.id AND a.purpose='option' AND a.lifecycle='active'
     WHERE o.poll_id=? ORDER BY o.display_position`).bind(pollId).all();
+  const bonuses = await bonusOptions(env, pollId);
   return (rows?.results || []).map((row) => ({ id: row.id, position: Number(row.display_position), label: row.label,
-    description: row.short_description || null, trigger: row.trigger_raw, normalizedTrigger: row.trigger_normalized, votes: Number(row.votes || 0),
+    description: row.short_description || null, trigger: row.trigger_raw, normalizedTrigger: row.trigger_normalized, votes: Number(row.votes || 0) + (bonuses.get(row.id) || 0), ordinaryVotes: Number(row.votes || 0), bonusVotes: bonuses.get(row.id) || 0,
     image: projectPollMediaAsset(row.image_asset_id ? { id: row.image_asset_id, purpose: row.image_purpose, poll_option_id: row.image_option_id,
       content_type: row.image_content_type, byte_size: row.image_byte_size, width: row.image_width, height: row.image_height,
       sha256: row.image_sha256, original_filename: row.image_original_filename, created_at: row.image_created_at } : null, env, publicVisible) }));
@@ -592,7 +643,13 @@ function validatePollInput(input, { creating, current = {} }) {
   if (livestreamMode === "exact" && !livestreamId) throw new AuthFailure(400, "rumble_livestream_required", "Enter the exact livestream ID.");
   const intervalSeconds = integer(input.requestedIntervalSeconds ?? current.requested_interval_seconds ?? 15, 10, 30, "poll_interval_invalid");
   const theme = input.theme && typeof input.theme === "object" && !Array.isArray(input.theme) ? sanitizeTheme(input.theme) : safeJson(current.theme_json, {});
-  return { title, description, webVotingMode, rumbleEnabled, rumbleSourceScope: rumbleEnabled ? rumbleSourceScope : null,
+  const presentationType = input.presentationType ?? current.presentation_type ?? 'regular';
+  if (!['regular', 'abootnothing'].includes(presentationType)) throw new AuthFailure(400, 'poll_type_invalid', 'Choose regular or Aboot Nothing.');
+  const presentation = input.presentation ?? safeJson(current.presentation_json, {});
+  if (!presentation || typeof presentation !== 'object' || Array.isArray(presentation)) throw new AuthFailure(400, 'poll_presentation_invalid', 'Invalid matchup appearance.');
+  const colors = presentation.colors ?? ['#f3c928', '#a9b7da'];
+  if (!Array.isArray(colors) || colors.length !== 2 || colors.some(c => !/^#[0-9a-f]{6}$/i.test(c))) throw new AuthFailure(400, 'poll_presentation_invalid', 'Choose two six-digit feature colours.');
+  return { presentationType, presentation: { colors, context: optional(presentation.context, 160), featuredOrder: integer(presentation.featuredOrder ?? 0, 0, 999, 'poll_feature_order_invalid') }, title, description, webVotingMode, rumbleEnabled, rumbleSourceScope: rumbleEnabled ? rumbleSourceScope : null,
     livestreamMode, livestreamId: livestreamMode === "exact" ? livestreamId : null, intervalSeconds, theme, creating };
 }
 
@@ -703,7 +760,7 @@ async function retainServiceNonce(env, requestId, pathname) {
   }
 }
 
-async function uniqueSlug(db, value) { const base = slugify(value); for (let index = 0; index < 100; index += 1) { const candidate = index ? `${base.slice(0, Math.max(2, 76 - String(index).length))}-${index + 1}` : base; if (!(await db.prepare("SELECT id FROM polls WHERE public_slug=?").bind(candidate).first())) return candidate; } throw new AuthFailure(409, "poll_slug_conflict", "A unique Poll URL could not be allocated."); }
+async function uniqueSlug(db, value) { const base = slugify(value); for (let index = 0; index < 100; index += 1) { const candidate = index || new Set(["new", "abootnothing", "access", "mine", "discovery", "media"]).has(base) ? `${base.slice(0, Math.max(2, 76 - String(index).length))}-${index + 1}` : base; if (!(await db.prepare("SELECT id FROM polls WHERE public_slug=?").bind(candidate).first())) return candidate; } throw new AuthFailure(409, "poll_slug_conflict", "A unique Poll URL could not be allocated."); }
 function slugify(value) { const slug = String(value || "poll").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80); return SLUG.test(slug) ? slug : `poll-${randomId().slice(0, 8)}`; }
 function required(value, minimum, maximum, code) { const text = clean(value, maximum); if (text.length < minimum || String(value ?? "").trim().length > maximum) throw new AuthFailure(400, code, "A required Poll field is outside its allowed length."); return text; }
 function optional(value, maximum) { const text = clean(value, maximum); return text || null; }

@@ -1,3 +1,4 @@
+import { ingestPaidSnapshot } from '../../../_shared/poll-credits.js';
 import { AuthFailure, errorResponse, jsonResponse } from "../../../_shared/auth-core.js";
 import { botAutomationRules, ingestAutomationEvents } from '../../../_shared/automation-core.js';
 import { botActivePoll, botDesiredConfig, ingestRumbleVotes, readPollJson, recordBotHeartbeat, synchronizeBotDesiredConfig, verifyBotServiceRequest } from "../../../_shared/polls-core.js";
@@ -14,9 +15,10 @@ export async function onRequest({ request, env }) {
       if (path === "rules-v2") return response(await botAutomationRules(env, true));
     }
     if (request.method === "POST") {
-      const { body, raw } = await readPollJson(request, ['votes', 'events'].includes(path) ? 128 * 1024 : 32 * 1024); await verifyBotServiceRequest(request, env, raw);
+      const { body, raw } = await readPollJson(request, ['votes', 'events', 'poll-credits'].includes(path) ? 128 * 1024 : 32 * 1024); await verifyBotServiceRequest(request, env, raw);
       if (path === "config") return response(await synchronizeBotDesiredConfig(env, body));
       if (path === "heartbeat") return response(await recordBotHeartbeat(env, body));
+      if (path === "poll-credits") return response(await ingestPaidSnapshot(env, body));
       if (path === "votes") return response(await ingestRumbleVotes(env, body));
       if (path === "events") return response(await ingestAutomationEvents(env, body));
     }

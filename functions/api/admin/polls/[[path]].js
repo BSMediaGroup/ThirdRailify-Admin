@@ -1,6 +1,7 @@
+import { uploadPollMedia, pollMediaResponse } from '../../../_shared/poll-media.js';
 import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
 import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
-import { adminPollAccess, adminPollLibrary, changePollLifecycle, changePollVisibility, getPublicPoll, mutatePollCreatorGrant, readPollJson } from "../../../_shared/polls-core.js";
+import { getSafeRumbleDiscovery, createPoll, updatePoll, adminPollAccess, adminPollLibrary, changePollLifecycle, changePollVisibility, getPublicPoll, mutatePollCreatorGrant, readPollJson } from "../../../_shared/polls-core.js";
 
 const PREFIX = "/api/admin/polls";
 
@@ -11,13 +12,27 @@ export async function onRequest({ request, env }) {
     const path = new URL(request.url).pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g, "");
     if (request.method === "GET") {
       await requireAdminCapability(env, request, "polls.view");
-      if (!path) { const url = new URL(request.url); return response(await adminPollLibrary(env, { state: url.searchParams.get("state"), owner: url.searchParams.get("owner") }), request, env); }
+      if (!path) { const url = new URL(request.url); return response(await adminPollLibrary(env, { state: url.searchParams.get("state"), owner: url.searchParams.get("owner"), type: url.searchParams.get("type") }), request, env); }
+      if (/^media\/[A-Za-z0-9_-]{16,80}$/.test(path)) { const session = await requireAdminCapability(env, request, "polls.view"); return pollMediaResponse(env, path.slice(6), request, session.accountId); }
+      if (path === "discovery") return response(await getSafeRumbleDiscovery(env), request, env);
       if (path === "access") return response(await adminPollAccess(env), request, env);
       return response(await getPublicPoll(env, decode(path), (await requireAdminCapability(env, request, "polls.view")).accountId, true), request, env);
     }
     if (request.method !== "POST") throw new AuthFailure(405, "method_not_allowed", "This Admin Poll method is not allowed.", { Allow: "GET,POST,OPTIONS" });
     requireOrigin(request, env); const session = await requireAdminCapability(env, request, "polls.manage"); await requireCsrf(request, session);
+    const media = path.match(/^([^/]+)\/media\/(banner|option)(?:\/([^/]+))?$/);
+    if (media) {
+      if (Number(request.headers.get('content-length') || 0) > 9 * 1024 * 1024) throw new AuthFailure(413, 'request_too_large', 'Image request exceeds the limit.');
+      const raw = await request.arrayBuffer();
+      if (raw.byteLength > 9 * 1024 * 1024) throw new AuthFailure(413, 'request_too_large', 'Image request exceeds the limit.');
+      const form = await new Request(request.url, { method: 'POST', headers: request.headers, body: raw }).formData(); const file = form.get('image');
+      if (!file || typeof file === 'string') throw new AuthFailure(400, 'poll_media_file_required', 'Choose an image.');
+      return response(await uploadPollMedia(env, decode(media[1]), media[2], decode(media[3] || ''), session.accountId, new Uint8Array(await file.arrayBuffer()), file.type, file.name), request, env);
+    }
     const { body } = await readPollJson(request);
+    if (path === "create") return response(await createPoll(env, session.accountId, body), request, env);
+    const edit = path.match(/^([^/]+)\/save$/);
+    if (edit) return response(await updatePoll(env, session.accountId, decode(edit[1]), body), request, env);
     if (path === "grants") return response(await mutatePollCreatorGrant(env, session.accountId, body), request, env);
     const lifecycle = path.match(/^([^/]+)\/lifecycle$/);
     if (lifecycle) return response(await changePollLifecycle(env, session.accountId, decode(lifecycle[1]), body), request, env);

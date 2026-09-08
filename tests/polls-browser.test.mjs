@@ -31,6 +31,7 @@ async function respond(route) { const url = new URL(route.request().url()); cons
   if (path === "/api/auth/session") return json(route, session());
   if (path === "/api/admin/inbox/summary") return json(route, { ok: true, unread: 0, actionable: { goats: { total: 0, submissions: 0, comments: 0, emailFailures: 0 } } });
   if (path === "/api/admin/automations/rules") return json(route, { ok: true, rules: [], wheels: [], activity: [] });
+  if (path === "/api/admin/automations/poll-voting") return json(route, { ok: true, policies: [], lots: [], botCompatible: false, protocol: 2, heartbeatAt: null });
   if (path === "/api/admin/automations") return json(route, automations(mode));
   if (path === "/api/admin/polls" && route.request().method() === "GET") return json(route, { ok: true, items: [poll(), closedPoll(adminClosedPublic), hiddenPoll()], count: 3 });
   if (path.endsWith("/visibility") && route.request().method() === "POST") { adminClosedPublic = JSON.parse(route.request().postData() || "{}").public; return json(route, { ok: true, poll: closedPoll(adminClosedPublic) }); }

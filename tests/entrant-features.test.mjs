@@ -29,12 +29,14 @@ test('real executor -> persisted snapshot -> public projection -> manual save ->
   const entries = payload.wheel.entries.map((e, i) => i === 0 ? { ...e, appearance: { ...e.appearance, manual: { fill: { colors: ['#123456', '#654321'] }, icons: [], effects: null } } } : e);
   assert.equal(await participantSnapshotHash(entries), acceptedHash, 'appearance excluded from winner snapshot');
   payload = await saveWheel(env, 'creator', slug, { ...payload.wheel, entries });
-  const later = event(rules[2], 'Subscriber'); assert.equal(await send(later), 'added');
+  const giftSubscription = (await saveAutomationRule(env, 'master', { ...rules[2], id: undefined, eventType: 'rumble.subscribe' })).rule;
+  const raidSubscription = (await saveAutomationRule(env, 'master', { ...rules[1], id: undefined, eventType: 'rumble.subscribe' })).rule;
+  const later = event(giftSubscription, 'Subscriber'); assert.equal(await send(later), 'added');
   const after = await read(); entrant = after.wheel.entries.find(e => e.label === 'Subscriber');
   assert.equal(entrant.weight, 170); assert.deepEqual(effectiveAppearance(entrant).fill.colors, ['#123456', '#654321']); assert.deepEqual(effectiveAppearance(entrant).icons, []); assert.equal(effectiveAppearance(entrant).effects, null);
   const beforeReplay = JSON.stringify((await h.commerceDb.prepare('SELECT * FROM wheel_entries ORDER BY id').all()).results);
   assert.equal(await send(later), 'duplicate_event'); assert.equal(JSON.stringify((await h.commerceDb.prepare('SELECT * FROM wheel_entries ORDER BY id').all()).results), beforeReplay);
-  const older = event(rules[1], 'Subscriber', { at: new Date(Date.parse(later.providerEventAt) - 1).toISOString() }); assert.equal(await send(older), 'added');
+  const older = event(raidSubscription, 'Subscriber', { at: new Date(Date.parse(later.providerEventAt) - 1).toISOString() }); assert.equal(await send(older), 'added');
   entrant = (await read()).wheel.entries.find(e => e.label === 'Subscriber'); assert.equal(entrant.weight, 190); assert.deepEqual(entrant.appearance.automatic.fill.value.colors, FEATURE_PRESETS.gift.components.fill.colors);
   const oldClient = await read(); const omitted = oldClient.wheel.entries.map(({ appearance, ...e }) => ({ ...e, label: e.label, weight: e.weight + 1 }));
   await saveWheel(env, 'creator', slug, { ...oldClient.wheel, entries: omitted.reverse() });
@@ -52,7 +54,8 @@ test('real executor -> persisted snapshot -> public projection -> manual save ->
 test('stable ties, manual suppression, rejected awards and transaction rollback', async t => {
   const f = await featureFixture(); t.after(f.h.dispose); const { h, env, rules, event, send, read } = f;
   const at = new Date(Date.now() + 2000).toISOString();
-  const a = event(rules[2], 'One', { at }), b = event(rules[3], 'One', { at });
+  const secondGift = (await saveAutomationRule(env, 'master', { ...rules[3], id: undefined, eventType: 'rumble.gift_purchase' })).rule;
+  const a = event(rules[2], 'One', { at }), b = event(secondGift, 'One', { at });
   await send(a); await send(b); const first = (await read()).wheel.entries.find(e => e.label === 'One').appearance;
   await h.commerceDb.prepare('DELETE FROM automation_receipts').run(); await h.commerceDb.prepare('DELETE FROM wheel_entries').run();
   await send(b); await send(a); assert.deepEqual((await read()).wheel.entries.find(e => e.label === 'One').appearance, first);
@@ -65,12 +68,13 @@ test('stable ties, manual suppression, rejected awards and transaction rollback'
   const snapshot = JSON.stringify((await read()).wheel.entries); assert.equal(await send(event(skip, 'One')), 'duplicate_entrant'); assert.equal(JSON.stringify((await read()).wheel.entries), snapshot);
 });
 
-test('0040 is additive, old awards execute, and appearance readiness rejects before writes', async t => {
+test('0040 is additive and appearance readiness rejects before writes with typed award storage', async t => {
   const h = await createCommerceDatabases({ commerceMigrationCount: 39 }); t.after(h.dispose); const env = commerceEnvironment(h), db = h.commerceDb;
   const now = new Date().toISOString();
   await db.prepare("INSERT INTO wheels(id,reference_code,public_slug,title,lifecycle,visibility,owner_account_id,config_json,created_at,updated_at) VALUES ('compat-wheel','W-COMPAT','compat-wheel','Compatibility','active','public','creator','{}',?,?)").bind(now, now).run();
   let rule = (await saveAutomationRule(env, 'master', { name: 'Old rule', description: '', enabled: true, sourceScope: 'user:fixture', eventType: 'rumble.follow', conditions: {}, actionType: 'wheel.add_actor', targetWheelId: 'compat-wheel' })).rule;
   const e = { ruleId: rule.id, ruleRevision: rule.revision, eventType: rule.eventType, sourceScope: rule.sourceScope, eventFingerprint: 'a'.repeat(64), actorLabel: 'Old entrant', actorKey: 'rumble:user:fixture:old entrant', providerEventAt: new Date(Date.now() + 1000).toISOString(), evidence: {} };
+  await applyMigration(db, h.commerceMigrations[41]);
   assert.equal((await ingestAutomationEvents(env, { events: [e] })).results[0].outcome, 'added');
   const before = JSON.stringify((await db.prepare('SELECT * FROM automation_rules').all()).results);
   await assert.rejects(saveAutomationRule(env, 'master', { ...rule, actionConfig: { ...rule.actionConfig, appearance: FEATURE_PRESETS.gift.components } }), err => err.code === 'entrant_appearance_schema_required');

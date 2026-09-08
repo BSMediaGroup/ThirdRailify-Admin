@@ -91,7 +91,7 @@ test('weighted awards, distinct events, replay, thresholds, hidden normalization
   await wheel(db);
   const save = async input => (await saveAutomationRule(env, 'admin', { ...base, ...input })).rule;
   const send = async e => (await ingestAutomationEvents(env, { events: [e] })).results[0].outcome;
-  const row = async () => db.prepare("SELECT * FROM wheel_entries WHERE display_label='Alice'").first();
+  const row = async (type = 'gift') => db.prepare("SELECT * FROM wheel_entries WHERE display_label='Alice' AND json_extract(entrant_identity_json, '$.type')=?").bind(type).first();
   let r = await save({ actionConfig: config('per_gift', 5), conditions: { minGifts: 2 } });
   assert.equal((await botAutomationRules(env)).rules[0].duplicatePolicy, 'skip', 'unchanged Bot projection accepts V1.1 rules; this token never executes awards');
   assert.equal(await send(event(r, 'too-small', gifts(1))), 'condition_rejected');
@@ -105,7 +105,7 @@ test('weighted awards, distinct events, replay, thresholds, hidden normalization
   assert.equal((await listAutomationRules(env)).rules[0].counters.executed, 2);
   r = await save({ eventType: 'rumble.rant', actionConfig: config('per_amount', 1), conditions: { minAmountCents: 100 } });
   assert.equal(await send(event(r, 'rant-a', { amountCents: 650 })), 'added');
-  assert.equal(await send(event(r, 'rant-b', { amountCents: 250 })), 'added'); assert.equal((await row()).weight, 33);
+  assert.equal(await send(event(r, 'rant-b', { amountCents: 250 })), 'added'); assert.equal((await row('rant')).weight, 8);
   assert.equal(await send(event(r, 'rant-b', { amountCents: 250 })), 'duplicate_event');
   assert.equal(await send(event(r, 'rant-small', { amountCents: 99 })), 'condition_rejected');
   assert.equal(await send(event(r, 'rant-negative', { amountCents: -1 })), 'invalid_event');
@@ -113,32 +113,32 @@ test('weighted awards, distinct events, replay, thresholds, hidden normalization
     const rule = await save({ eventType, conditions: eventType === 'rumble.chat.exact' ? { exactText: 'ENTER' } : {}, actionConfig: config('fixed', 5) });
     assert.equal(await send(event(rule, eventType, evidence)), 'added');
   }
-  assert.equal((await row()).weight, 58);
+  assert.equal((await row()).weight, 30);
   const skip = await save({ actionConfig: config('fixed', 5, 'skip') });
-  assert.equal(await send(event(skip, 'skip', gifts(5))), 'duplicate_entrant'); assert.equal((await row()).weight, 58);
+  assert.equal(await send(event(skip, 'skip', gifts(5))), 'duplicate_entrant'); assert.equal((await row()).weight, 30);
   await db.prepare("UPDATE wheel_entries SET state='hidden',segment_colour='#ABCDEF'").run();
   await db.prepare('UPDATE wheels SET revision=revision+1,participant_count=0').run();
   assert.equal(await send(event(r, 'hidden', { amountCents: 200 }, 'Ａｌｉｃｅ')), 'added');
-  assert.equal((await row()).weight, 60); assert.equal((await row()).state, 'hidden'); assert.equal((await row()).segment_colour, '#ABCDEF');
+  assert.equal((await row('rant')).weight, 15); assert.equal((await row()).state, 'hidden'); assert.equal((await row()).segment_colour, '#ABCDEF');
   assert.equal((await db.prepare('SELECT participant_count FROM wheels').first()).participant_count, 0);
   // A forced audit failure must roll back weight, receipt, counters and Wheel revision together.
-  const snapshot = async () => ({ entry: await row(), wheel: await db.prepare('SELECT * FROM wheels').first(), rule: await db.prepare('SELECT * FROM automation_rules WHERE id=?').bind(r.id).first(), receipts: (await db.prepare('SELECT COUNT(*) n FROM automation_receipts').first()).n });
+  const snapshot = async () => ({ entries: (await db.prepare('SELECT * FROM wheel_entries ORDER BY id').all()).results, wheel: await db.prepare('SELECT * FROM wheels').first(), rule: await db.prepare('SELECT * FROM automation_rules WHERE id=?').bind(r.id).first(), receipts: (await db.prepare('SELECT COUNT(*) n FROM automation_receipts').first()).n });
   const before = await snapshot();
   await db.prepare("CREATE TRIGGER award_rollback BEFORE INSERT ON wheel_audit_events BEGIN SELECT RAISE(ABORT,'rollback'); END").run();
   await assert.rejects(send(event(r, 'rollback', { amountCents: 200 }))); assert.deepEqual(await snapshot(), before);
   await db.prepare('DROP TRIGGER award_rollback').run();
   const simultaneous = await Promise.all([send(event(r, 'concurrent', { amountCents: 200 })), send(event(r, 'concurrent', { amountCents: 200 }))]);
-  assert.equal(simultaneous.filter(x => x === 'added').length, 1); assert.equal((await row()).weight, 62);
+  assert.equal(simultaneous.filter(x => x === 'added').length, 1); assert.equal((await row('rant')).weight, 17);
   assert.equal((await db.prepare('SELECT duplicate_events FROM automation_rules WHERE id=?').bind(r.id).first()).duplicate_events, 2, 'both sequential and racing Rant replays are counted');
   const distinct = [event(r, 'distinct-a', { amountCents: 200 }), event(r, 'distinct-b', { amountCents: 300 })];
   const outcomes = await Promise.all(distinct.map(send)); for (let i=0; i<outcomes.length; i++) if (outcomes[i] === 'retry') assert.equal(await send(distinct[i]), 'added');
-  assert.equal((await row()).weight, 67);
+  assert.equal((await row('rant')).weight, 22);
   await db.prepare('UPDATE wheel_entries SET weight=99999').run(); await db.prepare('UPDATE wheels SET revision=revision+1').run();
   assert.equal(await send(event(r, 'overweight', { amountCents: 200 })), 'wheel_unavailable'); assert.equal((await row()).weight, 99999);
   assert.equal((await db.prepare("SELECT action_result FROM automation_receipts WHERE event_fingerprint=?").bind(event(r,'overweight',{}).eventFingerprint).first()).action_result, 'weight_limit_exceeded');
   const huge = await save({ actionConfig: config('per_gift', 100000) }); assert.equal(await send(event(huge, 'huge', gifts(2), 'Bob')), 'wheel_unavailable');
   const partial = await save({ eventType: 'rumble.rant', actionConfig: config('per_amount', 1) }); assert.equal(await send(event(partial, 'partial', { amountCents: 99 }, 'Bob')), 'wheel_unavailable');
-  assert.equal((await db.prepare('SELECT COUNT(*) n FROM wheel_entries').first()).n, 1);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM wheel_entries').first()).n, 5);
   await db.prepare(`INSERT INTO wheel_settings(setting_key,value_json,revision,updated_at) VALUES ('global','{"maximumParticipants":1}',1,?) ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json,revision=revision+1`).bind(new Date().toISOString()).run();
   const fixed = await save({ actionConfig: config('fixed', 1) });
   assert.equal(await send(event(fixed, 'capacity', gifts(1), 'Bob')), 'wheel_unavailable');

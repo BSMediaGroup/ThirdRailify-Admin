@@ -16,8 +16,10 @@ export async function automationReadiness(env) {
   let runtime = {}; try { runtime = JSON.parse(heartbeat?.runtime_json || '{}'); } catch { /* fail closed */ }
   const age = Date.now() - Date.parse(heartbeat?.heartbeat_at);
   const raidRuntime = runtime.eventAutomation?.raidNoticeVersion === 1 && age >= -300000 && age <= 45000;
-  const appearance = (await db.prepare('PRAGMA table_info(wheel_entries)').all()).results.some(c => c.name === 'entrant_appearance_json');
-  return { appearance, awards, raidSchema, raidRuntime, raidStatus: !raidSchema ? 'schema_required' : !raidRuntime ? 'pending_capable_bot' : 'ready' };
+  const entryColumns = (await db.prepare('PRAGMA table_info(wheel_entries)').all()).results;
+  const appearance = entryColumns.some(c => c.name === 'entrant_appearance_json');
+  const entryIdentity = entryColumns.some(c => c.name === 'entrant_identity_json');
+  return { entryIdentity, appearance, awards, raidSchema, raidRuntime, raidStatus: !raidSchema ? 'schema_required' : !raidRuntime ? 'pending_capable_bot' : 'ready' };
 }
 export function projectRule(row) {
   const actionConfig = row.action_config_json ? JSON.parse(row.action_config_json) : defaultAction();
@@ -108,7 +110,7 @@ export function dryRunAutomation(input) {
     ...(rule.eventType === RAID_TYPE ? { classification: 'Chat-derived / not independently verified', detectionMethod: RAID_METHOD } : {}),
     repeatActorPolicy: rule.actionConfig.repeatActorPolicy,
     action: !matched ? 'Would add 0 entries: conditions did not match. No action will be executed.' : award.reason ? `Would add 0 entries: ${award.reason.replaceAll('_', ' ')}. No action will be executed.` :
-      `Would add ${award.entries} entries${rule.eventType === 'rumble.gift_purchase' ? ' to purchaser' : ''}. ${rule.actionConfig.repeatActorPolicy === 'skip' ? 'Existing entrants would be skipped.' : 'Existing entrants would receive additional weight; hidden entrants remain hidden.'} Wheel locks and limits are checked during execution. No action will be executed.` };
+      `Would add ${award.entries} entries${rule.eventType === 'rumble.gift_purchase' ? ' to purchaser' : ''}. ${rule.actionConfig.repeatActorPolicy === 'skip' ? 'Entries matching the actor, source and event type would be skipped.' : 'Entries matching the actor, source and event type would receive additional weight; hidden entrants remain hidden.'} Wheel locks and limits are checked during execution. No action will be executed.` };
 
 }
 export async function ingestAutomationEvents(env, input) {

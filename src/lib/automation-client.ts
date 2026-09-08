@@ -11,7 +11,7 @@ export const families = [
   ['rumble.livestream.stopped', 'Livestream Ended', 'State transition only. This event has no entrant actor.'],
 ] as const;
 export type Conditions = { exactText?: string; minAmountCents?: number; minGifts?: number; giftType?: string; badge?: string; livestreamId?: string };
-export type Readiness = { appearance?: boolean; awards: boolean; raidSchema: boolean; raidRuntime: boolean; raidStatus: string };
+export type Readiness = { entryIdentity?: boolean; appearance?: boolean; awards: boolean; raidSchema: boolean; raidRuntime: boolean; raidStatus: string };
 export type Rule = { targetType?: string; targetAvailable?: boolean; targetLifecycle?: string; targetLocked?: boolean; runtimeStatus?: string; id?: string; revision?: number; name: string; description: string; enabled: boolean; sourceScope: string; sourceLabel?: string | null; eventType: string; conditions: Conditions; actionType: string; targetWheelId: string; duplicatePolicy: string; actionConfig?: ActionConfig; targetWheelTitle?: string; activatedAt?: string; lastMatchAt?: string; lastOutcome?: string; lastFault?: string; counters?: Record<string, number> };
 export type WheelChoice = { id: string; title: string; lifecycle: string; editing_locked: number };
 export type Discovery = { botState: string; discoveryState?: string; source: { scope: string; displayName: string } | null; livestreams: { id: string; title: string; isLive: boolean }[]; freshness?: { ageSeconds: number; observedAt?: string | null } | null };

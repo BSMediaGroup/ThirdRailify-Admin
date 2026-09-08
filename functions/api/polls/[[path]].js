@@ -51,9 +51,10 @@ async function publicRead(request, env, path) {
   if (request.method !== "GET" && request.method !== "HEAD") throw new AuthFailure(405, "method_not_allowed", "This Poll method is not allowed.");
   const url = new URL(request.url);
   const payload = path ? await getPublicPoll(env, decode(path)) : await listPublicPolls(env, {
-    view: url.searchParams.get("view"), search: url.searchParams.get("search"), page: url.searchParams.get("page"), pageSize: url.searchParams.get("pageSize"),
+    type: url.searchParams.get("type"), view: url.searchParams.get("view"), search: url.searchParams.get("search"), page: url.searchParams.get("page"), pageSize: url.searchParams.get("pageSize"),
   });
-  const cacheControl = path ? payload?.poll?.state === "open" ? PUBLIC_CACHE : "public, max-age=60" : payload?.view === "closed" ? "public, max-age=60" : PUBLIC_CACHE;
+  const unsettled = path ? Boolean(payload?.poll?.credits?.unresolved) : payload?.items?.some(p => p.credits?.unresolved);
+  const cacheControl = unsettled ? PUBLIC_CACHE : path ? payload?.poll?.state === "open" ? PUBLIC_CACHE : "public, max-age=60" : payload?.view === "closed" ? "public, max-age=60" : PUBLIC_CACHE;
   return jsonResponse(payload, { headers: { "Cache-Control": cacheControl, ETag: `W/\"${hash(JSON.stringify(payload))}\"` } });
 }
 

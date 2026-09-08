@@ -135,6 +135,9 @@ export const adminAreas: AdminArea[] = [
     futureScope: ["Authoritative aggregate results", "Approved creators", "One Rumble Poll per source"],
   },
   {
+    path: "/polls/abootnothing", parentPath: "/polls", label: "Aboot Nothing", shortLabel: "Aboot Nothing", icon: "polls", summary: "Matchup content, lifecycle and results.", futureScope: [],
+  },
+  {
     path: "/polls/access",
     parentPath: "/polls",
     label: "Poll Creator Access",

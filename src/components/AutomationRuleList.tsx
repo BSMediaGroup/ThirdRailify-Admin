@@ -32,7 +32,7 @@ function AutomationRuleCard({ rule, pending, pendingEnabled, error, canManage, s
     {error && <p className="automation-error" role="alert">{error}</p>}
     <p className="automation-card__award">{award.entriesPerUnit} {award.entriesPerUnit === 1 ? 'entry' : 'entries'} per {unit}</p>
     <p className="automation-card__condition">{conditions || 'Any new qualifying event'}</p>
-    <p>{action.repeatActorPolicy === 'accumulate' ? 'Adds to existing entrant' : 'Skips existing entrant'}</p>
+    <p>{action.repeatActorPolicy === 'accumulate' ? 'Adds to matching entry type' : 'Skips matching entry type'}</p>
     {rule.eventType === 'rumble.raid.received' && <p className="automation-card__notice">Chat-derived · Not independently verified</p>}
     <div className="automation-card__context"><span>{rule.sourceLabel || rule.sourceScope}</span>{scoped ? null : <span>{rule.targetWheelTitle}</span>}<small>Revision {rule.revision}</small></div>
     {rule.targetAvailable === false || rule.targetLocked || rule.targetLifecycle === 'archived' ? <p className="automation-warning">Target unavailable for entry awards</p> : null}

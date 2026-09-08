@@ -36,6 +36,7 @@ test('fixed-only raid contract and exact dry run, with no authenticity claim', (
 test('0036 preserves 0035 awards, receipts, foreign keys, constraints and reports readiness', async t => {
   const h = await createCommerceDatabases({ commerceMigrationCount: 35 }); t.after(h.dispose); const db = h.commerceDb, env = commerceEnvironment(h);
   await wheel(db);
+  await applyMigration(db, h.commerceMigrations[41]);
   const old = (await saveAutomationRule(env, 'admin', { ...base, eventType: 'rumble.follow', enabled: true })).rule;
   await ingestAutomationEvents(env, { events: [{ ...event(old), evidence: {} }] });
   const before = await db.prepare('SELECT * FROM automation_receipts').all();
@@ -114,6 +115,7 @@ test('per-rule overlap, pre-activation history after re-enable, and fresh schema
   // Exercise the complete upgrade as one D1 batch, as well as the maintained sequential migration harness above.
   const statements = h.commerceMigrations[35].split(/;\s*(?:\r?\n|$)/).map(s => s.trim()).filter(Boolean);
   await db.batch(statements.map(s => db.prepare(s)));
+  await applyMigration(db, h.commerceMigrations[41]);
   await wheel(db);
   let r = (await saveAutomationRule(env, 'admin', { ...base, enabled: true })).rule;
   const e = event(r, new Date(Date.now() + 1000).toISOString(), '\t HAS RAIDED THIS STREAM! \n');
@@ -121,7 +123,8 @@ test('per-rule overlap, pre-activation history after re-enable, and fresh schema
   assert.equal(await send(e), 'added');
   const exact = (await saveAutomationRule(env, 'admin', { ...base, name: 'Deliberate overlap', eventType: 'rumble.chat.exact', conditions: { exactText: 'has raided this stream!' }, enabled: true })).rule;
   assert.equal(await send({ ...e, ruleId: exact.id, ruleRevision: exact.revision, eventType: exact.eventType, evidence: { normalizedText: 'has raided this stream!' } }), 'added');
-  assert.equal((await db.prepare('SELECT weight FROM wheel_entries').first()).weight, 20);
+  assert.deepEqual((await db.prepare("SELECT weight FROM wheel_entries ORDER BY id").all()).results.map(e => e.weight), [10, 10]);
+  assert.deepEqual((await db.prepare("SELECT json_extract(entrant_identity_json, '$.type') AS type FROM wheel_entries ORDER BY type").all()).results.map(e => e.type), ['chat', 'raid']);
   r = (await saveAutomationRule(env, 'admin', { ...r, enabled: false })).rule;
   r = (await saveAutomationRule(env, 'admin', { ...r, enabled: true })).rule;
   const before = event(r, new Date(Date.parse(r.activatedAt) - 1).toISOString());

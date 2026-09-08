@@ -1,5 +1,9 @@
 # Third Railify Admin
 
+## Typed Wheel entry identity (local)
+
+Automatic awards now match the actor, Rumble source and event type. Subscription, gift, raid and regular slices with the same name remain distinct; imports retain classifications with fresh IDs and no automatic binding. Participant and winner details show the type. Legacy entries are reused only when complete receipt history proves their identity. See [`docs/WHEEL_ENTRANT_IDENTITY.md`](docs/WHEEL_ENTRANT_IDENTITY.md) for the shared `entrant-identity.*` contract, storage helper, tests and release sequence. **Migration 0042 was applied and verified on live Admin Commerce D1 at 2026-09-08 07:47:00 UTC after explicit user authorization. Application deployment remains pending: release Admin, then Public.**
+
 ## Automation cards and entrant appearance (local)
 
 Optional entrant features now share a versioned contract, normalized Canvas preview and reusable automation cards across Admin/Public. Target-ID grouping, accessible row-local switches, future-award appearance and manual participant overrides preserve the existing Wheel/receipt authority. Public's cached renderer draws gradients, vector marks and bounded annular effects across detail, Presentation, Stage and editors; safe content refresh waits while spins or editors hold the current snapshot.
@@ -446,3 +450,25 @@ Shared editor now lets the server recheck schema on Save rather than disabling o
 ### 2026-09-07 optional Rant message repair
 
 Blank or space-only optional Rant exact text is accepted by shared validation and omitted from saved conditions. Minimum cents and other filters remain enforced. Exact Chat still requires text. Updated automation award regression coverage proves unrestricted message matching at the configured amount and rejection below it. No migration or Bot change required.
+
+
+## Aboot Nothing and Poll credits (local, 2026-09-08)
+
+`/polls/abootnothing` is the dedicated two-subject content workspace. `/automations#poll-voting` manages per-Poll Rant/gift settings and `/automations#poll-reconciliation` provides bounded evidence, partial allocation/discard and audited allocation corrections. Both automation and Poll management permissions are required; an approved Public creator cannot reconcile credits.
+
+The durable ledger is additive to ordinary current votes and remains the only additional-vote authority. New writes require reviewed `commerce-migrations/0041_poll_matchups_and_credits.sql`; paid execution requires Bot protocol 2. See [the contract, acceptance evidence and controlled rollout](docs/POLLS_CREDITS_CONTRACT.md). No migration, deployment or paid enablement was performed remotely.
+
+New tree entries:
+
+```text
+commerce-migrations/0041_poll_matchups_and_credits.sql
+functions/_shared/poll-credits.js
+src/pages/AbootNothingPage.tsx
+src/polls/PollVotingPanel.tsx
+src/polls/admin-request.ts
+tests/poll-credits.test.mjs
+tests/poll-matchups-browser.test.mjs
+docs/POLLS_CREDITS_CONTRACT.md
+```
+
+Existing Poll core/API, signed Bot API, automation API, Poll pages/styles, navigation/capability registry and migration test helper were extended. No historical migration or file was removed. `npm.cmd run test:polls` includes the ledger suite; `npm.cmd run test:browser:poll-matchups` runs coupled offline browser acceptance after both frontend builds. Concurrent Wheel migration 0042 is outside this Poll release set.

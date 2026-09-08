@@ -1,3 +1,4 @@
+import { pollVotingAdmin, savePollPolicy, reconcilePollCredit, matchPaidTrigger } from '../../../_shared/poll-credits.js';
 import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
 import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import { automationsStatus, readPollJson, updateAutomationConfig } from "../../../_shared/polls-core.js";
@@ -8,6 +9,7 @@ export async function onRequest({ request, env }) {
     const url = new URL(request.url); const path = url.pathname.replace(/^\/api\/admin\/automations\/?/, '').replace(/\/$/, '');
     if (request.method === "GET") {
       originWhenPresent(request, env); await requireAdminCapability(env, request, "automations.view");
+      if (path === 'poll-voting') { await requireAdminCapability(env, request, 'polls.manage'); return response(await pollVotingAdmin(env, Object.fromEntries(url.searchParams)), request, env); }
       if (path === 'rules') { await requireAdminCapability(env, request, 'wheels.view'); return response(await listAutomationRules(env, url.searchParams.get('wheelId') || '', url.searchParams.get('ruleId') || ''), request, env); }
       if (path) throw new AuthFailure(404, 'automation_route_not_found', 'Unknown automation route.');
       return response(await automationsStatus(env), request, env);
@@ -15,6 +17,13 @@ export async function onRequest({ request, env }) {
     if (request.method !== "POST") throw new AuthFailure(405, "method_not_allowed", "This Automations method is not allowed.", { Allow: "GET,POST" });
     requireOrigin(request, env); const session = await requireAdminCapability(env, request, "automations.manage"); await requireCsrf(request, session);
     const { body } = await readPollJson(request, 16 * 1024);
+    if (path.startsWith('poll-voting')) {
+      await requireAdminCapability(env, request, 'polls.manage');
+      if (path === 'poll-voting/policy') return response(await savePollPolicy(env, session.accountId, body), request, env);
+      if (path === 'poll-voting/reconcile') return response(await reconcilePollCredit(env, session.accountId, body), request, env);
+      if (path === 'poll-voting/test') return response({ ok: true, matches: matchPaidTrigger(String(body.text || '').slice(0, 4000), Array.isArray(body.options) ? body.options : [], body.rant === true) }, request, env);
+      throw new AuthFailure(404, 'automation_route_not_found', 'Unknown Poll voting route.');
+    }
     if (path) {
       await requireAdminCapability(env, request, 'wheels.manage');
       if (path === 'rules') return response(await saveAutomationRule(env, session.accountId, body), request, env);

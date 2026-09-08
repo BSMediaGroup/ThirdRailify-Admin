@@ -1,5 +1,27 @@
 # Bump notes
 
+## 2026-09-08 - Wheel identity migration 0042 applied live
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- User explicitly authorized the remote migration. Applied only `0042_wheel_entrant_identity.sql` to Admin-owned `thirdrailify-commerce` at 07:47:00 UTC using an isolated migration directory and a private pre-migration export.
+- Verified identity column, unique index and actual authority readiness. Preserved 262 entries, 2639 total weight, 8 rules (3 enabled), 13 receipts; foreign-key check clean.
+- Application code was not deployed by this migration task. Evidence: Admin `.artifacts/migration-0042-live/verification.json` and `readiness.json`.
+
+## 2026-09-08 - Typed Wheel entry identity (local)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced first-name-match automation accumulation with actor/source/event-type identity and a database uniqueness constraint. Same-name subscriptions, gifts, raids, chat, follows, Rants and regular entries remain distinct. Skip/accumulate applies within that identity across rules.
+- Existing IDs retain their private identity through edits and old-client saves. Legacy rows are adopted only with complete, unambiguous creation/receipt evidence; mixed histories keep their existing weight. Award and adoption writes remain atomic and replay protected.
+- Wheel v3 and Stage imports preserve types as independent imported entries with fresh IDs. Public projections and exports exclude automatic matching keys. Typed participant/import/winner details and type-scoped winner removal clarify same-name slices.
+- Added `docs/WHEEL_ENTRANT_IDENTITY.md`, mirrored identity contracts, an Admin storage helper, migration 0042 and D1/import/concurrency/legacy regression coverage. Existing appearance, glyph layout and spin mechanics remain unchanged.
+- Release prerequisite: apply 0042 to Admin Commerce D1 before Admin, then release Public. Tested locally; no remote migration or deployment for this change.
+
 ## 2026-09-08 - Grouped automation cards and entrant feature treatments (local)
 
 CURRENT VER=0.1.0-alpha.0
@@ -948,3 +970,15 @@ Shared editor now lets the server recheck schema on Save rather than disabling o
 ### 2026-09-07 optional Rant message repair
 
 Blank or space-only optional Rant exact text is accepted by shared validation and omitted from saved conditions. Minimum cents and other filters remain enforced. Exact Chat still requires text. Updated automation award regression coverage proves unrestricted message matching at the configured amount and rejection below it. No migration or Bot change required.
+
+
+## 2026-09-08 - Aboot Nothing Polls and durable additional votes (LOCAL ONLY)
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added the coupled Public/Admin Aboot Nothing collection and shared comparison presentation, durable paid-credit ledger, versioned policy windows, conservative message budgets, explicit closed-result reconciliation and protocol-2 Bot outbox.
+- Ordinary current votes retain weight one. Rants earn floor(cents/100); gifts earn total_gifts*5. Unresolved credits are conserved and excluded from totals until allocated. Existing creator/media/source authority is retained.
+- Root README documents new files; the Admin `docs/POLLS_CREDITS_CONTRACT.md` records exact migration 0041, acceptance results, provider limits and controlled rollout order. Versions are unchanged for this local milestone.
+- No remote migration/deployment/push, provider event, live vote, paid enablement or Bot restart. Concurrent unrelated workspace changes are preserved. The existing Admin heartbeat browser fixture mismatch remains a documented validation limitation.
