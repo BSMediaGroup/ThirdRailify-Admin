@@ -46,18 +46,20 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
   const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true }); t.after(() => browser.close());
   const errors = [], geometry = [];
   let failNextArtwork = false;
+  let publicAuthorized = false;
   async function routes(context) {
     await context.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
+      if (url.origin === 'http://127.0.0.1:5174' && url.pathname === '/api/auth/config') return route.fulfill({ headers: { 'Access-Control-Allow-Origin': PUBLIC }, json: { configured: true, emailSignupConfigured: false, oauthProviders: [], oauthProviderStates: [], publicOrigin: PUBLIC, adminOrigin: ADMIN } });
       if (![PUBLIC, ADMIN].includes(url.origin)) return route.abort();
       if (!url.pathname.startsWith('/api/')) return route.continue();
       const isAdmin = url.origin === ADMIN;
-      const headers = { ...request.headers(), ...(isAdmin ? { Cookie: cookie } : {}) };
+      const headers = { ...request.headers(), ...(isAdmin || publicAuthorized ? { Cookie: cookie } : {}) };
       const req = new Request(request.url(), { method: request.method(), headers, ...(request.postDataBuffer() ? { body: request.postDataBuffer() } : {}) });
       let response;
       if (failNextArtwork && request.method() === 'POST' && url.pathname.includes('/media/')) { failNextArtwork = false; response = Response.json({ message: 'Test upload interruption' }, { status: 503 }); }
       else if (url.pathname === '/api/auth/config') response = Response.json({ configured: true, emailSignupConfigured: false, turnstileSiteKey: null, oauthProviders: [], oauthProviderStates: [], publicOrigin: PUBLIC, adminOrigin: ADMIN, environment: 'test', cookieMode: 'host-only' });
-      else if (url.pathname === '/api/auth/session') response = Response.json(isAdmin ? await sessionEnvelope(env, await resolveSession(env, req), session.csrfToken) : { ok: true, authenticated: false, account: null });
+      else if (url.pathname === '/api/auth/session') response = Response.json(isAdmin || publicAuthorized ? await sessionEnvelope(env, await resolveSession(env, req), session.csrfToken) : { ok: true, authenticated: false, account: null });
       else if (url.pathname === '/api/admin/inbox/summary') response = Response.json({ ok: true, unread: 0, actionable: { goats: { total: 0, submissions: 0, comments: 0, emailFailures: 0 } } });
       else if (url.pathname.startsWith('/api/admin/polls')) response = await adminPollHandler({ request: req, env });
       else if (url.pathname.startsWith('/api/admin/automations')) response = await automationHandler({ request: req, env });
@@ -76,6 +78,7 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
     await page.getByRole('button', { name: `Quick view ${created.poll.title}`, exact: true }).click(); await page.getByRole('dialog').waitFor();
     assert.equal(await page.locator('.aboot-vote-cards>article').count(), 2); await page.keyboard.press('Escape'); assert.equal(await page.getByRole('dialog').count(), 0);
     await page.goto(PUBLIC + `/polls/${created.poll.slug}`); await page.locator('.aboot-vote-cards').waitFor();
+    assert.equal(await page.locator('.poll-increment').count(), 0);
     assert.ok((await page.locator('.poll-credit-status').textContent()).includes('25 votes awaiting allocation'));
     geometry.push({ width, route: 'detail', fits: await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth) });
     await page.screenshot({ path: `${artifacts}/detail-${width}.png`, fullPage: true });
@@ -159,6 +162,52 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       await page.reload();
       await page.locator('.aboot-admin-grid article').filter({ hasText: 'Artwork before first save' }).getByRole('button', { name: 'Edit matchup' }).click();
       assert.equal(await page.locator('.aboot-admin-preview').count(), 3);
+      const draftRow = await h.commerceDb.prepare("SELECT public_slug FROM polls WHERE title='Artwork before first save'").first();
+      const draftPayload = await adminPollHandler({env,request:new Request(ADMIN+'/api/admin/polls/'+draftRow.public_slug,{headers:{Cookie:cookie}})});
+      const savedDraft = (await draftPayload.json()).poll;
+      await changePollLifecycle(env,account.id,savedDraft.slug,{revision:savedDraft.revision,action:'open'});
+      publicAuthorized = true;
+      await page.goto(PUBLIC+'/polls/'+savedDraft.slug);
+      await page.locator('.poll-increment').first().waitFor({ timeout: 10000 }).catch(async error => { await page.screenshot({ path: `${artifacts}/increment-debug.png` }); throw new Error(error.message + ' ' + await page.evaluate(async () => JSON.stringify(await (await fetch('/api/polls/access')).json()))); });
+      await page.mouse.move(0,0);
+      assert.equal(await page.locator('.poll-increment').first().evaluate(n=>getComputedStyle(n).opacity),'0');
+      await page.locator('.poll-options>article').first().hover();
+      await page.getByLabel('Votes to add to Side one',{exact:true}).fill('7');
+      await page.getByRole('button',{name:'Add 7',exact:true}).click();
+      await page.waitForFunction(()=>document.querySelector('.poll-options>article em')?.textContent==='7 votes');
+      assert.equal((await getPublicPoll(env,savedDraft.slug)).poll.totalVotes,7);
+      for (const incrementWidth of [1440,390]) {
+        await page.setViewportSize({width:incrementWidth,height:1000});
+        await page.locator('.poll-options>article').first().hover();
+        const row = page.locator('.poll-increment').first();
+        assert.equal(await row.evaluate(n=>getComputedStyle(n).display), incrementWidth < 700 ? 'grid' : 'flex');
+        assert.ok(await row.evaluate(n=>n.scrollWidth<=n.clientWidth));
+        assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+        await page.locator('.poll-options>article').first().screenshot({path:`${artifacts}/authorized-increment-${incrementWidth}.png`});
+      }
+
+      const regular = await createPoll(env, account.id, { title: 'Regular increment acceptance', options: [{ label: 'Regular A', trigger: 'a' }, { label: 'Regular B', trigger: 'b' }] });
+      await changePollLifecycle(env, account.id, regular.poll.slug, { revision: regular.poll.revision, action: 'open' });
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.goto(PUBLIC + '/polls/' + regular.poll.slug);
+      await page.locator('.poll-increment').first().waitFor();
+      await page.locator('.poll-options>article').first().hover();
+      await page.getByLabel('Votes to add to Regular A', { exact: true }).fill('3');
+      await page.getByRole('button', { name: 'Add 3', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('.poll-options>article em')?.textContent === '3 votes');
+      assert.equal((await getPublicPoll(env, regular.poll.slug)).poll.totalVotes, 3);
+      await page.locator('.poll-options').screenshot({ path: `${artifacts}/regular-increment.png` });
+      await page.goto(PUBLIC + '/polls');
+      await page.getByRole('button', { name: 'Quick view Regular increment acceptance', exact: true }).click();
+      await page.getByRole('dialog').locator('.poll-options>article').last().hover();
+      await page.getByRole('dialog').getByLabel('Votes to add to Regular B', { exact: true }).fill('2');
+      await page.getByRole('dialog').getByRole('button', { name: 'Add 2', exact: true }).click();
+      await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog] .poll-options>article em')].some(n => n.textContent === '2 votes'));
+      assert.equal((await getPublicPoll(env, regular.poll.slug)).poll.totalVotes, 5);
+      publicAuthorized = false;
+      await page.goto(PUBLIC + '/polls/' + regular.poll.slug); await page.locator('.poll-options').waitFor();
+      assert.equal(await page.locator('.poll-increment').count(),0);
+
     }
     const video = page.video(); await context.close();
     if (video) await video.saveAs(`${artifacts}/matchup-state-change.webm`);

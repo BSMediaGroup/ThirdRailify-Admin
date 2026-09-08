@@ -107,6 +107,33 @@ export async function getPollCreatorAccess(env, accountId) {
   return { ok: true, authenticated: true, canCreate: admin.canManageAll || Boolean(grant?.active && grant?.may_create_polls), canManageAll: admin.canManageAll };
 }
 
+export async function incrementPollVotes(env, accountId, slug, input) {
+  if (!(await getPollCreatorAccess(env, accountId)).canCreate) throw new AuthFailure(403, 'poll_increment_forbidden', 'An Admin or approved Poll account is required.');
+  const db = requirePollDb(env);
+  const amount = input.amount;
+  if (!Number.isInteger(amount) || amount < 1 || amount > 10000) throw new AuthFailure(400, 'poll_increment_invalid', 'Choose a whole number from 1 to 10000.');
+  const requestId = String(input.requestId || '');
+  if (!/^[a-f0-9-]{36}$/i.test(requestId)) throw new AuthFailure(400, 'poll_increment_request_invalid', 'A valid request identifier is required.');
+  const row = await db.prepare('SELECT * FROM polls WHERE public_slug=?').bind(slug).first();
+  if (!row) throw new AuthFailure(404, 'poll_not_found', 'This Poll was not found.');
+  const previous = await db.prepare('SELECT * FROM poll_manual_votes WHERE request_id=?').bind(requestId).first();
+  if (previous) {
+    if (previous.poll_id !== row.id || previous.option_id !== input.optionId || previous.actor_account_id !== accountId || previous.amount !== amount) throw new AuthFailure(409, 'poll_increment_request_conflict', 'This request identifier was already used.');
+    return getPublicPoll(env, slug, accountId);
+  }
+  if (row.state !== 'open' || !row.is_public) throw new AuthFailure(409, 'poll_not_open', 'Additional votes require an open, listed Poll.');
+  if (!await db.prepare('SELECT id FROM poll_options WHERE id=? AND poll_id=?').bind(String(input.optionId || ''), row.id).first()) throw new AuthFailure(400, 'poll_option_invalid', 'Choose an option from this Poll.');
+  try {
+    await db.prepare('INSERT INTO poll_manual_votes(request_id,poll_id,option_id,actor_account_id,amount,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(request_id) DO NOTHING').bind(requestId, row.id, input.optionId, accountId, amount, nowIso()).run();
+  } catch (error) {
+    if (String(error).includes('poll_manual_vote_closed')) throw new AuthFailure(409, 'poll_not_open', 'This Poll closed before the votes were added.');
+    throw error;
+  }
+  const recorded = await db.prepare('SELECT * FROM poll_manual_votes WHERE request_id=?').bind(requestId).first();
+  if (recorded.poll_id !== row.id || recorded.option_id !== input.optionId || recorded.actor_account_id !== accountId || recorded.amount !== amount) throw new AuthFailure(409, 'poll_increment_request_conflict', 'This request identifier was already used.');
+  return getPublicPoll(env, slug, accountId);
+}
+
 export async function getCreatorRumbleDiscovery(env, accountId) {
   await requireCreator(env, accountId);
   return getSafeRumbleDiscovery(env);
@@ -587,8 +614,11 @@ async function optionResults(env, pollId, publicVisible = false) {
     FROM poll_options o LEFT JOIN poll_media_assets a ON a.poll_option_id=o.id AND a.purpose='option' AND a.lifecycle='active'
     WHERE o.poll_id=? ORDER BY o.display_position`).bind(pollId).all();
   const bonuses = await bonusOptions(env, pollId);
+  const manualReady = await requirePollDb(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_manual_votes'").first();
+  const manualRows = manualReady ? (await requirePollDb(env).prepare('SELECT option_id,SUM(amount) AS votes FROM poll_manual_votes WHERE poll_id=? GROUP BY option_id').bind(pollId).all()).results : [];
+  const manual = new Map((manualRows || []).map(row => [row.option_id, Number(row.votes)]));
   return (rows?.results || []).map((row) => ({ id: row.id, position: Number(row.display_position), label: row.label,
-    description: row.short_description || null, trigger: row.trigger_raw, normalizedTrigger: row.trigger_normalized, votes: Number(row.votes || 0) + (bonuses.get(row.id) || 0), ordinaryVotes: Number(row.votes || 0), bonusVotes: bonuses.get(row.id) || 0,
+    description: row.short_description || null, trigger: row.trigger_raw, normalizedTrigger: row.trigger_normalized, votes: Number(row.votes || 0) + (bonuses.get(row.id) || 0) + (manual.get(row.id) || 0), manualVotes: manual.get(row.id) || 0, ordinaryVotes: Number(row.votes || 0), bonusVotes: bonuses.get(row.id) || 0,
     image: projectPollMediaAsset(row.image_asset_id ? { id: row.image_asset_id, purpose: row.image_purpose, poll_option_id: row.image_option_id,
       content_type: row.image_content_type, byte_size: row.image_byte_size, width: row.image_width, height: row.image_height,
       sha256: row.image_sha256, original_filename: row.image_original_filename, created_at: row.image_created_at } : null, env, publicVisible) }));

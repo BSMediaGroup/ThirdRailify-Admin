@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  incrementPollVotes,
   automationsStatus,
   botActivePoll,
   changePollLifecycle,
@@ -352,3 +353,29 @@ async function hmac(value) {
   const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
   return Buffer.from(bytes).toString("base64url");
 }
+
+
+test('approved manual increments preserve ordinary votes, reject unauthorized actors and replay safely', async t => {
+  const h = await createCommerceDatabases(); t.after(h.dispose);
+  const env = commerceEnvironment(h, { THIRDRAILIFY_POLL_VOTER_SECRET: HMAC_SECRET });
+  await account(h.authDb, 'increment-owner', 'Owner'); await account(h.authDb, 'increment-approved', 'Approved'); await account(h.authDb, 'increment-ordinary', 'Ordinary');
+  for (const id of ['increment-owner', 'increment-approved']) await h.commerceDb.prepare("INSERT INTO poll_creator_grants(account_id,active,may_create_polls,created_at,updated_at) VALUES (?,1,1,?,?)").bind(id,new Date().toISOString(),new Date().toISOString()).run();
+  let {poll} = await createPoll(env, 'increment-owner', pollInput('Manual increments'));
+  ({poll} = await changePollLifecycle(env, 'increment-owner', poll.slug, {revision:poll.revision,action:'open'}));
+  const input = {optionId:poll.options[0].id,amount:12,requestId:crypto.randomUUID()};
+  for (const id of ['', 'increment-ordinary']) await assert.rejects(incrementPollVotes(env,id,poll.slug,input), e=>e.status===403);
+  for (const amount of [0,-1,1.5,10001,'5']) await assert.rejects(incrementPollVotes(env,'increment-approved',poll.slug,{...input,amount}), e=>e.status===400);
+  await assert.rejects(incrementPollVotes(env,'increment-approved',poll.slug,{...input,optionId:'wrong'}), e=>e.status===400);
+  await Promise.all([incrementPollVotes(env,'increment-approved',poll.slug,input),incrementPollVotes(env,'increment-approved',poll.slug,input)]);
+  ({poll}=await getPublicPoll(env,poll.slug)); assert.equal(poll.totalVotes,12); assert.equal(poll.ordinaryVoterIdentities,0); assert.equal(poll.options[0].manualVotes,12);
+  await assert.rejects(incrementPollVotes(env,'increment-approved',poll.slug,{...input,amount:13}), e=>e.status===409);
+  await incrementPollVotes(env,'increment-approved',poll.slug,{...input,optionId:poll.options[1].id,amount:3,requestId:crypto.randomUUID()});
+  const vote = {namespace:'web_account',key:'account:increment-approved',accountId:'increment-approved'};
+  await submitWebVote(env,vote,poll.slug,{optionId:poll.options[0].id}); await submitWebVote(env,vote,poll.slug,{optionId:poll.options[1].id});
+  ({poll}=await getPublicPoll(env,poll.slug)); assert.equal(poll.totalVotes,16); assert.equal(poll.ordinaryVoterIdentities,1);
+  await h.commerceDb.prepare("UPDATE poll_creator_grants SET active=0 WHERE account_id='increment-approved'").run();
+  await assert.rejects(incrementPollVotes(env,'increment-approved',poll.slug,{...input,requestId:crypto.randomUUID()}), e=>e.status===403);
+  ({poll}=await changePollLifecycle(env,'increment-owner',poll.slug,{revision:poll.revision,action:'close'}));
+  await assert.rejects(incrementPollVotes(env,'increment-owner',poll.slug,{...input,requestId:crypto.randomUUID()}), e=>e.status===409);
+  const audit=(await h.commerceDb.prepare('SELECT actor_account_id,amount FROM poll_manual_votes').all()).results; assert.equal(audit.length,2); assert.ok(audit.every(r=>r.actor_account_id==='increment-approved'));
+});

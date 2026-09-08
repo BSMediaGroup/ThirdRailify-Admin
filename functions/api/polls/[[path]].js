@@ -1,5 +1,6 @@
 import { AuthFailure, errorResponse, jsonResponse } from "../../_shared/auth-core.js";
 import {
+  incrementPollVotes,
   changePollLifecycle,
   changePollVisibility,
   createPoll,
@@ -72,6 +73,8 @@ async function internalAction(method, env, path, body) {
   if (method === "POST" && lifecycle) return changePollLifecycle(env, accountId, decode(lifecycle[1]), body.input || {});
   const visibility = path.match(/^([^/]+)\/visibility$/);
   if (method === "POST" && visibility) return changePollVisibility(env, accountId, decode(visibility[1]), body.input || {});
+  const increment = path.match(/^([^/]+)\/increment$/);
+  if (method === "POST" && increment) return incrementPollVotes(env, accountId, decode(increment[1]), body.input || {});
   const vote = path.match(/^([^/]+)\/vote$/);
   if (method === "POST" && vote) return submitWebVote(env, relayActor(body.actor, accountId), decode(vote[1]), body.input || {});
   const mediaRemove = path.match(/^([^/]+)\/media\/(banner|option)(?:\/([^/]+))?$/);
