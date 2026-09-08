@@ -1,3 +1,4 @@
+import { schemaObject } from './schema-capabilities.js';
 import { validateStreamUrl, rumbleStreamUrl, detectedPollStreams } from './poll-streams.js';
 import { paidSchema, activePaidContext, bonusOptions, creditProjection, publicPollPolicy } from './poll-credits.js';
 import {
@@ -186,7 +187,7 @@ export async function createPoll(env, accountId, input, transactionExtension = n
   if (validated.presentationType !== 'regular' || input.presentation) await paidSchema(env);
   const metadata = upgraded ? [db.prepare('UPDATE polls SET presentation_type=?,presentation_json=? WHERE id=?').bind(validated.presentationType, JSON.stringify(validated.presentation), id)] : [];
   // Check media projection prerequisites before creating anything.
-  if (!(await db.prepare("SELECT name FROM sqlite_master WHERE name='poll_media_assets'").first())) throw new AuthFailure(503, 'poll_media_schema_required', 'Apply the reviewed Poll media schema before creating Polls.');
+  if (!(await schemaObject(db, 'poll_media_assets'))) throw new AuthFailure(503, 'poll_media_schema_required', 'Apply the reviewed Poll media schema before creating Polls.');
   await db.batch([
     db.prepare(`INSERT INTO polls
       (id,public_slug,owner_account_id,title,description,state,is_public,web_voting_mode,rumble_enabled,rumble_source_scope,
@@ -216,11 +217,11 @@ export async function updatePoll(env, accountId, slug, input) {
   const existingOptions = await db.prepare('SELECT * FROM poll_options WHERE poll_id=? ORDER BY display_position').bind(row.id).all();
   if (validated.presentationType === 'abootnothing' && (input.options || existingOptions.results).length !== 2) throw new AuthFailure(400, 'poll_matchup_requires_two', 'Aboot Nothing requires exactly two stable options.');
   const hasVotes = Number((await db.prepare('SELECT COUNT(*) count FROM poll_votes WHERE poll_id=?').bind(row.id).first()).count) > 0;
-  const manualSchema = await db.prepare("SELECT 1 FROM sqlite_master WHERE name='poll_manual_votes'").first();
+  const manualSchema = await schemaObject(db, 'poll_manual_votes');
   const hasCredits = upgraded && (Boolean(await db.prepare('SELECT 1 FROM poll_credit_lots WHERE poll_id=? LIMIT 1').bind(row.id).first()) || Boolean(manualSchema && await db.prepare('SELECT 1 FROM poll_manual_votes WHERE poll_id=? LIMIT 1').bind(row.id).first()));
   if ((hasVotes || hasCredits) && validated.presentationType !== (row.presentation_type || 'regular')) throw new AuthFailure(409, 'poll_structure_locked', 'The Poll category is locked after voting begins.');
   let structural = Array.isArray(input.options);
-  const bracketSchema = await db.prepare("SELECT name FROM sqlite_schema WHERE name='aboot_poll_links'").first();
+  const bracketSchema = await schemaObject(db, 'aboot_poll_links');
   const bracketLinked = bracketSchema && await db.prepare('SELECT id FROM aboot_poll_links WHERE poll_id=? AND active=1').bind(row.id).first();
   if (bracketLinked && validated.presentationType !== row.presentation_type) throw new AuthFailure(409, 'poll_bracket_identity_locked', 'Detach the canonical bracket link before changing this Poll category.');
   if (bracketLinked && structural) {
@@ -337,7 +338,7 @@ async function resetPollToUpcoming(env, accountId, row, input) {
   if (!(await getPollCreatorAccess(env, accountId)).canManageAll) throw new AuthFailure(403, 'poll_reset_admin_required', 'Only an Admin can reset a Poll.');
   if (!['open','closed','archived'].includes(row.state) || !row.opened_at) throw new AuthFailure(409, 'poll_reset_state_invalid', 'Only a previously opened Poll can be reset.');
   if (input.revision !== row.revision) throw new AuthFailure(409, 'poll_revision_conflict', 'This Poll changed. Refresh before resetting.');
-  if (!await db.prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first()) throw new AuthFailure(503,'poll_reset_schema_required','Poll reset requires migration 0044.');
+  if (!await schemaObject(db, 'poll_result_history')) throw new AuthFailure(503,'poll_reset_schema_required','Poll reset requires migration 0044.');
   const snapshot = await projectSummary(env,row);
   const historyId = randomId(), guard = randomId(), timestamp = nowIso();
   const publicSnapshot = { title: snapshot.title, openedAt: snapshot.openedAt, closedAt: snapshot.closedAt, totalVotes: snapshot.totalVotes, unallocatedDiscarded: snapshot.credits?.unresolved || 0, options: snapshot.options.map(o => ({ id:o.id,label:o.label,votes:o.votes,ordinaryVotes:o.ordinaryVotes,bonusVotes:o.bonusVotes,manualVotes:o.manualVotes })) };
@@ -638,7 +639,7 @@ async function projectDetail(env, row, accountId = "", voteIdentity = null) {
     .bind(row.id, voteIdentity.namespace, voteIdentity.voterHash).first();
   else if (accountId) currentVote = await requirePollDb(env).prepare("SELECT option_id FROM poll_votes WHERE poll_id=? AND source_namespace='web_account' AND voter_key_hash=?")
     .bind(row.id, await voterKeyHash(env, "web_account", `account:${accountId}`)).first();
-  const historyReady = await requirePollDb(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first();
+  const historyReady = await schemaObject(requirePollDb(env), 'poll_result_history');
   const history = historyReady ? (await requirePollDb(env).prepare('SELECT id,snapshot_json,created_at FROM poll_result_history WHERE poll_id=? ORDER BY created_at DESC LIMIT 100').bind(row.id).all()).results.map(h => ({ id:h.id,resetAt:h.created_at,...JSON.parse(h.snapshot_json) })) : [];
   return { ...summary, history, livestreamMode: row.rumble_livestream_mode, livestreamId: row.rumble_livestream_id || null,
     requestedIntervalSeconds: Number(row.requested_interval_seconds), currentVoteOptionId: currentVote?.option_id || null };
@@ -652,8 +653,8 @@ async function optionResults(env, pollId, publicVisible = false) {
     FROM poll_options o LEFT JOIN poll_media_assets a ON a.poll_option_id=o.id AND a.purpose='option' AND a.lifecycle='active'
     WHERE o.poll_id=? ORDER BY o.display_position`).bind(pollId).all();
   const bonuses = await bonusOptions(env, pollId);
-  const manualReady = await requirePollDb(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_manual_votes'").first();
-  const historyReady = await requirePollDb(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first();
+  const manualReady = await schemaObject(requirePollDb(env), 'poll_manual_votes');
+  const historyReady = await schemaObject(requirePollDb(env), 'poll_result_history');
   const manualRows = manualReady ? (await requirePollDb(env).prepare(`SELECT option_id,SUM(amount) AS votes FROM poll_manual_votes WHERE poll_id=? ${historyReady ? 'AND request_id NOT IN (SELECT request_id FROM poll_reset_manual_votes)' : ''} GROUP BY option_id`).bind(pollId).all()).results : [];
   const manual = new Map((manualRows || []).map(row => [row.option_id, Number(row.votes)]));
   return (rows?.results || []).map((row) => ({ id: row.id, position: Number(row.display_position), label: row.label,

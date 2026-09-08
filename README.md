@@ -1,5 +1,7 @@
 # Third Railify Admin
 
+Schema reporting uses `functions/_shared/schema-capabilities.js` to share bounded metadata reads across Poll, Matchup and Automation authorities. Live results and permissions are not cached. See [D1 quota repair and validation](docs/D1_SCHEMA_QUOTA_REPAIR.md); regression files are `tests/schema-capabilities.test.mjs` and `tests/schema-quota.test.mjs`.
+
 ## Overview source health
 
 Overview now derives source counts, incidents and component diagnostics from coordinated per-source reads. Runtime heartbeat cadence and classification remain unchanged. See [source health architecture, release manifest and evidence limits](docs/OVERVIEW_SOURCE_HEALTH.md) for the new `src/overview/` files, scoped route middleware and regression tests. No files were removed.

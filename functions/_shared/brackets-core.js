@@ -1,6 +1,7 @@
 import { AuthFailure, nowIso } from './auth-core.js';
 import { createPoll, getPublicPoll } from './polls-core.js';
 import { paidSchema } from './poll-credits.js';
+import { hasSchemaObjects } from './schema-capabilities.js';
 import { sanitizeWheelMedia } from './wheel-media.js';
 import { uid, validate, generate, duplicate, referenceTemplate, safeGraph, opponents, descendants, protectedMatchIds } from '../../src/brackets/model.mjs';
 
@@ -10,8 +11,8 @@ const rows = async statement => (await statement.all()).results || [];
 const dbFor = env => env.THIRDRAILIFY_COMMERCE_DB;
 export async function bracketReady(env) {
   const db = dbFor(env);
-  const names = await rows(db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('aboot_brackets','aboot_publications','aboot_poll_links','aboot_decisions','aboot_audit','aboot_guards','aboot_media')"));
-  if (names.length !== 7) fail(503, 'bracket_schema_required', 'Apply reviewed Matchup Studio migration 0043 before saving.');
+  const ready = await hasSchemaObjects(db, ['aboot_brackets','aboot_publications','aboot_poll_links','aboot_decisions','aboot_audit','aboot_guards','aboot_media'], 'table');
+  if (!ready) fail(503, 'bracket_schema_required', 'Apply reviewed Matchup Studio migration 0043 before saving.');
   await paidSchema(env);
   return db;
 }

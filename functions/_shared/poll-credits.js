@@ -1,5 +1,6 @@
 import { AuthFailure, nowIso, randomId } from './auth-core.js';
 import { normalizePollTrigger } from './poll-normalization.js';
+import { hasSchemaObjects, schemaObject } from './schema-capabilities.js';
 
 export const PAID_PROTOCOL = 2;
 export const DEFAULT_POLL_POLICY = Object.freeze({ rantEnabled: false, giftEnabled: false, centsPerVote: 100, votesPerGift: 5, maxMessages: 3, timeoutSeconds: 300 });
@@ -8,8 +9,7 @@ const fail = (code, message, status = 400) => { throw new AuthFailure(status, co
 const rows = async statement => (await statement.all()).results || [];
 const parse = value => JSON.parse(value);
 export async function paidSchema(env, required = true) {
-  const found = await dbFor(env).prepare("SELECT COUNT(*) count FROM sqlite_master WHERE name IN ('poll_credit_guards','poll_credit_lifecycle','poll_credit_allocation_guard','poll_credit_review_audit','poll_credit_structure_update')").first();
-  const ready = found?.count === 5;
+  const ready = await hasSchemaObjects(dbFor(env), ['poll_credit_guards','poll_credit_lifecycle','poll_credit_allocation_guard','poll_credit_review_audit','poll_credit_structure_update']);
   if (!ready && required) fail('poll_credit_schema_required', 'Poll matchups and credits require the complete reviewed migration 0041 before saving.', 503);
   return ready;
 }
@@ -96,7 +96,7 @@ export async function expirePollCredits(env) {
   await dbFor(env).prepare(`UPDATE poll_credit_lots SET unreconciled=unreconciled+waiting,waiting=0,reason='timeout',revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM poll_credit_lots WHERE waiting>0 AND expires_at<=? LIMIT 200)`).bind(timestamp, timestamp).run();
 }
 async function resetCreditFilter(env, prefix = '') {
-  return await dbFor(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first() ? ` AND ${prefix}window_id NOT IN (SELECT window_id FROM poll_reset_windows)` : '';
+  return await schemaObject(dbFor(env), 'poll_result_history') ? ` AND ${prefix}window_id NOT IN (SELECT window_id FROM poll_reset_windows)` : '';
 }
 export async function creditProjection(env, pollId) {
   if (!await paidSchema(env, false)) return null;

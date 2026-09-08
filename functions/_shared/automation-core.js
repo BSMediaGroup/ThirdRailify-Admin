@@ -5,13 +5,15 @@ import { getSafeRumbleDiscovery, requirePollDb } from './polls-core.js';
 import { executeAutomationWheelEntry } from './wheels-core.js';
 import { fieldFailure, invalid, matches, validateEvent, validateRule } from './automation-contract.js';
 import { normalizePollTrigger } from './poll-normalization.js';
+import { schemaObject, invalidateSchemaCapabilities } from './schema-capabilities.js';
 
 export async function automationReadiness(env) {
   const db = requirePollDb(env);
-  const table = await db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='automation_rules'").first();
+  const table = await schemaObject(db, 'automation_rules', 'table');
   const columns = (await db.prepare('PRAGMA table_info(automation_rules)').all()).results;
   const awards = columns.some(c => c.name === 'action_config_json');
   const raidSchema = awards && Boolean(table?.sql?.includes("'rumble.raid.received'"));
+  if (!raidSchema) invalidateSchemaCapabilities(db);
   const heartbeat = await db.prepare('SELECT runtime_json,heartbeat_at FROM bot_runtime_heartbeat WHERE singleton_id=1').first();
   let runtime = {}; try { runtime = JSON.parse(heartbeat?.runtime_json || '{}'); } catch { /* fail closed */ }
   const age = Date.now() - Date.parse(heartbeat?.heartbeat_at);

@@ -1,5 +1,14 @@
 # Bump notes
 
+## 2026-09-09 - D1 schema reporting quota repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Consolidated repeated Poll, credit, Matchup and Automation schema scans into a fixed metadata catalogue reused for five minutes per D1 binding. Failed/missing readiness is retried; operational reads and all write/replay guards retain their existing behavior.
+- Added deterministic expiry/isolation/failure tests and a real local D1 quota regression: one 464-row catalogue scan for 40 combined reporting cycles, versus 37,120 rows for the old paid-schema checks alone. See `docs/D1_SCHEMA_QUOTA_REPAIR.md` for incident evidence, cache limits and release verification.
+
 ## 2026-09-08 - Overview diagnostics presentation
 
 CURRENT VER=0.1.0-alpha.0

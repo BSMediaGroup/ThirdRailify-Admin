@@ -1,3 +1,4 @@
+import { schemaObject } from '../../../_shared/schema-capabilities.js';
 import { uploadPollMedia, pollMediaResponse } from '../../../_shared/poll-media.js';
 import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
 import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
@@ -20,7 +21,7 @@ export async function onRequest({ request, env }) {
       if (path === "access") return response(await adminPollAccess(env), request, env);
       const payload = await getPublicPoll(env, decode(path), (await requireAdminCapability(env, request, "polls.view")).accountId, true);
       const db = env.THIRDRAILIFY_COMMERCE_DB;
-      if (await db.prepare("SELECT name FROM sqlite_schema WHERE name='aboot_poll_links'").first()) {
+      if (await schemaObject(db, 'aboot_poll_links')) {
         const linked = await db.prepare('SELECT l.bracket_id,l.match_id,b.title,b.draft_json FROM aboot_poll_links l JOIN aboot_brackets b ON b.id=l.bracket_id WHERE l.poll_id=? AND l.active=1').bind(payload.poll.id).first();
         if (linked) { const match = JSON.parse(linked.draft_json).matches.find(m => m.id === linked.match_id); payload.poll.bracketLink = { bracketId: linked.bracket_id, matchId: linked.match_id, title: linked.title, round: match?.round, position: match?.position }; }
       }
