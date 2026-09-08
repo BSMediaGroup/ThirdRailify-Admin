@@ -281,3 +281,7 @@
 .bracket-placed-check { display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;color:#6dc98d; }
 .bracket-bench-item summary small { margin-left:5px; }
 .bracket-bench-item.is-placed summary small { color:#8bcba2; }
+
+.bracket-audit article { padding: 16px; margin: 12px 0; border: 1px solid var(--border-color, #39351e); border-radius: 8px; }
+.bracket-audit h3 { font-family: inherit; font-size: 1rem; line-height: 1.5; }
+.bracket-audit-reason { white-space: pre-wrap; overflow-wrap: anywhere; }

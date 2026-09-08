@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createCommerceDatabases, commerceEnvironment } from './commerce-test-helpers.mjs';
 import { applyMigration } from './auth-test-helpers.mjs';
 import { generate, referenceTemplate, duplicate, validate, uid, protectedMatchIds } from '../src/brackets/model.mjs';
-import { createBracket, mutateBracket, publicBrackets, createMatchPoll, adminBracket, pollPicker, uploadBracketMedia, bracketMedia, importBracketImage } from '../functions/_shared/brackets-core.js';
+import { createBracket, mutateBracket, publicBrackets, createMatchPoll, adminBracket, pollPicker, uploadBracketMedia, bracketMedia, importBracketImage, matchAudit } from '../functions/_shared/brackets-core.js';
 import { createPoll, mutatePollCreatorGrant, changePollLifecycle, changePollVisibility, submitWebVote, updatePoll } from '../functions/_shared/polls-core.js';
 import { createSession } from '../functions/_shared/auth-core.js';
 import { onRequest as handler } from '../functions/api/admin/brackets/[[path]].js';
@@ -35,6 +35,7 @@ test('HTTP permission boundaries, reversed mappings, downstream protection, medi
   for(const id of ['ordinary','creator']) {
     const account=await h.authDb.prepare('SELECT * FROM accounts WHERE id=?').bind(id).first(), session=await createSession(env,new Request(origin),account,origin);
     const response=await handler({env,request:new Request(origin+'/api/admin/brackets',{headers:{Cookie:session.cookie.split(';')[0]}})});assert.equal(response.status,403);
+    assert.equal((await handler({env,request:new Request(origin+'/api/admin/brackets/private/audit?matchId=private',{headers:{Cookie:session.cookie.split(';')[0]}})})).status,403);
   }
   let b=(await createBracket(env,actor,{id:uid('bracket'),size:4,title:'Bounded acceptance'})).bracket;
   const action=async(name,extra={})=>{b=(await mutateBracket(env,b.id,actor,{action:name,revision:b.revision,requestId:uid('request'),...extra})).bracket;};
@@ -59,6 +60,7 @@ test('HTTP permission boundaries, reversed mappings, downstream protection, medi
   const withArtwork=structuredClone(b.graph);withArtwork.contenders[0].image=asset.assetId;await action('save',{graph:withArtwork});
   b=(await createMatchPoll(env,b.id,actor,{matchId:graph.matches[2].id,revision:b.revision,requestId:uid('request')})).bracket;
   assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) n FROM poll_media_assets').first()).n,1);
+  await assert.rejects(mutateBracket(env,b.id,actor,{action:'correct_result',matchId:graph.matches[0].id,winnerId:graph.contenders[1].id,scores:[0,99],reason:'Attempt to replace Poll outcome',revision:b.revision,requestId:uid('request')}),/Only an accepted historical/);
   await assert.rejects(mutateBracket(env,b.id,actor,{action:'rollback',matchId:graph.matches[0].id,reason:'Review changed result',revision:b.revision,requestId:uid('request')}),/downstream Poll is protected/);
   const down=b.sources[graph.matches[2].id];let dp=(await changePollLifecycle(env,actor,down.slug,{action:'open',revision:down.revision})).poll;
   dp=(await changePollLifecycle(env,actor,down.slug,{action:'close',revision:dp.revision})).poll;
@@ -157,4 +159,46 @@ test('partial seasons allow unrelated placement and names while protecting resul
   await assert.rejects(importBracketImage(env,b.id,actor,'https://images.example.com/item.png',async()=>new Response('<html/>',{headers:{'content-type':'image/png'}})));
   assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) n FROM aboot_media').first()).n,count);
 
+});
+
+
+test('historical corrections require reasons, retain immutable evidence and protect downstream winners', { timeout:120000 }, async t => {
+  const h=await createCommerceDatabases(); t.after(h.dispose);
+  const env=commerceEnvironment(h), actor='history-admin';
+  await applyMigration(h.commerceDb,await readFile(new URL('../commerce-migrations/0043_aboot_matchup_studio.sql',import.meta.url),'utf8'));
+  let b=(await createBracket(env,actor,{id:uid('bracket'),template:'reference'})).bracket;
+  const act=async(action,extra={})=>b=(await mutateBracket(env,b.id,actor,{action,revision:b.revision,requestId:uid('request'),...extra})).bracket;
+  const m=b.graph.matches[0], initial=b.decisions.find(d=>d.matchId===m.id), other=m.slots[1].ref;
+  const revision=b.revision;
+  for(const reason of ['', '   ', 'tiny']) await assert.rejects(act('correct_result',{matchId:m.id,winnerId:other,scores:[20,32],reason}),/reason/);
+  assert.equal((await adminBracket(env,b.id,actor)).bracket.revision,revision);
+  await assert.rejects(act('correct_result',{matchId:m.id,winnerId:'missing',scores:[20,32],reason:'Correct source sheet'}),/resolved opponent/);
+  await assert.rejects(act('correct_result',{matchId:m.id,winnerId:other,scores:[-1,32],reason:'Correct source sheet'}),/non-negative/);
+  const next=b.graph.matches.find(x=>x.slots.some(slot=>slot.kind==='winner'&&slot.ref===m.id));
+  await act('advance',{matchId:next.id,source:'historical',winnerId:initial.winnerId,scores:[40,30],reason:'Original second round'});
+  await assert.rejects(act('correct_result',{matchId:m.id,winnerId:other,scores:[20,32],reason:'Correct first round winner'}),/downstream decisions/);
+  const nextDecision=b.decisions.find(d=>d.matchId===next.id);
+  await act('correct_result',{matchId:m.id,winnerId:initial.winnerId,scores:[35,20],reason:'Correct score transcription only'});
+  assert.equal(b.decisions.find(d=>d.matchId===next.id).id,nextDecision.id);
+  await act('rollback',{matchId:next.id,reason:'Clear downstream before replacing winner'});
+  const input={action:'correct_result',revision:b.revision,requestId:uid('request'),matchId:m.id,winnerId:other,scores:[20,32],reason:'Reviewed source confirms the other winner'};
+  b=(await mutateBracket(env,b.id,actor,input)).bracket;
+  const correctedId=b.decisions.find(d=>d.matchId===m.id).id;
+  assert.equal((await mutateBracket(env,b.id,actor,input)).bracket.revision,b.revision);
+  await assert.rejects(mutateBracket(env,b.id,actor,{...input,requestId:uid('request')}),/Another administrator/);
+  const history=await matchAudit(env,b.id,m.id);
+  assert.equal(history.decisions.length,3); assert.equal(history.decisions.filter(d=>!d.superseded).length,1);
+  assert.equal(history.decisions[0].id,correctedId);assert.equal(history.decisions[2].id,initial.id);
+  assert.equal(history.decisions[2].reason,initial.reason);
+  const event=history.events.find(e=>e.action==='correct_result');
+  assert.equal(event.details.previousResult.winnerId,initial.winnerId);assert.equal(event.details.replacementResult.winnerId,other);
+  assert.equal(event.details.reason,input.reason);assert.equal(event.actor,actor);
+  await act('publish',{presentation:{...b.graph.presentation,title:'Corrected roadmap',slug:'corrected-roadmap'}});
+  const projection=await publicBrackets(env,'corrected-roadmap');
+  assert.equal(projection.bracket.decisions.find(d=>d.matchId===m.id).winnerId,other);
+  assert.ok(!JSON.stringify(projection).includes(input.reason));assert.ok(!('events' in projection.bracket));
+  assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) n FROM polls').first()).n,0);
+  await h.commerceDb.prepare('UPDATE aboot_brackets SET finalized=1 WHERE id=?').bind(b.id).run();
+  await act('correct_result',{matchId:m.id,winnerId:other,scores:[21,32],reason:'Finalized score transcription correction'});
+  assert.equal(b.finalized,true);assert.deepEqual(b.decisions.find(d=>d.matchId===m.id).scores,[21,32]);
 });

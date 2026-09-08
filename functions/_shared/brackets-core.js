@@ -24,7 +24,7 @@ async function state(env, b) {
 }
 function guard(db, sql, bindings) { return db.prepare(`INSERT INTO aboot_guards(id,valid) VALUES (?,CASE WHEN (${sql}) THEN 1 ELSE 0 END)`).bind(uid('guard'), ...bindings); }
 function revisionGuard(db, b) { return guard(db, 'SELECT revision=? FROM aboot_brackets WHERE id=?', [b.revision, b.id]); }
-async function write(env, b, actor, input, action, extra = [], change = {}) {
+async function write(env, b, actor, input, action, extra = [], change = {}, audit = {}) {
   const db = dbFor(env);
   if (!/^[a-zA-Z0-9_-]{8,90}$/.test(input.requestId || '')) fail(400, 'bracket_request_id', 'A stable action request ID is required.');
   const previous = await db.prepare('SELECT action FROM aboot_audit WHERE bracket_id=? AND request_id=?').bind(b.id, input.requestId).first();
@@ -34,7 +34,7 @@ async function write(env, b, actor, input, action, extra = [], change = {}) {
   try { await db.batch([
     revisionGuard(db, b), ...extra,
     db.prepare('UPDATE aboot_brackets SET title=?,draft_json=?,publication_id=?,public_slug=?,finalized=?,archived=?,revision=revision+1,updated_at=? WHERE id=?').bind(change.title ?? b.title, change.draft_json ?? b.draft_json, change.publication_id === undefined ? b.publication_id : change.publication_id, change.public_slug === undefined ? b.public_slug : change.public_slug, change.finalized ?? b.finalized, change.archived ?? b.archived, timestamp, b.id),
-    db.prepare('INSERT INTO aboot_audit VALUES (?,?,?,?,?,?,?)').bind(uid('audit'), b.id, input.requestId, action, actor, JSON.stringify({ matchId: input.matchId || null, reason: String(input.reason || '').slice(0, 2000), revision: b.revision, publicationId: change.publication_id || null }), timestamp),
+    db.prepare('INSERT INTO aboot_audit VALUES (?,?,?,?,?,?,?)').bind(uid('audit'), b.id, input.requestId, action, actor, JSON.stringify({ ...audit, matchId: input.matchId || null, reason: String(input.reason || '').slice(0, 2000), revision: b.revision, publicationId: change.publication_id || null }), timestamp),
     db.prepare('DELETE FROM aboot_guards'),
   ]); } catch (error) { if (/constraint|valid|unique/i.test(String(error))) fail(409, 'bracket_changed', 'Bracket or source changed during this action. Reload and review; no partial decision was saved.'); throw error; }
 }
@@ -104,9 +104,9 @@ function structure(graph, protectedIds) {
 export async function mutateBracket(env, id, actor, input) {
   const b = await record(env, id), db = dbFor(env), s = await state(env, b), action = input.action;
   if (await db.prepare('SELECT id FROM aboot_audit WHERE bracket_id=? AND request_id=? AND action=?').bind(id, String(input.requestId || ''), String(action)).first()) return adminBracket(env, id, actor);
-  if (b.finalized && !['reopen', 'unpublish', 'archive'].includes(action)) fail(409, 'bracket_final_locked', 'Reopen this finalized bracket with a reason before editing.');
+  if (b.finalized && !['reopen', 'unpublish', 'archive', 'correct_result'].includes(action)) fail(409, 'bracket_final_locked', 'Reopen this finalized bracket with a reason before editing.');
   if (b.archived && action !== 'restore') fail(409, 'bracket_archived', 'Restore this archived bracket before editing.');
-  const change = {}, extra = [];
+  const change = {}, extra = [], audit = {};
   if (action === 'save') {
     const graph = validate(input.graph); await validateAssets(db, id, graph);
     const protectedIds = new Set(protectedMatchIds(s.graph, [...s.links, ...s.decisions]));
@@ -147,6 +147,22 @@ export async function mutateBracket(env, id, actor, input) {
   } else if (action === 'rollback') {
     reason(input); const m = match(s, input.matchId); await protectDownstream(env, s, m.id);
     for (const mid of [m.id, ...descendants(s.graph, m.id)]) extra.push(db.prepare('UPDATE aboot_decisions SET superseded=1 WHERE bracket_id=? AND match_id=? AND superseded=0').bind(id, mid));
+  } else if (action === 'correct_result') {
+    reason(input);
+    const m = match(s, input.matchId), previous = s.decisions.find(d => d.matchId === m.id), pair = opponents(s.graph, m, s.decisions);
+    if (!previous || !['historical', 'manual', 'bye'].includes(previous.source) || previous.linkId || s.links.some(l => l.matchId === m.id)) fail(409, 'bracket_correction_source', 'Only an accepted historical/manual result or explicit bye can be edited here. Use Poll correction for linked results.');
+    if (reviews(s, await sources(env, s.links, actor)).includes(m.id)) fail(409, 'bracket_upstream_review', 'Resolve the upstream source review before correcting this result.');
+    const d = { matchId: m.id, source: previous.source, winnerId: input.winnerId, scores: input.scores, reason: input.reason.trim() };
+    if (previous.source === 'bye') {
+      if (pair.filter(Boolean).length !== 1 || !m.slots.some(slot => slot.kind === 'bye')) fail(409, 'bracket_bye_invalid', 'This is no longer a valid explicit bye.');
+      d.winnerId = pair.find(Boolean).id; d.scores = [null, null];
+    } else ready(pair);
+    if (!pair.some(c => c?.id === d.winnerId)) fail(400, 'bracket_winner_invalid', 'The winner must be a resolved opponent.');
+    if (!Array.isArray(d.scores) || d.scores.length !== 2 || d.scores.some(n => n !== null && (!Number.isSafeInteger(n) || n < 0 || n > 1000000000))) fail(400, 'bracket_scores_invalid', 'Scores must be non-negative integers or unknown.');
+    if (d.winnerId !== previous.winnerId) await protectDownstream(env, s, m.id);
+    const snapshot = value => ({ winnerId: value.winnerId, winnerName: pair.find(c => c?.id === value.winnerId)?.name || value.winnerId, source: value.source, scores: value.scores });
+    audit.previousResult = { decisionId: previous.id, ...snapshot(previous) }; audit.replacementResult = snapshot(d);
+    extra.push(db.prepare('UPDATE aboot_decisions SET superseded=1 WHERE bracket_id=? AND id=? AND superseded=0').bind(id, previous.id), insertDecision(db, id, actor, d));
   } else if (action === 'advance') {
     const m = match(s, input.matchId), pair = opponents(s.graph, m, s.decisions), l = s.links.find(x => x.matchId === m.id);
     if (s.decisions.some(d => d.matchId === m.id)) fail(409, 'bracket_already_advanced', 'This match has an accepted decision. Review correction before changing it.');
@@ -166,7 +182,7 @@ export async function mutateBracket(env, id, actor, input) {
     if (!Array.isArray(d.scores) || d.scores.length !== 2 || d.scores.some(n => n !== null && (!Number.isSafeInteger(n) || n < 0 || n > 1000000000))) fail(400, 'bracket_scores_invalid', 'Scores must be non-negative integers or unknown.');
     extra.push(insertDecision(db, id, actor, d));
   } else fail(400, 'bracket_action_invalid', 'Unknown bracket action.');
-  await write(env, b, actor, input, action, extra, change);
+  await write(env, b, actor, input, action, extra, change, audit);
   return adminBracket(env, id, actor);
 }
 function reason(input) { if (typeof input.reason !== 'string' || input.reason.trim().length < 5 || input.reason.length > 2000) fail(400, 'bracket_reason_required', 'Enter a clear reason (5–2000 characters) for this audited decision.'); }
@@ -181,6 +197,13 @@ async function protectDownstream(env, s, id) {
 export async function correctionPreview(env, id, matchId, actor) {
   const b = await record(env, id), s = await state(env, b), affected = [matchId, ...descendants(s.graph, matchId)];
   return { ok: true, revision: b.revision, affected: affected.map(mid => ({ match: match(s, mid), decision: s.decisions.find(d => d.matchId === mid) || null, link: s.links.find(l => l.matchId === mid) || null })), sources: await sources(env, s.links.filter(l => affected.includes(l.matchId)), actor) };
+}
+export async function matchAudit(env, id, matchId) {
+  const b = await record(env, id), s = await state(env, b); match(s, matchId);
+  const db = dbFor(env);
+  const decisions = await rows(db.prepare('SELECT * FROM aboot_decisions WHERE bracket_id=? AND match_id=? ORDER BY created_at DESC,rowid DESC').bind(id, matchId));
+  const events = await rows(db.prepare("SELECT * FROM aboot_audit WHERE bracket_id=? AND json_extract(details_json,'$.matchId')=? ORDER BY created_at DESC,rowid DESC").bind(id, matchId));
+  return { ok: true, decisions: decisions.map(d => ({ ...decision(d), actor: d.actor, superseded: !!d.superseded })), events: events.map(e => ({ id: e.id, action: e.action, actor: e.actor, createdAt: e.created_at, details: parse(e.details_json) })) };
 }
 export async function pollPicker(env, actor, search = '', page = 1) {
   const db = await bracketReady(env), p = Math.max(1, Math.min(100000, Number(page) || 1));

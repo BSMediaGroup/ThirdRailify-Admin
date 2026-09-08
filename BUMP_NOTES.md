@@ -1088,3 +1088,17 @@ PENDING VER=0.1.0-alpha.0
 - No new files, backend/schema changes or Public deployment needed: the planning bench is Admin-only.
 
 - Deployed and verified at 2026-09-08 11:45 UTC: Admin `304b55e4d9c41e1484d69af09e3f3d47d405ff6c`, Pages `3cb71c11-94fe-4ee7-822b-62ba5c19c0f9` (equivalent main build `89d9c5e8-d603-4366-9591-3178efebcf97`). Stable JS/CSS match the immutable deployment and include placed-item cues. Evidence: `.artifacts/matchup-studio/live/placed-bench-release.json`. Original and remote main include the repair. No production bracket records were changed.
+
+
+## 2026-09-08 - Audited historical result corrections
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Completed historical/manual matches now offer Edit historical result with the existing winner and scores prefilled. A 5-2000 character reason is required by both the form and server before replacement.
+- Corrections atomically supersede the old decision and append a replacement plus immutable before/after audit evidence, actor and timestamp. Match audit log exposes the current and previous decisions and reasons in the editor, including after reload.
+- Score-only corrections preserve later results, including finalized brackets. A winner change must first resolve downstream decisions or Poll links through the existing correction workflow. Linked Poll results cannot be replaced through this historical action; votes and credit records are untouched.
+- Public roadmaps consume the corrected active result through their existing projection. Reasons and audit history remain Admin-only. No schema migration or Public frontend deployment is needed.
+- Build/typecheck and scoped lint pass. All five backend tests, the connected Public/browser suite, and the updated canvas/editor browser suite pass. Coverage includes blank reasons, invalid winners/scores, superseded evidence, idempotency, stale revisions, downstream protection, public projection privacy, audit access, desktop/mobile rendering and save/reload. Viewed screenshots: `.artifacts/matchup-studio/browser-1788868491874/historical-result-correction.png` and `match-audit-log-mobile.png`.
+- Existing backend/API, Studio/style and regression-test files updated; no files added or removed. Production bracket data is not changed during release validation.

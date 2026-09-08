@@ -105,5 +105,22 @@ test('Studio canvas fullscreen, measured connectors, focus, modal editors, bench
   const sideBench=page.locator('.bracket-bench');assert.deepEqual(await sideBench.locator('.bracket-bench-item').evaluateAll(items=>items.map(i=>i.classList.contains('is-placed'))),[false,true,true,true,true]);assert.match(await sideBench.locator('.bracket-bench-item').first().innerText(),/Delta/);assert.equal(await sideBench.locator('.bracket-placed-check').count(),4);await sideBench.scrollIntoViewIfNeeded();await page.screenshot({path:artifacts+'/placed-ideas-sidebar.png'});
   await page.getByRole('button',{name:'Edit round 1 match 2',exact:true}).click();await editor.getByLabel('Opponent 1 slot',{exact:true}).selectOption('');await editor.getByRole('button',{name:'Save draft and close',exact:true}).click();await editor.waitFor({state:'hidden'});await page.reload();await sideBench.locator('.bracket-bench-item').first().waitFor();assert.deepEqual(await sideBench.locator('.bracket-bench-item').evaluateAll(items=>items.map(i=>i.classList.contains('is-placed'))),[false,false,true,true,true]);assert.match(await sideBench.locator('.bracket-bench-item').nth(1).innerText(),/Fresh contender/);assert.equal(await sideBench.locator('.bracket-placed-check').count(),3);
 
+  await page.getByRole('button',{name:'Edit round 1 match 1',exact:true}).click();
+  await editor.getByRole('button',{name:'Edit historical result',exact:true}).click();
+  const correction=page.getByRole('dialog',{name:'Edit historical result',exact:true});
+  assert.equal(await correction.getByRole('button',{name:'Save corrected result',exact:true}).isDisabled(),true);
+  await correction.getByLabel('Winner',{exact:true}).selectOption({label:'Beta'});
+  await correction.getByLabel(/Score: Alpha/).fill('20');await correction.getByLabel(/Score: Beta/).fill('32');
+  await correction.getByLabel('Reason for correction (required)',{exact:true}).fill('Corrected original score sheet after review');
+  await page.screenshot({path:artifacts+'/historical-result-correction.png'});
+  await correction.getByRole('button',{name:'Save corrected result',exact:true}).click();
+  const history=page.getByRole('dialog',{name:'Match audit log',exact:true});await history.waitFor();
+  assert.match(await history.innerText(),/Current result: Beta/i);assert.match(await history.innerText(),/Previous result: Alpha/i);
+  assert.match(await history.innerText(),/Before: Alpha/);assert.match(await history.innerText(),/After: Beta/);
+  assert.match(await history.innerText(),/Corrected original score sheet after review/);
+  await page.screenshot({path:artifacts+'/match-audit-log.png'});
+  await history.getByRole('button',{name:'Back to matchup',exact:true}).click();await editor.getByRole('button',{name:'Done',exact:true}).click();
+  await page.reload();await page.getByRole('button',{name:'Edit round 1 match 1',exact:true}).click();await editor.getByRole('button',{name:'Match audit log',exact:true}).click();await history.waitFor();assert.match(await history.innerText(),/Corrected original score sheet after review/);
+  await page.setViewportSize({width:390,height:844});assert.equal(await history.evaluate(e=>e.scrollWidth<=e.clientWidth),true);await page.screenshot({path:artifacts+'/match-audit-log-mobile.png'});
   assert.deepEqual(failures,[]);
 });

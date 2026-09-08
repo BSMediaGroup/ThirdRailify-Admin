@@ -1,7 +1,7 @@
 import { AuthFailure, errorResponse, requireCsrf, normalizeOrigin } from '../../../_shared/auth-core.js';
 import { requireAdminCapability } from '../../../_shared/admin-capabilities.js';
 import { readPollJson } from '../../../_shared/polls-core.js';
-import { bracketLibrary, adminBracket, createBracket, mutateBracket, pollPicker, correctionPreview, uploadBracketMedia, importBracketImage, bracketMedia, createMatchPoll } from '../../../_shared/brackets-core.js';
+import { bracketLibrary, adminBracket, createBracket, mutateBracket, pollPicker, correctionPreview, matchAudit, uploadBracketMedia, importBracketImage, bracketMedia, createMatchPoll } from '../../../_shared/brackets-core.js';
 
 export async function onRequest({ request, env, data }) {
   try {
@@ -12,6 +12,7 @@ export async function onRequest({ request, env, data }) {
       if (!parts.length) payload = await bracketLibrary(env, url.searchParams.get('search'), url.searchParams.get('archived') === 'true');
       else if (parts[0] === 'poll-picker') payload = await pollPicker(env, session.accountId, url.searchParams.get('search'), url.searchParams.get('page'));
       else if (parts[0] === 'media') return bracketMedia(env, parts[1], true);
+      else if (parts[1] === 'audit') payload = await matchAudit(env, parts[0], url.searchParams.get('matchId'));
       else if (parts[1] === 'correction') payload = await correctionPreview(env, parts[0], url.searchParams.get('matchId'), session.accountId);
       else if (parts.length === 1) payload = await adminBracket(env, parts[0], session.accountId);
       else throw new AuthFailure(404, 'bracket_route_missing', 'This route was not found.');
