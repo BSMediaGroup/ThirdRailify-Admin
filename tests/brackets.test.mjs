@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createCommerceDatabases, commerceEnvironment } from './commerce-test-helpers.mjs';
 import { applyMigration } from './auth-test-helpers.mjs';
-import { generate, referenceTemplate, duplicate, validate, uid } from '../src/brackets/model.mjs';
-import { createBracket, mutateBracket, publicBrackets, createMatchPoll, adminBracket, pollPicker, uploadBracketMedia, bracketMedia } from '../functions/_shared/brackets-core.js';
+import { generate, referenceTemplate, duplicate, validate, uid, protectedMatchIds } from '../src/brackets/model.mjs';
+import { createBracket, mutateBracket, publicBrackets, createMatchPoll, adminBracket, pollPicker, uploadBracketMedia, bracketMedia, importBracketImage } from '../functions/_shared/brackets-core.js';
 import { createPoll, mutatePollCreatorGrant, changePollLifecycle, changePollVisibility, submitWebVote, updatePoll } from '../functions/_shared/polls-core.js';
 import { createSession } from '../functions/_shared/auth-core.js';
 import { onRequest as handler } from '../functions/api/admin/brackets/[[path]].js';
@@ -125,4 +125,36 @@ test('real D1 private/public isolation, idempotent Poll linkage, settlement and 
   b = (await mutateBracket(env, b.id, actor, request('unpublish'))).bracket;
   await assert.rejects(publicBrackets(env, 'acceptance-roadmap'), /not published/);
   assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) n FROM poll_votes').first()).n, 1);
+});
+
+
+test('partial seasons allow unrelated placement and names while protecting result inputs and tree identity', { timeout:120000 }, async t => {
+  const h=await createCommerceDatabases({withMedia:true});t.after(h.dispose);const env=commerceEnvironment(h,{THIRDRAILIFY_PROFILE_MEDIA:h.media});
+  await applyMigration(h.commerceDb,await readFile(new URL('../commerce-migrations/0043_aboot_matchup_studio.sql',import.meta.url),'utf8'));
+  const actor='partial-admin',at=new Date().toISOString();await h.authDb.prepare("INSERT INTO accounts(id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES (?,?,'Partial Admin','admin','full','active',?,?,?,'test')").bind(actor,actor+'@example.test',at,at,at).run();
+  let b=(await createBracket(env,actor,{id:uid('bracket'),size:8,title:'Partial field'})).bracket;
+  const act=async(action,extra={})=>{b=(await mutateBracket(env,b.id,actor,{action,revision:b.revision,requestId:uid('request'),...extra})).bracket;};
+  const g=structuredClone(b.graph);g.contenders=['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta','Alternate'].map(name=>({id:uid('contender'),name,seed:null,description:'',image:null}));g.matches.filter(m=>m.round===0).forEach((m,i)=>m.slots.forEach((s,j)=>{s.kind='contender';s.ref=g.contenders[i*2+j].id;}));await act('save',{graph:g});
+  await act('advance',{matchId:g.matches[0].id,source:'historical',winnerId:g.contenders[0].id,scores:[3,2],reason:'Recorded first match'});
+  assert.deepEqual(protectedMatchIds(b.graph,b.decisions),[g.matches[0].id]);
+  const edited=structuredClone(b.graph);edited.matches[2].slots[0].ref=edited.contenders[8].id;edited.contenders[5].name='Zeta revised';edited.contenders.push({id:uid('contender'),name:'New idea',seed:null,description:'',image:null});await act('save',{graph:edited});assert.equal(b.decisions.length,1);assert.equal(b.graph.matches[2].slots[0].ref,edited.contenders[8].id);
+  const rejected=async(graph)=>assert.rejects(mutateBracket(env,b.id,actor,{action:'save',graph,revision:b.revision,requestId:uid('request')}),/protect contender identity/);
+  const renamed=structuredClone(b.graph);renamed.contenders[0].name='Changed winner';await rejected(renamed);
+  const swapped=structuredClone(b.graph);[swapped.matches[0].slots[0].ref,swapped.matches[1].slots[0].ref]=[swapped.matches[1].slots[0].ref,swapped.matches[0].slots[0].ref];await rejected(swapped);
+  const rewired=structuredClone(b.graph);rewired.matches[3].id=uid('match');rewired.matches[5].slots[1].ref=rewired.matches[3].id;await rejected(rewired);
+  const ancestry=protectedMatchIds(b.graph,[{matchId:g.matches[4].id}]);assert.deepEqual(new Set(ancestry),new Set([g.matches[4].id,g.matches[0].id,g.matches[1].id]));assert.ok(!ancestry.includes(g.matches[2].id));
+  b=(await createMatchPoll(env,b.id,actor,{matchId:g.matches[2].id,revision:b.revision,requestId:uid('request')})).bracket;
+  const linkedEdit=structuredClone(b.graph);linkedEdit.contenders[8].name='Changed linked opponent';await rejected(linkedEdit);
+  const otherEdit=structuredClone(b.graph);otherEdit.contenders[6].name='Editable other branch';await act('save',{graph:otherEdit});assert.equal(b.graph.contenders[6].name,'Editable other branch');
+  const png=await sharp({create:{width:32,height:24,channels:4,background:'#cfaa35'}}).png().toBuffer();let fetched=0;
+  const fetchImage=async(url,init)=>{fetched++;assert.equal(url,'https://images.example.com/item.png');assert.equal(init.redirect,'manual');assert.deepEqual(Object.keys(init.headers),['Accept']);return new Response(png,{headers:{'content-type':'image/png'}});};
+  for(const url of ['http://example.com/image.png','https://127.0.0.1/a.png','https://[::1]/a.png','https://localhost/a.png','https://files.internal/a.png','https://user:password@example.com/a.png','https://example.com:8443/a.png']) await assert.rejects(importBracketImage(env,b.id,actor,url,fetchImage),/HTTPS/);
+  assert.equal(fetched,0);const image=await importBracketImage(env,b.id,actor,'https://images.example.com/item.png',fetchImage);assert.ok(image.assetId);assert.equal((await bracketMedia(env,image.assetId,true)).status,200);await assert.rejects(bracketMedia(env,image.assetId),/not published/);
+  const count=(await h.commerceDb.prepare('SELECT COUNT(*) n FROM aboot_media').first()).n;
+  await assert.rejects(importBracketImage(env,b.id,actor,'https://images.example.com/item.png',async()=>new Response(null,{status:302,headers:{Location:'https://127.0.0.1/a.png'}})),/direct image URL/);
+  await assert.rejects(importBracketImage(env,b.id,actor,'https://images.example.com/item.png',async()=>new Response('<html/>',{headers:{'content-type':'text/html'}})),/directly/);
+  await assert.rejects(importBracketImage(env,b.id,actor,'https://images.example.com/item.png',async()=>new Response(new Uint8Array(8*1024*1024+1),{headers:{'content-type':'image/png'}})),/8 MB/);
+  await assert.rejects(importBracketImage(env,b.id,actor,'https://images.example.com/item.png',async()=>new Response('<html/>',{headers:{'content-type':'image/png'}})));
+  assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) n FROM aboot_media').first()).n,count);
+
 });

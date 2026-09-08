@@ -2,7 +2,7 @@ import { AuthFailure, nowIso } from './auth-core.js';
 import { createPoll, getPublicPoll } from './polls-core.js';
 import { paidSchema } from './poll-credits.js';
 import { sanitizeWheelMedia } from './wheel-media.js';
-import { uid, validate, generate, duplicate, referenceTemplate, safeGraph, opponents, descendants } from '../../src/brackets/model.mjs';
+import { uid, validate, generate, duplicate, referenceTemplate, safeGraph, opponents, descendants, protectedMatchIds } from '../../src/brackets/model.mjs';
 
 const fail = (status, code, message) => { throw new AuthFailure(status, code, message); };
 const parse = value => JSON.parse(value);
@@ -92,7 +92,15 @@ async function validateAssets(db, id, graph) {
     if (!await db.prepare('SELECT id FROM aboot_media WHERE id=? AND bracket_id=?').bind(asset, id).first()) fail(400, 'bracket_media_owner', 'Artwork must belong to this bracket.');
   }
 }
-function structure(graph) { const placed = new Set(graph.matches.flatMap(m => m.slots.map(s => s.ref))); return JSON.stringify({ size: graph.size, matches: graph.matches.map(m => [m.id, m.round, m.position, m.slots]), contenders: graph.contenders.filter(c => placed.has(c.id)).map(c => [c.id, c.name, c.seed]) }); }
+function structure(graph, protectedIds) {
+  const matches = graph.matches.filter(m => protectedIds.has(m.id));
+  const placed = new Set(matches.flatMap(m => m.slots.filter(s => s.kind === 'contender').map(s => s.ref)));
+  return JSON.stringify({ size: graph.size,
+    topology: graph.matches.map(m => [m.id, m.round, m.position, m.slots.map(s => [s.id, m.round ? s.kind : null, m.round ? s.ref : null])]).sort(),
+    matches: matches.map(m => [m.id, m.slots]).sort(),
+    contenders: graph.contenders.filter(c => placed.has(c.id)).map(c => [c.id, c.name, c.seed]).sort(),
+  });
+}
 export async function mutateBracket(env, id, actor, input) {
   const b = await record(env, id), db = dbFor(env), s = await state(env, b), action = input.action;
   if (await db.prepare('SELECT id FROM aboot_audit WHERE bracket_id=? AND request_id=? AND action=?').bind(id, String(input.requestId || ''), String(action)).first()) return adminBracket(env, id, actor);
@@ -101,7 +109,8 @@ export async function mutateBracket(env, id, actor, input) {
   const change = {}, extra = [];
   if (action === 'save') {
     const graph = validate(input.graph); await validateAssets(db, id, graph);
-    if ((s.links.length || s.decisions.length) && structure(graph) !== structure(s.graph)) fail(409, 'bracket_structure_locked', 'Linked or decided matches protect contender identity. Use correction/detach or duplicate as a new draft.');
+    const protectedIds = new Set(protectedMatchIds(s.graph, [...s.links, ...s.decisions]));
+    if (protectedIds.size && structure(graph, protectedIds) !== structure(s.graph, protectedIds)) fail(409, 'bracket_structure_locked', 'Linked or decided matches protect contender identity. Use correction/detach or duplicate as a new draft.');
     change.draft_json = JSON.stringify(graph); change.title = graph.title;
   } else if (action === 'publish') {
     const graph = validate(s.graph); graph.presentation = validate({ ...graph, presentation: input.presentation }).presentation;
@@ -192,6 +201,29 @@ export async function publicBrackets(env, slug = '') {
   const sourceMap = await sources(env, s.links, ''), hidden = new Set(s.links.filter(l => sourceMap[l.matchId]?.protected).flatMap(l => [l.matchId, ...descendants(s.graph, l.matchId)]));
   const review = reviews(s, sourceMap);
   return { ok: true, bracket: { id: b.id, publicationId: b.publication_id, slug: b.public_slug, graph: s.graph, finalized: !!b.finalized && !review.length && !hidden.size, needsReview: review.filter(id => !hidden.has(id)), decisions: s.decisions.filter(d => !hidden.has(d.matchId) && s.graph.matches.some(m => m.id === d.matchId)).map(d => ({ matchId: d.matchId, winnerId: d.winnerId, source: d.source, scores: d.scores })), sources: Object.fromEntries(Object.entries(sourceMap).map(([id, x]) => [id, x.protected ? { state: 'unavailable' } : { state: x.state, slug: x.slug, scores: x.scores, title: x.title }])) } };
+}
+export async function importBracketImage(env, id, actor, value, fetchImpl = fetch) {
+  const b = await record(env, id);
+  if (b.finalized || b.archived) fail(409, 'bracket_image_locked', 'Reopen or restore this bracket before adding images.');
+  let url;
+  try { url = new URL(String(value || '').trim()); } catch { fail(400, 'bracket_image_url', 'Enter a valid public HTTPS image URL.'); }
+  const host = url.hostname.toLowerCase();
+  if (url.href.length > 2048 || url.protocol !== 'https:' || url.username || url.password || url.hash || (url.port && url.port !== '443') || !host.includes('.') || host.includes(':') || /^\d+(?:\.\d+){3}$/.test(host) || /(?:^|\.)(?:localhost|local|internal|test)$/.test(host) || host.endsWith('.home.arpa')) fail(400, 'bracket_image_url', 'Use a public HTTPS image URL without credentials or a custom port.');
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetchImpl(url.href, { method: 'GET', headers: { Accept: 'image/png,image/jpeg,image/webp' }, redirect: 'manual', signal: controller.signal });
+    if (!response.ok || response.status >= 300) fail(400, 'bracket_image_url_unavailable', 'The image could not be downloaded. Use the final direct image URL or upload the file.');
+    const type = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase().replace('image/jpg', 'image/jpeg');
+    if (!['image/png','image/jpeg','image/webp'].includes(type)) { await response.body?.cancel(); fail(415, 'bracket_image_type', 'The URL must point directly to a PNG, JPG or WebP image.'); }
+    const limit = 8 * 1024 * 1024;
+    if (Number(response.headers.get('content-length')) > limit) { await response.body?.cancel(); fail(413, 'image_too_large', 'Choose an image below 8 MB.'); }
+    const reader = response.body?.getReader(); if (!reader) fail(400, 'bracket_image_empty', 'The image URL returned no image.');
+    const chunks = []; let length = 0;
+    try { while (true) { const { done, value: chunk } = await reader.read(); if (done) break; length += chunk.byteLength; if (length > limit) fail(413, 'image_too_large', 'Choose an image below 8 MB.'); chunks.push(chunk); } } finally { await reader.cancel(); }
+    const bytes = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return await uploadBracketMedia(env, id, actor, bytes, type);
+  } catch (error) { if (error instanceof AuthFailure) throw error; fail(400, 'bracket_image_url_unavailable', 'The image could not be downloaded. Check the URL or upload the file.'); }
+  finally { clearTimeout(timer); }
 }
 export async function uploadBracketMedia(env, id, actor, bytes, type) {
   await record(env, id); if (!['image/png', 'image/jpeg', 'image/webp'].includes(type)) fail(415, 'bracket_image_type', 'Choose PNG, JPG or WebP.');

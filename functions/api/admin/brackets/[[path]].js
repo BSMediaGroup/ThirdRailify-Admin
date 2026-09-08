@@ -1,9 +1,9 @@
 import { AuthFailure, errorResponse, requireCsrf, normalizeOrigin } from '../../../_shared/auth-core.js';
 import { requireAdminCapability } from '../../../_shared/admin-capabilities.js';
 import { readPollJson } from '../../../_shared/polls-core.js';
-import { bracketLibrary, adminBracket, createBracket, mutateBracket, pollPicker, correctionPreview, uploadBracketMedia, bracketMedia, createMatchPoll } from '../../../_shared/brackets-core.js';
+import { bracketLibrary, adminBracket, createBracket, mutateBracket, pollPicker, correctionPreview, uploadBracketMedia, importBracketImage, bracketMedia, createMatchPoll } from '../../../_shared/brackets-core.js';
 
-export async function onRequest({ request, env }) {
+export async function onRequest({ request, env, data }) {
   try {
     const url = new URL(request.url), parts = url.pathname.replace(/^\/api\/admin\/brackets\/?/, '').split('/').filter(Boolean);
     const session = await requireAdminCapability(env, request, request.method === 'GET' ? 'polls.view' : 'polls.manage');
@@ -26,6 +26,7 @@ export async function onRequest({ request, env }) {
       } else {
         const { body } = await readPollJson(request, 256 * 1024);
         if (parts[0] === 'create') payload = await createBracket(env, session.accountId, body);
+        else if (parts[1] === 'media-url') payload = await importBracketImage(env, parts[0], session.accountId, body.imageUrl, data?.bracketImageFetch);
         else if (parts[1] === 'create-poll') payload = await createMatchPoll(env, parts[0], session.accountId, body);
         else if (parts.length === 1) payload = await mutateBracket(env, parts[0], session.accountId, body);
         else throw new AuthFailure(404, 'bracket_route_missing', 'This route was not found.');

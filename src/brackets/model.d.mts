@@ -13,3 +13,5 @@ export function safeGraph(input: Graph): Graph;
 export function referenceTemplate(): { graph: Graph; historical: Decision[] };
 export function opponents(graph: Graph, match: Match, decisions?: Decision[]): Array<Contender | null>;
 export function descendants(graph: Graph, id: string): string[];
+
+export function protectedMatchIds(graph: Graph, records?: Array<{ matchId: string }>): string[];

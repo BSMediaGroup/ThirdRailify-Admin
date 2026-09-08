@@ -56,6 +56,7 @@ export function BracketCanvas({ bracket, onSelect, onEdit, onFocusContender, sel
       if (card && container) {
         const a = card.getBoundingClientRect(), b = container.getBoundingClientRect();
         container.scrollTo({ left: container.scrollLeft + a.left - b.left - (container.clientWidth - a.width) / 2, top: container.scrollTop + a.top - b.top - (container.clientHeight - a.height) / 2, behavior: 'instant' });
+        if (!document.fullscreenElement && !shell.current?.closest('dialog')) window.scrollBy({ top: a.top - Math.max(100, (window.innerHeight - a.height) / 2), behavior: 'instant' });
         card.focus({ preventScroll: true });
       }
       setPendingFocus('');
@@ -76,7 +77,7 @@ export function BracketCanvas({ bracket, onSelect, onEdit, onFocusContender, sel
   };
   const fit = () => {
     if (!viewport.current || !tree.current) return;
-    setZoom(Math.max(.1, Math.min(1, (viewport.current.clientWidth - 32) / tree.current.offsetWidth, (viewport.current.clientHeight - 32) / tree.current.offsetHeight)));
+    setZoom(Math.max(.1, Math.min(1, (viewport.current.clientWidth - 32) / tree.current.offsetWidth, document.fullscreenElement === shell.current ? (viewport.current.clientHeight - 32) / tree.current.offsetHeight : 1)));
     viewport.current.scrollTo(0, 0);
   };
   return <section ref={shell} className="bracket-canvas-shell" style={{ '--bracket-accent': graph.presentation.accent } as CSSProperties} aria-label="Season bracket">

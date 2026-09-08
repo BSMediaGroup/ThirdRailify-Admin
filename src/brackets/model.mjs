@@ -61,6 +61,19 @@ export function descendants(graph, id) {
   for (let cursor = id; cursor;) { const next = graph.matches.find(m => m.slots.some(s => s.kind === 'winner' && s.ref === cursor)); if (!next) break; found.push(next.id); cursor = next.id; }
   return found;
 }
+// A linked or decided match protects its inputs, including all upstream matches.
+// Other branches remain editable while a season is in progress.
+export function protectedMatchIds(graph, records = []) {
+  const protectedIds = new Set();
+  const visit = id => {
+    if (protectedIds.has(id)) return;
+    protectedIds.add(id);
+    const match = graph.matches.find(m => m.id === id);
+    for (const slot of match?.slots || []) if (slot.kind === 'winner') visit(slot.ref);
+  };
+  records.forEach(record => visit(record.matchId));
+  return [...protectedIds];
+}
 export function safeGraph(graph) {
   const used = new Set(graph.matches.flatMap(m => m.slots.filter(s => s.kind === 'contender').map(s => s.ref)));
   return { ...graph, title: graph.presentation.title, contenders: graph.contenders.filter(c => used.has(c.id)).map(({ id, name, seed, description, image }) => ({ id, name, seed, description, image })), matches: graph.matches.map(({ id, round, position, slots, description }) => ({ id, round, position, slots, description })) };
