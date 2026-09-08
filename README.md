@@ -495,5 +495,3 @@ docs/POLLS_CREDITS_CONTRACT.md
 Existing Poll core/API, signed Bot API, automation API, Poll pages/styles, navigation/capability registry and migration test helper were extended. No historical migration or file was removed. `npm.cmd run test:polls` includes the ledger suite; `npm.cmd run test:browser:poll-matchups` runs coupled offline browser acceptance after both frontend builds. Concurrent Wheel migration 0042 is outside this Poll release set.
 
 Release preserves deployed Poll workspace styling (`src/styles/poll-workspaces.css`), pending-artwork handling and feedback. Verification recovery coverage: `tests/turnstile-recovery-browser.test.mjs`.
-
-Sidebar interaction regression: `tests/sidebar-groups-browser.test.mjs` checks stable pointer targets, repeated toggles, keyboard activation and mobile taps.

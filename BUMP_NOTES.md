@@ -999,5 +999,3 @@ PENDING VER=0.1.0-alpha.0
 - Matchup Studio reuses the existing black-and-gold surfaces and dialog styling. Turnstile keeps its widget on errors and provides explicit retry; verification remains mandatory. The operator confirmed failure was limited to the separate automated browser.
 
 - Production release recorded in `docs/MATCHUP_STUDIO.md`: Admin 4083ee10 / 9dd9c44, Public 6861272d / 738a24e. Stable assets/API/public-library checks pass. Authenticated Studio acceptance remains blocked by browser transport failure; no acceptance records created.
-
-- Fixed sidebar group arrows moving 22px on pointer press because the global active-button transform overrode vertical centering. Group toggles now have stationary full-row-height 44px hit areas. Added browser coverage for every group, repeated clicks, Enter/Space and mobile taps.
