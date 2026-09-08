@@ -179,3 +179,6 @@ PENDING VER=0.1.0-alpha.0
 - Added src/polls/PollEditDialog.tsx and src/polls/poll-edit.css. Updated both Admin pages and the existing real D1/API browser acceptance. Build/typecheck, focused lint and responsive browser checks pass, including actual ordinary Poll trigger saves, stable IDs/category, direct matchup navigation and editor focus at 390/1440. No migration or Public/Bot changes.
 
 - Released Admin 65dec4b to https://dbc18d7e.thirdrailify-admin.pages.dev and main. Stable admin.thirdrailify.com JS/CSS hashes match the tested immutable deployment; evidence .artifacts/poll-edit-live/release.json. Actual saves were verified locally against real D1/API, with screenshots under .artifacts/poll-credits/acceptance/ordinary-poll-editor-{390,1440}.png. No authenticated production edits performed. Concurrent workspace changes preserved; integrated workspace typecheck also passes.
+
+
+Draft matchup artwork (2026-09-08): Admin library images now always use the authenticated Admin media route. Listed drafts previously selected the anonymous public route, which does not provide authenticated draft access. Both production contender assets were confirmed active with a read-only D1 query; no image upload or record mutation was needed. Real API/browser regression checks cover visible draft images and continued anonymous denial. No schema or Public changes.

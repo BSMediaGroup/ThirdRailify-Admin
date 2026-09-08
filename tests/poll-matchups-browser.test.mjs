@@ -179,12 +179,24 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       await page.getByLabel('Square artwork').first().setInputFiles(file);
       await page.waitForFunction(() => !document.querySelector('input[type=file]').disabled);
       assert.equal(await page.getByLabel('Poll title', { exact: true }).inputValue(), 'Unsaved title survives artwork replacement');
+      await h.commerceDb.prepare("UPDATE polls SET is_public=1 WHERE title='Artwork before first save'").run();
       await page.reload();
       await page.locator('.aboot-admin-grid article').filter({ hasText: 'Artwork before first save' }).getByRole('button', { name: 'Edit Poll' }).click();
       assert.equal(await page.locator('.aboot-admin-preview').count(), 3);
       const draftRow = await h.commerceDb.prepare("SELECT public_slug FROM polls WHERE title='Artwork before first save'").first();
       const draftPayload = await adminPollHandler({env,request:new Request(ADMIN+'/api/admin/polls/'+draftRow.public_slug,{headers:{Cookie:cookie}})});
       const savedDraft = (await draftPayload.json()).poll;
+      assert.equal(savedDraft.state, 'draft');
+      assert.equal(savedDraft.public, true);
+      const draftImages = page.locator('.aboot-admin-grid article').filter({ hasText: 'Artwork before first save' }).locator('img');
+      assert.equal(await draftImages.count(), 2);
+      await page.waitForFunction(() => [...document.querySelectorAll('.aboot-admin-grid img')].every(n => n.complete && n.naturalWidth > 0));
+      for (const img of await draftImages.all()) assert.ok((await img.getAttribute('src')).startsWith('/api/admin/polls/media/'));
+      const privateImage = savedDraft.options[0].image.id;
+      await assert.rejects(() => pollHandler({ env, request: new Request(ADMIN + '/api/polls/media/' + privateImage) }), { code: 'poll_media_not_found' });
+      await page.getByRole('button', { name: 'Close editor', exact: true }).click();
+      await page.locator('.aboot-admin-grid').screenshot({ path: `${artifacts}/draft-library-artwork.png` });
+
       await changePollLifecycle(env,account.id,savedDraft.slug,{revision:savedDraft.revision,action:'open'});
       publicAuthorized = true;
       await page.goto(PUBLIC+'/polls/'+savedDraft.slug);

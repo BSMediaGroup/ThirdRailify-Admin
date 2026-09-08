@@ -519,3 +519,6 @@ Unconfigured match dimming (2026-09-08): increased the visible difference by low
 
 
 Direct Poll editing (2026-09-08): Edit Poll in the main list opens the correct category editor. The library editor scrolls into view and focuses its title. Ordinary Polls use the new src/polls/PollEditDialog.tsx and src/polls/poll-edit.css; stable identities and canonical revision checks remain enforced. Real D1/API browser saves and responsive checks pass.
+
+
+Draft matchup artwork (2026-09-08): Admin library images now always use the authenticated Admin media route. Listed drafts previously selected the anonymous public route, which does not provide authenticated draft access. Both production contender assets were confirmed active with a read-only D1 query; no image upload or record mutation was needed. Real API/browser regression checks cover visible draft images and continued anonymous denial. No schema or Public changes.
