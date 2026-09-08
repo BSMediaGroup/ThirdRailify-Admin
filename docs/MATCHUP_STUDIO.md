@@ -129,3 +129,5 @@ PENDING VER=0.1.0-alpha.0
 - Placed items have a green tint, green status text and a discreet prefix checkmark. Placement follows the current working slots, so assigning/removing a contender updates both ordering and styling immediately.
 - Build/typecheck, scoped lint and the connected canvas/editor browser test pass. Coverage checks both bench views, assignment changes, and removal moving a contender back to the unplaced group after save/reload. Viewed sidebar and expanded-modal screenshots under `.artifacts/matchup-studio/browser-1788867803709/`.
 - No new files, backend/schema changes or Public deployment needed: the planning bench is Admin-only.
+
+- Deployed and verified at 2026-09-08 11:45 UTC: Admin `304b55e4d9c41e1484d69af09e3f3d47d405ff6c`, Pages `3cb71c11-94fe-4ee7-822b-62ba5c19c0f9` (equivalent main build `89d9c5e8-d603-4366-9591-3178efebcf97`). Stable JS/CSS match the immutable deployment and include placed-item cues. Evidence: `.artifacts/matchup-studio/live/placed-bench-release.json`. Original and remote main include the repair. No production bracket records were changed.
