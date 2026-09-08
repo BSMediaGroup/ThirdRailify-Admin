@@ -202,3 +202,35 @@ test('historical corrections require reasons, retain immutable evidence and prot
   await act('correct_result',{matchId:m.id,winnerId:other,scores:[21,32],reason:'Finalized score transcription correction'});
   assert.equal(b.finalized,true);assert.deepEqual(b.decisions.find(d=>d.matchId===m.id).scores,[21,32]);
 });
+
+
+test('audited Poll result replacement updates unplayed descendants and preserves protected results', async t => {
+  const h=await createCommerceDatabases();t.after(h.dispose);const env=commerceEnvironment(h);
+  await applyMigration(h.commerceDb,await readFile(new URL('../commerce-migrations/0043_aboot_matchup_studio.sql',import.meta.url),'utf8'));
+  const actor='reconcile-admin',at=new Date().toISOString();
+  await h.authDb.prepare("INSERT INTO accounts(id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES (?,?,'Admin','admin','full','active',?,?,?,'test')").bind(actor,'reconcile@example.test',at,at,at).run();
+  let b=(await createBracket(env,actor,{id:uid('bracket'),size:4,title:'Result correction'})).bracket;
+  const act=async(action,extra={})=>{b=(await mutateBracket(env,b.id,actor,{action,revision:b.revision,requestId:uid('request'),...extra})).bracket;};
+  const graph=structuredClone(b.graph);graph.contenders=['A','B','C','D'].map(name=>({id:uid('contender'),name,seed:null,description:'',notes:'',tags:'',image:null}));
+  graph.matches.filter(m=>m.round===0).forEach((m,j)=>m.slots.forEach((slot,i)=>{slot.kind='contender';slot.ref=graph.contenders[j*2+i].id;}));await act('save',{graph});
+  const mid=graph.matches[0].id,final=graph.matches.find(m=>m.round===1).id;
+  b=(await createMatchPoll(env,b.id,actor,{matchId:mid,revision:b.revision,requestId:uid('request')})).bracket;
+  const source=b.sources[mid];let p=(await changePollLifecycle(env,actor,source.slug,{action:'open',revision:source.revision})).poll;
+  await submitWebVote(env,{namespace:'web_anonymous',key:'first'},p.slug,{optionId:p.options[0].id});p=(await changePollLifecycle(env,actor,p.slug,{action:'close',revision:p.revision})).poll;
+  b=(await adminBracket(env,b.id,actor)).bracket;await act('advance',{matchId:mid,source:'poll',fingerprint:b.sources[mid].fingerprint});
+  const original=b.decisions[0];p=(await changePollLifecycle(env,actor,p.slug,{action:'open',revision:p.revision})).poll;
+  for(const key of ['second','third'])await submitWebVote(env,{namespace:'web_anonymous',key},p.slug,{optionId:p.options[1].id});
+  p=(await changePollLifecycle(env,actor,p.slug,{action:'close',revision:p.revision})).poll;b=(await adminBracket(env,b.id,actor)).bracket;
+  assert.ok(b.needsReview.includes(final));
+  await assert.rejects(act('reconcile',{matchId:mid,fingerprint:b.sources[mid].fingerprint,reason:''}),/reason/);
+  await assert.rejects(act('reconcile',{matchId:mid,fingerprint:original.fingerprint,reason:'Reviewed latest result'}),/Poll result changed/);
+  await act('reconcile',{matchId:mid,fingerprint:b.sources[mid].fingerprint,reason:'Reviewed corrected settled outcome'});
+  assert.deepEqual(b.needsReview,[]);assert.equal(b.decisions[0].winnerId,graph.contenders[1].id);
+  const audit=await matchAudit(env,b.id,mid);assert.equal(audit.decisions.length,2);assert.equal(audit.decisions.filter(d=>d.superseded).length,1);assert.equal(audit.events.find(e=>e.action==='reconcile').details.previousResult.winnerId,original.winnerId);
+  await act('advance',{matchId:graph.matches[1].id,source:'manual',winnerId:graph.contenders[2].id,scores:[1,0],reason:'Reviewed historical match'});
+  await act('advance',{matchId:final,source:'manual',winnerId:graph.contenders[1].id,scores:[1,0],reason:'Reviewed final match'});
+  p=(await changePollLifecycle(env,actor,p.slug,{action:'open',revision:p.revision})).poll;
+  for(const key of ['fourth','fifth','sixth'])await submitWebVote(env,{namespace:'web_anonymous',key},p.slug,{optionId:p.options[0].id});
+  await changePollLifecycle(env,actor,p.slug,{action:'close',revision:p.revision});b=(await adminBracket(env,b.id,actor)).bracket;
+  await assert.rejects(act('reconcile',{matchId:mid,fingerprint:b.sources[mid].fingerprint,reason:'Changed winner must protect final'}),/downstream decisions/);
+});

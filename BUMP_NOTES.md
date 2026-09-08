@@ -1139,3 +1139,15 @@ PENDING VER=0.1.0-alpha.0
 
 
 Draft matchup artwork (2026-09-08): Admin library images now always use the authenticated Admin media route. Listed drafts previously selected the anonymous public route, which does not provide authenticated draft access. Both production contender assets were confirmed active with a read-only D1 query; no image upload or record mutation was needed. Real API/browser regression checks cover visible draft images and continued anonymous denial. No schema or Public changes.
+
+
+## 2026-09-09 - Recover changed accepted Poll outcomes
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added Update from Poll for accepted linked results. The current settled winner replaces the prior acceptance in one guarded transaction, with a mandatory reason, before/after audit snapshots and retained superseded decision. Unplayed unlinked dependent matches resolve automatically from the replacement; later linked Polls and recorded results remain protected when a winner changes.
+- Added Clear accepted result and navigation from a dependent review to its changed source. Recovery actions save pending draft edits before submitting, instead of remaining disabled. Open/tied/unsettled sources cannot be accepted; revision and fingerprint guards reject stale corrections.
+- Real production read-only inspection confirmed the affected later branch has neither linked Polls nor accepted decisions. No production result, vote, or publication was changed by this release. Administrator correction reasons remain required.
+- Six backend tests pass, including audited replacement, stale fingerprint/empty reason rejection and downstream result protection. Build/typecheck and focused lint pass. Extended the connected Admin/Public browser test for correction with unsaved notes and automatic downstream display. No new files or migration.

@@ -147,6 +147,22 @@ export async function mutateBracket(env, id, actor, input) {
   } else if (action === 'rollback') {
     reason(input); const m = match(s, input.matchId); await protectDownstream(env, s, m.id);
     for (const mid of [m.id, ...descendants(s.graph, m.id)]) extra.push(db.prepare('UPDATE aboot_decisions SET superseded=1 WHERE bracket_id=? AND match_id=? AND superseded=0').bind(id, mid));
+  } else if (action === 'reconcile') {
+    reason(input);
+    const m = match(s, input.matchId), previous = s.decisions.find(d => d.matchId === m.id), l = s.links.find(l => l.matchId === m.id);
+    if (!previous || !l || previous.linkId !== l.id) fail(409, 'bracket_reconcile_missing', 'Choose a match with an accepted linked Poll result.');
+    const sourceMap = await sources(env, s.links, actor), source = sourceMap[m.id];
+    const ancestorsInReview = s.decisions.some(d => d.matchId !== m.id && descendants(s.graph, d.matchId).includes(m.id) && reviews(s, sourceMap).includes(d.matchId));
+    if (ancestorsInReview) fail(409, 'bracket_upstream_review', 'Update the earlier changed result first.');
+    if (source.state !== 'settled' || !source.winnerId) fail(409, 'bracket_result_ineligible', 'Close and settle the linked Poll with a unique winner before updating the bracket.');
+    if (source.fingerprint !== input.fingerprint) fail(409, 'bracket_result_changed', 'Poll result changed. Review the latest result before confirming.');
+    const pair = opponents(s.graph, m, s.decisions); ready(pair);
+    if (!pair.some(c => c.id === source.winnerId)) fail(409, 'bracket_mapping_invalid', 'The current Poll winner does not match the resolved opponents.');
+    if (source.winnerId !== previous.winnerId) await protectDownstream(env, s, m.id);
+    const d = { matchId: m.id, source: 'poll', winnerId: source.winnerId, scores: pair.map(c => source.scores[c.id]), linkId: l.id, fingerprint: source.fingerprint, reason: input.reason.trim() };
+    const snapshot = value => ({ winnerId: value.winnerId, winnerName: pair.find(c => c.id === value.winnerId)?.name || value.winnerId, source: value.source, scores: value.scores });
+    audit.previousResult = { decisionId: previous.id, ...snapshot(previous) }; audit.replacementResult = snapshot(d);
+    extra.push(...sourceGuards(db, l, source), db.prepare('UPDATE aboot_decisions SET superseded=1 WHERE bracket_id=? AND id=? AND superseded=0').bind(id, previous.id), insertDecision(db, id, actor, d));
   } else if (action === 'correct_result') {
     reason(input);
     const m = match(s, input.matchId), previous = s.decisions.find(d => d.matchId === m.id), pair = opponents(s.graph, m, s.decisions);
