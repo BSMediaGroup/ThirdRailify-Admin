@@ -513,3 +513,6 @@ Admin and Public bracket presentation (2026-09-08): unresolved matchups dim to 7
 Ideas bench placement (2026-09-08): both sidebar and expanded editor list unplaced ideas first; placed items move below them with a green tint and prefix checkmark. Working placement changes update the display immediately without reordering stored contenders. Existing source and browser test files updated; no files added or removed.
 
 Historical result corrections (2026-09-08): completed historical/manual matches expose Edit historical result. Winner/score corrections require a reason and retain immutable before/after evidence in Match audit log. Score-only corrections preserve downstream results; winner changes protect downstream decisions and Poll links. Public projections display the active correction while reasons remain private. Existing backend, editor and tests updated; no migration or new files.
+
+
+Unconfigured match dimming (2026-09-08): increased the visible difference by lowering incomplete match opacity from 70% to 40% on Admin and Public. Hover, keyboard focus and print restore full opacity. Existing transition and reduced-motion behavior retained. CURRENT VER=0.1.0-alpha.0; PENDING VER=0.1.0-alpha.0. No new files or data changes.

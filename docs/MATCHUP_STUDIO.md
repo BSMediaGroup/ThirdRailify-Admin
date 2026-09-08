@@ -147,3 +147,6 @@ PENDING VER=0.1.0-alpha.0
 - Existing backend/API, Studio/style and regression-test files updated; no files added or removed. Production bracket data is not changed during release validation.
 
 - Deployed and verified on the stable Admin domain at 2026-09-08 11:57 UTC: app commit `2a74fd9`, direct Pages `994ccfc8-db60-44f4-bec3-27396deef4b0`, equivalent main build `7b100d0a-1254-463e-b4ab-bd7b5d6dd421`. Stable JS/CSS match the immutable tested deployment and include the correction action and audit log. Evidence: `.artifacts/matchup-studio/live/historical-correction-release.json`. Both local and remote main include the repair. Authenticated production mutation was not performed; all result-editing acceptance used disposable local records.
+
+
+Unconfigured match dimming (2026-09-08): increased the visible difference by lowering incomplete match opacity from 70% to 40% on Admin and Public. Hover, keyboard focus and print restore full opacity. Existing transition and reduced-motion behavior retained. CURRENT VER=0.1.0-alpha.0; PENDING VER=0.1.0-alpha.0. No new files or data changes.

@@ -264,7 +264,7 @@
 .bracket-image-url { margin-top:12px;padding-top:8px;border-top:1px solid var(--line); }.bracket-image-url label { margin-bottom:8px; }
 
 /* Distinguish undefined inputs and recorded results without changing the graph. */
-.bracket-match-card.is-incomplete { opacity:.7;transition:opacity .18s ease; }
+.bracket-match-card.is-incomplete { opacity:.4;transition:opacity .18s ease; }
 .bracket-match-card.is-incomplete:hover,.bracket-match-card.is-incomplete:focus-within { opacity:1; }
 .bracket-match-kicker.is-complete { background:linear-gradient(105deg,rgba(43,158,89,.19),rgba(43,158,89,.045)); }
 .bracket-match-status { display:inline-flex;align-items:center;gap:5px; }
