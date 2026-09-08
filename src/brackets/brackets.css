@@ -274,3 +274,10 @@
 .bracket-score .bracket-winner-feature svg { width:15px;height:15px; }
 @media(prefers-reduced-motion:reduce) { .bracket-match-card.is-incomplete { transition:none; } }
 @media print { .bracket-match-card.is-incomplete { opacity:1; } }
+
+/* Placement cues are shared by the sidebar bench and expanded editor. */
+.bracket-bench-item.is-placed { background:linear-gradient(105deg,rgba(43,158,89,.15),rgba(43,158,89,.025));border-color:rgba(109,201,141,.24);border-radius:8px;box-shadow:inset 2px 0 rgba(109,201,141,.45); }
+.bracket-bench .bracket-bench-item.is-placed { padding-inline:8px;margin-block:4px; }
+.bracket-placed-check { display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;color:#6dc98d; }
+.bracket-bench-item summary small { margin-left:5px; }
+.bracket-bench-item.is-placed summary small { color:#8bcba2; }

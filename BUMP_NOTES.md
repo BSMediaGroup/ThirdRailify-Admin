@@ -1075,3 +1075,14 @@ PENDING VER=0.1.0-alpha.0
 - Both frontend builds/typechecks and scoped lint pass. Admin browser coverage checks completion counts, trophy placement/size, dimming and keyboard/hover restoration. Public browser assertions verify the same states on the published projection; existing responsive, editing, image and publication checks are retained. No backend, schema or result-authority changes.
 
 - Presentation deployed and verified on both stable domains at 2026-09-08 11:37 UTC: Admin `bdd3d1a3c2ecb7e89cfe245500ca4832d3803db2`, direct Pages `129efdc5-e048-409b-a335-9a7179d3b155`, stable main build `8104b325-21aa-4ba1-bf58-218db1e04b10`; Public `d70b18c4603e560fd5950152629d8f46db04a1b2`, Pages `96e21de3-6280-4a9a-9286-1ca0a8961524`. Both stable JS/CSS match immutable release artifacts, including completion checks, opacity and score-prefix trophy styling. Both browser suites pass, including explicit Public projection assertions. Viewed Admin and Public screenshots under Admin `.artifacts/matchup-studio/browser-1788867247451/` and `browser-1788867305660/`. Stable evidence: `.artifacts/matchup-studio/live/match-state-presentation-release.json`. No live bracket changes were made; authenticated production workflow acceptance remains separate.
+
+## 2026-09-08 - Placed idea cues and bench ordering
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- The sidebar Ideas bench and expanded lightbox now place unassigned ideas first and placed contenders last, preserving their existing relative order within each group. Sorting is a view projection and does not reorder the saved graph.
+- Placed items have a green tint, green status text and a discreet prefix checkmark. Placement follows the current working slots, so assigning/removing a contender updates both ordering and styling immediately.
+- Build/typecheck, scoped lint and the connected canvas/editor browser test pass. Coverage checks both bench views, assignment changes, and removal moving a contender back to the unplaced group after save/reload. Viewed sidebar and expanded-modal screenshots under `.artifacts/matchup-studio/browser-1788867803709/`.
+- No new files, backend/schema changes or Public deployment needed: the planning bench is Admin-only.
