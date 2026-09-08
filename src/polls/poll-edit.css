@@ -1,0 +1,8 @@
+.poll-edit-form,.poll-edit-form fieldset{display:grid;gap:20px;min-width:0}
+.poll-edit-form fieldset{padding:0;border:0}
+.poll-edit-form label{display:grid;gap:8px;min-width:0}
+.poll-edit-form :is(input,textarea,select){width:100%;min-width:0}
+.poll-edit-form textarea{min-height:100px}
+.poll-edit-option{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding-top:16px;border-top:1px solid var(--line)}
+.poll-edit-form footer{display:flex;justify-content:flex-end;gap:12px;border-top:1px solid var(--line);padding-top:20px}
+@media(max-width:600px){.poll-edit-option{grid-template-columns:1fr}}

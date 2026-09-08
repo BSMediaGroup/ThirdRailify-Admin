@@ -1123,3 +1123,14 @@ PENDING VER=0.1.0-alpha.0
 - Both builds/typechecks pass. Public scoped lint and responsive detail tests pass: winner/review state, Poll URL, violet gradient, original green tick and no horizontal overflow at 390/1440. Viewed local detail screenshots under Public `.artifacts/roadmap-gallery-1788874064189/`. Existing coupled bracket/editor browser coverage retained.
 
 - Deployed and verified at 2026-09-08 13:30 UTC: Admin `d3019d9` / `311afe18.thirdrailify-admin.pages.dev`; Public `2a82b6d` / `81add123.thirdrailify.pages.dev`. Stable JS/CSS match immutable release hashes on both domains. Read-only live Public browser checks confirm violet headers, unchanged green ticks, the new match detail and no dialog horizontal overflow at 1440/390. Evidence/screenshots: Public `.artifacts/match-detail-live/`. Concurrent main-workspace Poll edits preserved; no live result or publication mutation performed.
+
+
+## 2026-09-08 - Direct Poll editor access
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Main Poll management now exposes Edit Poll for every record. It fetches the current revision and routes Aboot Nothing records to their existing full editor; ordinary Polls open an accessible lightbox for title, description, voting policy, options and triggers without changing category or option IDs.
+- The matchup library labels its editor Edit Poll and scrolls/focuses the editor immediately, including direct edit links. Existing matchup controls remain intact. Protected options remain locked after voting; canonical save validation and revision conflicts are retained.
+- Added src/polls/PollEditDialog.tsx and src/polls/poll-edit.css. Updated both Admin pages and the existing real D1/API browser acceptance. Build/typecheck, focused lint and responsive browser checks pass, including actual ordinary Poll trigger saves, stable IDs/category, direct matchup navigation and editor focus at 390/1440. No migration or Public/Bot changes.

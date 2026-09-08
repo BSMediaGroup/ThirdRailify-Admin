@@ -28,6 +28,7 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
   const session = await createSession(env, new Request(ADMIN), account, ADMIN);
   const cookie = session.cookie.split(';')[0];
   const created = await createPoll(env, account.id, { title: 'The moon or the deep?', description: 'One giant leap. One unexplored world. Where would you go?', presentationType: 'abootnothing', presentation: { colors: ['#efc65c', '#6cc9d9'], context: 'Aboot Nothing · The next frontier', featuredOrder: 1 }, rumbleEnabled: true, rumbleSourceScope: 'user:synthetic', options: [{ label: 'THE MOON', description: 'Look up. Go further.', trigger: 'moon' }, { label: 'THE DEEP', description: 'Dive into the unknown.', trigger: 'deep' }] });
+  const regular = await createPoll(env, account.id, { title: 'Editable ordinary Poll', options: [{ label: 'Coffee', trigger: 'coffee' }, { label: 'Tea', trigger: 'tea' }] });
   await changePollLifecycle(env, account.id, created.poll.slug, { revision: created.poll.revision, action: 'open' });
   await savePollPolicy(env, account.id, { pollId: created.poll.id, revision: 0, policy: { rantEnabled: true, giftEnabled: true, maxMessages: 3, timeoutSeconds: 300 } });
   const bot = (await botActivePoll(env)).activePoll;
@@ -84,7 +85,26 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
     await page.screenshot({ path: `${artifacts}/detail-${width}.png`, fullPage: true });
     await page.goto(PUBLIC + `/polls/${created.poll.slug}/popout`); await page.locator('.aboot-vote-cards').waitFor(); assert.equal(await page.getByRole('button', { name: 'Vote', exact: true }).count(), 0);
     await page.setViewportSize({ width, height: width < 500 ? 844 : 1000 });
-    await page.goto(ADMIN + '/polls/abootnothing'); await page.getByRole('heading', { name: 'Aboot Nothing', exact: true }).waitFor(); await page.getByRole('button', { name: 'Edit matchup' }).click({ timeout: 5000 }).catch(e => { throw new Error(`${e.message}: ${errors.join(' | ')}`); }); await page.getByRole('button', { name: 'Save matchup' }).waitFor();
+    if (width === 1440 || width === 390) {
+      await page.goto(ADMIN + '/polls');
+      await page.getByRole('row').filter({ hasText: 'Editable ordinary Poll' }).getByRole('button', { name: 'Edit Poll', exact: true }).click();
+      const editor = page.getByRole('dialog', { name: 'Edit Poll', exact: true });
+      await editor.getByLabel('Trigger for Coffee', { exact: true }).fill('java');
+      await page.screenshot({ path: `${artifacts}/ordinary-poll-editor-${width}.png` });
+      assert.ok(await editor.evaluate(n => { const r = n.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
+      await editor.getByRole('button', { name: 'Save Poll', exact: true }).click();
+      await editor.waitFor({ state: 'detached' });
+      const saved = (await getPublicPoll(env, regular.poll.slug, account.id, true)).poll;
+      assert.equal(saved.options[0].trigger, 'java');
+      assert.equal(saved.presentationType, 'regular');
+      assert.equal(saved.options[0].id, regular.poll.options[0].id);
+      await page.getByRole('row').filter({ hasText: created.poll.title }).getByRole('button', { name: 'Edit Poll', exact: true }).click();
+      await page.getByLabel('Poll title', { exact: true }).waitFor();
+      assert.ok(page.url().includes('?edit='));
+      assert.equal(await page.getByLabel('Poll title', { exact: true }).inputValue(), created.poll.title);
+    }
+    await page.goto(ADMIN + '/polls/abootnothing'); await page.getByRole('heading', { name: 'Aboot Nothing', exact: true }).waitFor(); await page.getByRole('button', { name: 'Edit Poll' }).click({ timeout: 5000 }).catch(e => { throw new Error(`${e.message}: ${errors.join(' | ')}`); }); await page.getByRole('button', { name: 'Save matchup' }).waitFor();
+    assert.ok(await page.getByLabel('Poll title', { exact: true }).evaluate(n => { const r = n.getBoundingClientRect(); return document.activeElement === n && r.top >= 0 && r.top < innerHeight; }));
     geometry.push({ width, route: 'admin', fits: await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth) });
     if (width === 1440) {
       await page.screenshot({ path: `${artifacts}/admin-editor.png`, fullPage: true });
@@ -160,7 +180,7 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       await page.waitForFunction(() => !document.querySelector('input[type=file]').disabled);
       assert.equal(await page.getByLabel('Poll title', { exact: true }).inputValue(), 'Unsaved title survives artwork replacement');
       await page.reload();
-      await page.locator('.aboot-admin-grid article').filter({ hasText: 'Artwork before first save' }).getByRole('button', { name: 'Edit matchup' }).click();
+      await page.locator('.aboot-admin-grid article').filter({ hasText: 'Artwork before first save' }).getByRole('button', { name: 'Edit Poll' }).click();
       assert.equal(await page.locator('.aboot-admin-preview').count(), 3);
       const draftRow = await h.commerceDb.prepare("SELECT public_slug FROM polls WHERE title='Artwork before first save'").first();
       const draftPayload = await adminPollHandler({env,request:new Request(ADMIN+'/api/admin/polls/'+draftRow.public_slug,{headers:{Cookie:cookie}})});

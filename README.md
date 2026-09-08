@@ -516,3 +516,6 @@ Historical result corrections (2026-09-08): completed historical/manual matches 
 
 
 Unconfigured match dimming (2026-09-08): increased the visible difference by lowering incomplete match opacity from 70% to 40% on Admin and Public. Hover, keyboard focus and print restore full opacity. Existing transition and reduced-motion behavior retained. CURRENT VER=0.1.0-alpha.0; PENDING VER=0.1.0-alpha.0. No new files or data changes.
+
+
+Direct Poll editing (2026-09-08): Edit Poll in the main list opens the correct category editor. The library editor scrolls into view and focuses its title. Ordinary Polls use the new src/polls/PollEditDialog.tsx and src/polls/poll-edit.css; stable identities and canonical revision checks remain enforced. Real D1/API browser saves and responsive checks pass.
