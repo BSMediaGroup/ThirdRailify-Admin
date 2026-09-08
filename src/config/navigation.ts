@@ -3,13 +3,12 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "overview" | "analytics" | "content" | "watch" | "gaming" | "wheels" | "wheelStages" | "bracket" | "versus" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "rumble" | "overview" | "analytics" | "content" | "watch" | "gaming" | "wheels" | "wheelStages" | "bracket" | "versus" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
 
 export const adminAreas: AdminArea[] = [
-  { path: "/rumble-intelligence", label: "Rumble Intelligence", shortLabel: "Subscribers", icon: "users", summary: "Private subscriber registry and observation history.", futureScope: [] },
   {
     path: "/",
     label: "Overview",
@@ -26,6 +25,7 @@ export const adminAreas: AdminArea[] = [
     summary: "Current signal visibility and retained episode controls.",
     futureScope: ["Signed-ingest archive", "24-record retention", "Public visibility controls"],
   },
+  { path: "/rumble-intelligence", label: "Rumble Intelligence", shortLabel: "Subscribers", icon: "rumble", summary: "Private subscriber registry and observation history.", futureScope: [] },
   {
     path: "/gaming",
     label: "Gaming",

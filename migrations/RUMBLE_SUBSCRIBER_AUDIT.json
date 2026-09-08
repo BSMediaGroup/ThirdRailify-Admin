@@ -1,0 +1,3373 @@
+{
+  "report_version": 1,
+  "scope": "Analysis of the four supplied JSON payloads; no live account/API access or repository changes.",
+  "date_basis": "Snapshot time from each payload's now Unix timestamp, converted to UTC. File upload times are not capture times.",
+  "inputs": [
+    {
+      "file": "RUMBLE_API_OUTPUT_SAMPLE(1).json",
+      "bytes": 312647,
+      "sha256": "ed2a8b6a31f1c594b586ef893ef4b602d637cc26ff4a5d29954a53b4d4dbe2dc"
+    },
+    {
+      "file": "RUMBLE_OUTPUT_WITH_CHATS(1).json",
+      "bytes": 32170,
+      "sha256": "df4ac1fc8705e35e6d7dc641f716cbfbc61315e9dfd44ac51ef5d9413d8edab4"
+    },
+    {
+      "file": "RUMBLE_OUTPUT_WITH_EVENTS(1).json",
+      "bytes": 335859,
+      "sha256": "04bde30145bc462bcee20940ff1481e1cf3c2e2298637facd6511ab2a7d20fd7"
+    },
+    {
+      "file": "RUMBLE_OUTPUT_WITH_RAID.json",
+      "bytes": 220820,
+      "sha256": "7d49316a6db39bdda9fbad4e0e470b160ba02fe2a7ca4cdd6fad53f1815a62f7"
+    }
+  ],
+  "snapshots": [
+    {
+      "file": "RUMBLE_API_OUTPUT_SAMPLE.json",
+      "source": {
+        "type": "user",
+        "user_id": "1sl8zm",
+        "username": "ThirdRailify",
+        "channel_id": null,
+        "channel_name": null
+      },
+      "now_utc": "2026-08-31T11:08:24+00:00",
+      "since": null,
+      "max_num_results": 50,
+      "num_subscribers": 132,
+      "rows": 132,
+      "unique_usernames": 126,
+      "distinct_subkey": 132,
+      "amount_counts": {
+        "0": 122,
+        "500": 10
+      },
+      "user_username_mismatch": 0,
+      "oldest_subscribed": "2025-04-16T04:02:43+00:00",
+      "newest_subscribed": "2026-08-31T01:55:36+00:00",
+      "zero_age_days_minmax": [
+        0.38389,
+        30.28471
+      ],
+      "zero_older_than_30d": 10,
+      "zero_older_than_31d": 0,
+      "positive_records": [
+        {
+          "user": "outworldlive",
+          "username": "outworldlive",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-08-27T02:36:59+00:00"
+        },
+        {
+          "user": "tonyhey",
+          "username": "tonyhey",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-24T03:06:35+00:00"
+        },
+        {
+          "user": "CyberValkyrie",
+          "username": "CyberValkyrie",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-21T04:35:07+00:00"
+        },
+        {
+          "user": "CSIReferee",
+          "username": "CSIReferee",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-21T02:20:27+00:00"
+        },
+        {
+          "user": "DuckTape71",
+          "username": "DuckTape71",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-20T03:38:24+00:00"
+        },
+        {
+          "user": "AlastorAR",
+          "username": "AlastorAR",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-02-12T07:12:07+00:00"
+        },
+        {
+          "user": "DeluxeKnight1981",
+          "username": "DeluxeKnight1981",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-07-12T02:55:22+00:00"
+        },
+        {
+          "user": "Spuds1964",
+          "username": "Spuds1964",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-21T03:15:06+00:00"
+        },
+        {
+          "user": "Shrty7081",
+          "username": "Shrty7081",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-17T02:27:09+00:00"
+        },
+        {
+          "user": "Cassassrumble29",
+          "username": "Cassassrumble29",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-04-16T04:02:43+00:00"
+        }
+      ],
+      "duplicate_users": {
+        "phloggo": 2,
+        "do_what_david_does": 2,
+        "bjobsecure": 2,
+        "shrty7081": 2,
+        "csireferee": 2,
+        "boomboom42": 2
+      },
+      "sub_fields": [
+        "amount_cents",
+        "amount_dollars",
+        "profile_pic_url",
+        "subscribed_on",
+        "user",
+        "username"
+      ],
+      "subsection_fields": [
+        "latest_subscriber",
+        "num_subscribers",
+        "recent_subscribers"
+      ],
+      "gift_num": 2742,
+      "gift_rows": 1133,
+      "gift_quantity_sum": 2742,
+      "followers_num": 149,
+      "followers_total": 1927,
+      "followers_rows": 48,
+      "stream_count": 1,
+      "chat_records": 0,
+      "rant_records": 0
+    },
+    {
+      "file": "RUMBLE_OUTPUT_WITH_CHATS.json",
+      "source": {
+        "type": "user",
+        "user_id": "vmzw3",
+        "username": "danielclancy",
+        "channel_id": null,
+        "channel_name": null
+      },
+      "now_utc": "2026-08-31T11:51:06+00:00",
+      "since": null,
+      "max_num_results": 50,
+      "num_subscribers": 33,
+      "rows": 33,
+      "unique_usernames": 33,
+      "distinct_subkey": 33,
+      "amount_counts": {
+        "0": 32,
+        "500": 1
+      },
+      "user_username_mismatch": 0,
+      "oldest_subscribed": "2026-08-02T02:06:30+00:00",
+      "newest_subscribed": "2026-08-12T04:57:28+00:00",
+      "zero_age_days_minmax": [
+        19.28725,
+        29.40597
+      ],
+      "zero_older_than_30d": 0,
+      "zero_older_than_31d": 0,
+      "positive_records": [
+        {
+          "user": "BryGuyBMoney",
+          "username": "BryGuyBMoney",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-08-02T03:01:14+00:00"
+        }
+      ],
+      "duplicate_users": {},
+      "sub_fields": [
+        "amount_cents",
+        "amount_dollars",
+        "profile_pic_url",
+        "subscribed_on",
+        "user",
+        "username"
+      ],
+      "subsection_fields": [
+        "latest_subscriber",
+        "num_subscribers",
+        "recent_subscribers"
+      ],
+      "gift_num": 72,
+      "gift_rows": 37,
+      "gift_quantity_sum": 72,
+      "followers_num": 54,
+      "followers_total": 1881,
+      "followers_rows": 49,
+      "stream_count": 1,
+      "chat_records": 4,
+      "rant_records": 0
+    },
+    {
+      "file": "RUMBLE_OUTPUT_WITH_EVENTS.json",
+      "source": {
+        "type": "user",
+        "user_id": "1sl8zm",
+        "username": "ThirdRailify",
+        "channel_id": null,
+        "channel_name": null
+      },
+      "now_utc": "2026-09-01T03:09:22+00:00",
+      "since": null,
+      "max_num_results": 50,
+      "num_subscribers": 137,
+      "rows": 137,
+      "unique_usernames": 131,
+      "distinct_subkey": 137,
+      "amount_counts": {
+        "0": 127,
+        "500": 10
+      },
+      "user_username_mismatch": 0,
+      "oldest_subscribed": "2025-04-16T04:02:43+00:00",
+      "newest_subscribed": "2026-09-01T02:42:08+00:00",
+      "zero_age_days_minmax": [
+        0.01891,
+        30.95205
+      ],
+      "zero_older_than_30d": 10,
+      "zero_older_than_31d": 0,
+      "positive_records": [
+        {
+          "user": "outworldlive",
+          "username": "outworldlive",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-08-27T02:36:59+00:00"
+        },
+        {
+          "user": "tonyhey",
+          "username": "tonyhey",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-24T03:06:35+00:00"
+        },
+        {
+          "user": "CyberValkyrie",
+          "username": "CyberValkyrie",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-21T04:35:07+00:00"
+        },
+        {
+          "user": "CSIReferee",
+          "username": "CSIReferee",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-21T02:20:27+00:00"
+        },
+        {
+          "user": "DuckTape71",
+          "username": "DuckTape71",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-20T03:38:24+00:00"
+        },
+        {
+          "user": "AlastorAR",
+          "username": "AlastorAR",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-02-12T07:12:07+00:00"
+        },
+        {
+          "user": "DeluxeKnight1981",
+          "username": "DeluxeKnight1981",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-07-12T02:55:22+00:00"
+        },
+        {
+          "user": "Spuds1964",
+          "username": "Spuds1964",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-21T03:15:06+00:00"
+        },
+        {
+          "user": "Shrty7081",
+          "username": "Shrty7081",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-17T02:27:09+00:00"
+        },
+        {
+          "user": "Cassassrumble29",
+          "username": "Cassassrumble29",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-04-16T04:02:43+00:00"
+        }
+      ],
+      "duplicate_users": {
+        "phloggo": 2,
+        "do_what_david_does": 2,
+        "bjobsecure": 2,
+        "shrty7081": 2,
+        "csireferee": 2,
+        "boomboom42": 2
+      },
+      "sub_fields": [
+        "amount_cents",
+        "amount_dollars",
+        "profile_pic_url",
+        "subscribed_on",
+        "user",
+        "username"
+      ],
+      "subsection_fields": [
+        "latest_subscriber",
+        "num_subscribers",
+        "recent_subscribers"
+      ],
+      "gift_num": 2747,
+      "gift_rows": 1134,
+      "gift_quantity_sum": 2747,
+      "followers_num": 149,
+      "followers_total": 1930,
+      "followers_rows": 48,
+      "stream_count": 1,
+      "chat_records": 50,
+      "rant_records": 1
+    },
+    {
+      "file": "RUMBLE_OUTPUT_WITH_RAID.json",
+      "source": {
+        "type": "user",
+        "user_id": "1sl8zm",
+        "username": "ThirdRailify",
+        "channel_id": null,
+        "channel_name": null
+      },
+      "now_utc": "2026-09-07T02:51:46+00:00",
+      "since": null,
+      "max_num_results": 50,
+      "num_subscribers": 122,
+      "rows": 122,
+      "unique_usernames": 116,
+      "distinct_subkey": 122,
+      "amount_counts": {
+        "0": 111,
+        "500": 11
+      },
+      "user_username_mismatch": 0,
+      "oldest_subscribed": "2025-04-16T04:02:43+00:00",
+      "newest_subscribed": "2026-09-07T02:41:21+00:00",
+      "zero_age_days_minmax": [
+        0.00723,
+        30.94494
+      ],
+      "zero_older_than_30d": 9,
+      "zero_older_than_31d": 0,
+      "positive_records": [
+        {
+          "user": "BryGuyBMoney",
+          "username": "BryGuyBMoney",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-09-04T04:16:18+00:00"
+        },
+        {
+          "user": "outworldlive",
+          "username": "outworldlive",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-08-27T02:36:59+00:00"
+        },
+        {
+          "user": "tonyhey",
+          "username": "tonyhey",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-24T03:06:35+00:00"
+        },
+        {
+          "user": "CyberValkyrie",
+          "username": "CyberValkyrie",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-21T04:35:07+00:00"
+        },
+        {
+          "user": "CSIReferee",
+          "username": "CSIReferee",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-21T02:20:27+00:00"
+        },
+        {
+          "user": "DuckTape71",
+          "username": "DuckTape71",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-20T03:38:24+00:00"
+        },
+        {
+          "user": "AlastorAR",
+          "username": "AlastorAR",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-02-12T07:12:07+00:00"
+        },
+        {
+          "user": "DeluxeKnight1981",
+          "username": "DeluxeKnight1981",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-07-12T02:55:22+00:00"
+        },
+        {
+          "user": "Spuds1964",
+          "username": "Spuds1964",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-21T03:15:06+00:00"
+        },
+        {
+          "user": "Shrty7081",
+          "username": "Shrty7081",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-17T02:27:09+00:00"
+        },
+        {
+          "user": "Cassassrumble29",
+          "username": "Cassassrumble29",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-04-16T04:02:43+00:00"
+        }
+      ],
+      "duplicate_users": {
+        "boomboom42": 2,
+        "phloggo": 2,
+        "do_what_david_does": 2,
+        "bjobsecure": 2,
+        "shrty7081": 2,
+        "csireferee": 2
+      },
+      "sub_fields": [
+        "amount_cents",
+        "amount_dollars",
+        "profile_pic_url",
+        "subscribed_on",
+        "user",
+        "username"
+      ],
+      "subsection_fields": [
+        "latest_subscriber",
+        "num_subscribers",
+        "recent_subscribers"
+      ],
+      "gift_num": 2769,
+      "gift_rows": 1143,
+      "gift_quantity_sum": 2769,
+      "followers_num": 149,
+      "followers_total": 1957,
+      "followers_rows": 48,
+      "stream_count": 1,
+      "chat_records": 48,
+      "rant_records": 5
+    }
+  ],
+  "complete_observed_field_schema": {
+    "$": [
+      "channel_id",
+      "channel_name",
+      "followers",
+      "gifted_subs",
+      "livestreams",
+      "max_num_results",
+      "now",
+      "since",
+      "subscribers",
+      "type",
+      "user_id",
+      "username"
+    ],
+    "$.followers": [
+      "latest_follower",
+      "num_followers",
+      "num_followers_total",
+      "recent_followers"
+    ],
+    "$.followers.latest_follower": [
+      "followed_on",
+      "profile_pic_url",
+      "username"
+    ],
+    "$.followers.recent_followers[]": [
+      "followed_on",
+      "profile_pic_url",
+      "username"
+    ],
+    "$.subscribers": [
+      "latest_subscriber",
+      "num_subscribers",
+      "recent_subscribers"
+    ],
+    "$.subscribers.latest_subscriber": [
+      "amount_cents",
+      "amount_dollars",
+      "profile_pic_url",
+      "subscribed_on",
+      "user",
+      "username"
+    ],
+    "$.subscribers.recent_subscribers[]": [
+      "amount_cents",
+      "amount_dollars",
+      "profile_pic_url",
+      "subscribed_on",
+      "user",
+      "username"
+    ],
+    "$.gifted_subs": [
+      "latest_gifted_sub",
+      "num_gifted_subs",
+      "recent_gifted_subs"
+    ],
+    "$.gifted_subs.latest_gifted_sub": [
+      "gift_type",
+      "gifted_on",
+      "purchased_by",
+      "remaining_gifts",
+      "total_gifts",
+      "video_id"
+    ],
+    "$.gifted_subs.recent_gifted_subs[]": [
+      "gift_type",
+      "gifted_on",
+      "purchased_by",
+      "remaining_gifts",
+      "total_gifts",
+      "video_id"
+    ],
+    "$.livestreams[]": [
+      "categories",
+      "chat",
+      "created_on",
+      "dislikes",
+      "id",
+      "is_live",
+      "likes",
+      "scheduled_on",
+      "server_url",
+      "stream_key",
+      "title",
+      "visibility",
+      "watching_now"
+    ],
+    "$.livestreams[].categories": [
+      "primary",
+      "secondary"
+    ],
+    "$.livestreams[].categories.primary": [
+      "slug",
+      "title"
+    ],
+    "$.livestreams[].categories.secondary": [
+      "slug",
+      "title"
+    ],
+    "$.livestreams[].chat": [
+      "latest_message",
+      "latest_rant",
+      "recent_messages",
+      "recent_rants"
+    ],
+    "$.livestreams[].chat.latest_message": [
+      "badges",
+      "created_on",
+      "profile_pic_url",
+      "text",
+      "username"
+    ],
+    "$.livestreams[].chat.recent_messages[]": [
+      "badges",
+      "created_on",
+      "profile_pic_url",
+      "text",
+      "username"
+    ],
+    "$.livestreams[].chat.latest_rant": [
+      "amount_cents",
+      "amount_dollars",
+      "badges",
+      "created_on",
+      "expires_on",
+      "profile_pic_url",
+      "text",
+      "username"
+    ],
+    "$.livestreams[].chat.recent_rants[]": [
+      "amount_cents",
+      "amount_dollars",
+      "badges",
+      "created_on",
+      "expires_on",
+      "profile_pic_url",
+      "text",
+      "username"
+    ]
+  },
+  "additional_checks": {
+    "RUMBLE_API_OUTPUT_SAMPLE.json": {
+      "valid_integer_sub_amounts": true,
+      "dollar_cent_agreement": true,
+      "sub_rows_descending": true,
+      "gift_duplicate_fingerprints": 0,
+      "gift_earliest": "2025-01-05T03:21:57+00:00",
+      "gift_latest": "2026-08-31T01:55:26+00:00",
+      "positive_old_over30_count": 9
+    },
+    "RUMBLE_OUTPUT_WITH_CHATS.json": {
+      "valid_integer_sub_amounts": true,
+      "dollar_cent_agreement": true,
+      "sub_rows_descending": true,
+      "gift_duplicate_fingerprints": 0,
+      "gift_earliest": "2025-06-19T01:29:53+00:00",
+      "gift_latest": "2026-08-12T04:55:58+00:00",
+      "positive_old_over30_count": 0
+    },
+    "RUMBLE_OUTPUT_WITH_EVENTS.json": {
+      "valid_integer_sub_amounts": true,
+      "dollar_cent_agreement": true,
+      "sub_rows_descending": true,
+      "gift_duplicate_fingerprints": 0,
+      "gift_earliest": "2025-01-05T03:21:57+00:00",
+      "gift_latest": "2026-09-01T01:52:33+00:00",
+      "positive_old_over30_count": 9
+    },
+    "RUMBLE_OUTPUT_WITH_RAID.json": {
+      "valid_integer_sub_amounts": true,
+      "dollar_cent_agreement": true,
+      "sub_rows_descending": true,
+      "gift_duplicate_fingerprints": 0,
+      "gift_earliest": "2025-01-05T03:21:57+00:00",
+      "gift_latest": "2026-09-07T02:40:25+00:00",
+      "positive_old_over30_count": 9
+    }
+  },
+  "same_source_subscription_diffs": [
+    {
+      "from": "RUMBLE_API_OUTPUT_SAMPLE.json",
+      "to": "RUMBLE_OUTPUT_WITH_EVENTS.json",
+      "retained": 132,
+      "added": 5,
+      "removed": 0,
+      "added_amounts": {
+        "0": 5
+      },
+      "removed_amounts": {},
+      "removed_records": [],
+      "added_records": [
+        {
+          "user": "PenguinHunter63",
+          "username": "PenguinHunter63",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:04:14+00:00"
+        },
+        {
+          "user": "GregOhio",
+          "username": "GregOhio",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:05:40+00:00"
+        },
+        {
+          "user": "danielclancy",
+          "username": "danielclancy",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:12:45+00:00"
+        },
+        {
+          "user": "Nitewulph",
+          "username": "Nitewulph",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:18:15+00:00"
+        },
+        {
+          "user": "ADEllis24",
+          "username": "ADEllis24",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:42:08+00:00"
+        }
+      ],
+      "removed_oldest_newest": [
+        null,
+        null
+      ],
+      "removed_older_than_31": 0,
+      "removed_calendar_month_elapsed": 0,
+      "metadata_only_changes": 1
+    },
+    {
+      "from": "RUMBLE_OUTPUT_WITH_EVENTS.json",
+      "to": "RUMBLE_OUTPUT_WITH_RAID.json",
+      "retained": 99,
+      "added": 23,
+      "removed": 38,
+      "added_amounts": {
+        "0": 22,
+        "500": 1
+      },
+      "removed_amounts": {
+        "0": 38
+      },
+      "removed_records": [
+        {
+          "user": "BigRedOneGuy",
+          "username": "BigRedOneGuy",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T04:18:25+00:00"
+        },
+        {
+          "user": "gingerams24",
+          "username": "gingerams24",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T04:39:15+00:00"
+        },
+        {
+          "user": "Thanosjerry",
+          "username": "Thanosjerry",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T04:52:45+00:00"
+        },
+        {
+          "user": "darnellquiggley",
+          "username": "darnellquiggley",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T04:59:07+00:00"
+        },
+        {
+          "user": "13Ironman",
+          "username": "13Ironman",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T05:00:10+00:00"
+        },
+        {
+          "user": "izzyb1234",
+          "username": "izzyb1234",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T05:08:38+00:00"
+        },
+        {
+          "user": "deboravilbert",
+          "username": "deboravilbert",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T05:13:06+00:00"
+        },
+        {
+          "user": "Mikegenesis",
+          "username": "Mikegenesis",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T05:13:17+00:00"
+        },
+        {
+          "user": "Down7232",
+          "username": "Down7232",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T05:14:21+00:00"
+        },
+        {
+          "user": "thatguyjosh",
+          "username": "thatguyjosh",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-01T05:18:00+00:00"
+        },
+        {
+          "user": "DLDX",
+          "username": "DLDX",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T00:24:17+00:00"
+        },
+        {
+          "user": "BoomBoom42",
+          "username": "BoomBoom42",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T00:28:13+00:00"
+        },
+        {
+          "user": "soberrvtech",
+          "username": "soberrvtech",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T01:15:22+00:00"
+        },
+        {
+          "user": "EleMentalMJ",
+          "username": "EleMentalMJ",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T01:15:43+00:00"
+        },
+        {
+          "user": "Boxin",
+          "username": "Boxin",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T01:18:25+00:00"
+        },
+        {
+          "user": "Deathbyte420",
+          "username": "Deathbyte420",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T01:24:10+00:00"
+        },
+        {
+          "user": "Ngmiles",
+          "username": "Ngmiles",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T01:29:06+00:00"
+        },
+        {
+          "user": "DrewBostian13",
+          "username": "DrewBostian13",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T02:00:54+00:00"
+        },
+        {
+          "user": "sanglant86",
+          "username": "sanglant86",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T02:23:50+00:00"
+        },
+        {
+          "user": "sizzle40",
+          "username": "sizzle40",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T03:31:47+00:00"
+        },
+        {
+          "user": "RedPilledAmericans",
+          "username": "RedPilledAmericans",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T04:24:13+00:00"
+        },
+        {
+          "user": "nomadangrygod1",
+          "username": "nomadangrygod1",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T04:41:10+00:00"
+        },
+        {
+          "user": "xEMORSKx",
+          "username": "xEMORSKx",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-03T05:16:27+00:00"
+        },
+        {
+          "user": "BrookeBlackburn",
+          "username": "BrookeBlackburn",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-04T02:37:16+00:00"
+        },
+        {
+          "user": "SimpleDavy",
+          "username": "SimpleDavy",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-05T05:10:05+00:00"
+        },
+        {
+          "user": "JDL37",
+          "username": "JDL37",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-05T05:34:26+00:00"
+        },
+        {
+          "user": "FnSupertrucker",
+          "username": "FnSupertrucker",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-05T05:34:26+00:00"
+        },
+        {
+          "user": "CReeeed",
+          "username": "CReeeed",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-05T05:34:27+00:00"
+        },
+        {
+          "user": "Tweak626",
+          "username": "Tweak626",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-05T05:34:28+00:00"
+        },
+        {
+          "user": "FriendlySlumLord",
+          "username": "FriendlySlumLord",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-05T05:34:29+00:00"
+        },
+        {
+          "user": "TheLionKing",
+          "username": "TheLionKing",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-06T02:08:50+00:00"
+        },
+        {
+          "user": "SassyJen51",
+          "username": "SassyJen51",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-06T02:09:12+00:00"
+        },
+        {
+          "user": "LurkingCatfish",
+          "username": "LurkingCatfish",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-06T03:44:10+00:00"
+        },
+        {
+          "user": "TheCrazyDuckLady",
+          "username": "TheCrazyDuckLady",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-06T03:44:41+00:00"
+        },
+        {
+          "user": "pnqpoo6",
+          "username": "pnqpoo6",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-06T03:51:13+00:00"
+        },
+        {
+          "user": "Queen_o_Biltong",
+          "username": "Queen_o_Biltong",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T03:02:47+00:00"
+        },
+        {
+          "user": "Yannifangz",
+          "username": "Yannifangz",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T03:35:04+00:00"
+        },
+        {
+          "user": "KammieKamz",
+          "username": "KammieKamz",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T03:56:00+00:00"
+        }
+      ],
+      "added_records": [
+        {
+          "user": "Ginger277",
+          "username": "Ginger277",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T01:44:31+00:00"
+        },
+        {
+          "user": "ProfessorSavageDad",
+          "username": "ProfessorSavageDad",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:06:16+00:00"
+        },
+        {
+          "user": "oxva420",
+          "username": "oxva420",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:09:51+00:00"
+        },
+        {
+          "user": "MandaMoe624",
+          "username": "MandaMoe624",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:16:58+00:00"
+        },
+        {
+          "user": "theRiTTzer",
+          "username": "theRiTTzer",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:45:25+00:00"
+        },
+        {
+          "user": "izzyb1234",
+          "username": "izzyb1234",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T04:43:47+00:00"
+        },
+        {
+          "user": "PTPod",
+          "username": "PTPod",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T04:43:48+00:00"
+        },
+        {
+          "user": "MarkDellinger",
+          "username": "MarkDellinger",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T05:42:32+00:00"
+        },
+        {
+          "user": "Killinitsense90",
+          "username": "Killinitsense90",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:41:58+00:00"
+        },
+        {
+          "user": "BoomBoom42",
+          "username": "BoomBoom42",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:50+00:00"
+        },
+        {
+          "user": "GersonFC",
+          "username": "GersonFC",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:51+00:00"
+        },
+        {
+          "user": "Ngmiles",
+          "username": "Ngmiles",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:52+00:00"
+        },
+        {
+          "user": "sanglant86",
+          "username": "sanglant86",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:52+00:00"
+        },
+        {
+          "user": "colty86",
+          "username": "colty86",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:53+00:00"
+        },
+        {
+          "user": "EleMentalMJ",
+          "username": "EleMentalMJ",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:54+00:00"
+        },
+        {
+          "user": "sizzle40",
+          "username": "sizzle40",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:54+00:00"
+        },
+        {
+          "user": "Robstuff100",
+          "username": "Robstuff100",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:55+00:00"
+        },
+        {
+          "user": "wesrev",
+          "username": "wesrev",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:56+00:00"
+        },
+        {
+          "user": "soberrvtech",
+          "username": "soberrvtech",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:54:08+00:00"
+        },
+        {
+          "user": "BryGuyBMoney",
+          "username": "BryGuyBMoney",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-09-04T04:16:18+00:00"
+        },
+        {
+          "user": "RedPilledAmericans",
+          "username": "RedPilledAmericans",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-04T04:34:26+00:00"
+        },
+        {
+          "user": "Jody121",
+          "username": "Jody121",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-07T02:39:08+00:00"
+        },
+        {
+          "user": "noman1904",
+          "username": "noman1904",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-07T02:41:21+00:00"
+        }
+      ],
+      "removed_oldest_newest": [
+        "2026-08-01T04:18:25+00:00",
+        "2026-08-07T03:56:00+00:00"
+      ],
+      "removed_older_than_31": 35,
+      "removed_calendar_month_elapsed": 35,
+      "metadata_only_changes": 2
+    }
+  ],
+  "badge_observations": {
+    "RUMBLE_API_OUTPUT_SAMPLE.json": {
+      "badge_types": {},
+      "chat_rant_distinct_actors": 0,
+      "recurring_badge_actors": [],
+      "recurring_badge_actor_count": 0,
+      "recurring_badge_absent_from_subscribers": [],
+      "subscribers_with_chat_but_no_recurring_badge": [],
+      "recurring_badge_only_zero_sub_rows": [],
+      "recurring_badge_positive_sub_rows": []
+    },
+    "RUMBLE_OUTPUT_WITH_CHATS.json": {
+      "badge_types": {
+        "moderator": 2,
+        "verified": 2,
+        "admin": 2,
+        "whale-gray": 2
+      },
+      "chat_rant_distinct_actors": 2,
+      "recurring_badge_actors": [],
+      "recurring_badge_actor_count": 0,
+      "recurring_badge_absent_from_subscribers": [],
+      "subscribers_with_chat_but_no_recurring_badge": [],
+      "recurring_badge_only_zero_sub_rows": [],
+      "recurring_badge_positive_sub_rows": []
+    },
+    "RUMBLE_OUTPUT_WITH_EVENTS.json": {
+      "badge_types": {
+        "moderator": 24,
+        "recurring_subscription": 42,
+        "verified": 31,
+        "whale-blue": 13,
+        "whale-yellow": 10,
+        "whale-gray": 16,
+        "admin": 4
+      },
+      "chat_rant_distinct_actors": 16,
+      "recurring_badge_actors": [
+        "adellis24",
+        "bjobsecure",
+        "boomboom42",
+        "danielclancy",
+        "ezedoesit216",
+        "finboyslick",
+        "fnsupertrucker",
+        "jakehusdon",
+        "mrscottawesome",
+        "streambot",
+        "tweak626",
+        "zomg"
+      ],
+      "recurring_badge_actor_count": 12,
+      "recurring_badge_absent_from_subscribers": [],
+      "subscribers_with_chat_but_no_recurring_badge": [],
+      "recurring_badge_only_zero_sub_rows": [
+        "adellis24",
+        "bjobsecure",
+        "boomboom42",
+        "danielclancy",
+        "ezedoesit216",
+        "finboyslick",
+        "fnsupertrucker",
+        "jakehusdon",
+        "mrscottawesome",
+        "streambot",
+        "tweak626",
+        "zomg"
+      ],
+      "recurring_badge_positive_sub_rows": []
+    },
+    "RUMBLE_OUTPUT_WITH_RAID.json": {
+      "badge_types": {
+        "verified": 29,
+        "whale-gray": 33,
+        "recurring_subscription": 38,
+        "moderator": 16,
+        "whale-yellow": 4,
+        "whale-blue": 9
+      },
+      "chat_rant_distinct_actors": 14,
+      "recurring_badge_actors": [
+        "boomboom42",
+        "colty86",
+        "csireferee",
+        "danielclancy",
+        "evad76",
+        "gregohio",
+        "phloggo",
+        "rdnkrenegade03",
+        "spuds1964",
+        "streambot",
+        "wesrev"
+      ],
+      "recurring_badge_actor_count": 11,
+      "recurring_badge_absent_from_subscribers": [],
+      "subscribers_with_chat_but_no_recurring_badge": [],
+      "recurring_badge_only_zero_sub_rows": [
+        "boomboom42",
+        "colty86",
+        "danielclancy",
+        "evad76",
+        "gregohio",
+        "phloggo",
+        "rdnkrenegade03",
+        "streambot",
+        "wesrev"
+      ],
+      "recurring_badge_positive_sub_rows": [
+        "csireferee",
+        "spuds1964"
+      ]
+    }
+  },
+  "latest_thirdrailify_named_roster": [
+    {
+      "username": "ADEllis24",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ADEllis24",
+          "username": "ADEllis24",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:42:08+00:00"
+        }
+      ]
+    },
+    {
+      "username": "AlastorAR",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "AlastorAR",
+          "username": "AlastorAR",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-02-12T07:12:07+00:00"
+        }
+      ]
+    },
+    {
+      "username": "bakedlinguini",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "bakedlinguini",
+          "username": "bakedlinguini",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T02:01:36+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Beeuskit",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Beeuskit",
+          "username": "Beeuskit",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T01:48:40+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BirdieTheDog",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "BirdieTheDog",
+          "username": "BirdieTheDog",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T04:43:42+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BJobSecure",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "BJobSecure",
+          "username": "BJobSecure",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-19T22:20:40+00:00"
+        },
+        {
+          "user": "BJobSecure",
+          "username": "BJobSecure",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-14T02:14:07+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BleuWolf248",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "BleuWolf248",
+          "username": "BleuWolf248",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-31T01:55:36+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BoilingPointLive",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "BoilingPointLive",
+          "username": "BoilingPointLive",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T02:37:27+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BoomBoom42",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "BoomBoom42",
+          "username": "BoomBoom42",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:50+00:00"
+        },
+        {
+          "user": "BoomBoom42",
+          "username": "BoomBoom42",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-13T20:04:21+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BrightCanNews",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "BrightCanNews",
+          "username": "BrightCanNews",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-21T03:42:36+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BryGuyBMoney",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "BryGuyBMoney",
+          "username": "BryGuyBMoney",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-09-04T04:16:18+00:00"
+        }
+      ]
+    },
+    {
+      "username": "BuckeyeMaGroin",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "BuckeyeMaGroin",
+          "username": "BuckeyeMaGroin",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-11T02:21:41+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Businessparty",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Businessparty",
+          "username": "Businessparty",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T03:14:29+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Cassassrumble29",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "Cassassrumble29",
+          "username": "Cassassrumble29",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-04-16T04:02:43+00:00"
+        }
+      ]
+    },
+    {
+      "username": "CH2ActionNews",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "CH2ActionNews",
+          "username": "CH2ActionNews",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T03:43:20+00:00"
+        }
+      ]
+    },
+    {
+      "username": "chazwhich",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "chazwhich",
+          "username": "chazwhich",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T05:41:58+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ChiefMustache",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ChiefMustache",
+          "username": "ChiefMustache",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T01:59:54+00:00"
+        }
+      ]
+    },
+    {
+      "username": "colty86",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "colty86",
+          "username": "colty86",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:53+00:00"
+        }
+      ]
+    },
+    {
+      "username": "coryp1986",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "coryp1986",
+          "username": "coryp1986",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T02:19:32+00:00"
+        }
+      ]
+    },
+    {
+      "username": "CSIReferee",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "CSIReferee",
+          "username": "CSIReferee",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-19T22:20:37+00:00"
+        },
+        {
+          "user": "CSIReferee",
+          "username": "CSIReferee",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-21T02:20:27+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Cwnosky",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Cwnosky",
+          "username": "Cwnosky",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T03:15:43+00:00"
+        }
+      ]
+    },
+    {
+      "username": "CyberValkyrie",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "CyberValkyrie",
+          "username": "CyberValkyrie",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-21T04:35:07+00:00"
+        }
+      ]
+    },
+    {
+      "username": "danielclancy",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "danielclancy",
+          "username": "danielclancy",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:12:45+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Dawndarkstar86",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Dawndarkstar86",
+          "username": "Dawndarkstar86",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-11T03:37:25+00:00"
+        }
+      ]
+    },
+    {
+      "username": "DeluxeKnight1981",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "DeluxeKnight1981",
+          "username": "DeluxeKnight1981",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-07-12T02:55:22+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Do_What_David_Does",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Do_What_David_Does",
+          "username": "Do_What_David_Does",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-19T22:21:44+00:00"
+        },
+        {
+          "user": "Do_What_David_Does",
+          "username": "Do_What_David_Does",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T04:04:34+00:00"
+        }
+      ]
+    },
+    {
+      "username": "DuckTape71",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "DuckTape71",
+          "username": "DuckTape71",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-03-20T03:38:24+00:00"
+        }
+      ]
+    },
+    {
+      "username": "EleMentalMJ",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "EleMentalMJ",
+          "username": "EleMentalMJ",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:54+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Evad76",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Evad76",
+          "username": "Evad76",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-31T00:32:08+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ezedoesit216",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ezedoesit216",
+          "username": "ezedoesit216",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-31T00:35:43+00:00"
+        }
+      ]
+    },
+    {
+      "username": "FennisUrsai",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "FennisUrsai",
+          "username": "FennisUrsai",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-21T03:42:34+00:00"
+        }
+      ]
+    },
+    {
+      "username": "FeralHousewife85",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "FeralHousewife85",
+          "username": "FeralHousewife85",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T01:55:27+00:00"
+        }
+      ]
+    },
+    {
+      "username": "FinboySlick",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "FinboySlick",
+          "username": "FinboySlick",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-27T04:22:23+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Fishie228",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Fishie228",
+          "username": "Fishie228",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T02:51:35+00:00"
+        }
+      ]
+    },
+    {
+      "username": "FkItButton",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "FkItButton",
+          "username": "FkItButton",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-11T05:16:21+00:00"
+        }
+      ]
+    },
+    {
+      "username": "GersonFC",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "GersonFC",
+          "username": "GersonFC",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:51+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Ginger277",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Ginger277",
+          "username": "Ginger277",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T01:44:31+00:00"
+        }
+      ]
+    },
+    {
+      "username": "GodBless5697",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "GodBless5697",
+          "username": "GodBless5697",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T04:02:15+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Gonnafish",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Gonnafish",
+          "username": "Gonnafish",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-13T03:30:22+00:00"
+        }
+      ]
+    },
+    {
+      "username": "GregOhio",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "GregOhio",
+          "username": "GregOhio",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:05:40+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Hernandez2787",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Hernandez2787",
+          "username": "Hernandez2787",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T02:43:05+00:00"
+        }
+      ]
+    },
+    {
+      "username": "izzyb1234",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "izzyb1234",
+          "username": "izzyb1234",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T04:43:47+00:00"
+        }
+      ]
+    },
+    {
+      "username": "JacobCastro",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "JacobCastro",
+          "username": "JacobCastro",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-27T04:21:10+00:00"
+        }
+      ]
+    },
+    {
+      "username": "jakehusdon",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "jakehusdon",
+          "username": "jakehusdon",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-28T05:41:19+00:00"
+        }
+      ]
+    },
+    {
+      "username": "JeffPearsonII",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "JeffPearsonII",
+          "username": "JeffPearsonII",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-20T03:35:14+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Jerico",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Jerico",
+          "username": "Jerico",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T04:11:03+00:00"
+        }
+      ]
+    },
+    {
+      "username": "JimSatala",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "JimSatala",
+          "username": "JimSatala",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-21T03:42:33+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Jody121",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Jody121",
+          "username": "Jody121",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-07T02:39:08+00:00"
+        }
+      ]
+    },
+    {
+      "username": "JonaPhinn",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "JonaPhinn",
+          "username": "JonaPhinn",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T03:43:21+00:00"
+        }
+      ]
+    },
+    {
+      "username": "jwink80",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "jwink80",
+          "username": "jwink80",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-14T02:25:29+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Killinitsense90",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Killinitsense90",
+          "username": "Killinitsense90",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:41:58+00:00"
+        }
+      ]
+    },
+    {
+      "username": "King_of_Biltong",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "King_of_Biltong",
+          "username": "King_of_Biltong",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T01:48:38+00:00"
+        }
+      ]
+    },
+    {
+      "username": "KingChris01",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "KingChris01",
+          "username": "KingChris01",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-27T05:06:01+00:00"
+        }
+      ]
+    },
+    {
+      "username": "KushGenie",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "KushGenie",
+          "username": "KushGenie",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T04:00:22+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Macross2012",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Macross2012",
+          "username": "Macross2012",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-24T01:33:45+00:00"
+        }
+      ]
+    },
+    {
+      "username": "MandaMoe624",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "MandaMoe624",
+          "username": "MandaMoe624",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:16:58+00:00"
+        }
+      ]
+    },
+    {
+      "username": "MarkDellinger",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "MarkDellinger",
+          "username": "MarkDellinger",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T05:42:32+00:00"
+        }
+      ]
+    },
+    {
+      "username": "MaverickBroadcasting",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "MaverickBroadcasting",
+          "username": "MaverickBroadcasting",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-11T02:00:54+00:00"
+        }
+      ]
+    },
+    {
+      "username": "mdfII",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "mdfII",
+          "username": "mdfII",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-27T05:21:10+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Minnesota260",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Minnesota260",
+          "username": "Minnesota260",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T01:45:01+00:00"
+        }
+      ]
+    },
+    {
+      "username": "MischiefMuggle",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "MischiefMuggle",
+          "username": "MischiefMuggle",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T02:08:57+00:00"
+        }
+      ]
+    },
+    {
+      "username": "MrScottAwesome",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "MrScottAwesome",
+          "username": "MrScottAwesome",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T04:59:19+00:00"
+        }
+      ]
+    },
+    {
+      "username": "nanabear007",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "nanabear007",
+          "username": "nanabear007",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T01:48:39+00:00"
+        }
+      ]
+    },
+    {
+      "username": "neeshiidoesgaming",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "neeshiidoesgaming",
+          "username": "neeshiidoesgaming",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-13T05:05:30+00:00"
+        }
+      ]
+    },
+    {
+      "username": "NeuroDivergentOne",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "NeuroDivergentOne",
+          "username": "NeuroDivergentOne",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-27T04:22:34+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Ngmiles",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Ngmiles",
+          "username": "Ngmiles",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:52+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Nitewulph",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Nitewulph",
+          "username": "Nitewulph",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:18:15+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Nitewulph63",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Nitewulph63",
+          "username": "Nitewulph63",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-27T02:39:02+00:00"
+        }
+      ]
+    },
+    {
+      "username": "noman1904",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "noman1904",
+          "username": "noman1904",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-07T02:41:21+00:00"
+        }
+      ]
+    },
+    {
+      "username": "OGDarkSpider",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "OGDarkSpider",
+          "username": "OGDarkSpider",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-27T04:22:23+00:00"
+        }
+      ]
+    },
+    {
+      "username": "outworldlive",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "outworldlive",
+          "username": "outworldlive",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-08-27T02:36:59+00:00"
+        }
+      ]
+    },
+    {
+      "username": "oxva420",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "oxva420",
+          "username": "oxva420",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:09:51+00:00"
+        }
+      ]
+    },
+    {
+      "username": "PenguinHunter63",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "PenguinHunter63",
+          "username": "PenguinHunter63",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-01T02:04:14+00:00"
+        }
+      ]
+    },
+    {
+      "username": "phloggo",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "phloggo",
+          "username": "phloggo",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-20T03:33:41+00:00"
+        },
+        {
+          "user": "phloggo",
+          "username": "phloggo",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-19T22:20:40+00:00"
+        }
+      ]
+    },
+    {
+      "username": "PlasticQuack",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "PlasticQuack",
+          "username": "PlasticQuack",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-14T02:18:16+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ProfessorSavageDad",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ProfessorSavageDad",
+          "username": "ProfessorSavageDad",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:06:16+00:00"
+        }
+      ]
+    },
+    {
+      "username": "PTPod",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "PTPod",
+          "username": "PTPod",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T04:43:48+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Radio_Baloney",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Radio_Baloney",
+          "username": "Radio_Baloney",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T04:35:49+00:00"
+        }
+      ]
+    },
+    {
+      "username": "RadioStreamer",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "RadioStreamer",
+          "username": "RadioStreamer",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-15T04:49:41+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Rdnkrenegade03",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Rdnkrenegade03",
+          "username": "Rdnkrenegade03",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-31T00:22:42+00:00"
+        }
+      ]
+    },
+    {
+      "username": "RealDarthMelvin",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "RealDarthMelvin",
+          "username": "RealDarthMelvin",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T05:04:13+00:00"
+        }
+      ]
+    },
+    {
+      "username": "RedPilledAmericans",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "RedPilledAmericans",
+          "username": "RedPilledAmericans",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-04T04:34:26+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ResTruthPod",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ResTruthPod",
+          "username": "ResTruthPod",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T01:55:48+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Retsnom",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Retsnom",
+          "username": "Retsnom",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T02:44:54+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Robstuff100",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Robstuff100",
+          "username": "Robstuff100",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:55+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ruckstande",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ruckstande",
+          "username": "ruckstande",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T02:29:00+00:00"
+        }
+      ]
+    },
+    {
+      "username": "rustyrivers",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "rustyrivers",
+          "username": "rustyrivers",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-22T03:58:27+00:00"
+        }
+      ]
+    },
+    {
+      "username": "SamDuty",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "SamDuty",
+          "username": "SamDuty",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T07:26:16+00:00"
+        }
+      ]
+    },
+    {
+      "username": "sanglant86",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "sanglant86",
+          "username": "sanglant86",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:52+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Scutum",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Scutum",
+          "username": "Scutum",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T04:07:10+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ShoGunMastaShoNuff",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ShoGunMastaShoNuff",
+          "username": "ShoGunMastaShoNuff",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T06:32:25+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Shrty7081",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Shrty7081",
+          "username": "Shrty7081",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-19T22:20:39+00:00"
+        },
+        {
+          "user": "Shrty7081",
+          "username": "Shrty7081",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-17T02:27:09+00:00"
+        }
+      ]
+    },
+    {
+      "username": "sizzle40",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "sizzle40",
+          "username": "sizzle40",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:54+00:00"
+        }
+      ]
+    },
+    {
+      "username": "SketchyJesus",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "SketchyJesus",
+          "username": "SketchyJesus",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T04:05:22+00:00"
+        }
+      ]
+    },
+    {
+      "username": "soberrvtech",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "soberrvtech",
+          "username": "soberrvtech",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:54:08+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Spuds1964",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "Spuds1964",
+          "username": "Spuds1964",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2025-06-21T03:15:06+00:00"
+        }
+      ]
+    },
+    {
+      "username": "StarWarsMarvelPURIST",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "StarWarsMarvelPURIST",
+          "username": "StarWarsMarvelPURIST",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T05:05:09+00:00"
+        }
+      ]
+    },
+    {
+      "username": "StreamBot",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "StreamBot",
+          "username": "StreamBot",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-21T03:42:36+00:00"
+        }
+      ]
+    },
+    {
+      "username": "Surge122",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "Surge122",
+          "username": "Surge122",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T05:05:08+00:00"
+        }
+      ]
+    },
+    {
+      "username": "surgerbear",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "surgerbear",
+          "username": "surgerbear",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T05:09:34+00:00"
+        }
+      ]
+    },
+    {
+      "username": "TheFrontPorchConservative",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "TheFrontPorchConservative",
+          "username": "TheFrontPorchConservative",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T05:31:29+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ThePatriotPartyPodCast",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ThePatriotPartyPodCast",
+          "username": "ThePatriotPartyPodCast",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-20T03:40:57+00:00"
+        }
+      ]
+    },
+    {
+      "username": "TheRealTombi",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "TheRealTombi",
+          "username": "TheRealTombi",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T02:33:00+00:00"
+        }
+      ]
+    },
+    {
+      "username": "theRiTTzer",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "theRiTTzer",
+          "username": "theRiTTzer",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-02T02:45:25+00:00"
+        }
+      ]
+    },
+    {
+      "username": "TheSchleppy",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "TheSchleppy",
+          "username": "TheSchleppy",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T03:03:24+00:00"
+        }
+      ]
+    },
+    {
+      "username": "ThirdRailPolitics",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "ThirdRailPolitics",
+          "username": "ThirdRailPolitics",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-21T03:42:35+00:00"
+        }
+      ]
+    },
+    {
+      "username": "TilDeathPodcast",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "TilDeathPodcast",
+          "username": "TilDeathPodcast",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-11T02:19:58+00:00"
+        }
+      ]
+    },
+    {
+      "username": "tonyhey",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": true,
+      "zero_amount_record_present": false,
+      "records": [
+        {
+          "user": "tonyhey",
+          "username": "tonyhey",
+          "amount_cents": 500,
+          "amount_dollars": 5,
+          "subscribed_on": "2026-07-24T03:06:35+00:00"
+        }
+      ]
+    },
+    {
+      "username": "TVGreen",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "TVGreen",
+          "username": "TVGreen",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-11T03:22:52+00:00"
+        }
+      ]
+    },
+    {
+      "username": "TYWILSONMD",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "TYWILSONMD",
+          "username": "TYWILSONMD",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-13T03:36:14+00:00"
+        }
+      ]
+    },
+    {
+      "username": "uninstalled000",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "uninstalled000",
+          "username": "uninstalled000",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-07T04:36:32+00:00"
+        }
+      ]
+    },
+    {
+      "username": "VerNiz",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "VerNiz",
+          "username": "VerNiz",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-08T05:07:09+00:00"
+        }
+      ]
+    },
+    {
+      "username": "wesrev",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "wesrev",
+          "username": "wesrev",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-09-03T03:43:56+00:00"
+        }
+      ]
+    },
+    {
+      "username": "wildarms420",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "wildarms420",
+          "username": "wildarms420",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-24T01:32:21+00:00"
+        }
+      ]
+    },
+    {
+      "username": "XXXftSMURF",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "XXXftSMURF",
+          "username": "XXXftSMURF",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-12T07:22:19+00:00"
+        }
+      ]
+    },
+    {
+      "username": "zomg",
+      "source_scope": "user:1sl8zm",
+      "sample_time_utc": "2026-09-07T02:51:46+00:00",
+      "interpretation": "API-listed in this sample, not independently verified active/paid status.",
+      "positive_amount_record_present": false,
+      "zero_amount_record_present": true,
+      "records": [
+        {
+          "user": "zomg",
+          "username": "zomg",
+          "amount_cents": 0,
+          "amount_dollars": 0,
+          "subscribed_on": "2026-08-10T02:26:47+00:00"
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "status": "observed",
+      "finding": "Each supplied num_subscribers equals its recent_subscribers raw row count. Raw rows are not unique accounts."
+    },
+    {
+      "status": "observed",
+      "finding": "ThirdRailify snapshot row counts are 132, 137, 122; unique normalized usernames are 126, 131, 116."
+    },
+    {
+      "status": "observed",
+      "finding": "The CHATS sample is user:vmzw3 / danielclancy, not user:1sl8zm / ThirdRailify."
+    },
+    {
+      "status": "observed",
+      "finding": "September 1 to September 7 retains 99 records, adds 23 and removes 38; every removed record has amount_cents=0."
+    },
+    {
+      "status": "observed",
+      "finding": "All ten earlier positive-amount ThirdRailify records persist; one new 500-cent record appears by September 7."
+    },
+    {
+      "status": "inference",
+      "finding": "The supplied subscriber arrays are consistent with an evolving roster containing differently retained zero-amount and positive-amount records. A complete active-entitlement contract is not proven."
+    },
+    {
+      "status": "observed",
+      "finding": "No subscriber active flag, expiry, cancellation, last-renewal, current-period, currency, invoice ID or immutable subscription ID appears. expires_on occurs only on Rants."
+    },
+    {
+      "status": "observed",
+      "finding": "In every supplied subscriber record, user equals username; an immutable subscriber user ID is not demonstrated."
+    },
+    {
+      "status": "observed",
+      "finding": "Some zero-amount records older than 30 days remain listed. Some disappear before exactly one calendar month from their own timestamp. No exact expiry formula is validated."
+    },
+    {
+      "status": "observed",
+      "finding": "recurring_subscription badges appear on actors with only zero-amount subscriber records. The badge alone does not demonstrate direct payment or a successful monthly renewal."
+    },
+    {
+      "status": "observed",
+      "finding": "Latest gifted_subs contains 1,143 distinct purchase-shaped records totalling 2,769 gifts, equal to num_gifted_subs. No explicit recipient-to-purchase foreign key is supplied."
+    },
+    {
+      "status": "inference",
+      "finding": "Timestamp clustering between gift purchases and zero-amount subscriber rows supports a gifted-origin hypothesis, not definitive per-recipient assignment."
+    }
+  ],
+  "design_guardrails": [
+    "Keep provider-listed status, payment evidence, renewal evidence and competition eligibility separate.",
+    "Use full validated source-scoped snapshots and qualified set differences, not latest-only notifications.",
+    "Never expire a positive-amount subscriber solely because subscribed_on is old.",
+    "Never infer a renewal charge merely because the same row persists.",
+    "Treat disappearance as observed absence until semantics/coverage are verified; do not call it an exact cancellation.",
+    "Do not infer lapse from silence or a failed/partial/stale snapshot.",
+    "Record badge sighting time; rereading the same old message is not fresh proof.",
+    "Preserve historical import evidence without executing past Wheel/Poll actions.",
+    "Freeze approved monthly participant lists and dedupe monthly membership awards separately from gift/Rant awards."
+  ]
+}

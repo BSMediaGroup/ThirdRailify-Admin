@@ -1,7 +1,7 @@
 import { AuthFailure, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from '../../../_shared/auth-core.js';
 import { requireAdminCapability } from '../../../_shared/admin-capabilities.js';
 import { readPollJson } from '../../../_shared/polls-core.js';
-import { PRIMARY_SOURCE, hash, ingestIntelligence, intelligencePerson, intelligenceReport, projectProvider, validateObservation } from '../../../_shared/rumble-intelligence.js';
+import { PRIMARY_SOURCE, hash, ingestIntelligence, intelligencePerson, intelligenceReport, intelligenceTrend, projectProvider, validateObservation } from '../../../_shared/rumble-intelligence.js';
 
 export async function onRequest({ request, env }) {
   try {
@@ -9,8 +9,9 @@ export async function onRequest({ request, env }) {
     const path = url.pathname.replace(/^\/api\/admin\/rumble-intelligence\/?/, '').replace(/\/$/, '');
     const origin = request.headers.get('origin');
     if ((origin || request.method !== 'GET') && normalizeOrigin(origin) !== normalizeOrigin(env.THIRDRAILIFY_ADMIN_ORIGIN)) throw new AuthFailure(403, 'origin_not_allowed', 'Admin origin required.');
-    if (request.method === 'GET' && (!path || path === 'person')) {
+    if (request.method === 'GET' && (!path || path === 'person' || path === 'trend')) {
       await requireAdminCapability(env, request, 'rumble_intelligence.view');
+      if (path === 'trend') return response(await intelligenceTrend(env, url.searchParams.get('source') || PRIMARY_SOURCE, url.searchParams.get('range') || '7d', url.searchParams.get('snapshotId')));
       if (path === 'person') return response(await intelligencePerson(env, url.searchParams.get('source') || PRIMARY_SOURCE, url.searchParams.get('name')));
       return response(await intelligenceReport(env, url.searchParams.get('source') || PRIMARY_SOURCE));
     }

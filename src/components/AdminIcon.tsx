@@ -7,6 +7,7 @@ type Props = {
 };
 
 const paths: Record<Props["name"], ReactNode> = {
+  rumble: <><path d="M6.8 2.7C5.1 2.3 3.6 3.4 3.1 5.2c-1.3 4.6-1.4 9.5-.2 13.8.6 2 2.5 3 4.3 2.5 5.1-1.3 9.4-4 12.7-7.5 1.2-1.3 1.2-3.3 0-4.6C16.5 5.9 11.8 3.9 6.8 2.7Z"/><path d="M9 8c-.7-.3-1.3.2-1.4.9-.3 1.8-.3 3.7-.1 5.4.1.7.8 1.2 1.4.9 1.5-.7 2.9-1.6 4.2-2.6.6-.5.6-1.3 0-1.8A24 24 0 0 0 9 8Z"/></>,
   overview: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
   analytics: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><path d="m3 8 6-5 6 7 6-6"/></>,
   content: <><path d="M5 3h10l4 4v14H5z"/><path d="M14 3v5h5M8 12h8M8 16h6"/></>,

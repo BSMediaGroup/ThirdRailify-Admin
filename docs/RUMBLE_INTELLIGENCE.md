@@ -22,6 +22,16 @@ History views show at most 180 qualified checkpoints, with explicit bounded cove
 
 Admin Refresh reads existing storage only. Bot consumes the existing successful snapshot, before the no-Poll guard, using the existing HMAC client and a separate durable bounded retry outbox. Unchanged membership checkpoints are rate-bounded; membership changes are retained. No public roster, new provider polling loop, Wheel, Poll-credit or Discord side effects are added.
 
+## Subscriber chart and pagination
+
+The registry defaults to 20 rows with 10/20/50/100 options; changing page size or filters returns to page one. CSV continues to export every filtered account across all pages. Rumble Intelligence sits immediately below Watch / Broadcast, using an inline AdminIcon path drawn from the Rumble reference shape.
+
+The green subscriber chart highlights total current distinct API-listed accounts independently of table filters. Its 24hr/7d/30d/90d controls query the private, capability-protected `/api/admin/rumble-intelligence/trend` endpoint. Self-paid-only, gifted-only, mixed and unknown categories are exclusive and sum to total. Legend toggles and keyboard-focusable observations reveal exact values. Point markers appear only on hover/focus, with a detailed tooltip showing the exact UTC timestamp, source, provenance, total and category counts/percentages. The graph uses a slightly deeper green. Layout adapts its SVG coordinates to the container so mobile axes remain readable.
+
+The query pins the displayed current snapshot and source, selecting the latest qualified actual observation per UTC hour (24hr/7d) or day (30d/90d), before loading membership sets. It covers the full window independently of the recent 180-checkpoint drawer; at most 340 observation rows are loaded, with reused sets classified once per request. Missing periods are not zero-filled, and lines break across gaps longer than 2.5 buckets. Refresh report also reloads chart history when the current snapshot has not changed, so imported older evidence appears. No additional migration or background polling is introduced.
+
+Validation: production build/typecheck, scoped ESLint, eight focused contract/connected tests, and Chrome at 1920/1440/768/390. Browser checks exercise every page size, last-page boundaries, all timescales, legend toggles, keyboard evidence, source totals and sidebar order. Backend tests cover 90-day history beyond 180 checkpoints, exclusive categories, degraded observations, source isolation and pinned snapshots. The chart screenshots in `.artifacts/rumble-intelligence/ui-*/trend-{width}.png` use explicitly synthetic local historical observations and the real sample's latest 116-account roster; they are not production history. No production login or remote D1 calls were attempted for this enhancement.
+
 ## Release evidence
 
 Protected full Commerce D1 backup: `X:\GIT\_BACKUPS\ThirdRailify\rumble-intelligence-20260909-before.sql`, 5,179,162 bytes, SHA-256 `506d906d14bc3e1b11fd07fa3dc5a17e3123ebf6039c1f2d0a4dfe43c141ae84`. NTFS access restricted to the operator, SYSTEM and Administrators. Successfully restored into an in-memory SQLite database for inspection; baseline includes 12 Wheels, 262 entries, 13 automation receipts and 37 Poll votes. The additive migration has no business-table writes or triggers.
@@ -43,6 +53,8 @@ commerce-migrations/0045_rumble_intelligence.sql
 functions/_shared/rumble-intelligence.js
 functions/api/admin/rumble-intelligence/[[path]].js
 src/pages/RumbleIntelligencePage.tsx
+src/components/RumbleSubscriberTrend.tsx
+src/styles/rumble-subscriber-trend.css
 src/styles/rumble-intelligence.css
 scripts/release-rumble-intelligence-schema.ps1
 tests/rumble-intelligence.test.mjs

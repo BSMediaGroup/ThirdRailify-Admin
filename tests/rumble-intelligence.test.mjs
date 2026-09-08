@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createCommerceDatabases, commerceEnvironment } from './commerce-test-helpers.mjs';
 import { applyMigration } from './auth-test-helpers.mjs';
-import { accounts, amountClass, projectProvider, validateObservation, ingestIntelligence, intelligenceReport } from '../functions/_shared/rumble-intelligence.js';
+import { accounts, amountClass, projectProvider, validateObservation, ingestIntelligence, intelligenceReport, intelligenceTrend } from '../functions/_shared/rumble-intelligence.js';
 import { onRequest as reportRoute } from '../functions/api/admin/rumble-intelligence/[[path]].js';
 
 const row = (name, amount, date = '2026-01-01T00:00:00Z') => ({ username: name, user: name, amount_cents: amount, subscribed_on: date });
@@ -11,6 +11,33 @@ const snapshot = (rows, now = 1788749506, extra = {}) => ({ user_id: '1sl8zm', c
 const project = s => projectProvider(s, new Date().toISOString());
 const migration = await readFile(new URL('../commerce-migrations/0045_rumble_intelligence.sql', import.meta.url), 'utf8');
 async function harness(t) { const h = await createCommerceDatabases(); t.after(() => h.dispose()); await applyMigration(h.commerceDb, migration); return { ...h, env: commerceEnvironment(h) }; }
+
+test('trend covers 90 days beyond recent history, samples actual observations and pins source/snapshot', async t => {
+  const h = await harness(t), now = Math.floor(Date.now() / 1000) - 60;
+  const send = (rows, at, extra) => ingestIntelligence(h.env, project(snapshot(rows, at, extra)));
+  const old = await send([row('Old', 500)], now - 60 * 86400);
+  const oldRow = await h.commerceDb.prepare('SELECT * FROM rumble_intelligence_observations WHERE id=?').bind(old.observationId).first();
+  // More than the report drawer's 180 checkpoints: the chart must still find day -60.
+  await h.commerceDb.batch(Array.from({ length: 185 }, (_, i) => h.commerceDb.prepare('INSERT INTO rumble_intelligence_observations(id,source,provider_at,observed_at,received_at,provenance,qualified,set_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)').bind(i.toString(16).padStart(64, '0'), oldRow.source, new Date((now - 86400 + i * 60) * 1000).toISOString(), oldRow.observed_at, oldRow.received_at, 'live', 1, oldRow.set_id, oldRow.metadata_json)));
+  const rows = [row('Paid', 500), row('Gift', 0), row('Mixed', 0), row('Mixed', 500), row('Unknown', 499)];
+  const current = await send(rows, now);
+  await send([], now + 10, { since: 1 }); // Degraded observations cannot erase the chart.
+  await send([], now, { user_id: 'vmzw3', username: 'Other' });
+  const trend = await intelligenceTrend(h.env, 'user:1sl8zm', '90d', current.observationId);
+  assert.equal(trend.points[0].at, oldRow.provider_at);
+  assert.deepEqual(trend.points.at(-1), { at: new Date(now * 1000).toISOString(), provenance: 'live', total: 4, paid: 1, gifted: 1, mixed: 1, unknown: 1 });
+  assert.ok(trend.points.length <= 3, 'No daily zero-fill for missing observations');
+  for (const range of ['24h', '7d', '30d']) {
+    const result = await intelligenceTrend(h.env, 'user:1sl8zm', range, current.observationId);
+    assert.ok(result.points.every(p => p.at !== oldRow.provider_at));
+    assert.ok(result.points.every(p => p.total === p.paid + p.gifted + p.mixed + p.unknown));
+    assert.equal(result.points.at(-1).total, 4);
+  }
+  await send([], now + 20);
+  assert.equal((await intelligenceTrend(h.env, 'user:1sl8zm', '24h', current.observationId)).points.at(-1).total, 4, 'New snapshots cannot change a pinned chart');
+  await assert.rejects(intelligenceTrend(h.env, 'user:1sl8zm', '365d', current.observationId));
+  await assert.rejects(intelligenceTrend(h.env, 'user:vmzw3', '90d', current.observationId));
+});
 
 test('all original samples reconcile source, provider time, full counts and latest classifications', async () => {
   const expected = [['RUMBLE_API_OUTPUT_SAMPLE.json', 'user:1sl8zm', 132, 126], ['RUMBLE_OUTPUT_WITH_CHATS.json', 'user:vmzw3', 33, 33], ['RUMBLE_OUTPUT_WITH_EVENTS.json', 'user:1sl8zm', 137, 131], ['RUMBLE_OUTPUT_WITH_RAID.json', 'user:1sl8zm', 122, 116]];

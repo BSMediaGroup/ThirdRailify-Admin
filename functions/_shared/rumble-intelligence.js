@@ -147,6 +147,34 @@ export async function intelligencePerson(env, source, name) {
   return { ok: true, source, name, bounded: result.results.length > 500, records: result.results.slice(0, 500).map(({ record_json, ...span }) => ({ ...JSON.parse(record_json), ...span })) };
 }
 
+export async function intelligenceTrend(env, source, range = '7d', snapshotId) {
+  const windows = { '24h': [1, 3600], '7d': [7, 3600], '30d': [30, 86400], '90d': [90, 86400] };
+  if (!Object.hasOwn(windows, range) || !/^(user|channel):[\w-]{1,100}$/.test(source) || !/^[a-f0-9]{64}$/.test(snapshotId || '')) fail('intelligence_trend_range');
+  const db = await intelligenceDb(env);
+  const anchor = await db.prepare('SELECT provider_at FROM rumble_intelligence_observations WHERE id=? AND source=? AND qualified=1').bind(snapshotId, source).first();
+  if (!anchor) throw new AuthFailure(404, 'intelligence_snapshot_missing', 'The requested subscriber snapshot is unavailable.');
+  const [days, bucketSeconds] = windows[range];
+  const to = new Date().toISOString(), from = new Date(Date.parse(to) - days * DAY).toISOString();
+  // Select the latest actual observation in each UTC bucket BEFORE loading rosters.
+  // This covers the full selected window, independent of the 180-checkpoint drawer.
+  const rows = await db.prepare(`WITH selected AS (
+    SELECT MAX(provider_at) at FROM rumble_intelligence_observations
+    WHERE source=? AND qualified=1 AND provider_at>=? AND provider_at<=?
+    GROUP BY CAST(unixepoch(provider_at)/? AS INTEGER)
+  ) SELECT o.provider_at,o.provenance,o.set_id,m.records_json
+    FROM selected s JOIN rumble_intelligence_observations o ON o.provider_at=s.at AND o.source=? AND o.qualified=1
+    JOIN rumble_intelligence_sets m ON m.id=o.set_id ORDER BY o.provider_at,o.provenance LIMIT 340`).bind(source, from, anchor.provider_at < to ? anchor.provider_at : to, bucketSeconds, source).all();
+  const sets = new Map(), points = new Map();
+  for (const row of rows.results) {
+    if (!sets.has(row.set_id)) {
+      const roster = accounts(JSON.parse(row.records_json));
+      sets.set(row.set_id, { total: roster.length, paid: roster.filter(a => a.classification === 'Self-paid').length, gifted: roster.filter(a => a.classification === 'Gifted').length, mixed: roster.filter(a => a.classification === 'Self-paid + gifted').length, unknown: roster.filter(a => a.classification === 'Needs review').length });
+    }
+    points.set(row.provider_at, { at: row.provider_at, provenance: row.provenance, ...sets.get(row.set_id) });
+  }
+  return { ok: true, source, snapshotId, range, from, to, bucketSeconds, points: [...points.values()] };
+}
+
 export async function intelligenceReport(env, source = PRIMARY_SOURCE) {
   if (!/^(user|channel):[\w-]{1,100}$/.test(source)) fail('intelligence_source');
   const db = await intelligenceDb(env);

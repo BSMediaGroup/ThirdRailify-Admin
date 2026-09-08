@@ -1,3 +1,13 @@
+## 2026-09-09 - Rumble subscriber trend and pagination
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added a green, responsive subscriber line chart with a prominent current total, 24hr/7d/30d/90d windows, exclusive category toggles and keyboard evidence. Bounded private history sampling covers the selected window without fabricating missing data.
+- Registry page sizes are 10/20/50/100 (default 20). Moved Rumble Intelligence below Watch / Broadcast and drew its icon inline from the Rumble reference shape.
+- Local contract, real-handler browser, build/typecheck and scoped lint checks cover the enhancement. Production remains blocked by the previously exhausted D1 quota and unapplied 0045 gate; no production sign-in requested.
+
 # Bump notes
 
 ## 2026-09-09 - D1 schema reporting quota repair
