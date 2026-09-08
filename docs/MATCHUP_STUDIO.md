@@ -78,3 +78,13 @@ PENDING VER=0.1.0-alpha.0
 - Both stable domains' JS/CSS match their respective immutable deployment bytes. Winner feature, measured connectors and fullscreen CSS are present. Admin anonymous brackets API returns JSON 401; Public library JSON 200 with zero publications, unknown roadmap JSON 404; all use no-store. Evidence: Admin `.artifacts/matchup-studio/live/canvas-release-verified.json`.
 - Both production builds/typechecks and scoped maintained-source lint pass. Both Pages Functions bundles compiled successfully during deployment. Final serial browser run: 2/2 suites pass. Viewed winner hover, full-height/Fit view, fullscreen editor and improved library screenshots. Current local evidence: Admin `.artifacts/matchup-studio/browser-1788862231273/` and `browser-1788862245242/`.
 - No production Studio records were created or changed for this UI release. Authenticated stable-domain end-to-end acceptance remains incomplete; asset parity and local browser tests are not represented as that acceptance.
+
+## 2026-09-08 - Direct opponent text entry in the matchup editor
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Fixed the empty-bracket editor that exposed only existing-idea dropdowns. Each opponent now has a prominent Name input; typing creates and assigns a new contender in the working draft, and renaming an existing contender retains its ID. Per-opponent Description fields are editable in the same modal. Existing idea/bye selection remains available below the Name field.
+- Save validation is shown at the top of the modal. Starting slots has an explicit accessible label. Linked/decided/finalized identity protections and server-side validation remain intact; no migration or result-authority changes.
+- Browser coverage includes creation with the bench hidden, both names/descriptions saving through hard reload, rename identity preservation, visible blank-name rejection, protected historical identity and responsive modal geometry. Existing connected Poll/publication browser coverage retained. No new files or Public/Bot changes; concurrent manual-vote work in the shared Admin checkout is excluded from this repair.

@@ -1035,3 +1035,13 @@ PENDING VER=0.1.0-alpha.0
 - No schema migration, Bot action, live bracket mutation or provider/paid-voting change. Source is integrated with current main before release; deployment evidence is appended separately.
 
 - Canvas repair deployed and verified at 10:13 UTC: Admin e12bcab / 524037c2 (direct f1c91ba3), Public 15b6314 / 93559ffb. Stable assets match immutable deployments; 2/2 final local browser suites pass. Exact evidence and remaining authenticated acceptance limitation are recorded in `docs/MATCHUP_STUDIO.md`.
+
+## 2026-09-08 - Direct opponent text entry in the matchup editor
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Fixed the empty-bracket editor that exposed only existing-idea dropdowns. Each opponent now has a prominent Name input; typing creates and assigns a new contender in the working draft, and renaming an existing contender retains its ID. Per-opponent Description fields are editable in the same modal. Existing idea/bye selection remains available below the Name field.
+- Save validation is shown at the top of the modal. Starting slots has an explicit accessible label. Linked/decided/finalized identity protections and server-side validation remain intact; no migration or result-authority changes.
+- Browser coverage includes creation with the bench hidden, both names/descriptions saving through hard reload, rename identity preservation, visible blank-name rejection, protected historical identity and responsive modal geometry. Existing connected Poll/publication browser coverage retained. No new files or Public/Bot changes; concurrent manual-vote work in the shared Admin checkout is excluded from this repair.

@@ -227,3 +227,10 @@
   .bracket-match:hover .bracket-opponent.is-winner::before,.bracket-match:focus-visible .bracket-opponent.is-winner::before { animation:none; }
   .bracket-match:hover .bracket-winner-sparkles i,.bracket-match:focus-visible .bracket-winner-sparkles i { animation:none;opacity:.55;transform:none; }
 }
+
+/* Direct contender editing belongs beside each opponent in the matchup modal. */
+.bracket-opponent-editor { min-width:0;margin:0;padding:18px;border:1px solid var(--line);border-radius:10px; }
+.bracket-opponent-editor legend { padding:0 8px;color:var(--gold);font-weight:600; }
+.bracket-opponent-editor label { margin-bottom:16px; }
+.bracket-opponent-editor label:last-child { margin-bottom:0; }
+.bracket-opponent-editor p { margin:8px 0;color:var(--muted);font-size:.9rem;line-height:1.5; }

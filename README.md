@@ -503,3 +503,5 @@ Existing Poll core/API, signed Bot API, automation API, Poll pages/styles, navig
 Release preserves deployed Poll workspace styling (`src/styles/poll-workspaces.css`), pending-artwork handling and feedback. Verification recovery coverage: `tests/turnstile-recovery-browser.test.mjs`.
 
 Matchup Studio canvas repair (2026-09-08): collapsible Ideas bench, measured connectors, viewport-sized fullscreen, reliable contender Focus, per-match modal editing and fully clickable season cards. Confirmed winners carry a trophy and gold hover sparkle treatment, with reduced-motion support. Run the two bracket browser files serially with `node --test --test-concurrency=1 tests/bracket-canvas-ux-browser.test.mjs tests/brackets-browser.test.mjs` after building both applications.
+
+The matchup modal now has direct Name and Description fields for both opponents. Typing into an empty starting slot creates and places a contender; editing an existing name retains its identity. Save draft and close persists both opponents without using the Ideas bench. Linked/decided identity protections remain enforced.
