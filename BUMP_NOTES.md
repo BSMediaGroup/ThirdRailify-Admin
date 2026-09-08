@@ -1107,3 +1107,5 @@ PENDING VER=0.1.0-alpha.0
 
 
 Unconfigured match dimming (2026-09-08): increased the visible difference by lowering incomplete match opacity from 70% to 40% on Admin and Public. Hover, keyboard focus and print restore full opacity. Existing transition and reduced-motion behavior retained. CURRENT VER=0.1.0-alpha.0; PENDING VER=0.1.0-alpha.0. No new files or data changes.
+
+Verified stronger dimming release at 2026-09-08 12:10 UTC: both frontend builds and both connected browser tests pass, including 40% opacity and full hover/focus restoration. Stable JS/CSS match immutable deployments: Admin `3d14bcf` / `3aa6fb82.thirdrailify-admin.pages.dev`; Public `242f9c7` / `356ae0a1.thirdrailify.pages.dev`. Evidence in Admin `.artifacts/matchup-studio/live/stronger-dimming-release.json`; viewed Admin screenshot `browser-1788869275301/winner-hover.png`. No production data changed.
