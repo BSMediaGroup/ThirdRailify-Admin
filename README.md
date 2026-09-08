@@ -472,3 +472,5 @@ docs/POLLS_CREDITS_CONTRACT.md
 ```
 
 Existing Poll core/API, signed Bot API, automation API, Poll pages/styles, navigation/capability registry and migration test helper were extended. No historical migration or file was removed. `npm.cmd run test:polls` includes the ledger suite; `npm.cmd run test:browser:poll-matchups` runs coupled offline browser acceptance after both frontend builds. Concurrent Wheel migration 0042 is outside this Poll release set.
+
+Poll dashboard repair (2026-09-08): `src/styles/poll-workspaces.css` provides responsive Poll workspace styling. Matchup artwork supports selection before first save and retry after upload failure. Migration 0041 is applied in production; see `docs/POLLS_CREDITS_CONTRACT.md` for deployment and verification evidence.
