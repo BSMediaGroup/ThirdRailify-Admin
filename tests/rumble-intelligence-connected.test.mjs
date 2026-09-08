@@ -89,6 +89,7 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
     try { await page.getByText('116 accounts', { exact: false }).waitFor(); } catch (e) { await page.screenshot({ path: `${evidenceDir}/connected-failure.png`, fullPage: true }); t.diagnostic(await page.locator('body').innerText()); throw e; }
     await page.locator('.ri-trend[aria-busy="false"] svg g[role="button"]').first().waitFor();
     assert.equal(await page.getByTestId('subscriber-total').innerText(), '116');
+    assert.equal(await page.getByTestId('subscriber-paid-total').innerText(), '11');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `overflow at ${width}`);
     await page.screenshot({ path: `${evidenceDir}/registry-${width}.png`, fullPage: width > 900 });
     await page.locator('.ri-trend').screenshot({ path: `${evidenceDir}/trend-${width}.png` });
@@ -121,6 +122,11 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
       await page.getByRole('button', { name: 'Gifted only', exact: true }).click();
       assert.equal(await page.getByRole('button', { name: 'Gifted only', exact: true }).getAttribute('aria-pressed'), 'false');
       await page.getByRole('button', { name: 'Gifted only', exact: true }).click();
+      const seriesButtons = page.getByRole('group', { name: 'Subscriber chart series' }).getByRole('button');
+      for (const button of await seriesButtons.all()) await button.click();
+      await page.getByRole('status').filter({ hasText: 'All series hidden' }).waitFor();
+      assert.equal(await page.getByTestId('subscriber-paid-total').innerText(), '11');
+      for (const button of await seriesButtons.all()) await button.click();
       await page.locator('.ri-trend svg g[role="button"]').last().focus();
       assert.match(await page.locator('.ri-trend__readout').innerText(), /Total subscribers: 116/);
       assert.equal(await page.getByRole('tooltip').count(), 1);
@@ -135,6 +141,19 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
       await page.getByRole('button', { name: 'history', exact: true }).click(); await page.screenshot({ path: `${evidenceDir}/history.png`, fullPage: true });
       await page.reload(); await page.getByText('116 accounts', { exact: false }).waitFor();
     }
+    await page.getByRole('combobox', { name: /^Classification/ }).selectOption('Self-paid + gifted');
+    await page.locator('.ri-person').first().click();
+    const detail = page.locator('dialog[open]');
+    await detail.getByText('Distinct reported records across retained history.', { exact: true }).waitFor();
+    assert.equal(await detail.locator('.ri-detail-identity .ri-avatar').count(), 1);
+    assert.match(await detail.locator('dd').first().evaluate(e => getComputedStyle(e).fontFamily), /monospace/);
+    assert.equal(await detail.evaluate(e => e.scrollWidth <= e.clientWidth + 1), true, `dialog overflow at ${width}`);
+    await detail.screenshot({ path: `${evidenceDir}/subscriber-detail-${width}.png` });
+    await detail.locator('.ri-detail-section').nth(1).locator('summary').first().click();
+    await detail.locator('.ri-detail-section').nth(1).scrollIntoViewIfNeeded();
+    await detail.screenshot({ path: `${evidenceDir}/subscriber-history-${width}.png` });
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('dialog[open]').count(), 0);
     assert.deepEqual(errors, []); await context.close();
   }
   for (const table of ['automation_receipts', 'poll_votes']) assert.equal((await h.commerceDb.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n, 0);
