@@ -266,7 +266,7 @@
 /* Distinguish undefined inputs and recorded results without changing the graph. */
 .bracket-match-card.is-incomplete { opacity:.4;transition:opacity .18s ease; }
 .bracket-match-card.is-incomplete:hover,.bracket-match-card.is-incomplete:focus-within { opacity:1; }
-.bracket-match-kicker.is-complete { background:linear-gradient(105deg,rgba(43,158,89,.19),rgba(43,158,89,.045)); }
+.bracket-match-kicker.is-complete { position:relative;isolation:isolate;overflow:hidden;background:linear-gradient(110deg,#682ebc66,#a56bda2e 55%,#34205c55);box-shadow:inset 0 1px 0 #d5b3ff24; }
 .bracket-match-status { display:inline-flex;align-items:center;gap:5px; }
 .bracket-complete-check { flex:none;width:12px;height:12px;color:#6dc98d; }
 .bracket-score { display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;flex:none;white-space:nowrap; }
@@ -285,3 +285,12 @@
 .bracket-audit article { padding: 16px; margin: 12px 0; border: 1px solid var(--border-color, #39351e); border-radius: 8px; }
 .bracket-audit h3 { font-family: inherit; font-size: 1rem; line-height: 1.5; }
 .bracket-audit-reason { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.bracket-header-sparkles { position:absolute;inset:0;pointer-events:none;z-index:-1; }
+.bracket-header-sparkles i { position:absolute;width:5px;height:5px;background:#e7cfff;opacity:.28;clip-path:polygon(50% 0,62% 37%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 37%);filter:drop-shadow(0 0 4px #bd85ff);top:20%;left:15%; }
+.bracket-header-sparkles i:nth-child(2){left:32%;top:65%;width:4px;height:4px}
+.bracket-header-sparkles i:nth-child(3){left:50%;top:25%}
+.bracket-header-sparkles i:nth-child(4){left:72%;top:68%;width:4px;height:4px}
+.bracket-header-sparkles i:nth-child(5){left:92%;top:20%}
+.bracket-match-card:hover .bracket-header-sparkles i,.bracket-match-card:focus-within .bracket-header-sparkles i { animation:bracket-winner-sparkle 1.9s ease-in-out calc(var(--spark-index) * -.31s) infinite; }
+@media(prefers-reduced-motion:reduce){.bracket-match-card .bracket-header-sparkles i{animation:none;opacity:.4}}

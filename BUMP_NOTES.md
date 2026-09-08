@@ -1109,3 +1109,15 @@ PENDING VER=0.1.0-alpha.0
 Unconfigured match dimming (2026-09-08): increased the visible difference by lowering incomplete match opacity from 70% to 40% on Admin and Public. Hover, keyboard focus and print restore full opacity. Existing transition and reduced-motion behavior retained. CURRENT VER=0.1.0-alpha.0; PENDING VER=0.1.0-alpha.0. No new files or data changes.
 
 Verified stronger dimming release at 2026-09-08 12:10 UTC: both frontend builds and both connected browser tests pass, including 40% opacity and full hover/focus restoration. Stable JS/CSS match immutable deployments: Admin `3d14bcf` / `3aa6fb82.thirdrailify-admin.pages.dev`; Public `242f9c7` / `356ae0a1.thirdrailify.pages.dev`. Evidence in Admin `.artifacts/matchup-studio/live/stronger-dimming-release.json`; viewed Admin screenshot `browser-1788869275301/winner-hover.png`. No production data changed.
+
+
+## 2026-09-08 - Match result presentation and violet completion headers
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Completed match headers now use a violet gradient, inset highlight and purple sparkles on hover/focus in Admin and Public. Existing green checkmarks retain #6dc98d. Reduced-motion keeps static highlights.
+- Public match details now present large artwork panels, a gold winner banner/trophy, winner badges and prominent scores, with a clear related-Poll link when the sanitized source exposes one and a Back to bracket action. Under-review matches suppress winner treatments. Manual/historical score provenance remains explicit.
+- Public adds `src/brackets/MatchDetail.tsx` and `src/brackets/match-detail.css`; existing Roadmaps, canvas/styles and public gallery browser tests extended. Admin changes only the existing canvas and styles. No schema, authority, vote or publication changes.
+- Both builds/typechecks pass. Public scoped lint and responsive detail tests pass: winner/review state, Poll URL, violet gradient, original green tick and no horizontal overflow at 390/1440. Viewed local detail screenshots under Public `.artifacts/roadmap-gallery-1788874064189/`. Existing coupled bracket/editor browser coverage retained.
