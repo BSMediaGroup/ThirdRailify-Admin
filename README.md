@@ -1,5 +1,12 @@
 # Third Railify Admin
 
+## Automation cards and entrant appearance (local)
+
+Optional entrant features now share a versioned contract, normalized Canvas preview and reusable automation cards across Admin/Public. Target-ID grouping, accessible row-local switches, future-award appearance and manual participant overrides preserve the existing Wheel/receipt authority. Public's cached renderer draws gradients, vector marks and bounded annular effects across detail, Presentation, Stage and editors; safe content refresh waits while spins or editors hold the current snapshot.
+
+Architecture and file inventory: [`docs/WHEEL_ENTRANT_APPEARANCE.md`](docs/WHEEL_ENTRANT_APPEARANCE.md). New shared files live in `src/lib/entrant-appearance.*`, `src/lib/entrant-feature-drawing.ts`, `src/lib/automation-rule-store.ts`, `src/components/AutomationRuleList.tsx`, `src/components/EntrantAppearanceControls.tsx`, and their two scoped stylesheets. Public adds `src/wheels/useWheelRefresh.ts`; Admin adds the storage validator and additive migration `0040_wheel_entrant_appearance.sql`. Apply the migration, then release Admin before Public. Existing rules/entrants remain opt-out; this milestone is local-only.
+
+
 ## Raid Received automation (local, current/pending 0.1.0-alpha.0)
 
 The existing Rumble event pipeline now supports explicitly enabled, **Chat-derived** Raid Received rules for the complete announcement `has raided this stream!`. System origin is not independently verified. Awards go to the named account using fixed entries and skip-existing or accumulation; no participant list or raid size is inferred. Replay protection is per rule, with activation boundaries and atomic weighted receipts retained.

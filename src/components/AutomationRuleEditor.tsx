@@ -1,3 +1,4 @@
+import { EntrantAppearanceControls } from './EntrantAppearanceControls';
 import { useEffect, useState } from 'react';
 import { CONDITION_FIELDS, RAID_TYPE, RAID_TEXT, calculateAward, defaultAction, ruleFieldErrors, type ActionConfig } from '../lib/automation-model.mjs';
 
@@ -88,7 +89,12 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
         <p>Event replay protection is always enabled. This setting controls what happens when the same actor generates a different qualifying event later.</p>
         <p>1 weight unit = 1 entry/chance unit. Maximum weight: 100,000 per entrant. Existing hidden entrants remain hidden; accumulation does not reactivate them. Awards that exceed Wheel limits are rejected in full.</p>
       </fieldset>
-      <label className="event-enable"><input type="checkbox" checked={rule.enabled} onChange={e => update({ enabled: e.target.checked })} />Enable on save</label><p>Saving an enabled rule starts a new activation boundary. Older provider history is ignored.</p>
+      <label className="event-enable"><input type="checkbox" checked={action.appearance != null} onChange={e => update({ actionConfig: { ...action, appearance: e.target.checked ? {} : null } })} />Apply entrant appearance on future successful awards</label>
+      {action.appearance != null ? <EntrantAppearanceControls value={action.appearance} onChange={appearance => update({ actionConfig: { ...action, appearance } })} /> : <p>Optional appearance is off. Choose components explicitly to decorate future awards.</p>}
+      {rule.eventType === 'rumble.subscribe' && action.appearance != null ? <p>Subscriber decoration applies only when reported amount_cents is positive. Zero-value subscriber awards retain their existing eligibility and appearance.</p> : null}
+      {action.appearance != null && readiness?.appearance === false ? <p role="status">Entrant appearance requires migration 0040. Saving checks readiness before changing this rule.</p> : null}
+      {hint('appearance')}
+      <label className="event-enable"><input type="checkbox" checked={rule.enabled} onChange={e => update({ enabled: e.target.checked })} />Enable on save</label><p>Enabling or changing award conditions starts a new activation boundary. Appearance-only edits preserve activation and affect future events.</p>
       <fieldset className="event-tester"><legend>Dry run — no action will be executed</legend><div className="event-fields">
         <label>Sample actor<input value={sample.actorLabel} onChange={e => { setSample({ ...sample, actorLabel: e.target.value }); setTest(null); }} /></label>
         {streamEvent ? <label>Sample message<input value={sample.text} onChange={e => { setSample({ ...sample, text: e.target.value }); setTest(null); }} /></label> : null}

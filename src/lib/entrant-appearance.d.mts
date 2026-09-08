@@ -1,0 +1,14 @@
+export type FeatureIcon = 'star' | 'medallion' | 'incoming' | 'lightning' | 'gift' | 'coin' | 'burst';
+export type FeatureEffect = 'sparkles' | 'shine' | 'dazzle' | 'pulse';
+export type FeatureComponents = { preset?: string | null; fill?: { colors: string[] } | null; icons?: FeatureIcon[] | null; edge?: { color: string; placement: 'inner' | 'outer' | 'both' } | null; effects?: { kinds: FeatureEffect[]; intensity: number; speed: number; density: number } | null };
+export type Appearance = { version: 1; manual: FeatureComponents; automatic?: { [K in keyof FeatureComponents]?: { value: FeatureComponents[K]; source: 'automation'; at?: string; key?: string } } };
+export const FEATURE_COMPONENTS: readonly (keyof FeatureComponents)[];
+export const FEATURE_ICONS: readonly FeatureIcon[];
+export const FEATURE_EFFECTS: readonly FeatureEffect[];
+export const FEATURE_PRESETS: Readonly<Record<string, { label: string; components: FeatureComponents }>>;
+export function normalizeFeatureComponents(value: unknown): FeatureComponents;
+export function normalizeAppearance(value: unknown): Appearance | null;
+export function effectiveAppearance(entry: { appearance?: Appearance | null; style?: unknown; colour?: string | null }): FeatureComponents & { sources: Record<keyof FeatureComponents, string> };
+export function publicAppearance(value: unknown): Appearance | null;
+export function portableAppearance(entry: { appearance?: Appearance | null; style?: unknown; colour?: string | null }): Appearance | undefined;
+export function applyAutomaticAppearance(previous: Appearance | null, components: FeatureComponents | null, event: { eventType: string; providerEventAt: string; evidence?: { amountCents?: number } }, eventKey: string): Appearance | null;

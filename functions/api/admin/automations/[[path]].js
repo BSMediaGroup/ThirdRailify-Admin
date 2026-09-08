@@ -8,7 +8,7 @@ export async function onRequest({ request, env }) {
     const url = new URL(request.url); const path = url.pathname.replace(/^\/api\/admin\/automations\/?/, '').replace(/\/$/, '');
     if (request.method === "GET") {
       originWhenPresent(request, env); await requireAdminCapability(env, request, "automations.view");
-      if (path === 'rules') { await requireAdminCapability(env, request, 'wheels.view'); return response(await listAutomationRules(env, url.searchParams.get('wheelId') || ''), request, env); }
+      if (path === 'rules') { await requireAdminCapability(env, request, 'wheels.view'); return response(await listAutomationRules(env, url.searchParams.get('wheelId') || '', url.searchParams.get('ruleId') || ''), request, env); }
       if (path) throw new AuthFailure(404, 'automation_route_not_found', 'Unknown automation route.');
       return response(await automationsStatus(env), request, env);
     }

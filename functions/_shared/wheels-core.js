@@ -1,3 +1,5 @@
+import { storedAppearance, requireAppearanceStorage, validateEntryAppearance, mergeEntryAppearance } from './entrant-style-storage.js';
+import { applyAutomaticAppearance, publicAppearance } from '../../src/lib/entrant-appearance.mjs';
 import { MAX_ENTRY_WEIGHT, calculateAward, defaultAction } from '../../src/lib/automation-model.mjs';
 import {
   AuthFailure,
@@ -151,7 +153,8 @@ export async function createWheel(env, accountId, input) {
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const lifecycle = input.lifecycle === "draft" ? "draft" : "active";
   const policy = await getWheelSettings(env); const config = validateConfig(input.config || {}, policy.settings.mechanics);
-  const entries = validateEntries(input.entries || [], { newIds: true });
+  const entries = validateEntries(input.entries || [], { newIds: true }).map(entry => ({ ...entry, appearance: mergeEntryAppearance(entry, null) }));
+  if (entries.some(entry => entry.appearance)) await requireAppearanceStorage(db);
   if (segmentAssetIds(config, entries).length) throw new AuthFailure(400, "wheel_segment_media_invalid", "Create the wheel before assigning wheel-owned segment images.");
   const id = randomId(); const timestamp = nowIso();
   await db.batch([
@@ -190,10 +193,14 @@ export async function executeAutomationWheelEntry(env, rule, event) {
     if (receipt && receipt.id !== id) await db.prepare('UPDATE automation_rules SET duplicate_events=duplicate_events+1 WHERE id=?').bind(rule.id).run();
     return receipt ? receipt.id === id ? 'wheel_unavailable' : 'duplicate_event' : 'retry';
   }
-  const entries = await db.prepare('SELECT id,display_label,weight,state FROM wheel_entries WHERE wheel_id=? ORDER BY display_order,id').bind(wheel.id).all();
+  const entryColumns = (await db.prepare('PRAGMA table_info(wheel_entries)').all()).results;
+  const appearanceReady = entryColumns.some(c => c.name === 'entrant_appearance_json');
+  const sourceAvatars = entryColumns.some(c => c.name === 'source_avatar_url');
+  const entries = await db.prepare('SELECT * FROM wheel_entries WHERE wheel_id=? ORDER BY display_order,id').bind(wheel.id).all();
   const policy = await getWheelSettings(env);
   const capacity = Math.min(MAX_ENTRIES, policy.settings.maximumParticipants || MAX_ENTRIES);
   const action = rule.action_config_json ? JSON.parse(rule.action_config_json) : defaultAction();
+  if (action.appearance && !appearanceReady) await requireAppearanceStorage(db);
   const award = calculateAward(action, event.eventType, event.evidence);
   const normalize = value => value.normalize('NFKC').trim().toLowerCase();
   const duplicate = entries.results.find(entry => normalize(entry.display_label) === normalize(event.actorLabel));
@@ -208,19 +215,23 @@ export async function executeAutomationWheelEntry(env, rule, event) {
   const outcome = ['created', 'accumulated'].includes(actionResult) ? 'added' : actionResult === 'skipped_existing' ? 'duplicate_entrant' : 'wheel_unavailable';
   const awardedEntries = outcome === 'added' ? award.entries : 0;
   const receiptId = randomId(), entryId = randomId(), timestamp = nowIso();
+  const oldAppearance = storedAppearance(duplicate?.entrant_appearance_json);
+  const eventKey = await digestHex(new TextEncoder().encode(JSON.stringify([event.eventFingerprint, rule.id])));
+  const nextAppearance = outcome === 'added' ? applyAutomaticAppearance(oldAppearance, action.appearance, event, eventKey) : oldAppearance;
+  const styled = nextAppearance ? JSON.stringify(nextAppearance) : null;
   const result = await db.batch([
     db.prepare(`INSERT OR IGNORE INTO automation_receipts(id,rule_id,rule_revision,event_fingerprint,event_type,provider_event_at,actor_key,actor_label,outcome,target_wheel_id,created_at,awarded_entries,action_result)
       SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=?)
       AND EXISTS (SELECT 1 FROM wheel_settings WHERE setting_key='global' AND revision=?)
       AND EXISTS (SELECT 1 FROM automation_rules WHERE id=? AND revision=? AND enabled=1 AND deleted_at IS NULL)`)
       .bind(receiptId, rule.id, rule.revision, event.eventFingerprint, event.eventType, event.providerEventAt, event.actorKey, event.actorLabel, outcome, wheel.id, timestamp, awardedEntries, actionResult, wheel.id, wheel.revision, policy.revision, rule.id, rule.revision),
-    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at,source_avatar_url)
-      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?,?
+    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at${sourceAvatars ? ',source_avatar_url' : ''}${appearanceReady ? ',entrant_appearance_json' : ''})
+      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?${sourceAvatars ? ',?' : ''}${appearanceReady ? ',?' : ''}
       WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='created')`)
-      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, event.actorAvatarUrl || null, receiptId),
-    db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=?,source_avatar_url=COALESCE(?,source_avatar_url) WHERE id=? AND wheel_id=?
+      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, ...(sourceAvatars ? [event.actorAvatarUrl || null] : []), ...(appearanceReady ? [styled] : []), receiptId),
+    db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=?${sourceAvatars ? ',source_avatar_url=COALESCE(?,source_avatar_url)' : ''}${appearanceReady ? ',entrant_appearance_json=?' : ''} WHERE id=? AND wheel_id=?
       AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='accumulated')`)
-      .bind(awardedEntries, timestamp, event.actorAvatarUrl || null, duplicate?.id || '', wheel.id, receiptId),
+      .bind(awardedEntries, timestamp, ...(sourceAvatars ? [event.actorAvatarUrl || null] : []), ...(appearanceReady ? [styled] : []), duplicate?.id || '', wheel.id, receiptId),
     db.prepare(`UPDATE wheels SET participant_count=(SELECT COUNT(*) FROM wheel_entries WHERE wheel_id=? AND state='active'),revision=revision+1,updated_at=?
       WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND outcome='added')`).bind(wheel.id, timestamp, wheel.id, receiptId),
     db.prepare(`UPDATE automation_rules SET matched=matched+1,executed=executed+?,duplicate_entrants=duplicate_entrants+?,failed=failed+?,last_match_at=?,last_outcome=?,last_fault=?
@@ -248,17 +259,18 @@ export async function saveWheel(env, accountId, slug, input) {
   const description = optionalText(input.description, 280);
   const policy = await getWheelSettings(env); const storedConfig = parseJson(wheel.config_json, DEFAULT_CONFIG); const config = validateConfig(input.config || {}, policy.settings.mechanics, { existingDuration: Number(storedConfig.spinDurationMs) });
   const requestedEntries = validateEntries(input.entries || []);
+  if (requestedEntries.some(entry => entry.appearance)) await requireAppearanceStorage(db);
   const referencedSegmentAssets = segmentAssetIds(config, requestedEntries);
   await validateSegmentMediaReferences(env, wheel.id, referencedSegmentAssets);
   const previousEntries = await entriesForWheel(env, wheel.id, true); const previousSegmentAssets = segmentAssetIds(validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)), previousEntries);
-  const currentEntryRows = await db.prepare("SELECT id FROM wheel_entries WHERE wheel_id = ?").bind(wheel.id).all();
+  const currentEntryRows = await db.prepare("SELECT * FROM wheel_entries WHERE wheel_id = ?").bind(wheel.id).all();
   const currentEntryIds = new Set((currentEntryRows?.results || []).map((row) => row.id));
   const usedEntryIds = new Set();
   const entries = requestedEntries.map((entry, index) => {
     const id = currentEntryIds.has(entry.id) && !usedEntryIds.has(entry.id) ? entry.id : randomId();
     usedEntryIds.add(id);
     const prior = previousEntries.find(prior => prior.id === id);
-    return { ...entry, id, sourceAvatarUrl: prior?.sourceAvatarUrl || null, avatarUrl: input.entries[index].customAvatarUrl === undefined && (input.entries[index].avatarUrl === undefined || input.entries[index].avatarUrl === prior?.avatarUrl) ? prior?.customAvatarUrl || null : entry.avatarUrl };
+    return { ...entry, id, appearance: mergeEntryAppearance(input.entries[index], storedAppearance(currentEntryRows.results.find(row => row.id === id)?.entrant_appearance_json)), sourceAvatarUrl: prior?.sourceAvatarUrl || null, avatarUrl: input.entries[index].customAvatarUrl === undefined && (input.entries[index].avatarUrl === undefined || input.entries[index].avatarUrl === prior?.avatarUrl) ? prior?.customAvatarUrl || null : entry.avatarUrl };
   });
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const timestamp = nowIso();
@@ -552,8 +564,9 @@ function validateEntries(input, options = {}) {
     if (!value || typeof value !== "object") throw new AuthFailure(400, "participant_invalid", "A participant entry is invalid.");
     const colour = value.colour == null || value.colour === "" ? null : clean(value.colour, 7);
     if (colour && !HEX.test(colour)) throw new AuthFailure(400, "participant_colour_invalid", "Participant colours must be six-digit hex values.");
+    const appearance = validateEntryAppearance(value.appearance);
     const style = value.style == null ? null : validateSegmentStyle(value.style, colour || DEFAULT_CONFIG.palette[index % DEFAULT_CONFIG.palette.length]);
-    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), avatarUrl: validateAvatarUrl(value.customAvatarUrl !== undefined ? value.customAvatarUrl : value.avatarUrl), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", MAX_ENTRY_WEIGHT), colour: style?.color || colour?.toUpperCase() || null, style, state: value.state === "hidden" ? "hidden" : "active" };
+    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), avatarUrl: validateAvatarUrl(value.customAvatarUrl !== undefined ? value.customAvatarUrl : value.avatarUrl), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", MAX_ENTRY_WEIGHT), colour: style?.color || colour?.toUpperCase() || null, style, ...(appearance !== undefined ? { appearance } : {}), state: value.state === "hidden" ? "hidden" : "active" };
   });
 }
 
@@ -622,7 +635,7 @@ async function accountSummary(env, accountId) { const account = await activeAcco
 async function publicWheelOwner(env, accountId) { const account = await activeAccount(env, accountId); return account ? { displayName: account.displayName, avatarUrl: account.avatarUrl || null } : { displayName: "Unavailable creator", avatarUrl: null }; }
 
 async function wheelBySlug(env, slug) { return requireWheelDb(env).prepare("SELECT * FROM wheels WHERE public_slug = ? COLLATE NOCASE LIMIT 1").bind(clean(slug, 80)).first(); }
-async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, avatarUrl: row.avatar_url || row.source_avatar_url || null, customAvatarUrl: row.avatar_url || null, sourceAvatarUrl: row.source_avatar_url || null, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, state: row.state })); }
+async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT * FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, avatarUrl: row.avatar_url || row.source_avatar_url || null, customAvatarUrl: row.avatar_url || null, sourceAvatarUrl: row.source_avatar_url || null, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, appearance: publicAppearance(storedAppearance(row.entrant_appearance_json)), state: row.state })); }
 async function publicHistory(env, wheel, limit) { const config = parseJson(wheel.config_json, DEFAULT_CONFIG); if (!config.publicHistoryVisible) return []; return (await resultRows(env, wheel.id, limit)).map(officialProjection); }
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
@@ -639,10 +652,10 @@ function adminResultProjection(row) { return { ...officialProjection(row), wheel
 async function adminWheelSummary(env, row) { return { id: row.id, reference: row.reference_code, slug: row.public_slug, title: row.title, description: row.description, lifecycle: row.lifecycle, visibility: row.visibility, owner: await accountSummary(env, row.owner_account_id), participantCount: Number(row.participant_count), revision: Number(row.revision), officialEnabled: Boolean(row.official_spin_enabled), demoEnabled: Boolean(row.public_demo_spin_enabled), editingLocked: Boolean(row.editing_locked), spinLocked: Boolean(row.official_spinning_locked), latestWinner: row.latest_winner || null, latestResultAt: row.latest_result_at || row.latest_official_spin_at || null, updatedAt: row.updated_at }; }
 async function wheelAccessRows(env, wheelId) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_access WHERE wheel_id = ? ORDER BY active DESC, role, created_at").bind(wheelId).all(); return Promise.all((rows?.results || []).map(async (row) => ({ account: await accountSummary(env, row.account_id), role: row.role, active: Boolean(row.active), updatedAt: row.updated_at }))); }
 
-function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare("INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp); }
-function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at)
-  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
-).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp, wheelId, revision, timestamp); }
+function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at${entry.appearance ? ', entrant_appearance_json' : ''}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${entry.appearance ? ', ?' : ''})`).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp, ...(entry.appearance ? [JSON.stringify(entry.appearance)] : [])); }
+function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at${entry.appearance ? ', entrant_appearance_json' : ''})
+  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${entry.appearance ? ', ?' : ''} WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
+).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp, ...(entry.appearance ? [JSON.stringify(entry.appearance)] : []), wheelId, revision, timestamp); }
 
 function validatePaletteStyles(value, palette, custom) {
   if (!Array.isArray(value) || value.length !== palette.length || value.length > (custom ? 5 : 12)) throw new AuthFailure(400, "wheel_palette_styles_invalid", "Palette styles must align exactly with the palette.");

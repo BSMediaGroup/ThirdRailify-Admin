@@ -53,6 +53,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0037_wheel_entrant_avatars.sql", import.meta.url),
   new URL("../commerce-migrations/0038_wheel_source_avatars.sql", import.meta.url),
   new URL("../commerce-migrations/0039_wheel_avatar_uploads.sql", import.meta.url),
+  new URL("../commerce-migrations/0040_wheel_entrant_appearance.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

@@ -1,3 +1,4 @@
+import { requireAppearanceStorage } from './entrant-style-storage.js';
 import { RAID_TYPE, RAID_METHOD, defaultAction, calculateAward } from '../../src/lib/automation-model.mjs';
 import { AuthFailure, nowIso, randomId } from './auth-core.js';
 import { getSafeRumbleDiscovery, requirePollDb } from './polls-core.js';
@@ -15,25 +16,27 @@ export async function automationReadiness(env) {
   let runtime = {}; try { runtime = JSON.parse(heartbeat?.runtime_json || '{}'); } catch { /* fail closed */ }
   const age = Date.now() - Date.parse(heartbeat?.heartbeat_at);
   const raidRuntime = runtime.eventAutomation?.raidNoticeVersion === 1 && age >= -300000 && age <= 45000;
-  return { awards, raidSchema, raidRuntime, raidStatus: !raidSchema ? 'schema_required' : !raidRuntime ? 'pending_capable_bot' : 'ready' };
+  const appearance = (await db.prepare('PRAGMA table_info(wheel_entries)').all()).results.some(c => c.name === 'entrant_appearance_json');
+  return { appearance, awards, raidSchema, raidRuntime, raidStatus: !raidSchema ? 'schema_required' : !raidRuntime ? 'pending_capable_bot' : 'ready' };
 }
 export function projectRule(row) {
   const actionConfig = row.action_config_json ? JSON.parse(row.action_config_json) : defaultAction();
   return { id: row.id, name: row.name, description: row.description, enabled: Boolean(row.enabled), sourceScope: row.source_scope,
     eventType: row.event_type, conditions: JSON.parse(row.conditions_json), actionType: row.action_type, targetWheelId: row.target_wheel_id,
-    targetWheelTitle: row.wheel_title || 'Unavailable Wheel', actionConfig, sourceLabel: row.source_label || null, duplicatePolicy: actionConfig.repeatActorPolicy, revision: row.revision, activatedAt: row.activated_at,
+    targetType: 'wheel', targetAvailable: Boolean(row.wheel_title), targetWheelTitle: row.wheel_title || 'Unavailable Wheel', targetLifecycle: row.wheel_lifecycle, targetLocked: Boolean(row.wheel_locked), actionConfig, sourceLabel: row.source_label || null, duplicatePolicy: actionConfig.repeatActorPolicy, revision: row.revision, activatedAt: row.activated_at,
     updatedAt: row.updated_at, counters: { matched: row.matched, executed: row.executed, duplicateEvents: row.duplicate_events,
       duplicateEntrants: row.duplicate_entrants, rejected: row.rejected, failed: row.failed }, lastMatchAt: row.last_match_at, lastOutcome: row.last_outcome, lastFault: row.last_fault };
 }
-export async function listAutomationRules(env, wheelId = '') {
+export async function listAutomationRules(env, wheelId = '', ruleId = '') {
   const db = requirePollDb(env), readiness = await automationReadiness(env);
   if (!readiness.awards) throw new AuthFailure(503, 'automation_schema_required', 'Automation awards require migration 0035 before editing rules.');
-  const rows = await db.prepare(`SELECT r.*, w.title AS wheel_title FROM automation_rules r LEFT JOIN wheels w ON w.id=r.target_wheel_id
-    WHERE r.deleted_at IS NULL AND (?='' OR r.target_wheel_id=?) ORDER BY r.updated_at DESC LIMIT 200`).bind(wheelId, wheelId).all();
+  const rows = await db.prepare(`SELECT r.*, w.title AS wheel_title,w.lifecycle AS wheel_lifecycle,w.editing_locked AS wheel_locked FROM automation_rules r LEFT JOIN wheels w ON w.id=r.target_wheel_id
+    WHERE r.deleted_at IS NULL AND (?='' OR r.target_wheel_id=?) AND (?='' OR r.id=?) ORDER BY r.created_at,r.id LIMIT 201`).bind(wheelId, wheelId, ruleId, ruleId).all();
+  if (ruleId) return { ok: true, rules: rows.results.map(row => ({ ...projectRule(row), ...(row.event_type === RAID_TYPE ? { runtimeStatus: readiness.raidStatus } : {}) })) };
   const wheels = await db.prepare("SELECT id,title,lifecycle,editing_locked FROM wheels ORDER BY title LIMIT 500").all();
   const activity = await db.prepare(`SELECT a.id,a.rule_id,a.event_type,a.actor_label,a.outcome,a.awarded_entries,a.action_result,a.created_at FROM automation_receipts a
     WHERE (?='' OR a.target_wheel_id=?) ORDER BY a.created_at DESC LIMIT 40`).bind(wheelId, wheelId).all();
-  return { ok: true, readiness, rules: rows.results.map(row => ({ ...projectRule(row), ...(row.event_type === RAID_TYPE ? { runtimeStatus: readiness.raidStatus } : {}) })), wheels: wheels.results, activity: activity.results, discovery: await getSafeRumbleDiscovery(env) };
+  return { ok: true, readiness, list: { limit: 200, truncated: rows.results.length > 200 }, rules: rows.results.slice(0, 200).map(row => ({ ...projectRule(row), ...(row.event_type === RAID_TYPE ? { runtimeStatus: readiness.raidStatus } : {}) })), wheels: wheels.results, activity: activity.results, discovery: await getSafeRumbleDiscovery(env) };
 }
 export async function botAutomationRules(env, raidCapable = false) {
   const readiness = await automationReadiness(env);
@@ -54,10 +57,18 @@ export async function saveAutomationRule(env, actorId, input) {
   const prior = input.id ? await db.prepare('SELECT * FROM automation_rules WHERE id=? AND deleted_at IS NULL').bind(id).first() : null;
   if (input.id && !prior) throw new AuthFailure(404, 'automation_not_found', 'This rule no longer exists.');
   if (prior && input.revision !== prior.revision) throw new AuthFailure(409, 'automation_revision_conflict', 'The rule changed. Refresh before saving.');
-  // Every semantic edit creates a fresh boundary, including edits while enabled.
+  // Legacy clients omitting the optional field retain it. Cosmetic edits preserve activation.
+  if (prior && input.actionConfig?.appearance === undefined) {
+    const previousAction = prior.action_config_json ? JSON.parse(prior.action_config_json) : defaultAction();
+    if (previousAction.appearance !== undefined) rule.actionConfig = { ...rule.actionConfig, appearance: previousAction.appearance };
+  }
+  if (rule.actionConfig.appearance) await requireAppearanceStorage(db);
+  const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+  const semantic = r => JSON.stringify(canonical([r.enabled, r.sourceScope, r.eventType, r.conditions, r.targetWheelId, r.actionConfig.repeatActorPolicy, r.actionConfig.award]));
+  const cosmeticOnly = prior && semantic(projectRule(prior)) === semantic(rule);
   const discovery = await getSafeRumbleDiscovery(env);
   const sourceLabel = discovery.source?.scope === rule.sourceScope ? discovery.source.displayName : prior?.source_scope === rule.sourceScope ? prior.source_label : null;
-  const activated = rule.enabled ? timestamp : null;
+  const activated = rule.enabled ? cosmeticOnly ? prior.activated_at : timestamp : null;
   const values = [rule.name, rule.description, Number(rule.enabled), rule.sourceScope, rule.eventType, JSON.stringify(rule.conditions), rule.targetWheelId, activated, timestamp, JSON.stringify(rule.actionConfig), sourceLabel];
   const statement = prior ? db.prepare(`UPDATE automation_rules SET name=?,description=?,enabled=?,source_scope=?,event_type=?,conditions_json=?,target_wheel_id=?,activated_at=?,updated_at=?,action_config_json=?,source_label=?,revision=revision+1
     WHERE id=? AND revision=? AND deleted_at IS NULL`).bind(...values, id, prior.revision)
@@ -66,7 +77,7 @@ export async function saveAutomationRule(env, actorId, input) {
   const result = await db.batch([statement, db.prepare(`INSERT INTO poll_activity_events(id,poll_id,actor_account_id,event_type,result,metadata_json,created_at)
     SELECT ?,NULL,?,?, 'success',?,? WHERE changes()=1`).bind(randomId(), actorId, prior ? 'automation_rule_edited' : 'automation_rule_created', JSON.stringify({ ruleId: id, enabled: rule.enabled, revision: (prior?.revision || 0) + 1 }), timestamp)]);
   if (result[0].meta.changes !== 1) throw new AuthFailure(409, 'automation_revision_conflict', 'Refresh the rules; the revision or 200-rule limit changed.');
-  return { ok: true, rule: projectRule(await db.prepare('SELECT * FROM automation_rules WHERE id=?').bind(id).first()) };
+  return { ok: true, rule: { ...projectRule(await db.prepare('SELECT r.*,w.title AS wheel_title,w.lifecycle AS wheel_lifecycle,w.editing_locked AS wheel_locked FROM automation_rules r LEFT JOIN wheels w ON w.id=r.target_wheel_id WHERE r.id=?').bind(id).first()), ...(rule.eventType === RAID_TYPE ? { runtimeStatus: readiness.raidStatus } : {}) } };
 }
 export async function deleteAutomationRule(env, actorId, input) {
   if (input.confirm !== 'DELETE') invalid('automation_delete_confirmation', 'Confirm rule deletion.');

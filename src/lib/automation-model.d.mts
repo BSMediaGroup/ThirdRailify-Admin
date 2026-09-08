@@ -1,4 +1,5 @@
-export type ActionConfig = { version: 2; repeatActorPolicy: 'skip' | 'accumulate'; award: { mode: 'fixed' | 'per_gift' | 'per_amount'; entriesPerUnit: number; unitCents: number } };
+import type { FeatureComponents } from './entrant-appearance.mjs';
+export type ActionConfig = { version: 2; appearance?: FeatureComponents | null; repeatActorPolicy: 'skip' | 'accumulate'; award: { mode: 'fixed' | 'per_gift' | 'per_amount'; entriesPerUnit: number; unitCents: number } };
 export const RAID_TYPE: string;
 export const RAID_METHOD: string;
 export const RAID_TEXT: string;

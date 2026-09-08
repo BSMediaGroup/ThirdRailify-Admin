@@ -11,18 +11,18 @@ export const families = [
   ['rumble.livestream.stopped', 'Livestream Ended', 'State transition only. This event has no entrant actor.'],
 ] as const;
 export type Conditions = { exactText?: string; minAmountCents?: number; minGifts?: number; giftType?: string; badge?: string; livestreamId?: string };
-export type Readiness = { awards: boolean; raidSchema: boolean; raidRuntime: boolean; raidStatus: string };
-export type Rule = { runtimeStatus?: string; id?: string; revision?: number; name: string; description: string; enabled: boolean; sourceScope: string; sourceLabel?: string | null; eventType: string; conditions: Conditions; actionType: string; targetWheelId: string; duplicatePolicy: string; actionConfig?: ActionConfig; targetWheelTitle?: string; activatedAt?: string; lastMatchAt?: string; lastOutcome?: string; lastFault?: string; counters?: Record<string, number> };
+export type Readiness = { appearance?: boolean; awards: boolean; raidSchema: boolean; raidRuntime: boolean; raidStatus: string };
+export type Rule = { targetType?: string; targetAvailable?: boolean; targetLifecycle?: string; targetLocked?: boolean; runtimeStatus?: string; id?: string; revision?: number; name: string; description: string; enabled: boolean; sourceScope: string; sourceLabel?: string | null; eventType: string; conditions: Conditions; actionType: string; targetWheelId: string; duplicatePolicy: string; actionConfig?: ActionConfig; targetWheelTitle?: string; activatedAt?: string; lastMatchAt?: string; lastOutcome?: string; lastFault?: string; counters?: Record<string, number> };
 export type WheelChoice = { id: string; title: string; lifecycle: string; editing_locked: number };
 export type Discovery = { botState: string; discoveryState?: string; source: { scope: string; displayName: string } | null; livestreams: { id: string; title: string; isLive: boolean }[]; freshness?: { ageSeconds: number; observedAt?: string | null } | null };
 export type TestResult = { classification?: string; sourceScope?: string; livestreamId?: string; matched: boolean; actorLabel: string; calculation: string; action: string; repeatActorPolicy: string };
 export class AutomationRequestError extends Error {
-  constructor(message: string, public issues: { field: string; message: string }[] = []) { super(message); }
+  constructor(message: string, public issues: { field: string; message: string }[] = [], public status = 0) { super(message); }
 }
 export async function automationRequest<T>(path: string, csrf?: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/admin/automations/${path}`, { credentials: 'include', cache: 'no-store', method: body ? 'POST' : 'GET', headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf || '' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const value = await response.json();
-  if (!response.ok) throw new AutomationRequestError(value.message || 'Automation request failed.', value.issues || []);
+  if (!response.ok) throw new AutomationRequestError(value.message || 'Automation request failed.', value.issues || [], response.status);
   return value;
 }
 

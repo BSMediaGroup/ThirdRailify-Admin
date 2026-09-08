@@ -1,3 +1,4 @@
+import { normalizeFeatureComponents } from './entrant-appearance.mjs';
 // Shared editor/server contract. Wheel schema and validateEntries use this same ceiling.
 export const MAX_ENTRY_WEIGHT = 100000;
 export const EVENT_TYPES = Object.freeze(['rumble.chat.exact', 'rumble.raid.received', 'rumble.rant', 'rumble.follow', 'rumble.subscribe', 'rumble.gift_purchase']);
@@ -35,7 +36,7 @@ export function ruleFieldErrors(input) {
   }
   if (r.eventType === 'rumble.chat.exact' && (typeof c?.exactText !== 'string' || !c.exactText.trim())) errors.exactText = 'Enter the complete chat message to match.';
   const a = r.actionConfig === undefined ? defaultAction() : r.actionConfig;
-  if (!a || a.version !== 2 || Object.keys(a).some(k => !['version', 'repeatActorPolicy', 'award'].includes(k))) errors.actionConfig = 'Use a supported entry award configuration (version 2).';
+  if (!a || a.version !== 2 || Object.keys(a).some(k => !['version', 'repeatActorPolicy', 'award', 'appearance'].includes(k))) errors.actionConfig = 'Use a supported entry award configuration (version 2).';
   if (!['skip', 'accumulate'].includes(a?.repeatActorPolicy)) errors.repeatActorPolicy = 'Choose how to handle a repeat actor.';
   if (r.duplicatePolicy !== undefined && !['skip', 'accumulate'].includes(r.duplicatePolicy)) errors.repeatActorPolicy = 'Choose how to handle a repeat actor.';
   const award = a?.award;
@@ -43,6 +44,7 @@ export function ruleFieldErrors(input) {
   if (!award || !modes.includes(award.mode) || Object.keys(award).some(k => !['mode', 'entriesPerUnit', 'unitCents'].includes(k))) errors.awardMode = 'Choose an award mode supported by this event.';
   if (!integer(award?.entriesPerUnit, 1, MAX_ENTRY_WEIGHT)) errors.entriesPerUnit = 'Enter a whole number greater than zero, up to 100,000.';
   if (!integer(award?.unitCents, 1, 100000000)) errors.unitCents = 'Enter a whole number of cents from 1 to 100,000,000.';
+  if (a?.appearance != null) { try { normalizeFeatureComponents(a.appearance); } catch (e) { errors.appearance = e.message; } }
   return errors;
 }
 export function calculateAward(action, eventType, evidence = {}) {

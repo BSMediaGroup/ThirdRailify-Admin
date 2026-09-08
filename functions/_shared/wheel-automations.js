@@ -10,7 +10,7 @@ export async function wheelAutomations(env, accountId, slug, action, input) {
   if (!access.canEdit) throw new AuthFailure(403, 'wheel_edit_forbidden', 'Wheel editor access is required to manage automations.');
   if (wheel.editing_locked && !access.isMasterAdmin) throw new AuthFailure(423, 'wheel_edit_locked', 'Wheel editing is locked by Admin.');
   if (action === 'read') {
-    const result = await listAutomationRules(env, wheel.id);
+    const result = await listAutomationRules(env, wheel.id, input?.ruleId || '');
     return { ...result, wheels: [{ id: wheel.id, title: wheel.title, lifecycle: wheel.lifecycle, editing_locked: wheel.editing_locked }] };
   }
   const rule = action === 'test' ? input.rule : input;

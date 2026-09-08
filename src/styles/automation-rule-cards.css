@@ -1,0 +1,37 @@
+.automation-target-list { margin-block: 18px; }
+.automation-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; }
+.automation-filters label { display: grid; gap: 5px; font-size: 12px; }
+.automation-filters input,.automation-filters select { min-height: 36px; min-width: 0; padding: 7px; background: #17191d; border: 1px solid #484b54; color: #f3f1e9; border-radius: 6px; }
+.automation-filters small { color: #adb0bc; padding-bottom: 8px; }
+.automation-target { background: #101216; border: 1px solid #383a42; border-radius: 14px; margin: 15px 0; padding: 16px; }
+.automation-target > summary { display: flex; justify-content: space-between; gap: 14px; cursor: pointer; padding: 3px 0 13px; }
+.automation-target > summary strong { display: block; color: #f5edda; font-size: 19px; }
+.automation-target > summary small { display: block; margin-top: 5px; color: #acadb8; }
+.automation-target__link { display: inline-block; font-size: 12px; margin-bottom: 14px; color: #edcf8e; }
+.automation-cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,365px),1fr)); gap: 12px; }
+.automation-card { min-width: 0; border: 1px solid #393a45; border-left: 3px solid var(--event-color); border-radius: 10px; padding: 17px; background: linear-gradient(140deg,#23242d,#181a20 65%); color: #d1d0da; font-size: 12px; }
+.automation-card header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.automation-card h3 { margin: 5px 0 12px; font-size: 18px; color: #fff4e4; overflow-wrap: anywhere; }
+.automation-card p { margin: 7px 0; line-height: 1.45; }
+.automation-card__family { display: flex; align-items: center; gap: 8px; color: var(--event-color); font-weight: 650; }
+.automation-card__family svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; flex-shrink: 0; }
+.automation-card__switch { display: grid; justify-items: center; gap: 6px; flex-shrink: 0; font-size: 11px; }
+.automation-card__switch button { display: block; width: 43px; min-width: 43px; height: 25px; min-height: 25px; border: 1px solid #666976; border-radius: 18px; padding: 3px; background: #363943; }
+.automation-card__switch button span { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: #b9bbc5; font-size: 12px; color: #093822; }
+.automation-card__switch button[aria-checked=true] { background: #176243; border-color: #54c394; }
+.automation-card__switch button[aria-checked=true] span { margin-left: 17px; background: #adf3cc; }
+.automation-card__switch button[aria-disabled=true] { cursor: progress; }
+.automation-card__switch button:focus-visible,.automation-target summary:focus-visible { outline: 2px solid #ffdf98; outline-offset: 4px; }
+.automation-enabled { color: #92e7b8; }.automation-paused { color: #b4b6c1; }.automation-warning { color: #f0c26e; }.automation-error { color: #ffaaaa; }
+.automation-card__award { font-size: 15px; color: #f0e5d5; font-weight: 650; }
+.automation-card__condition { color: #b4b2c0; overflow-wrap: anywhere; }
+.automation-card__context { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; color: #aaa7b6; }
+.automation-card__appearance { display: flex; align-items: center; gap: 8px; border-top: 1px solid #363640; margin-top: 9px; }
+.automation-card__appearance .feature-slice-preview { width: 77px; height: 47px; flex-basis: 77px; }
+.automation-card__appearance-off { display: block; margin: 12px 0; color: #aaa7b6; }
+.automation-card footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid #393943; display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.automation-card footer small { display: block; margin-top: 5px; color: #b5b0bc; overflow-wrap: anywhere; }
+.automation-card__actions { display: flex; gap: 6px; flex-shrink: 0; }
+.automation-card__actions button { min-height: 30px; padding: 5px 9px; font-size: 12px; }
+.automation-card__actions .automation-card__delete { background: transparent; color: #c4b2b7; border-color: transparent; }
+@media(max-width:600px) { .automation-target { padding: 10px; }.automation-target summary { flex-direction: column; }.automation-card { padding: 12px; }.automation-card footer { flex-wrap: wrap; } }
