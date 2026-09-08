@@ -42,6 +42,7 @@ export function validateEvent(event) {
   const usernameKey = `rumble:${event.sourceScope}:${normalizePollTrigger(event.actorLabel)}`;
   if (event.actorKey !== usernameKey && !(event.eventType === 'rumble.subscribe' && event.actorKey.startsWith(`rumble:${event.sourceScope}:user:`) && event.actorKey.length > `rumble:${event.sourceScope}:user:`.length)) invalid('automation_actor_invalid');
   if (typeof event.providerEventAt !== 'string' || !Number.isFinite(Date.parse(event.providerEventAt)) || Date.parse(event.providerEventAt) > Date.now() + 300000) invalid('automation_timestamp_invalid');
+  if (event.actorAvatarUrl != null) { let url; try { url = new URL(event.actorAvatarUrl); } catch { invalid("automation_avatar_invalid"); } if (typeof event.actorAvatarUrl !== "string" || event.actorAvatarUrl.length > 2048 || url.protocol !== "https:" || url.username || url.password) invalid("automation_avatar_invalid"); }
   const d = event.evidence;
   if (!d || typeof d !== 'object' || Array.isArray(d)) invalid();
   if (Object.keys(d).some(key => !['normalizedText', 'badges', 'amountCents', 'totalGifts', 'giftType', 'videoId', 'announcement', 'detectionMethod'].includes(key))) invalid('automation_evidence_invalid');

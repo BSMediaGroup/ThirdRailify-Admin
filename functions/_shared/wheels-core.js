@@ -214,13 +214,13 @@ export async function executeAutomationWheelEntry(env, rule, event) {
       AND EXISTS (SELECT 1 FROM wheel_settings WHERE setting_key='global' AND revision=?)
       AND EXISTS (SELECT 1 FROM automation_rules WHERE id=? AND revision=? AND enabled=1 AND deleted_at IS NULL)`)
       .bind(receiptId, rule.id, rule.revision, event.eventFingerprint, event.eventType, event.providerEventAt, event.actorKey, event.actorLabel, outcome, wheel.id, timestamp, awardedEntries, actionResult, wheel.id, wheel.revision, policy.revision, rule.id, rule.revision),
-    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at)
-      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?
+    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at,source_avatar_url)
+      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?,?
       WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='created')`)
-      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, receiptId),
-    db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=? WHERE id=? AND wheel_id=?
+      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, event.actorAvatarUrl || null, receiptId),
+    db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=?,source_avatar_url=COALESCE(?,source_avatar_url) WHERE id=? AND wheel_id=?
       AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='accumulated')`)
-      .bind(awardedEntries, timestamp, duplicate?.id || '', wheel.id, receiptId),
+      .bind(awardedEntries, timestamp, event.actorAvatarUrl || null, duplicate?.id || '', wheel.id, receiptId),
     db.prepare(`UPDATE wheels SET participant_count=(SELECT COUNT(*) FROM wheel_entries WHERE wheel_id=? AND state='active'),revision=revision+1,updated_at=?
       WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND outcome='added')`).bind(wheel.id, timestamp, wheel.id, receiptId),
     db.prepare(`UPDATE automation_rules SET matched=matched+1,executed=executed+?,duplicate_entrants=duplicate_entrants+?,failed=failed+?,last_match_at=?,last_outcome=?,last_fault=?
@@ -257,7 +257,8 @@ export async function saveWheel(env, accountId, slug, input) {
   const entries = requestedEntries.map((entry, index) => {
     const id = currentEntryIds.has(entry.id) && !usedEntryIds.has(entry.id) ? entry.id : randomId();
     usedEntryIds.add(id);
-    return { ...entry, id, avatarUrl: input.entries[index].avatarUrl === undefined ? previousEntries.find(prior => prior.id === id)?.avatarUrl || null : entry.avatarUrl };
+    const prior = previousEntries.find(prior => prior.id === id);
+    return { ...entry, id, sourceAvatarUrl: prior?.sourceAvatarUrl || null, avatarUrl: input.entries[index].customAvatarUrl === undefined && (input.entries[index].avatarUrl === undefined || input.entries[index].avatarUrl === prior?.avatarUrl) ? prior?.customAvatarUrl || null : entry.avatarUrl };
   });
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const timestamp = nowIso();
@@ -552,7 +553,7 @@ function validateEntries(input, options = {}) {
     const colour = value.colour == null || value.colour === "" ? null : clean(value.colour, 7);
     if (colour && !HEX.test(colour)) throw new AuthFailure(400, "participant_colour_invalid", "Participant colours must be six-digit hex values.");
     const style = value.style == null ? null : validateSegmentStyle(value.style, colour || DEFAULT_CONFIG.palette[index % DEFAULT_CONFIG.palette.length]);
-    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), avatarUrl: validateAvatarUrl(value.avatarUrl), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", MAX_ENTRY_WEIGHT), colour: style?.color || colour?.toUpperCase() || null, style, state: value.state === "hidden" ? "hidden" : "active" };
+    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), avatarUrl: validateAvatarUrl(value.customAvatarUrl !== undefined ? value.customAvatarUrl : value.avatarUrl), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", MAX_ENTRY_WEIGHT), colour: style?.color || colour?.toUpperCase() || null, style, state: value.state === "hidden" ? "hidden" : "active" };
   });
 }
 
@@ -621,7 +622,7 @@ async function accountSummary(env, accountId) { const account = await activeAcco
 async function publicWheelOwner(env, accountId) { const account = await activeAccount(env, accountId); return account ? { displayName: account.displayName, avatarUrl: account.avatarUrl || null } : { displayName: "Unavailable creator", avatarUrl: null }; }
 
 async function wheelBySlug(env, slug) { return requireWheelDb(env).prepare("SELECT * FROM wheels WHERE public_slug = ? COLLATE NOCASE LIMIT 1").bind(clean(slug, 80)).first(); }
-async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, state FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, avatarUrl: row.avatar_url || null, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, state: row.state })); }
+async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, avatarUrl: row.avatar_url || row.source_avatar_url || null, customAvatarUrl: row.avatar_url || null, sourceAvatarUrl: row.source_avatar_url || null, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, state: row.state })); }
 async function publicHistory(env, wheel, limit) { const config = parseJson(wheel.config_json, DEFAULT_CONFIG); if (!config.publicHistoryVisible) return []; return (await resultRows(env, wheel.id, limit)).map(officialProjection); }
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
@@ -638,10 +639,10 @@ function adminResultProjection(row) { return { ...officialProjection(row), wheel
 async function adminWheelSummary(env, row) { return { id: row.id, reference: row.reference_code, slug: row.public_slug, title: row.title, description: row.description, lifecycle: row.lifecycle, visibility: row.visibility, owner: await accountSummary(env, row.owner_account_id), participantCount: Number(row.participant_count), revision: Number(row.revision), officialEnabled: Boolean(row.official_spin_enabled), demoEnabled: Boolean(row.public_demo_spin_enabled), editingLocked: Boolean(row.editing_locked), spinLocked: Boolean(row.official_spinning_locked), latestWinner: row.latest_winner || null, latestResultAt: row.latest_result_at || row.latest_official_spin_at || null, updatedAt: row.updated_at }; }
 async function wheelAccessRows(env, wheelId) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_access WHERE wheel_id = ? ORDER BY active DESC, role, created_at").bind(wheelId).all(); return Promise.all((rows?.results || []).map(async (row) => ({ account: await accountSummary(env, row.account_id), role: row.role, active: Boolean(row.active), updatedAt: row.updated_at }))); }
 
-function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare("INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.state, timestamp, timestamp); }
-function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, state, created_at, updated_at)
-  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
-).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.state, timestamp, timestamp, wheelId, revision, timestamp); }
+function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare("INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp); }
+function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at)
+  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
+).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp, wheelId, revision, timestamp); }
 
 function validatePaletteStyles(value, palette, custom) {
   if (!Array.isArray(value) || value.length !== palette.length || value.length > (custom ? 5 : 12)) throw new AuthFailure(400, "wheel_palette_styles_invalid", "Palette styles must align exactly with the palette.");

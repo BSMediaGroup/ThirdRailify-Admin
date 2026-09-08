@@ -40,3 +40,17 @@ test('avatar persistence, old-client preservation and Wheel-scoped automation au
   await wheelAutomations(env, 'master', wheel.slug, 'delete', { id: stored.id, revision: stored.revision, confirm: 'DELETE' });
   assert.equal((await getPublicWheel(env, wheel.slug)).wheel.entries[0].weight, 2);
 });
+
+ test('API avatar defaults survive custom replacement and reset', async t => {
+  const { h, env, wheel } = await fixture(t);
+  await h.commerceDb.prepare('UPDATE wheel_entries SET source_avatar_url=? WHERE id=?').bind('https://example.test/provider.png', wheel.entries[1].id).run();
+  let current = (await getPublicWheel(env, wheel.slug, 'creator')).wheel;
+  assert.equal(current.entries[1].avatarUrl, 'https://example.test/provider.png');
+  current.entries[1].customAvatarUrl = 'https://example.test/custom.png';
+  current = (await saveWheel(env, 'creator', wheel.slug, current)).wheel;
+  assert.equal(current.entries[1].avatarUrl, 'https://example.test/custom.png');
+  assert.equal(current.entries[1].sourceAvatarUrl, 'https://example.test/provider.png');
+  current.entries[1].customAvatarUrl = null;
+  current = (await saveWheel(env, 'creator', wheel.slug, current)).wheel;
+  assert.equal(current.entries[1].avatarUrl, 'https://example.test/provider.png');
+ });
