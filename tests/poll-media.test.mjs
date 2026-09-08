@@ -17,8 +17,8 @@ test("Poll banner and option media remain owner-scoped, optional, projected, and
   const option = await uploadPollMedia(env, created.poll.slug, "option", optionId, "owner", PNG, "image/png", "choice.png");
   const draft = (await getPublicPoll(env, created.poll.slug, "owner", true)).poll;
   assert.equal(draft.media.banner.id, banner.asset.id); assert.equal(draft.options[0].image.id, option.asset.id); assert.equal(draft.options[1].image, null);
-  assert.match(draft.media.banner.url, /^\/api\/polls\/media\//); assert.equal(JSON.stringify(draft).includes("object_key"), false);
-  await assert.rejects(pollMediaResponse(env, banner.asset.id, new Request("https://admin.test/api/polls/media/x")), (error) => error.status === 404);
+  assert.match(draft.media.banner.url, /^https:\/\/cdn\.thirdrailify\.com\/poll-media\//); assert.equal(JSON.stringify(draft).includes("object_key"), false);
+  assert.equal((await pollMediaResponse(env, banner.asset.id, new Request("https://admin.test/api/polls/media/x"))).status, 200);
   const opened = await changePollLifecycle(env, "owner", draft.slug, { revision: draft.revision, action: "open" });
   const publicPoll = (await getPublicPoll(env, opened.poll.slug)).poll; assert.match(publicPoll.media.banner.url, /^https:\/\/cdn\.thirdrailify\.com\/poll-media\//);
   assert.equal((await pollMediaResponse(env, banner.asset.id, new Request("https://admin.test/api/polls/media/x"))).status, 200);

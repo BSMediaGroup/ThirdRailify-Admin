@@ -50,17 +50,19 @@ export async function readPollJson(request, maximumBytes = 64 * 1024) {
 
 export async function listPublicPolls(env, input = {}, accountId = "") {
   const db = requirePollDb(env);
-  const view = new Set(["open", "closed", "recent", "mine"]).has(input.view) ? input.view : "open";
+  const view = new Set(["open", "closed", "upcoming", "recent", "mine"]).has(input.view) ? input.view : "open";
   if (view === "mine" && !accountId) throw new AuthFailure(401, "authentication_required", "Sign in to view your Polls.");
   const search = clean(input.search, 100).toLowerCase();
   const page = boundedListInteger(input.page, 1, 10_000, 1);
   const pageSize = boundedListInteger(input.pageSize, 1, PUBLIC_MAX_PAGE_SIZE, PUBLIC_PAGE_SIZE);
   let where = view === "mine"
     ? "p.owner_account_id = ?"
-    : view === "closed"
-      ? "p.is_public = 1 AND p.state = 'closed'"
+    : view === "upcoming"
+      ? "p.is_public = 1 AND p.state = 'draft' AND p.opened_at IS NULL"
+      : view === "closed"
+      ? "p.is_public = 1 AND p.state = 'closed' AND p.opened_at IS NOT NULL"
       : view === "recent"
-        ? "p.is_public = 1 AND p.state IN ('open','closed')"
+        ? "p.is_public = 1 AND (p.state IN ('open','closed') OR (p.state='draft' AND p.opened_at IS NULL))"
         : "p.is_public = 1 AND p.state = 'open'";
   if (input.type && !['regular', 'abootnothing'].includes(input.type)) throw new AuthFailure(400, 'poll_type_invalid', 'Choose a supported Poll collection.');
   if (input.type) { await paidSchema(env); where += ` AND p.presentation_type='${input.type}'`; }
@@ -93,7 +95,7 @@ export async function getPublicPoll(env, slug, accountId = "", includePrivate = 
   const row = await requirePollDb(env).prepare("SELECT * FROM polls WHERE public_slug=? LIMIT 1").bind(clean(slug, 80)).first();
   if (!row) throw new AuthFailure(404, "poll_not_found", "This Poll was not found.");
   const access = await pollAccess(env, accountId, row);
-  if (!(row.is_public && new Set(["open", "closed"]).has(row.state)) && !(includePrivate && access.canManage)) {
+  if (!(row.is_public && (new Set(["open", "closed"]).has(row.state) || (row.state === "draft" && !row.opened_at))) && !(includePrivate && access.canManage)) {
     throw new AuthFailure(404, "poll_not_found", "This Poll was not found.");
   }
   return { ok: true, poll: await projectDetail(env, row, accountId), access, refreshedAt: nowIso() };
@@ -183,7 +185,7 @@ export async function createPoll(env, accountId, input, transactionExtension = n
     db.prepare(`INSERT INTO polls
       (id,public_slug,owner_account_id,title,description,state,is_public,web_voting_mode,rumble_enabled,rumble_source_scope,
        rumble_livestream_mode,rumble_livestream_id,requested_interval_seconds,theme_json,result_metadata_json,revision,created_at,updated_at)
-      VALUES (?,?,?,?,?,'draft',0,?,?,?,?,?,?,?,'{}',1,?,?)`)
+      VALUES (?,?,?,?,?,'draft',1,?,?,?,?,?,?,?,'{}',1,?,?)`)
       .bind(id, slug, accountId, validated.title, validated.description, validated.webVotingMode, validated.rumbleEnabled ? 1 : 0,
         validated.rumbleSourceScope, validated.livestreamMode, validated.livestreamId, validated.intervalSeconds,
         JSON.stringify(validated.theme), timestamp, timestamp),
@@ -208,7 +210,8 @@ export async function updatePoll(env, accountId, slug, input) {
   const existingOptions = await db.prepare('SELECT * FROM poll_options WHERE poll_id=? ORDER BY display_position').bind(row.id).all();
   if (validated.presentationType === 'abootnothing' && (input.options || existingOptions.results).length !== 2) throw new AuthFailure(400, 'poll_matchup_requires_two', 'Aboot Nothing requires exactly two stable options.');
   const hasVotes = Number((await db.prepare('SELECT COUNT(*) count FROM poll_votes WHERE poll_id=?').bind(row.id).first()).count) > 0;
-  const hasCredits = upgraded && Boolean(await db.prepare('SELECT 1 FROM poll_credit_lots WHERE poll_id=? LIMIT 1').bind(row.id).first());
+  const manualSchema = await db.prepare("SELECT 1 FROM sqlite_master WHERE name='poll_manual_votes'").first();
+  const hasCredits = upgraded && (Boolean(await db.prepare('SELECT 1 FROM poll_credit_lots WHERE poll_id=? LIMIT 1').bind(row.id).first()) || Boolean(manualSchema && await db.prepare('SELECT 1 FROM poll_manual_votes WHERE poll_id=? LIMIT 1').bind(row.id).first()));
   if ((hasVotes || hasCredits) && validated.presentationType !== (row.presentation_type || 'regular')) throw new AuthFailure(409, 'poll_structure_locked', 'The Poll category is locked after voting begins.');
   let structural = Array.isArray(input.options);
   const bracketSchema = await db.prepare("SELECT name FROM sqlite_schema WHERE name='aboot_poll_links'").first();
@@ -286,6 +289,7 @@ export async function changePollLifecycle(env, accountId, slug, input) {
   const db = requirePollDb(env);
   const row = await requireManagedPoll(env, accountId, slug);
   const action = clean(input.action, 20);
+  if (action === "reset") return resetPollToUpcoming(env, accountId, row, input);
   const revision = integer(input.revision, 1, 1_000_000, "poll_revision_invalid");
   if (revision !== Number(row.revision)) throw new AuthFailure(409, "poll_revision_conflict", "This Poll changed after it was loaded.");
   const transitions = { open: new Set(["draft", "closed"]), close: new Set(["open"]), archive: new Set(["draft", "closed"]), restore: new Set(["archived"]) };
@@ -320,6 +324,32 @@ export async function changePollLifecycle(env, accountId, slug, input) {
   }
   await activity(env, row.id, accountId, `poll_${action}ed`, "success", { revision: nextRevision });
   return getPublicPoll(env, row.public_slug, accountId, true);
+}
+
+async function resetPollToUpcoming(env, accountId, row, input) {
+  const db = requirePollDb(env);
+  if (!(await getPollCreatorAccess(env, accountId)).canManageAll) throw new AuthFailure(403, 'poll_reset_admin_required', 'Only an Admin can reset a Poll.');
+  if (!['open','closed','archived'].includes(row.state) || !row.opened_at) throw new AuthFailure(409, 'poll_reset_state_invalid', 'Only a previously opened Poll can be reset.');
+  if (input.revision !== row.revision) throw new AuthFailure(409, 'poll_revision_conflict', 'This Poll changed. Refresh before resetting.');
+  if (!await db.prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first()) throw new AuthFailure(503,'poll_reset_schema_required','Poll reset requires migration 0044.');
+  const snapshot = await projectSummary(env,row);
+  const historyId = randomId(), guard = randomId(), timestamp = nowIso();
+  const publicSnapshot = { title: snapshot.title, openedAt: snapshot.openedAt, closedAt: snapshot.closedAt, totalVotes: snapshot.totalVotes, unallocatedDiscarded: snapshot.credits?.unresolved || 0, options: snapshot.options.map(o => ({ id:o.id,label:o.label,votes:o.votes,ordinaryVotes:o.ordinaryVotes,bonusVotes:o.bonusVotes,manualVotes:o.manualVotes })) };
+  try { await db.batch([
+    db.prepare('INSERT INTO poll_credit_guards VALUES (?,CASE WHEN EXISTS(SELECT 1 FROM polls WHERE id=? AND revision=? AND results_revision=?) THEN 1 ELSE 0 END)').bind(guard,row.id,row.revision,row.results_revision),
+    db.prepare("INSERT INTO poll_result_history VALUES (?,?,?,?,(SELECT COALESCE(json_group_array(json_object('source',source_namespace,'voterHash',voter_key_hash,'optionId',option_id,'actorLabel',actor_label,'createdAt',created_at,'updatedAt',updated_at)),'[]') FROM poll_votes WHERE poll_id=?),?)").bind(historyId,row.id,accountId,JSON.stringify(publicSnapshot),row.id,timestamp),
+    db.prepare('DELETE FROM poll_rumble_leases WHERE poll_id=?').bind(row.id),
+    db.prepare("UPDATE polls SET state='draft',is_public=1,opened_at=NULL,closed_at=NULL,revision=revision+1,results_revision=results_revision+1,updated_at=? WHERE id=?").bind(timestamp,row.id),
+    db.prepare("INSERT INTO poll_credit_audit(id,lot_id,actor_account_id,action,reason,before_json,after_json,created_at) SELECT lower(hex(randomblob(16))),id,?,'discarded','Poll reset to Upcoming',json_object('waiting',waiting,'review',unreconciled),json_object('discarded',waiting+unreconciled),? FROM poll_credit_lots WHERE poll_id=? AND waiting+unreconciled>0").bind(accountId,timestamp,row.id),
+    db.prepare("UPDATE poll_credit_lots SET discarded=discarded+waiting+unreconciled,waiting=0,unreconciled=0,reason='poll_reset',revision=revision+1,updated_at=? WHERE poll_id=? AND waiting+unreconciled>0").bind(timestamp,row.id),
+    db.prepare('INSERT OR IGNORE INTO poll_reset_windows SELECT id,? FROM poll_voting_windows WHERE poll_id=?').bind(historyId,row.id),
+    db.prepare('INSERT OR IGNORE INTO poll_reset_credit_lots SELECT id,? FROM poll_credit_lots WHERE poll_id=?').bind(historyId,row.id),
+    db.prepare('INSERT OR IGNORE INTO poll_reset_manual_votes SELECT request_id,? FROM poll_manual_votes WHERE poll_id=?').bind(historyId,row.id),
+    db.prepare('DELETE FROM poll_votes WHERE poll_id=?').bind(row.id),
+    db.prepare('DELETE FROM poll_credit_guards WHERE id=?').bind(guard),
+  ]); } catch (error) { if (String(error).includes('CHECK constraint failed: valid')) throw new AuthFailure(409,'poll_revision_conflict','Votes changed while resetting. Refresh and retry.'); throw error; }
+  await activity(env,row.id,accountId,'poll_reset_to_upcoming','success',{historyId});
+  return getPublicPoll(env,row.public_slug,accountId,true);
 }
 
 export async function changePollVisibility(env, accountId, slug, input) {
@@ -365,10 +395,10 @@ export async function submitWebVote(env, actor, slug, input) {
     .bind(poll.id, actor.namespace, voterHash).first();
   const timestamp = nowIso();
   const result = await db.prepare(`INSERT INTO poll_votes (poll_id,source_namespace,voter_key_hash,option_id,actor_label,created_at,updated_at)
-    SELECT p.id,?,?,?,?,?,? FROM polls p JOIN poll_options o ON o.poll_id=p.id AND o.id=? WHERE p.id=? AND p.state='open'
+    SELECT p.id,?,?,?,?,?,? FROM polls p JOIN poll_options o ON o.poll_id=p.id AND o.id=? WHERE p.id=? AND p.state='open' AND p.revision=?
     ON CONFLICT(poll_id,source_namespace,voter_key_hash) DO UPDATE SET option_id=excluded.option_id,updated_at=excluded.updated_at`)
-    .bind(actor.namespace, voterHash, optionId, actor.label || null, timestamp, timestamp, optionId, poll.id).run();
-  if (Number(result?.meta?.changes || 0) !== 1) throw new AuthFailure(409, "poll_closed_during_submission", "The Poll closed before the vote could be recorded.");
+    .bind(actor.namespace, voterHash, optionId, actor.label || null, timestamp, timestamp, optionId, poll.id, poll.revision).run();
+  if (Number(result?.meta?.changes || 0) < 1) throw new AuthFailure(409, "poll_closed_during_submission", "The Poll closed before the vote could be recorded.");
   const changed = Boolean(previous && previous.option_id !== optionId);
   const repeated = Boolean(previous && previous.option_id === optionId);
   await activity(env, poll.id, actor.accountId || null, repeated ? "web_vote_noop" : changed ? "web_vote_changed" : "web_vote_recorded", "success", { source: actor.namespace });
@@ -570,7 +600,7 @@ export async function ingestRumbleVotes(env, input) {
           ON CONFLICT(poll_id,source_namespace,voter_key_hash) DO UPDATE SET option_id=excluded.option_id,actor_label=excluded.actor_label,updated_at=excluded.updated_at`)
           .bind(actorHash, parsed.optionId, parsed.actorLabel, timestamp, timestamp, poll.id, revision),
       ]);
-      if (results.some((result) => Number(result?.meta?.changes || 0) !== 1)) throw new AuthFailure(409, "poll_closed_during_ingestion", "The Poll closed before this Rumble vote could be recorded.");
+      if (results.some((result) => Number(result?.meta?.changes || 0) < 1)) throw new AuthFailure(409, "poll_closed_during_ingestion", "The Poll closed before this Rumble vote could be recorded.");
     } catch (error) {
       if (/UNIQUE constraint/i.test(String(error?.message || error))) { accepted.duplicate += 1; continue; }
       throw error;
@@ -583,13 +613,13 @@ export async function ingestRumbleVotes(env, input) {
 }
 
 async function projectSummary(env, row) {
-  const publicVisible = Boolean(row.is_public) && new Set(["open", "closed"]).has(row.state);
+  const publicVisible = Boolean(row.is_public) && (new Set(["open", "closed"]).has(row.state) || (row.state === "draft" && !row.opened_at));
   const [options, banner] = await Promise.all([
     optionResults(env, row.id, publicVisible),
     requirePollDb(env).prepare("SELECT * FROM poll_media_assets WHERE poll_id=? AND purpose='banner' AND lifecycle='active' LIMIT 1").bind(row.id).first(),
   ]);
   return { id: row.id, presentationType: row.presentation_type || "regular", presentation: safeJson(row.presentation_json, {}), resultsRevision: Number(row.results_revision || 0), credits: await creditProjection(env, row.id), votingPolicy: await publicPollPolicy(env, row.id), slug: row.public_slug, title: row.title, description: row.description || null, state: row.state,
-    public: Boolean(row.is_public), webVotingMode: row.web_voting_mode, rumbleEnabled: Boolean(row.rumble_enabled),
+    public: Boolean(row.is_public), upcoming: row.state === "draft" && !row.opened_at, webVotingMode: row.web_voting_mode, rumbleEnabled: Boolean(row.rumble_enabled),
     rumbleSourceScope: row.rumble_source_scope || null, revision: Number(row.revision), totalVotes: options.reduce((sum, item) => sum + item.votes, 0),
     options, ordinaryVoterIdentities: options.reduce((sum, item) => sum + item.ordinaryVotes, 0), owner: await accountProjection(env, row.owner_account_id), theme: projectTheme(safeJson(row.theme_json, {})),
     media: { banner: projectPollMediaAsset(banner, env, publicVisible) }, updatedAt: row.updated_at, openedAt: row.opened_at || null, closedAt: row.closed_at || null };
@@ -602,7 +632,9 @@ async function projectDetail(env, row, accountId = "", voteIdentity = null) {
     .bind(row.id, voteIdentity.namespace, voteIdentity.voterHash).first();
   else if (accountId) currentVote = await requirePollDb(env).prepare("SELECT option_id FROM poll_votes WHERE poll_id=? AND source_namespace='web_account' AND voter_key_hash=?")
     .bind(row.id, await voterKeyHash(env, "web_account", `account:${accountId}`)).first();
-  return { ...summary, livestreamMode: row.rumble_livestream_mode, livestreamId: row.rumble_livestream_id || null,
+  const historyReady = await requirePollDb(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first();
+  const history = historyReady ? (await requirePollDb(env).prepare('SELECT id,snapshot_json,created_at FROM poll_result_history WHERE poll_id=? ORDER BY created_at DESC LIMIT 100').bind(row.id).all()).results.map(h => ({ id:h.id,resetAt:h.created_at,...JSON.parse(h.snapshot_json) })) : [];
+  return { ...summary, history, livestreamMode: row.rumble_livestream_mode, livestreamId: row.rumble_livestream_id || null,
     requestedIntervalSeconds: Number(row.requested_interval_seconds), currentVoteOptionId: currentVote?.option_id || null };
 }
 
@@ -615,7 +647,8 @@ async function optionResults(env, pollId, publicVisible = false) {
     WHERE o.poll_id=? ORDER BY o.display_position`).bind(pollId).all();
   const bonuses = await bonusOptions(env, pollId);
   const manualReady = await requirePollDb(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_manual_votes'").first();
-  const manualRows = manualReady ? (await requirePollDb(env).prepare('SELECT option_id,SUM(amount) AS votes FROM poll_manual_votes WHERE poll_id=? GROUP BY option_id').bind(pollId).all()).results : [];
+  const historyReady = await requirePollDb(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first();
+  const manualRows = manualReady ? (await requirePollDb(env).prepare(`SELECT option_id,SUM(amount) AS votes FROM poll_manual_votes WHERE poll_id=? ${historyReady ? 'AND request_id NOT IN (SELECT request_id FROM poll_reset_manual_votes)' : ''} GROUP BY option_id`).bind(pollId).all()).results : [];
   const manual = new Map((manualRows || []).map(row => [row.option_id, Number(row.votes)]));
   return (rows?.results || []).map((row) => ({ id: row.id, position: Number(row.display_position), label: row.label,
     description: row.short_description || null, trigger: row.trigger_raw, normalizedTrigger: row.trigger_normalized, votes: Number(row.votes || 0) + (bonuses.get(row.id) || 0) + (manual.get(row.id) || 0), manualVotes: manual.get(row.id) || 0, ordinaryVotes: Number(row.votes || 0), bonusVotes: bonuses.get(row.id) || 0,

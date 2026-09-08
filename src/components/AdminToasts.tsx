@@ -44,7 +44,7 @@ export function AdminToastProvider({ children }: { children: ReactNode }) {
       <div className="admin-toast-region" aria-label="Admin notifications" aria-live="polite" aria-relevant="additions removals">
         {toasts.map((toast) => <ToastCard key={toast.id} toast={toast} dismissToast={dismissToast} />)}
       </div>,
-      document.body,
+      document.querySelector<HTMLElement>('dialog[data-admin-toast-host][open]') || document.body,
     ) : null}
   </AdminToastContext.Provider>;
 }

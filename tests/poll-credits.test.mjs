@@ -202,3 +202,19 @@ test('late equal-time messages, exact-stream mismatch and expiry races never dou
   expiry = (await lots(h)).find(l => l.id === expiry.id); assert.equal(expiry.committed, 0); assert.equal(expiry.waiting, 0); assert.equal(expiry.unreconciled, 5);
   await conservation(h);
 });
+
+
+test('reset archives paid results, discards unresolved credits and isolates old provider windows', async t => {
+ const {h,env,created}=await setup(t);const {bot}=await open(env,created);const base=Date.parse(bot.paidContext.activatedAt)+10;
+ await ingestPaidSnapshot(env,bridge(snapshot(base,{gifts:[gift(base)],rants:[rant(base,'moon')]}),bot).paid);
+ let p=(await getPublicPoll(env,created.poll.slug)).poll;assert.equal(p.totalVotes,10);assert.equal(p.credits.unresolved,5);
+ p=(await changePollLifecycle(env,'credit-admin',p.slug,{revision:p.revision,action:'reset'})).poll;
+ assert.equal(p.totalVotes,0);assert.equal(p.credits.unresolved,0);assert.equal(p.history[0].totalVotes,10);assert.equal(p.history[0].unallocatedDiscarded,5);
+ assert.equal((await lots(h)).find(l=>l.kind==='gift').discarded,5);
+ const late=bridge(snapshot(base+100,{rants:[rant(base+100,'moon')]}),bot).paid;
+ assert.equal((await ingestPaidSnapshot(env,late)).historical,true);assert.equal((await getPublicPoll(env,p.slug)).poll.totalVotes,0);
+ p=(await changePollLifecycle(env,'credit-admin',p.slug,{revision:p.revision,action:'open'})).poll;
+ const next=(await botActivePoll(env)).activePoll;const at=Date.parse(next.paidContext.activatedAt)+10;
+ await ingestPaidSnapshot(env,bridge(snapshot(at,{rants:[rant(at,'moon',200)]}),next).paid);
+ p=(await getPublicPoll(env,p.slug)).poll;assert.equal(p.totalVotes,2);assert.equal(p.history[0].totalVotes,10);await conservation(h);
+});

@@ -520,8 +520,12 @@ Unconfigured match dimming (2026-09-08): increased the visible difference by low
 
 Direct Poll editing (2026-09-08): Edit Poll in the main list opens the correct category editor. The library editor scrolls into view and focuses its title. Ordinary Polls use the new src/polls/PollEditDialog.tsx and src/polls/poll-edit.css; stable identities and canonical revision checks remain enforced. Real D1/API browser saves and responsive checks pass.
 
+Upcoming Polls and reset history: commerce-migrations/0044_poll_upcoming_history.sql adds immutable result snapshots and prior-run ledger mappings. Both Poll management pages offer Admin Reset to Upcoming. See docs/POLLS_CREDITS_CONTRACT.md for reset semantics and production verification.
+
 
 Draft matchup artwork (2026-09-08): Admin library images now always use the authenticated Admin media route. Listed drafts previously selected the anonymous public route, which does not provide authenticated draft access. Both production contender assets were confirmed active with a read-only D1 query; no image upload or record mutation was needed. Real API/browser regression checks cover visible draft images and continued anonymous denial. No schema or Public changes.
 
 
 Accepted Poll recovery (2026-09-09): Update from Poll and Clear accepted result provide audited correction controls. Pending draft edits save first; unplayed dependent matches follow the replacement winner automatically. Changed earlier sources are directly reachable from affected matches. Existing backend/editor/browser test files updated; no new files or migration.
+
+Aboot Nothing editing now uses a native modal dialog with a scrollable form, persistent save/close controls, Escape dismissal, focus restoration, and modal-visible Admin toasts. Matchup library Public detail links open in a new tab. Browser evidence: .artifacts/matchup-modal.

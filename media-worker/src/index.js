@@ -34,7 +34,7 @@ export default {
     } else if (poll) {
       metadata = await env.COMMERCE_DB.prepare(`SELECT a.object_key,a.content_type,a.byte_size,a.sha256
         FROM poll_media_assets a JOIN polls p ON p.id=a.poll_id
-        WHERE a.id=? AND a.lifecycle='active' AND p.is_public=1 AND p.state IN ('open','closed') LIMIT 1`).bind(poll[1]).first();
+        WHERE a.id=? AND a.lifecycle='active' AND p.is_public=1 AND (p.state IN ('open','closed') OR (p.state='draft' AND p.opened_at IS NULL)) LIMIT 1`).bind(poll[1]).first();
       key = metadata?.object_key;
     }
     if (!key) return plain(404, "Not Found");

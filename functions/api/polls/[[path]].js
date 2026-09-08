@@ -55,7 +55,7 @@ async function publicRead(request, env, path) {
     type: url.searchParams.get("type"), view: url.searchParams.get("view"), search: url.searchParams.get("search"), page: url.searchParams.get("page"), pageSize: url.searchParams.get("pageSize"),
   });
   const unsettled = path ? Boolean(payload?.poll?.credits?.unresolved) : payload?.items?.some(p => p.credits?.unresolved);
-  const cacheControl = unsettled ? PUBLIC_CACHE : path ? payload?.poll?.state === "open" ? PUBLIC_CACHE : "public, max-age=60" : payload?.view === "closed" ? "public, max-age=60" : PUBLIC_CACHE;
+  const cacheControl = unsettled ? PUBLIC_CACHE : path ? (payload?.poll?.state === "open" || payload?.poll?.upcoming) ? PUBLIC_CACHE : "public, max-age=60" : payload?.view === "closed" ? "public, max-age=60" : PUBLIC_CACHE;
   return jsonResponse(payload, { headers: { "Cache-Control": cacheControl, ETag: `W/\"${hash(JSON.stringify(payload))}\"` } });
 }
 

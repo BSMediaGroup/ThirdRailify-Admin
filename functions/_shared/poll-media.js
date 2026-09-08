@@ -48,9 +48,9 @@ export async function removePollMedia(env, slugValue, purposeValue, optionIdValu
 
 export async function pollMediaResponse(env, assetIdValue, request, accountIdValue = "") {
   const assetId = clean(assetIdValue, 80); const accountId = clean(accountIdValue, 160); const db = requireDb(env);
-  const row = await db.prepare(`SELECT a.*,p.owner_account_id,p.state,p.is_public FROM poll_media_assets a JOIN polls p ON p.id=a.poll_id WHERE a.id=? AND a.lifecycle='active' LIMIT 1`).bind(assetId).first();
+  const row = await db.prepare(`SELECT a.*,p.owner_account_id,p.state,p.is_public,p.opened_at FROM poll_media_assets a JOIN polls p ON p.id=a.poll_id WHERE a.id=? AND a.lifecycle='active' LIMIT 1`).bind(assetId).first();
   if (!row) throw new AuthFailure(404, "poll_media_not_found", "The Poll image was not found.");
-  const publicVisible = Boolean(row.is_public) && new Set(["open", "closed"]).has(row.state);
+  const publicVisible = Boolean(row.is_public) && (new Set(["open", "closed"]).has(row.state) || (row.state === "draft" && !row.opened_at));
   if (!publicVisible && !await mayManage(env, row, accountId)) throw new AuthFailure(404, "poll_media_not_found", "The Poll image was not found.");
   const object = await requireBucket(env).get(row.object_key);
   if (!object) throw new AuthFailure(404, "poll_media_not_found", "The Poll image was not found.");

@@ -379,3 +379,31 @@ test('approved manual increments preserve ordinary votes, reject unauthorized ac
   await assert.rejects(incrementPollVotes(env,'increment-owner',poll.slug,{...input,requestId:crypto.randomUUID()}), e=>e.status===409);
   const audit=(await h.commerceDb.prepare('SELECT actor_account_id,amount FROM poll_manual_votes').all()).results; assert.equal(audit.length,2); assert.ok(audit.every(r=>r.actor_account_id==='increment-approved'));
 });
+
+
+test('Upcoming and Admin reset preserve history while restarting ordinary and manual totals', async t => {
+ const h=await createCommerceDatabases();t.after(h.dispose);const env=commerceEnvironment(h,{THIRDRAILIFY_POLL_VOTER_SECRET:HMAC_SECRET});
+ await account(h.authDb,'reset-admin','Reset Admin',{role:'admin',adminLevel:'full'});await account(h.authDb,'reset-user','Reset User');
+ for(const type of ['regular','abootnothing']) {
+  let {poll}=await createPoll(env,'reset-admin',{...pollInput('Upcoming '+type),presentationType:type,rumbleEnabled:false});
+  assert.equal((await getPublicPoll(env,poll.slug)).poll.upcoming,true);
+  assert.ok((await listPublicPolls(env,{view:'upcoming',type})).items.some(p=>p.id===poll.id));
+  const actor={namespace:'web_account',key:'account:reset-user',accountId:'reset-user'};
+  await assert.rejects(submitWebVote(env,actor,poll.slug,{optionId:poll.options[0].id}),e=>e.status===409);
+  ({poll}=await changePollLifecycle(env,'reset-admin',poll.slug,{revision:poll.revision,action:'open'}));
+  await submitWebVote(env,actor,poll.slug,{optionId:poll.options[0].id});
+  await incrementPollVotes(env,'reset-admin',poll.slug,{optionId:poll.options[1].id,amount:5,requestId:crypto.randomUUID()});
+  ({poll}=await changePollLifecycle(env,'reset-admin',poll.slug,{revision:poll.revision,action:'close'}));
+  assert.ok((await listPublicPolls(env,{view:'closed',type})).items.some(p=>p.id===poll.id));
+  await assert.rejects(changePollLifecycle(env,'reset-user',poll.slug,{revision:poll.revision,action:'reset'}),e=>e.status===403);
+  ({poll}=await changePollLifecycle(env,'reset-admin',poll.slug,{revision:poll.revision,action:'reset'}));
+  assert.equal(poll.upcoming,true);assert.equal(poll.totalVotes,0);assert.equal(poll.openedAt,null);assert.equal(poll.history[0].totalVotes,6);
+  assert.equal(JSON.stringify(poll.history).includes('voterHash'),false);
+  assert.ok(!(await listPublicPolls(env,{view:'closed',type})).items.some(p=>p.id===poll.id));
+  ({poll}=await changePollLifecycle(env,'reset-admin',poll.slug,{revision:poll.revision,action:'open'}));
+  await submitWebVote(env,actor,poll.slug,{optionId:poll.options[1].id});
+  ({poll}=await getPublicPoll(env,poll.slug));assert.equal(poll.totalVotes,1);assert.equal(poll.history[0].totalVotes,6);
+  ({poll}=await changePollLifecycle(env,'reset-admin',poll.slug,{revision:poll.revision,action:'reset'}));
+  assert.equal(poll.history.length,2);assert.equal(poll.history[0].totalVotes,1);assert.equal(poll.totalVotes,0);
+ }
+});

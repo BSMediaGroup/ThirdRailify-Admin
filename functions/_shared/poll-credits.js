@@ -95,14 +95,17 @@ export async function expirePollCredits(env) {
   const timestamp = nowIso();
   await dbFor(env).prepare(`UPDATE poll_credit_lots SET unreconciled=unreconciled+waiting,waiting=0,reason='timeout',revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM poll_credit_lots WHERE waiting>0 AND expires_at<=? LIMIT 200)`).bind(timestamp, timestamp).run();
 }
+async function resetCreditFilter(env, prefix = '') {
+  return await dbFor(env).prepare("SELECT 1 FROM sqlite_master WHERE name='poll_result_history'").first() ? ` AND ${prefix}window_id NOT IN (SELECT window_id FROM poll_reset_windows)` : '';
+}
 export async function creditProjection(env, pollId) {
   if (!await paidSchema(env, false)) return null;
-  const db = dbFor(env), totals = await db.prepare('SELECT COALESCE(SUM(waiting),0) waiting,COALESCE(SUM(unreconciled),0) review,COALESCE(SUM(committed),0) committed,COALESCE(SUM(discarded),0) discarded FROM poll_credit_lots WHERE poll_id=?').bind(pollId).first();
+  const db = dbFor(env), totals = await db.prepare('SELECT COALESCE(SUM(waiting),0) waiting,COALESCE(SUM(unreconciled),0) review,COALESCE(SUM(committed),0) committed,COALESCE(SUM(discarded),0) discarded FROM poll_credit_lots WHERE poll_id=?' + await resetCreditFilter(env)).bind(pollId).first();
   return { waiting: totals.waiting, review: totals.review, unresolved: totals.waiting + totals.review, committed: totals.committed, settled: totals.waiting + totals.review === 0 };
 }
 export async function bonusOptions(env, pollId) {
   if (!await paidSchema(env, false)) return new Map();
-  return new Map((await rows(dbFor(env).prepare('SELECT a.option_id,SUM(a.amount) votes FROM poll_credit_allocations a JOIN poll_credit_lots l ON l.id=a.lot_id WHERE l.poll_id=? GROUP BY a.option_id').bind(pollId))).map(r => [r.option_id, r.votes]));
+  return new Map((await rows(dbFor(env).prepare('SELECT a.option_id,SUM(a.amount) votes FROM poll_credit_allocations a JOIN poll_credit_lots l ON l.id=a.lot_id WHERE l.poll_id=?' + await resetCreditFilter(env, 'l.') + ' GROUP BY a.option_id').bind(pollId))).map(r => [r.option_id, r.votes]));
 }
 export async function publicPollPolicy(env, pollId) {
   if (!await paidSchema(env, false)) return null;
@@ -141,6 +144,7 @@ export async function ingestPaidSnapshot(env, input) {
   if (input.protocol !== PAID_PROTOCOL || !/^[a-f0-9]{64}$/.test(input.fingerprint || '') || !Array.isArray(input.events) || input.events.length > 200) fail('poll_paid_protocol_required', 'Poll evidence protocol 2 is required.');
   const db = dbFor(env), window = await db.prepare('SELECT * FROM poll_voting_windows WHERE id=?').bind(String(input.windowId || '')).first();
   if (!window) fail('poll_paid_context_unknown', 'Original Poll window cannot be established; evidence must remain in the outbox.', 409);
+  if (await resetCreditFilter(env) && await db.prepare('SELECT 1 FROM poll_reset_windows WHERE window_id=?').bind(window.id).first()) return { ok:true,acknowledged:[input.fingerprint],historical:true };
   if (await db.prepare('SELECT 1 FROM poll_credit_batches WHERE fingerprint=?').bind(input.fingerprint).first()) return { ok: true, acknowledged: [input.fingerprint], duplicate: true };
   const poll = await db.prepare('SELECT * FROM polls WHERE id=?').bind(window.poll_id).first();
   const policy = parse(window.policy_json), options = parse(window.options_json), timestamp = nowIso();
@@ -231,6 +235,7 @@ export async function reconcilePollCredit(env, actor, input) {
     return { ok: true, repeated: true };
   }
   const lot = await db.prepare('SELECT * FROM poll_credit_lots WHERE id=?').bind(input.lotId).first();
+  if (await resetCreditFilter(env) && await db.prepare('SELECT 1 FROM poll_reset_credit_lots WHERE lot_id=?').bind(input.lotId).first()) fail('poll_credit_historical', 'These credits belong to a saved result history.', 409);
   if (!lot || lot.revision !== input.revision) fail('poll_credit_conflict', 'Reload the current credit balance.', 409);
   if (input.action !== 'correct' && input.amount > lot.waiting + lot.unreconciled) fail('poll_credit_overallocation', 'The amount exceeds the unresolved balance.', 409);
   const [start, end] = guard(db, 'poll_credit_lots', lot.id, lot.revision), before = balances(lot), statements = [start];

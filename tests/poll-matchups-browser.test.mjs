@@ -105,6 +105,20 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
     }
     await page.goto(ADMIN + '/polls/abootnothing'); await page.getByRole('heading', { name: 'Aboot Nothing', exact: true }).waitFor(); await page.getByRole('button', { name: 'Edit Poll' }).click({ timeout: 5000 }).catch(e => { throw new Error(`${e.message}: ${errors.join(' | ')}`); }); await page.getByRole('button', { name: 'Save matchup' }).waitFor();
     assert.ok(await page.getByLabel('Poll title', { exact: true }).evaluate(n => { const r = n.getBoundingClientRect(); return document.activeElement === n && r.top >= 0 && r.top < innerHeight; }));
+    const matchupDialog=page.getByRole('dialog',{name:'Edit matchup',exact:true});
+    assert.equal(await matchupDialog.evaluate(n=>n.matches(':modal')),true);
+    assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden');
+    assert.ok(await matchupDialog.evaluate(n=>{const r=n.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}));
+    await page.locator('.aboot-editor-dialog .poll-workspace-body').evaluate(n=>n.scrollTop=n.scrollHeight);
+    assert.ok(await page.getByRole('button',{name:'Save matchup',exact:true}).evaluate(n=>{const r=n.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;}));
+    await page.screenshot({path:`${artifacts}/matchup-modal-${width}.png`});
+    await page.keyboard.press('Escape');
+    await matchupDialog.waitFor({state:'detached'});
+    assert.equal(await page.getByRole('button',{name:'Edit Poll',exact:true}).evaluate(n=>n===document.activeElement),true);
+    const publicDetail=page.getByRole('link',{name:'Public detail',exact:true});
+    assert.equal(await publicDetail.getAttribute('target'),'_blank');
+    assert.ok((await publicDetail.getAttribute('rel')).includes('noopener'));
+    await page.getByRole('button',{name:'Edit Poll',exact:true}).click();
     geometry.push({ width, route: 'admin', fits: await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth) });
     if (width === 1440) {
       await page.screenshot({ path: `${artifacts}/admin-editor.png`, fullPage: true });
@@ -192,8 +206,8 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       assert.equal(await draftImages.count(), 2);
       await page.waitForFunction(() => [...document.querySelectorAll('.aboot-admin-grid img')].every(n => n.complete && n.naturalWidth > 0));
       for (const img of await draftImages.all()) assert.ok((await img.getAttribute('src')).startsWith('/api/admin/polls/media/'));
-      const privateImage = savedDraft.options[0].image.id;
-      await assert.rejects(() => pollHandler({ env, request: new Request(ADMIN + '/api/polls/media/' + privateImage) }), { code: 'poll_media_not_found' });
+      const upcomingImage = savedDraft.options[0].image.id;
+      assert.equal((await pollHandler({ env, request: new Request(ADMIN + '/api/polls/media/' + upcomingImage) })).status, 200);
       await page.getByRole('button', { name: 'Close editor', exact: true }).click();
       await page.locator('.aboot-admin-grid').screenshot({ path: `${artifacts}/draft-library-artwork.png` });
 
@@ -236,9 +250,48 @@ test('local Bot evidence, real D1, Public relay and Admin controls across respon
       await page.getByRole('dialog').getByRole('button', { name: 'Add 2', exact: true }).click();
       await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog] .poll-options>article em')].some(n => n.textContent === '2 votes'));
       assert.equal((await getPublicPoll(env, regular.poll.slug)).poll.totalVotes, 5);
+      for (const [target,type,total] of [[created.poll,'abootnothing',35],[regular.poll,'regular',5]]) {
+        await page.goto(ADMIN + (type === 'abootnothing' ? '/polls/abootnothing' : '/polls'));
+        const item = type === 'abootnothing' ? page.locator('.aboot-admin-grid>article').filter({hasText:target.title}) : page.locator('tbody tr').filter({hasText:target.title});
+        page.once('dialog',dialog=>dialog.accept());
+        await item.getByRole('button',{name:'Reset to Upcoming',exact:true}).click();
+        await page.waitForTimeout(400);
+        const reset=(await getPublicPoll(env,target.slug)).poll; assert.equal(reset.totalVotes,0);assert.equal(reset.upcoming,true);assert.equal(reset.history[0].totalVotes,total);
+        const route=type==='abootnothing'?'/polls/abootnothing':'/polls';
+        await page.goto(PUBLIC+route);
+        const upcoming=page.getByRole('region',{name:type==='abootnothing'?'Upcoming Matchups':'Upcoming Polls',exact:true});
+        await upcoming.getByRole('button',{name:`Quick view ${target.title}`,exact:true}).click();
+        assert.equal(await page.getByRole('dialog').getByRole('button',{name:'Voting opens soon',exact:true}).count(),2);
+        assert.equal(await page.getByRole('dialog').getByRole('button',{name:'Voting opens soon',exact:true}).first().isDisabled(),true);
+        await page.keyboard.press('Escape');
+        await page.goto(PUBLIC+'/polls/'+target.slug);await page.getByRole('heading',{name:'Previous results',exact:true}).waitFor();
+        await page.locator('.poll-result-history summary').first().click();
+        await page.screenshot({path:`${artifacts}/upcoming-history-${type}.png`,fullPage:true});
+        await page.getByRole('button',{name:'Open Poll',exact:true}).click();
+        await page.getByRole('button',{name:'Vote',exact:true}).first().waitFor({timeout:12000});
+        const fresh=await createPoll(env,account.id,{title:`Upcoming preview ${type}`,presentationType:type,options:[{label:'First choice',trigger:'1'},{label:'Second choice',trigger:'2'}]});
+        await page.goto(PUBLIC+route);await upcoming.getByRole('button',{name:`Quick view ${fresh.poll.title}`,exact:true}).waitFor();
+        await upcoming.screenshot({path:`${artifacts}/upcoming-gallery-${type}.png`});
+        const freshCard=upcoming.locator('.poll-card').filter({hasText:fresh.poll.title});
+        await freshCard.getByRole('button',{name:'Open Poll',exact:true}).click();
+        const openRegion=page.getByRole('region',{name:type==='abootnothing'?'Current Matchups':'Open Polls',exact:true});
+        const openCard=openRegion.locator('.poll-card').filter({hasText:fresh.poll.title});
+        await openCard.getByRole('button',{name:'Close Poll',exact:true}).waitFor();
+        assert.equal(await page.getByRole('dialog').count(),0);
+        assert.equal((await getPublicPoll(env,fresh.poll.slug)).poll.state,'open');
+        page.once('dialog',dialog=>dialog.accept());
+        await openCard.getByRole('button',{name:'Close Poll',exact:true}).click();
+        const pastRegion=page.getByRole('region',{name:type==='abootnothing'?'Past Matchups':'Past Polls',exact:true});
+        await pastRegion.getByRole('button',{name:`Quick view ${fresh.poll.title}`,exact:true}).click();
+        await page.getByRole('dialog').getByRole('button',{name:'Open Poll',exact:true}).click();
+        await page.getByRole('dialog').getByRole('button',{name:'Close Poll',exact:true}).waitFor();
+        assert.equal((await getPublicPoll(env,fresh.poll.slug)).poll.state,'open');
+        await page.screenshot({path:`${artifacts}/public-admin-open-${type}.png`,fullPage:true});
+      }
       publicAuthorized = false;
       await page.goto(PUBLIC + '/polls/' + regular.poll.slug); await page.locator('.poll-options').waitFor();
       assert.equal(await page.locator('.poll-increment').count(),0);
+      assert.equal(await page.locator('.poll-admin-lifecycle').count(),0);
 
     }
     const video = page.video(); await context.close();
