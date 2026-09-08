@@ -50,6 +50,7 @@ const commerceMigrationUrls = [
   new URL("../commerce-migrations/0034_rumble_event_automations.sql", import.meta.url),
   new URL("../commerce-migrations/0035_rumble_automation_awards.sql", import.meta.url),
   new URL("../commerce-migrations/0036_rumble_raid_received.sql", import.meta.url),
+  new URL("../commerce-migrations/0037_wheel_entrant_avatars.sql", import.meta.url),
 ];
 
 export const TEST_COMMERCE_KEY = "ERERERERERERERERERERERERERERERERERERERERERE";

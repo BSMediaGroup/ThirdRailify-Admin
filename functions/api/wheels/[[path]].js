@@ -1,3 +1,4 @@
+import { wheelAutomations } from "../../_shared/wheel-automations.js";
 import { AuthFailure, errorResponse, jsonResponse } from "../../_shared/auth-core.js";
 import {
   applyWinnerAction,
@@ -64,6 +65,8 @@ async function handlePublicRead(request, env, path) {
 }
 
 async function handleInternal(method, env, path, body) {
+  const automation = path.match(/^([^/]+)\/automations\/(read|save|delete|test)$/);
+  if (method === "POST" && automation) return wheelAutomations(env, String(body.accountId || ""), decode(automation[1]), automation[2], body.input || {});
   const accountId = String(body.accountId || "").slice(0, 160);
   if (method === "POST" && path === "access") return getCreatorAccess(env, accountId);
   if (method === "POST" && path === "read") return listPublicWheels(env, body);

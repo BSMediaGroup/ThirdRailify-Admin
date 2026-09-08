@@ -3,8 +3,8 @@ import { CONDITION_FIELDS, RAID_TYPE, RAID_TEXT, calculateAward, defaultAction, 
 
 import { families, automationRequest, AutomationRequestError, type Rule, type Conditions, type WheelChoice, type Discovery, type TestResult, type Readiness } from '../lib/automation-client';
 
-export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules, csrf, busy, canManage, serverErrors, onChange, onSave, onClose }: {
-  rule: Rule; rules?: Rule[]; readiness?: Readiness; wheels: WheelChoice[]; discovery?: Discovery; csrf: string; busy: boolean; canManage: boolean;
+export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules, csrf, busy, canManage, serverErrors, onChange, onSave, onClose, request = automationRequest }: {
+  request?: typeof automationRequest; rule: Rule; rules?: Rule[]; readiness?: Readiness; wheels: WheelChoice[]; discovery?: Discovery; csrf: string; busy: boolean; canManage: boolean;
   serverErrors: Record<string, string>; onChange: (rule: Rule) => void; onSave: () => void; onClose: () => void;
 }) {
   const [custom, setCustom] = useState(false);
@@ -41,7 +41,7 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
   const invalid = (key: string) => ({ 'aria-invalid': Boolean(errors[key]), 'aria-describedby': errors[key] ? `rule-error-${key}` : undefined });
   const dryRun = async () => {
     setTesting(true); setTestError(''); setTest(null);
-    try { setTest(await automationRequest<TestResult>('test', csrf, { rule, sample })); }
+    try { setTest(await request<TestResult>('test', csrf, { rule, sample })); }
     catch (e) { setTestError(e instanceof AutomationRequestError && e.issues.length ? e.issues.map(i => i.message).join(' ') : e instanceof Error ? e.message : 'Dry run unavailable.'); }
     finally { setTesting(false); }
   };
