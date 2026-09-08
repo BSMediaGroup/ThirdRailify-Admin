@@ -43,6 +43,12 @@ test('Studio canvas fullscreen, measured connectors, focus, modal editors, bench
   await page.getByRole('button',{name:'Review reference template',exact:true}).click();await page.getByRole('button',{name:'Import reviewed private sample'}).click();await page.getByRole('heading',{name:/Reference sample .* private historical draft/,exact:true}).waitFor();
   const draftUrl=page.url(), board=page.locator('.bracket-canvas-shell').first();
   assert.equal(await board.locator('.bracket-winner-feature').count(),7);
+  assert.equal(await board.locator('.bracket-match-kicker.is-complete .bracket-complete-check').count(),7);
+  assert.equal(await board.locator('.bracket-score > .bracket-winner-feature').count(),7);
+  const undefinedCard=board.locator('.bracket-match-card.is-incomplete').first();assert.equal(await undefinedCard.evaluate(e=>getComputedStyle(e).opacity),'0.7');await undefinedCard.hover();assert.equal(await undefinedCard.evaluate(e=>getComputedStyle(e).opacity),'1');await page.mouse.move(0,0);await undefinedCard.locator('.bracket-match').focus();assert.equal(await undefinedCard.evaluate(e=>getComputedStyle(e).opacity),'1');await page.locator('.bracket-studio-header h1').click();
+  assert.match(await board.locator('.bracket-match-kicker.is-complete').first().evaluate(e=>getComputedStyle(e).backgroundImage),/linear-gradient/);
+  const trophy=await board.locator('.bracket-score .bracket-winner-feature').first().boundingBox();assert.ok(trophy.width<=20&&trophy.height<=22);
+
   await page.emulateMedia({reducedMotion:'no-preference'});await board.locator('.bracket-match').first().hover();await page.waitForTimeout(150);
   assert.equal(await board.locator('.bracket-winner-sparkles i').first().evaluate(e=>getComputedStyle(e).animationName),'bracket-winner-sparkle');
   await page.screenshot({path:artifacts+'/winner-hover.png'});

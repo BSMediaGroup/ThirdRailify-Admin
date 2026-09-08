@@ -62,6 +62,9 @@ test('connected Studio, historical sample, media, publication privacy and respon
   await dialog.getByRole('button',{name:'Publish reviewed roadmap'}).click();await dialog.waitFor({state:'hidden'});
   const publicPage=await context.newPage();await publicPage.goto(PUBLIC+'/polls/abootnothing/brackets/local-acceptance');await publicPage.getByRole('heading',{name:'Local acceptance roadmap',exact:true}).waitFor(); if(await publicPage.getByRole('button',{name:'Reject non-essential',exact:true}).count()) await publicPage.getByRole('button',{name:'Reject non-essential',exact:true}).click();
   const payload=await publicPage.evaluate(async()=>JSON.stringify(await(await fetch('/api/brackets/local-acceptance')).json()));assert.ok(!payload.includes('PRIVATE'));assert.ok(!payload.includes('notes'));
+  assert.equal(await publicPage.locator('.bracket-match-kicker.is-complete .bracket-complete-check').count(),7);
+  assert.equal(await publicPage.locator('.bracket-score > .bracket-winner-feature').count(),7);
+  const incomplete=publicPage.locator('.bracket-match-card.is-incomplete').first();await publicPage.mouse.move(0,0);assert.equal(await incomplete.evaluate(e=>getComputedStyle(e).opacity),'0.7');await incomplete.hover();assert.equal(await incomplete.evaluate(e=>getComputedStyle(e).opacity),'1');await publicPage.mouse.move(0,0);
   const geometry=[];
   for(const width of [1920,1440,768,390]){
     await publicPage.setViewportSize({width,height:1000});await publicPage.bringToFront();await publicPage.bringToFront();await publicPage.screenshot({path:`${artifacts}/public-${width}.png`,fullPage:true});

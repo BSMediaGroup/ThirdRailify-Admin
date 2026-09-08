@@ -262,3 +262,15 @@
 .bracket-bench-heading { display:flex;align-items:center;justify-content:space-between;gap:8px; }.bracket-bench-heading h2 { margin:0; }
 
 .bracket-image-url { margin-top:12px;padding-top:8px;border-top:1px solid var(--line); }.bracket-image-url label { margin-bottom:8px; }
+
+/* Distinguish undefined inputs and recorded results without changing the graph. */
+.bracket-match-card.is-incomplete { opacity:.7;transition:opacity .18s ease; }
+.bracket-match-card.is-incomplete:hover,.bracket-match-card.is-incomplete:focus-within { opacity:1; }
+.bracket-match-kicker.is-complete { background:linear-gradient(105deg,rgba(43,158,89,.19),rgba(43,158,89,.045)); }
+.bracket-match-status { display:inline-flex;align-items:center;gap:5px; }
+.bracket-complete-check { flex:none;width:12px;height:12px;color:#6dc98d; }
+.bracket-score { display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;flex:none;white-space:nowrap; }
+.bracket-score .bracket-winner-feature { width:20px;height:22px;border-radius:5px; }
+.bracket-score .bracket-winner-feature svg { width:15px;height:15px; }
+@media(prefers-reduced-motion:reduce) { .bracket-match-card.is-incomplete { transition:none; } }
+@media print { .bracket-match-card.is-incomplete { opacity:1; } }

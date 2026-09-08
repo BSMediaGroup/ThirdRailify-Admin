@@ -105,3 +105,14 @@ PENDING VER=0.1.0-alpha.0
 - No new files, schema migration, Bot action or provider/paid-voting change. Current main's manual-Poll count work is retained.
 
 - Deployed and verified 2026-09-08 10:57 UTC: Admin `225e01230218462a6628efbaf43cbc410baf2407`, direct Pages `3f5745fc-cde9-479e-9dcc-e2db8cee7d5c`, stable main build `fdd92690-fb25-42c3-99de-ceaf02b99098`; Public `e2cd9a56f3ff63bbbc75cb420c6d5fb09d7f40b9`, Pages `fed8d8f8-e7f3-4e18-b782-5c823207e83c`. Stable JS/CSS match immutable release bytes on both domains; new image URL/expanded bench controls and unclamped map styling are present. Both Functions bundles compile. Evidence: Admin `.artifacts/matchup-studio/live/scroll-images-release.json`. Original and remote main branches include the changes; existing manual-Poll work is preserved. No production bracket records were changed during verification.
+
+## 2026-09-08 - Matchup state and score presentation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Admin and Public use the same presentation: matchups with unresolved inputs render at 70% opacity and return to full brightness on hover or keyboard focus. Filled matchups retain normal brightness; printing restores full opacity.
+- A confirmed decision without a review flag adds a discreet green check before the header status and a subtle green header gradient. Undefined, undecided and needs-review matches do not receive a completion mark.
+- The winner trophy is now a smaller 20x22px badge immediately before the score, with a 15px icon. Winner row styling and hover sparkles remain intact.
+- Both frontend builds/typechecks and scoped lint pass. Admin browser coverage checks completion counts, trophy placement/size, dimming and keyboard/hover restoration. Public browser assertions verify the same states on the published projection; existing responsive, editing, image and publication checks are retained. No backend, schema or result-authority changes.
