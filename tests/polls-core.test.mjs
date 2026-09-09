@@ -1,3 +1,4 @@
+import { deletePoll } from '../functions/_shared/polls-core.js';
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -434,3 +435,18 @@ test('Rumble stream links validate, persist, clear and hydrate only from this Po
     ({poll}=await changePollLifecycle(env,'stream-admin',poll.slug,{revision:poll.revision,action:'close'}));
   }
 });
+
+ test('Permanent deletion removes reset history and manual votes atomically', async t => {
+ const h=await createCommerceDatabases();t.after(()=>h.dispose());const env=commerceEnvironment(h,{THIRDRAILIFY_POLL_VOTER_SECRET:HMAC_SECRET,THIRDRAILIFY_AUTH_RATE_LIMIT_SECRET:HMAC_SECRET});
+ await account(h.authDb,'delete-admin','Delete Admin',{role:'admin',adminLevel:'master'});
+ let {poll}=await createPoll(env,'delete-admin',{...pollInput('Delete fixture'),rumbleEnabled:false});
+ await assert.rejects(deletePoll(env,'delete-admin',poll.slug,{revision:poll.revision,confirmSlug:'wrong'}));
+ ({poll}=await changePollLifecycle(env,'delete-admin',poll.slug,{revision:poll.revision,action:'open'}));
+ await incrementPollVotes(env,'delete-admin',poll.slug,{optionId:poll.options[0].id,amount:5,requestId:crypto.randomUUID()});
+ ({poll}=await getPublicPoll(env,poll.slug,'delete-admin',true));
+ await assert.rejects(deletePoll(env,'delete-admin',poll.slug,{revision:poll.revision,confirmSlug:poll.slug}),e=>e.code==='poll_delete_open');
+ ({poll}=await changePollLifecycle(env,'delete-admin',poll.slug,{revision:poll.revision,action:'reset'}));
+ await assert.rejects(h.commerceDb.prepare('DELETE FROM poll_manual_votes WHERE poll_id=?').bind(poll.id).run());
+ assert.equal((await deletePoll(env,'delete-admin',poll.slug,{revision:poll.revision,confirmSlug:poll.slug})).deleted,true);
+ for(const table of ['polls','poll_options','poll_manual_votes','poll_result_history','poll_deletion_guards']) assert.equal((await h.commerceDb.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n,0);
+ });

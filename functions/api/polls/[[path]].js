@@ -25,7 +25,7 @@ export async function onRequest(context) {
   try {
     const path = new URL(request.url).pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g, "");
     if ((request.method === "GET" || request.method === "HEAD") && /^media\/[A-Za-z0-9_-]{16,80}$/.test(path)) return pollMediaResponse(env, path.slice(6), request);
-    if (request.method === "GET" || request.method === "HEAD") return publicRead(request, env, path);
+    if (request.method === "GET" || request.method === "HEAD") return await publicRead(request, env, path);
     if (!path.startsWith("internal/")) throw new AuthFailure(404, "poll_route_not_found", "The Poll route was not found.");
     const internalPath = path.slice(9);
     const mediaUpload = internalPath.match(/^([^/]+)\/media\/(banner|option)(?:\/([^/]+))?$/);

@@ -1,3 +1,4 @@
+import { deletePoll } from '../../../_shared/polls-core.js';
 import { schemaObject } from '../../../_shared/schema-capabilities.js';
 import { uploadPollMedia, pollMediaResponse } from '../../../_shared/poll-media.js';
 import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
@@ -40,6 +41,8 @@ export async function onRequest({ request, env }) {
     }
     const { body } = await readPollJson(request);
     if (path === "create") return response(await createPoll(env, session.accountId, body), request, env);
+    const deletion = path.match(/^([^/]+)\/delete$/);
+    if (deletion) return response(await deletePoll(env, session.accountId, decode(deletion[1]), body), request, env);
     const edit = path.match(/^([^/]+)\/save$/);
     if (edit) return response(await updatePoll(env, session.accountId, decode(edit[1]), body), request, env);
     if (path === "grants") return response(await mutatePollCreatorGrant(env, session.accountId, body), request, env);

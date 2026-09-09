@@ -359,6 +359,33 @@ async function resetPollToUpcoming(env, accountId, row, input) {
   return getPublicPoll(env,row.public_slug,accountId,true);
 }
 
+export async function deletePoll(env, accountId, slug, input) {
+  const db = requirePollDb(env);
+  const row = await requireManagedPoll(env, accountId, slug);
+  if (!(await getPollCreatorAccess(env, accountId)).canManageAll) throw new AuthFailure(403, 'poll_delete_admin_required', 'Only an Admin can permanently delete a Poll.');
+  if (input.confirmSlug !== row.public_slug || input.revision !== row.revision) throw new AuthFailure(409, 'poll_delete_confirmation', 'Confirm the current Poll before deleting it.');
+  if (row.state === 'open') throw new AuthFailure(409, 'poll_delete_open', 'Close the Poll before permanently deleting it.');
+  const linked = await schemaObject(db,'aboot_poll_links') ? await db.prepare('SELECT 1 FROM aboot_poll_links WHERE poll_id=? LIMIT 1').bind(row.id).first() : null;
+  if (linked) throw new AuthFailure(409, 'poll_delete_linked', 'This Poll supplies a season roadmap. Remove its link in Matchup Studio before deleting; accepted result evidence remains protected.');
+  const assets = (await db.prepare('SELECT object_key FROM poll_media_assets WHERE poll_id=?').bind(row.id).all()).results || [];
+  const statements = [db.prepare('INSERT INTO poll_deletion_guards VALUES (?,CASE WHEN EXISTS(SELECT 1 FROM polls WHERE id=? AND revision=? AND results_revision=?) THEN 1 ELSE 0 END)').bind(row.id,row.id,row.revision,row.results_revision)];
+  const lots = 'SELECT id FROM poll_credit_lots WHERE poll_id=?';
+  const windows = 'SELECT id FROM poll_voting_windows WHERE poll_id=?';
+  for (const [table, predicate] of [
+    ['poll_reset_windows',`window_id IN (${windows})`], ['poll_reset_credit_lots',`lot_id IN (${lots})`],
+    ['poll_reset_manual_votes','request_id IN (SELECT request_id FROM poll_manual_votes WHERE poll_id=?)'],
+    ['poll_credit_attempts',`lot_id IN (${lots})`], ['poll_credit_allocations',`lot_id IN (${lots})`], ['poll_credit_audit',`lot_id IN (${lots})`],
+    ['poll_credit_messages',`window_id IN (${windows})`], ['poll_credit_batches',`window_id IN (${windows})`],
+    ...['poll_credit_lots','poll_voting_windows','poll_voting_policies','poll_manual_votes','poll_result_history','poll_votes','poll_rumble_event_fingerprints','poll_rumble_leases','poll_media_assets','poll_options'].map(table=>[table,'poll_id=?']),
+  ]) statements.push(db.prepare(`DELETE FROM ${table} WHERE ${predicate}`).bind(row.id));
+  statements.push(db.prepare('DELETE FROM poll_deletion_guards WHERE poll_id=?').bind(row.id));
+  statements.push(db.prepare('DELETE FROM polls WHERE id=?').bind(row.id));
+  await db.batch(statements);
+  await activity(env,null,accountId,'poll_deleted','success',{id:row.id,slug:row.public_slug,title:row.title});
+  const cleanup = await Promise.allSettled(assets.map(asset=>env.THIRDRAILIFY_PROFILE_MEDIA.delete(asset.object_key)));
+  return {ok:true,deleted:true,mediaCleanupPending:cleanup.some(result=>result.status==='rejected')};
+}
+
 export async function changePollVisibility(env, accountId, slug, input) {
   const db = requirePollDb(env);
   const row = await requireManagedPoll(env, accountId, slug);
@@ -421,7 +448,7 @@ export async function adminPollLibrary(env, input = {}) {
   if (type) await paidSchema(env);
   const db = requirePollDb(env);
   const rows = await db.prepare(`SELECT p.*,(SELECT COUNT(*) FROM poll_votes v WHERE v.poll_id=p.id) AS total_votes
-    FROM polls p WHERE (?='all' OR p.state=?) AND (?='' OR p.owner_account_id=?) ${type ? 'AND p.presentation_type=?' : ''} ORDER BY p.updated_at DESC LIMIT 250`)
+    FROM polls p WHERE (?='all' OR p.state=?) AND (?='' OR p.owner_account_id=?) ${type ? 'AND p.presentation_type=?' : ''} ORDER BY CASE WHEN p.state='archived' THEN 1 ELSE 0 END,p.updated_at DESC LIMIT 250`)
     .bind(state, state, owner, owner, ...(type ? [type] : [])).all();
   return { ok: true, items: await Promise.all((rows?.results || []).map((row) => projectSummary(env, row))), count: (rows?.results || []).length };
 }

@@ -65,7 +65,7 @@ export async function createBracket(env, actor, input) {
 export async function bracketLibrary(env, search = '', archived = false) {
   const db = await bracketReady(env);
   const list = await rows(db.prepare('SELECT * FROM aboot_brackets WHERE archived=? AND title LIKE ? ORDER BY updated_at DESC LIMIT 100').bind(archived ? 1 : 0, `%${String(search).slice(0, 140)}%`));
-  return { ok: true, items: await Promise.all(list.map(async b => { const s = await state(env, b); return { id: b.id, title: b.title, revision: b.revision, published: !!b.publication_id, finalized: !!b.finalized, updatedAt: b.updated_at, size: s.graph.size, contenders: s.graph.contenders.length, matches: s.graph.matches.length, linked: s.links.length, completed: s.decisions.length, next: s.graph.matches.find(m => !s.decisions.some(d => d.matchId === m.id) && opponents(s.graph, m, s.decisions).every(Boolean))?.id || null }; })) };
+  return { ok: true, items: await Promise.all(list.map(async b => { const s = await state(env, b); return { id: b.id, title: b.title, revision: b.revision, published: !!b.publication_id, finalized: !!b.finalized, updatedAt: b.updated_at, cover: s.graph.presentation.cover, size: s.graph.size, contenders: s.graph.contenders.length, matches: s.graph.matches.length, linked: s.links.length, completed: s.decisions.length, next: s.graph.matches.find(m => !s.decisions.some(d => d.matchId === m.id) && opponents(s.graph, m, s.decisions).every(Boolean))?.id || null }; })) };
 }
 async function pollSource(env, l, actor = '') {
   const db = dbFor(env), row = await db.prepare('SELECT * FROM polls WHERE id=?').bind(l.pollId).first();
