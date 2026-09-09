@@ -1,3 +1,13 @@
+## 2026-09-09 - Rumble Intelligence production schema completion
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Applied migration 0045 to production Commerce D1 at 04:03:16 UTC. Reviewed hashes, four tables, two indexes, ledger and foreign keys verified.
+- Polished the source/freshness card with a status header, collection summary and structured monospace details; responsive browser, build/typecheck and scoped lint passed.
+- Existing Bot delivered a real live snapshot without restart: 108 records, 103 accounts, 11 with paid records. Production report and trend counts reconcile; the user confirmed the populated UI by screenshot.
+
 ## 2026-09-09 - Rumble subscriber trend and pagination
 
 CURRENT VER=0.1.0-alpha.0
@@ -6,7 +16,7 @@ PENDING VER=0.1.0-alpha.0
 
 - Added a green, responsive subscriber line chart with a prominent current total, 24hr/7d/30d/90d windows, exclusive category toggles and keyboard evidence. Bounded private history sampling covers the selected window without fabricating missing data.
 - Registry page sizes are 10/20/50/100 (default 20). Moved Rumble Intelligence below Watch / Broadcast and drew its icon inline from the Rumble reference shape.
-- Local contract, real-handler browser, build/typecheck and scoped lint checks cover the enhancement. Production remains blocked by the previously exhausted D1 quota and unapplied 0045 gate; no production sign-in requested.
+- Local contract, real-handler browser, build/typecheck and scoped lint checks cover the enhancement. The original quota/migration blocker was resolved by the production schema completion above.
 
 # Bump notes
 

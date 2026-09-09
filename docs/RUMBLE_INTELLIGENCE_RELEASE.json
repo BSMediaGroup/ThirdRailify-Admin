@@ -1,9 +1,11 @@
 {
+    "migrationAppliedAt": "2026-09-09T04:03:16Z",
+    "productionVerification": {"verifiedAt": "2026-09-09T04:05:55.721Z", "verification": "Actual report and trend functions with read-only production D1 adapter; not authenticated browser acceptance", "source": "user:1sl8zm", "snapshotId": "92a4799118c1eb80dcf504e02a9e931c24bbb7c3837d00334258fb2db000f93a", "providerAt": "2026-09-09T04:00:52.000Z", "observedAt": "2026-09-09T04:00:51.323Z", "provenance": "live", "health": "qualified", "rawCount": 108, "distinctCount": 103, "counts": {"Self-paid": 9, "Gifted": 92, "Self-paid + gifted": 2, "Needs review": 0}, "paidTotal": 11, "trendPoints": 1, "latestTrend": {"at": "2026-09-09T04:00:52.000Z", "provenance": "live", "total": 103, "paid": 9, "gifted": 92, "mixed": 2, "unknown": 0}, "migration": "0045_rumble_intelligence.sql", "migrationAppliedAt": "2026-09-09T04:03:16Z"},
     "databaseId":  "3dd23a7e-7c64-49cb-a52c-c1540b41db1c",
     "version":  1,
     "baselineAdminCommit":  "4efc3cced73f6665f43ca26adac52d301a51bfde",
     "baselineBotCommit":  "ff59bf29882dd07d68b8056eedda17f57344f69b",
-    "liveAcceptance":  "blocked: operator cannot sign in until quota recovery",
+    "liveAcceptance":  "production D1 report/trend verified; user screenshot confirms populated report; agent browser unauthenticated",
     "backup":  {
                    "sqliteRestoreVerified":  true,
                    "path":  "X:\\GIT\\_BACKUPS\\ThirdRailify\\rumble-intelligence-20260909-before.sql",
@@ -13,7 +15,7 @@
                },
     "project":  "thirdrailify-admin",
     "database":  "thirdrailify-commerce",
-    "status":  "blocked_d1_quota_7500_before_migration",
+    "status":  "migration_applied_live_observation_verified",
     "accountId":  "b98c3fe4118854c1a58982da6dae38a4",
     "approvedMigration":  {
                               "additive":  true,

@@ -93,6 +93,12 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `overflow at ${width}`);
     await page.screenshot({ path: `${evidenceDir}/registry-${width}.png`, fullPage: width > 900 });
     await page.locator('.ri-trend').screenshot({ path: `${evidenceDir}/trend-${width}.png` });
+    await page.locator('.ri-source').screenshot({ path: `${evidenceDir}/source-card-${width}.png` });
+    await page.locator('.ri-source summary').click();
+    await page.locator('.ri-source').screenshot({ path: `${evidenceDir}/source-card-expanded-${width}.png` });
+    assert.equal(await page.locator('.ri-source').evaluate(e => e.scrollWidth <= e.clientWidth + 1), true);
+    await page.locator('.ri-source summary').click();
+
     assert.equal(await page.locator('.ri-trend__node').count(), 0);
     await page.locator('.ri-trend svg g[role="button"] rect').last().hover();
     await page.getByRole('tooltip').waitFor();
