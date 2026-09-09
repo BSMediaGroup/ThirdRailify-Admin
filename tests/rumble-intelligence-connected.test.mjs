@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import { chromium } from 'playwright-core';
+import sharp from 'sharp';
 import { createCommerceDatabases, commerceEnvironment } from './commerce-test-helpers.mjs';
 import { applyMigration, cookiePair } from './auth-test-helpers.mjs';
 import { createSession } from '../functions/_shared/auth-core.js';
@@ -160,6 +161,30 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
     await detail.screenshot({ path: `${evidenceDir}/subscriber-history-${width}.png` });
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('dialog[open]').count(), 0);
+    if (width === 1440 || width === 390) {
+      // A real flat SVG path has a zero-height bounding box: verify painted pixels, not just path existence.
+      await page.route('**/api/admin/rumble-intelligence/trend?**', async route => {
+        const response = await route.fetch(); const body = await response.json();
+        body.points = body.points.map(p => ({ ...p, total: 116, paid: 9, gifted: 105, mixed: 2, unknown: 0 }));
+        await route.fulfill({ response, json: body });
+      });
+      await page.getByRole('button', { name: 'Refresh report' }).click();
+      await page.waitForResponse(r => r.url().includes('/rumble-intelligence/trend?') && r.status() === 200);
+      await page.locator('.ri-trend[aria-busy="false"]').waitFor();
+      await page.mouse.move(0, 0);
+      const svg = page.locator('.ri-trend__plot svg'); await svg.scrollIntoViewIfNeeded();
+      const point = await svg.evaluate(el => {
+        const path = [...el.querySelectorAll('.ri-trend__total-line')].sort((a,b) => b.getTotalLength() - a.getTotalLength())[0];
+        const p = path.getPointAtLength(path.getTotalLength() / 2);
+        const screen = new DOMPoint(p.x,p.y).matrixTransform(path.getScreenCTM()); const box = el.getBoundingClientRect();
+        return { x: Math.round(screen.x-box.x), y: Math.round(screen.y-box.y), height: path.getBBox().height };
+      });
+      assert.equal(point.height, 0);
+      const { data, info } = await sharp(await svg.screenshot()).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      const offset = (point.y * info.width + point.x) * info.channels;
+      await page.locator('.ri-trend').screenshot({ path: `${evidenceDir}/flat-total-${width}.png` });
+      assert.ok(data[offset+1] > 140 && data[offset+1] > data[offset] * 1.15, `Flat total stroke must paint green pixels: ${[...data.subarray(offset,offset+3)]}`);
+    }
     assert.deepEqual(errors, []); await context.close();
   }
   for (const table of ['automation_receipts', 'poll_votes']) assert.equal((await h.commerceDb.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n, 0);

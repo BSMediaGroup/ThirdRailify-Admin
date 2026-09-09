@@ -85,3 +85,8 @@ The source card presents the source identity and qualified/stale/unavailable sta
 
 
 Production source-card release: commit `a3f9663`, deployment `https://ebf0f9a1.thirdrailify-admin.pages.dev`. At 2026-09-09T04:11:56Z, `https://admin.thirdrailify.com/rumble-intelligence` served the exact built JavaScript/CSS assets containing the new source-card implementation; both assets returned 200. The unauthenticated report endpoint still returned 401. A subsequent normal Bot snapshot at `2026-09-09T04:11:09.000Z` reconciled to the same 103 accounts and paid total 11. Evidence: `.artifacts/rumble-intelligence/card-deployment.json` and `production-verification.json`. No Bot restart, outbox edits, Public deployment or historical-data seeding was performed.
+
+
+## Flat total-line rendering repair
+
+The total series used an SVG object-bounding-box stroke gradient. When all displayed totals were equal, its path had zero height and Chrome did not paint the gradient stroke, although the area and other series remained visible. The stroke gradient now uses explicit chart coordinates (`userSpaceOnUse`). A Chrome pixel regression reproduces the missing stroke before the change and checks a painted green stroke for flat totals at desktop/mobile widths after it; markers remain hover/focus-only and no history is invented.

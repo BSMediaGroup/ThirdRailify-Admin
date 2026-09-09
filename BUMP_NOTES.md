@@ -1,3 +1,12 @@
+## 2026-09-09 - Flat Rumble subscriber line rendering
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Fixed the total subscriber stroke disappearing when counts stayed constant: use chart-coordinate SVG gradient bounds instead of the zero-height path bounding box.
+- Added a browser pixel regression for flat totals on desktop and mobile, with an observed failure on the previous build.
+
 ## 2026-09-09 - Rumble Intelligence production schema completion
 
 CURRENT VER=0.1.0-alpha.0
