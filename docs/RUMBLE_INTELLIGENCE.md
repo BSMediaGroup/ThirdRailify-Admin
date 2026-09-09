@@ -82,3 +82,6 @@ The subscriber drawer uses the stored avatar beside the display name, with an in
 ## Source and freshness card
 
 The source card presents the source identity and qualified/stale/unavailable status above the provider observation time, collection method and quality summary. Native disclosure reveals monospace fields for collection timestamps, scope, provenance, coverage gaps and the pinned snapshot ID. Responsive browser captures cover collapsed and expanded states at 1920/1440/768/390, under `.artifacts/rumble-intelligence/ui-1788926950318/source-card[-expanded]-{width}.png`. Local fixtures are used for these design screenshots; production migration/readback evidence is recorded separately above.
+
+
+Production source-card release: commit `a3f9663`, deployment `https://ebf0f9a1.thirdrailify-admin.pages.dev`. At 2026-09-09T04:11:56Z, `https://admin.thirdrailify.com/rumble-intelligence` served the exact built JavaScript/CSS assets containing the new source-card implementation; both assets returned 200. The unauthenticated report endpoint still returned 401. A subsequent normal Bot snapshot at `2026-09-09T04:11:09.000Z` reconciled to the same 103 accounts and paid total 11. Evidence: `.artifacts/rumble-intelligence/card-deployment.json` and `production-verification.json`. No Bot restart, outbox edits, Public deployment or historical-data seeding was performed.
