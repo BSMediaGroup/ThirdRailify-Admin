@@ -544,3 +544,6 @@ Aboot Nothing editing now uses a native modal dialog with a scrollable form, per
 Optional Rumble stream links: all Poll/matchup editors support manual links and Detect from votes. Detection matches this Poll?s accepted Rumble stream IDs against canonical links in the existing Watch feed/archive; multiple matches require selection. Save applies the link, Clear link removes it. Public cards/detail/quick view show a compact SVG Watch stream link only when set. Stored in existing presentation metadata; no new migration or Bot restart required. Tests and screenshots: ThirdRailify-Admin/.artifacts/poll-stream-links.
 
 Workshop deployment repair (2026-09-12): retain the Commerce snapshot from live deployment `264abbc2-6eea-4094-88bb-a2cd23ff185b` while restoring the exact Lab origin, auth integration and Workshop access route. No new migration.
+# D1 quota repair
+
+The signed Bot control envelope in `functions/api/internal/bot/[[path]].js` combines existing config, Poll and rules projections without changing refresh cadence or replay protection. Conditional master provisioning avoids unchanged account writes. `tests/d1-write-budget.test.mjs` measures real local D1 cost and security/state regression contracts. See [D1 responsibilities, budgets and rollout evidence](docs/D1_WRITE_BUDGET.md). No schema or file removals.

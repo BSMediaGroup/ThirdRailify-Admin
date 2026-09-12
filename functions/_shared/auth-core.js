@@ -423,7 +423,12 @@ export async function ensureEnvironmentMasters(env) {
              display_name = COALESCE(NULLIF(accounts.display_name, ''), excluded.display_name),
              role = 'admin', admin_level = 'master', status = 'active',
              email_verified_at = COALESCE(accounts.email_verified_at, excluded.email_verified_at),
-             updated_at = excluded.updated_at, source = 'env_master'`,
+             updated_at = excluded.updated_at, source = 'env_master'
+           WHERE accounts.email_normalized IS NOT excluded.email_normalized
+              OR accounts.display_name IS NULL OR accounts.display_name = ''
+              OR accounts.role IS NOT 'admin' OR accounts.admin_level IS NOT 'master'
+              OR accounts.status IS NOT 'active' OR accounts.email_verified_at IS NULL
+              OR accounts.source IS NOT 'env_master'`,
         )
         .bind(master.id, master.email, master.displayName, timestamp, timestamp, timestamp),
     ),

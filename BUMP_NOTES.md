@@ -1214,3 +1214,12 @@ PENDING VER=0.1.0-alpha.0
 - Protected 5,179,162-byte full D1 backup verified and restored locally; reviewed migration 0045 and fail-fast isolated migration procedure prepared. Supported live ledger/apply attempts returned quota error 7500. No production schema success, Admin deployment or Bot restart is claimed. See docs/RUMBLE_INTELLIGENCE.md and release manifest for hashes, tests and limitations. Original audit files and unrelated work preserved.
 
 Workshop deployment repair (2026-09-12): retain the Commerce snapshot from live deployment `264abbc2-6eea-4094-88bb-a2cd23ff185b` while restoring the exact Lab origin, auth integration and Workshop access route. No new migration.
+## 2026-09-12 - D1 write amplification repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added one signed control response for Bot config/Poll/rules, preserving independent errors, nonce protection and current projections. Paired Bot rollout reduces three control authentication writes to one per refresh.
+- Made master-account provisioning a true unchanged-state no-op, retaining immediate authoritative repairs and personalized names.
+- Added real D1 cost, replay/concurrency, liveness and state-change regression coverage in `tests/d1-write-budget.test.mjs`; documented source ownership and subscriber write guardrails in `docs/D1_WRITE_BUDGET.md`. No D1 migration or removed files. Production acceptance evidence is appended to the operational document after observation.

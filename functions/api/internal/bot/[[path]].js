@@ -10,6 +10,21 @@ export async function onRequest({ request, env }) {
     const path = new URL(request.url).pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g, "");
     if (request.method === "GET") {
       await verifyBotServiceRequest(request, env, new Uint8Array());
+      if (path === "control") {
+        // One authenticated envelope, with independent failures and unchanged projections.
+        const entries = await Promise.all([
+          ["config", () => botDesiredConfig(env)],
+          ["poll", () => botActivePoll(env)],
+          ["rules", () => botAutomationRules(env, true)],
+        ].map(async ([name, read]) => {
+          try { return [name, { status: 200, body: await read() }]; }
+          catch (error) {
+            const failure = errorResponse(error, request, env);
+            return [name, { status: failure.status, body: await failure.json(), retryAfter: failure.headers.get('Retry-After') }];
+          }
+        }));
+        return response({ ok: true, version: 1, ...Object.fromEntries(entries) });
+      }
       if (path === "config") return response(await botDesiredConfig(env));
       if (path === "poll") return response(await botActivePoll(env));
       if (path === "rules") return response(await botAutomationRules(env));
