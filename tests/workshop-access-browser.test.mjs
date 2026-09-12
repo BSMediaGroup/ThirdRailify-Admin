@@ -83,6 +83,18 @@ test("Workshop Access uses the premium Admin system and keeps Overview first", a
     assert.equal(await profileDialog.locator(".profile-policy-card--pexels img, .profile-policy-card--pixabay img, .profile-policy-card--unsplash img").count(), 3, "stock providers use their supplied SVG marks");
     assert.equal(await profileDialog.locator(".profile-access-emblem svg").evaluate((node) => getComputedStyle(node).color), "rgb(243, 201, 40)", "modal shield is gold");
     if (viewport.width > 820) assert.equal(await profileDialog.locator(".profile-access-master svg").evaluate((node) => getComputedStyle(node).color), "rgb(243, 201, 40)", "Master-only shield is gold");
+    const modalTheme = await profileDialog.evaluate((node) => {
+      const dialog = getComputedStyle(node);
+      const lightbox = getComputedStyle(node.querySelector(".profile-access-lightbox"));
+      const body = getComputedStyle(node.querySelector(".profile-access-body"));
+      const card = getComputedStyle(node.querySelector(".profile-policy-card"));
+      return { border: dialog.borderColor, lightbox: lightbox.backgroundImage, scrollbar: body.scrollbarColor, cardBorder: card.borderColor };
+    });
+    assert.match(modalTheme.border, /255, 207, 47/, "modal border uses the dashboard gold line");
+    assert.match(modalTheme.scrollbar, /243, 201, 40/, "modal scrollbar uses gold, not purple");
+    assert.match(modalTheme.cardBorder, /255, 239, 176/, "provider cards use the dashboard cream line");
+    assert.doesNotMatch(JSON.stringify(modalTheme), /110, 74, 124|102, 83, 110|81, 66, 89/, "modal chrome contains no legacy purple accents");
+    assert.equal(await profileDialog.getByRole("button", { name: "Close provider profile access" }).locator("svg").evaluate((node) => getComputedStyle(node).color), "rgb(169, 163, 144)", "close icon uses the dashboard muted cream");
     assert.equal(await page.locator(".profile-restriction-panel").count(), 0, "the legacy expanding drawer is removed");
     const dialogGeometry = await profileDialog.evaluate((node) => { const rect = node.getBoundingClientRect(), cards = [...node.querySelectorAll(".profile-policy-card")].map((card) => card.getBoundingClientRect()); return { modal: node instanceof HTMLDialogElement && node.open, withinViewport: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight, cardsInside: cards.every((card) => card.left >= rect.left && card.right <= rect.right + 1), columns: getComputedStyle(node.querySelector(".profile-provider-group > div")).gridTemplateColumns.split(" ").length }; });
     assert.equal(dialogGeometry.modal, true, "provider access uses the native modal top layer");
