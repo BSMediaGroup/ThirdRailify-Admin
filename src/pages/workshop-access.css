@@ -300,6 +300,7 @@
 .profile-access-summary span { color: #8f8591; font: 650 .59rem/1.3 "Geist Mono",monospace; letter-spacing: .07em; text-transform: uppercase; }
 .profile-access-summary strong { color: #f0ca58; font-size: 1.05rem; }
 .profile-access-summary .profile-access-master { min-width: 150px; justify-content: center; color: #f0ca58; background: rgba(243,201,40,.055); }
+.profile-access-summary .profile-access-master > svg { color: #f3c928; stroke: currentColor; }
 .profile-access-master span { color: currentColor; }
 .profile-access-body { overflow: auto; padding: 22px 24px 28px; scrollbar-color: #66536e #0b090d; scrollbar-width: thin; }
 .profile-provider-group + .profile-provider-group { margin-top: 23px; }
