@@ -21,7 +21,7 @@ Wrangler's pinned `d1 insights` supports JSON, 1h/1d/7d and all six requested ra
 | Commerce: heartbeat singleton upsert | `recordBotHeartbeat`, POST `/api/internal/bot/heartbeat` | 4,906 / 4,906 | Required current liveness and runtime freshness |
 | Commerce: variant reconciliation update | `current-catalogue-reconciliation.js`, explicit reconciliation | 1,221 / 111 | Legitimate provider/catalogue reconciliation; left unchanged |
 | Commerce: subscriber observation insert | `rumble-intelligence.js`, subscriber observation ingress | 1,216 / 304 | Existing bounded observations/checkpoints; no subscriber-to-Wheel work in this repair |
-| Commerce: analytics insert | `analytics-core.js`, analytics ingress | 396 / 66 | Genuine audience events; retained |
+| Commerce: analytics insert | `functions/_shared/analytics.js`, analytics ingress | 396 / 66 | Genuine audience events; retained |
 
 Live retained nonces independently showed 18 requests each for rules-v2, config, poll and heartbeat in roughly five minutes. `THIRD-RAIL-BOT/thirdrailify_bot/stream_manager.py` selects a 15-second interval while automation rules are active, even when the generic heartbeat polling field says 60 seconds. This proves the persistent baseline's request source without inferring cadence from the chart.
 
@@ -39,9 +39,28 @@ Steady-state baseline: four signed requests per cycle, one heartbeat row. Repair
 
 ## Other paths and why they are unchanged
 
-The external evidence directory contains exhaustive source write-statement inventories for Public, Admin and Bot, including dynamic/batched SQL references. Auth session touches already coalesce at 15 minutes and do not extend expiry. Accounts rate-limit writes were 320 rows across both observed query shapes, not the dominant writer. Ordinary authenticated reads incur master reconciliation and occasional session touch; rate limit mutations are attached to login/signup/reset/profile, sensitive operations and submission paths. Signed public relays do incur nonce writes on reads. Removing those protections is outside this repair.
+The external evidence directory contains source write-statement inventories for Public, Admin and Bot, including dynamic/batched SQL references. Auth session touches already coalesce at 15 minutes and do not extend expiry. Accounts rate-limit writes were 320 rows across both observed query shapes, not the dominant writer. Ordinary authenticated reads incur master reconciliation and occasional session touch; rate limit mutations are attached to login/signup/reset/profile, sensitive operations and submission paths. Public's limiter in `functions/_shared/public-auth.js` counts authentication handoffs, not ordinary page/session reads. Signed public relays do incur nonce writes on reads. Removing those protections is outside this repair.
 
 Overview/Automations reads obtain control, heartbeat, rules, receipts and summaries; they do not rewrite entire configurations. Poll and Wheel mutations, event receipts/counters, inbox, account commerce, GOATS submissions/views, media metadata, order/payment/provider paths and analytics retain their established event-driven writes. Runtime schema readiness uses schema reads; migrations and triggers are inventoried separately. Five-minute Commerce readiness writes (~169 observed) are small and unchanged; they were not used to justify a broader provider/transaction repair. Nonce expiry deletion remains necessary; fewer redundant signed requests reduce both inserts and eventual deletes without adding cleanup scans.
+
+| Caller / route family | D1 mutation owner and tables | Cadence / repeat contract |
+| --- | --- | --- |
+| Public auth/session/handoff/logout | Public `public-auth.js`: sessions, accounts, auth_handoffs, auth_rate_limits, auth_audit | Session read touches only after 15 minutes; handoff consumption/rotation and logout are intentional state changes |
+| Admin auth/status/account reads | `auth-core.js`: accounts, sessions; `oauth-providers.js`: auth identities/transactions | Conditional master reconciliation; 15-minute session touch; OAuth/login/rotation only on auth flows |
+| Admin account/security edits | account routes, `admin-capabilities.js`, `profile-media.js`: accounts, credentials, capability denials, audit, media records | Explicit account changes; security rate limits retained |
+| Public Poll/Wheel reads and controls | Signed relays call Admin `polls-core.js`, `wheels-core.js`, `wheel-stages-core.js` | Reads preserve projections; signed requests retain nonce protection; voting/staging/spinning use existing revision/receipt guards |
+| Bot desired/applied/runtime | internal Bot route, `polls-core.js`: config, heartbeat, nonce/activity tables | Fresh control reads; one current heartbeat row; configuration/history change only on real mutations |
+| Bot rules/events/credits | `automation-core.js`, `poll-credits.js`, entrant storage: rules, receipts, credit lots/allocations, entries, audit | Actual matched events, transitions or credits; no all-rule counter rewrite on refresh |
+| Subscriber observations | `rumble-intelligence.js`: immutable semantic sets, bounded observations and source pointers | Existing five-minute checkpoint/change uploads, immutable set reuse; no per-member minute writes |
+| Audience analytics | internal analytics ingress, `analytics.js`: analytics_events | Genuine deduplicated events; reporting reads do not rewrite summaries |
+| Account commerce/inbox | `account-commerce.js`, `commerce-customers.js`, `account-messages.js`, `admin-inbox.js` | Profile/address/cart/order projections and user inbox actions; unchanged request reads do not rebuild record sets |
+| Commerce operations/provider readiness | internal commerce/jobs, `commerce-operations.js`, `catalogue-sync.js`, `resend-domain.js` | Five-minute scheduler plus configured catalogue maintenance; readiness marker is one small write, real jobs/provider changes retain their transaction paths |
+| Checkout/payment/fulfillment | checkout, PayPal, shipping, Printful and Commerce modules inventoried in evidence | Business-event writes, webhooks, dedupe receipts, reconciliation; no transaction/provider changes in this repair |
+| GOATS/community/media | `goats-core.js`, media helpers | Explicit submission/view/reaction/media workflows; draft cleanup is bounded and operator-invoked |
+| Gaming/content/brackets | gaming, IGDB, banner/Commerce, bracket helpers | Explicit editorial/operational changes; not a material periodic writer in Insights |
+| Auth expiry cleanup | `cleanupExpiredAuthState`, Admin accounts cleanup action | Explicit operator action over five expiry tables; not ordinary request middleware |
+
+The read-only Wheels release checkout still contains an Accounts binding but is not a distinct live Pages project. Lab Pages and Lab recovery both have verified live Accounts bindings. Raw schema inventory contains 116 Commerce tables/336 indexes/36 triggers and 16 Accounts tables/40 indexes, including SQLite/D1 internal objects. Commerce has 47 ledger entries, Accounts three; only Commerce `0046_poll_permanent_delete.sql` is pending. No pending migration was applied.
 
 ## Subscriber Intelligence next-milestone guardrails
 
@@ -58,3 +77,36 @@ No subscriber-to-Wheel logic is added. Reuse the existing Bot `SubscriberIntelli
 Build and test Admin before deploying its authority, then restart the paired Bot once with its existing single-instance lock, config and durable outboxes. Public and Commerce Worker source are unchanged. No D1 migration, export, bulk rewrite or index build is required. Remote ledgers are captured; unrelated pending migrations must not be applied. For rollback deploy the previous Admin version; Bot falls back to existing routes only on 404. Reverting Bot restores the previous higher write rate, so monitor account headroom.
 
 Cloudflare economics verified 2026-09-12: [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) lists Free 5M reads/day and 100k writes/day, Paid 25B reads/month and 50M writes/month included; overages $0.001/million reads and $1/million writes. [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) lists $5 USD/month minimum. Free's daily limits reset at midnight UTC. Account UTC-day and database rolling-24h charts cover different windows.
+
+## Measured rollout results
+
+Admin source commit `d7c49bcdfff777b6eeb6f54b3b1d0470f12f697b` deployed as `fa5ea95a-e29f-4c59-9d2b-39696a035bcf`, completed at 12:39:19 UTC. Bot source commit `c5cd22755da6801c33b43b913ee82989afb6e852` was committed/pushed and started at 12:40:48 UTC after the previous runtime logged every graceful shutdown stage through completion. Node 22.16.0, Admin build, Functions compile, focused ESLint, 22 Admin auth/Poll/cost tests and 106 Bot control/Poll/event/stream/publisher tests passed. Extended cost tests also verified 100 one-row heartbeats, immediate liveness transitions, independent control-section failures and concurrent nonce replay rejection.
+
+At baseline capture, rolling metrics reported Commerce 88,778 writes / 1,295,576 reads, Accounts 7,694 / 21,677 and Lab 120 / 444: 96,592 account writes / 1,317,697 reads. The separate current UTC-day account figure was 56,148 writes. The historical seven-day account dataset recorded 97,337 writes on September 10, 4,826,475 reads on September 11 and 6,896,045 reads on September 8. Those are analytics measurements, not claims that every historical request succeeded beyond a cap.
+
+Matched five-minute GraphQL Query Insights windows: before **12:30–12:35 UTC**, after **12:41–12:46 UTC**, September 12. The Bot had a working Rumble browser throughout the after window. Query Insights is an adaptive dataset: execution counts are estimates and need not equal the independently aggregated database metrics or exact nonce inventory. Rounded sub-one averages should be recomputed from sum/count.
+
+| Query shape | Executions before -> after | Written rows before -> after | Read rows before -> after | Average SQL latency ms before -> after |
+| --- | ---: | ---: | ---: | ---: |
+| Nonce insert | 66 -> 33 | 198 -> 99 | 0 -> 0 | 0.198 -> 0.204 |
+| Nonce expiry delete | 59 -> 24 | 76 -> 50 | 135 -> 74 | 0.190 -> 0.193 |
+| Master reconciliation, old -> conditional shape | 271 -> 100 | 813 -> 0 | 1,355 -> 300 | 0.296 -> 0.328 |
+| Required heartbeat | 51 -> 22 | 51 -> 22 | 51 -> 22 | 0.224 -> 0.296 |
+
+Heartbeat's code, cadence and one-row-per-execution cost did not change; do not treat the sampled count variation as heartbeat suppression. The exact live nonce inventory after old requests expired contained 19 control requests and 19 heartbeat requests over about five minutes, compared with 18 each of config, poll, rules-v2 and heartbeat before. No legacy control calls continued after rollout.
+
+Independent per-database metrics over those same five-minute windows were Commerce **317 -> 257 writes**, **91,455 -> 63,604 reads**, **129 -> 86 write queries**, and Accounts **481 -> 10 writes**, **1,529 -> 751 reads**, **161 -> 4 write queries**. The after window includes cleanup of pre-release nonces, six genuine acceptance page-view events in sampled Insights, and other legitimate operations. It must not be blindly extrapolated into a normal full day. No new bulk-write query or replacement read scan was introduced by this repair.
+
+Three live stable-origin comparisons returned identical config/Poll/rule content: legacy control sequence 508–1,289ms, combined response 277–284ms; serialized payload 1,388 -> 1,516 bytes. Session response size remained 1,472 bytes, Admin status 1,663 bytes. Three-sample session/status/Automations latency ranges overlapped (session 252–332 -> 243–290ms; status 314–360 -> 284–333ms; Automations 275–319 -> 265–303ms). These short checks show no material endpoint regression, not a full production latency distribution.
+
+Authenticated stable Admin Overview, Automations, Audience Analytics, Polls, Wheels and Commerce all loaded with no failed API responses. Automations displayed Healthy/Current. Public homepage, Watch, Polls, Wheels and account loaded; the existing Admin-to-Public handoff then verified an authenticated Public account session. No votes, spins, orders or payments were fabricated. Existing Cloudflare beacon CSP/integrity console errors remain outside this repair; first-party Audience Analytics ingestion/reporting was preserved.
+
+## Capacity decision
+
+**B — Free works, Workers Paid recommended for production headroom.** The optimized normal-day projection is approximately **50,000–55,000 writes and 1.3M reads**, using observed control cadence, per-cycle cost and the previous day's genuine non-control traffic. This is a projection, not a measured full repaired day. A baseline arithmetic cross-check is 96,592 - (4,906 cycles × eight avoided nonce lifecycle writes) - 6,819 duplicate master writes = 50,525 writes; allow for slightly faster completed cycles and traffic variation.
+
+Normal write headroom is approximately 45–50k/day (1.8–2.0× safety factor). A legitimate 10-second active-Poll cadence permits 77,760 control/liveness writes/day; adding 5–10k event/other activity gives an **83–88k peak scenario**, only 12–17k headroom (1.14–1.20×). Concurrent Lab growth shares this account quota. Recent read peaks also approached or exceeded the Free allowance. These factors support Paid for reliability; efficient routine writes alone do not establish that Paid is strictly required. At projected usage the D1 portion is within Paid's included monthly allowances; other Workers/platform usage can affect the total bill. No plan change was made.
+
+## Runtime recovery exception
+
+The first repaired runtime initialized Discord, Rumble and both publishers normally. At 12:47:14 UTC, after the accepted measurement window, the Rumble browser closed and subsequent requests logged `TargetClosedError`; a separate launch at 12:47:45 was correctly rejected by the single-instance lock. Cause of the browser closure is unproven. The existing process did not respond to an attempted graceful console interrupt. Poll and event outboxes were empty and config/environment hashes unchanged. Forced termination/relaunch is awaiting operator confirmation because this task explicitly requested graceful restart. **Do not describe complete Bot acceptance while this exception remains unresolved.**
