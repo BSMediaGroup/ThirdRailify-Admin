@@ -295,6 +295,6 @@
 .bracket-match-card:hover .bracket-header-sparkles i,.bracket-match-card:focus-within .bracket-header-sparkles i { animation:bracket-winner-sparkle 1.9s ease-in-out calc(var(--spark-index) * -.31s) infinite; }
 @media(prefers-reduced-motion:reduce){.bracket-match-card .bracket-header-sparkles i{animation:none;opacity:.4}}
 .bracket-library-cover { display:block; width:calc(100% + 52px); max-width:none; height:160px; object-fit:cover; margin:-26px -26px 20px; border-radius:14px 14px 0 0; }
-.bracket-studio > .bracket-actions { align-items:flex-end; gap:12px; }
-.bracket-studio > .bracket-actions > label { display:grid; gap:8px; }
-.bracket-studio > .bracket-actions :is(input,button) { box-sizing:border-box; min-height:42px; margin:0; }
+.bracket-studio .bracket-library-filters { align-items:flex-end; gap:12px; margin:24px 0; }
+.bracket-studio .bracket-library-filters > label { display:grid; gap:8px; margin:0; }
+.bracket-studio .bracket-library-filters :is(input,button) { box-sizing:border-box; height:42px; min-height:42px; margin:0; }
