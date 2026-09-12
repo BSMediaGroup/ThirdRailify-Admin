@@ -1,3 +1,5 @@
+import { CommerceStatusHeader, CommerceServiceCards, CommerceReadinessDetails } from './CommerceStatusOverview';
+import { AdminIcon } from '../components/AdminIcon';
 import { CatalogueSellabilityReview } from "./CatalogueSellabilityReview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
@@ -47,27 +49,16 @@ export function StoreLaunchWorkspace({ profileDraft, onActivated }: { profileDra
     finally { setBusy(false); }
   };
   return <section className="store-launch-workspace commerce-section" aria-labelledby="store-launch-title">
-    <p className="eyebrow">Production commerce</p><h2 id="store-launch-title">Store status: {plan?.operationalState === "degraded" ? "DEGRADED / ACTION REQUIRED" : plan?.state === "active" ? "LIVE / ACTIVE" : plan?.settings.emergencyPaused ? "PAUSED" : plan?.ready || (draft && !hardBlockers.length) ? "READY TO ENABLE" : "ACTION REQUIRED"}</h2>
+    <CommerceStatusHeader plan={plan} blockers={hardBlockers.length} status={plan?.operationalState === "degraded" ? "DEGRADED / ACTION REQUIRED" : plan?.state === "active" ? "LIVE / ACTIVE" : plan?.settings.emergencyPaused ? "PAUSED" : plan?.ready || (draft && !hardBlockers.length) ? "READY TO ENABLE" : "ACTION REQUIRED"}/>
     {error && <div className="admin-alert" role="alert">{error}</div>}
     {!plan ? error ? <button type="button" className="secondary-button" onClick={() => void load()}>Refresh store readiness</button> : <p>Reading canonical store readiness…</p> : <>
-      <p>{plan.business.tradingName || "Merchant identity"} · profile revision {plan.business.revision} · {hardBlockers.length} hard blockers</p>
-      <dl className="store-launch-summary">
-        <div><dt>Merchant facts</dt><dd>{plan.business.ownerConfirmed ? "OPERATOR ATTESTED" : plan.business.legalNameConfigured && plan.business.phoneConfigured && plan.business.addressConfigured ? "CONFIGURED" : "ACTION REQUIRED"} · encrypted phone and address</dd></div>
-        <div><dt>Payment provider</dt><dd>PayPal Live · provider verified when ready</dd></div>
-        <div><dt>Tax</dt><dd>NOT COLLECTING · OPERATOR ATTESTED</dd></div>
-        <div><dt>Shipping & catalogue</dt><dd>Worldwide · {plan.settings.shippingStrategy === "merchant_weight_bands" ? "Merchant weight-band rates" : plan.settings.shippingStrategy === "printful_dynamic" ? "Printful dynamic rates" : "Shipping strategy requires review"} · {plan.catalogue.eligibleSellableVariants} eligible sellable variants</dd></div>
-        <div><dt>Agreement & receipt</dt><dd>{plan.settings.customerDocumentAccessEnabled ? "ACTIVE" : "Enabled with launch"} · transaction-only disclosure</dd></div>
-        <div><dt>Order confirmation</dt><dd>{plan.settings.transactionalEmailEnabled ? "ACTIVE" : "Enabled with launch"} · Resend</dd></div>
-        <div><dt>Fulfillment operations</dt><dd>{plan.settings.fulfillmentEnabled ? "ACTIVE" : "Enabled with launch"} · draft, validate, confirm</dd></div>
-        <div><dt>Delivery lifecycle</dt><dd>{plan.hardGates.find(gate => gate.id === "operations_worker")?.ready && plan.settings.fulfillmentEnabled ? "ACTIVE / AUTHENTICATED RECONCILIATION" : "ACTION REQUIRED / review fulfillment operations"}</dd></div>
-        <div><dt>Optional services</dt><dd>Stripe NOT USED / DISABLED · tax invoice NOT APPLICABLE</dd></div>
-      </dl>
+      <CommerceServiceCards plan={plan}/>
       {!!hardBlockers.length && <ul className="store-launch-blockers">{hardBlockers.map((gate)=><li key={gate.id}><strong>ACTION REQUIRED: {gate.id.replaceAll("_"," ")}</strong> — {gate.detail} {gate.href && <a href={gate.href}>Resolve requirement</a>}</li>)}</ul>}
       {!!plan.activationDrift?.length && <div className="admin-alert"><p>Active-store settings need reconciliation: {plan.activationDrift.join(", ")}</p><button className="secondary-button" disabled={!access.isMasterAdmin || busy || !plan.ready} onClick={() => void reconcile()}>RECONCILE ACTIVE STORE</button></div>}
       <CatalogueSellabilityReview onApplied={load} disabled={busy} />
-      <details><summary>Non-blocking capabilities and readiness details</summary><ul>{plan.advisories.map((gate)=><li key={gate.id}>{gate.ready ? "VERIFIED / READY" : gate.id.startsWith("printful") ? "OPTIONAL / UNVERIFIED" : "POST-LAUNCH OPTIONAL"}: {gate.detail}</li>)}</ul><ul>{plan.hardGates.map((gate)=><li key={gate.id}>{gate.ready ? "READY" : "ACTION REQUIRED"}: {gate.detail}</li>)}</ul></details>
+      <CommerceReadinessDetails plan={plan}/>
       {!profileDraft && access.isMasterAdmin && plan.state !== "active" && <><button type="button" className="secondary-button" onClick={()=>void reveal()} disabled={busy}>Reveal / edit current private merchant record</button>{editing && replacement && <fieldset className="store-launch-edit"><legend>Private merchant record — held in this form only</legend><label>Legal name<input value={replacement.legalBusinessName} maxLength={240} onChange={(e)=>setReplacement({...replacement,legalBusinessName:e.target.value})}/></label><label>Private business phone<input value={replacement.privatePhone} maxLength={80} onChange={(e)=>setReplacement({...replacement,privatePhone:e.target.value})}/></label>{["line1","line2","city","province","postalCode","country"].map((key)=><label key={key}>Business address: {key}<input value={replacement.privateAddress[key] || ""} maxLength={key.startsWith("line")?180:key==="postalCode"?64:120} onChange={(e)=>setReplacement({...replacement,privateAddress:{...replacement.privateAddress,[key]:e.target.value}})}/></label>)}<button className="secondary-button" type="button" onClick={()=>{setReplacement(null);setEditing(false);}}>Cancel private edits</button></fieldset>}</>}
-      {plan.state === "active" && !draft ? <div className="store-launch-active"><p>Activated {plan.activatedAt ? new Date(plan.activatedAt).toLocaleString() : ""} · actor {plan.activatedBy || "recorded in audit"}</p><button className="secondary-button" type="button" disabled={!access.isMasterAdmin || busy} onClick={()=>void pause()}>PAUSE STORE</button></div> : <button className="primary-button store-launch-primary" type="button" disabled={!canReview} onClick={()=>{setConfirmed(false);setAuthorized(false);dialog.current?.showModal();}}>ENABLE STORE</button>}
+      {plan.state === "active" && !draft ? <div className="store-launch-active"><p><AdminIcon name="approved" size={19}/><span>Activated {plan.activatedAt ? new Date(plan.activatedAt).toLocaleString() : ""} · actor {plan.activatedBy || "recorded in audit"}</span></p><button className="secondary-button" type="button" disabled={!access.isMasterAdmin || busy} onClick={()=>void pause()}><AdminIcon name="pending" size={16}/>PAUSE STORE</button></div> : <button className="primary-button store-launch-primary" type="button" disabled={!canReview} onClick={()=>{setConfirmed(false);setAuthorized(false);dialog.current?.showModal();}}>ENABLE STORE</button>}
       {!access.isMasterAdmin && <p>Master Admin must confirm the merchant facts and production activation.</p>}
       <dialog ref={dialog} className="store-launch-dialog" onCancel={(event)=>{if(busy)event.preventDefault();}}>
         <h2>Confirm &amp; enable production store</h2><p>{draft ? "Your current profile edits will be saved, confirmed and activated together." : `Confirm the encrypted merchant record at revision ${plan.business.revision}.`}</p>

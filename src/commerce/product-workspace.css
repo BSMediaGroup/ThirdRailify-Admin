@@ -1,12 +1,12 @@
 /* Product workspace: scoped visual system;
 a single content scroll region. */
 .product-workspace {
-  --pw-bg:#14110c;
-  --pw-card:#1c1914;
-  --pw-line:#35322d;
-  --pw-muted:#a3a795;
-  --pw-ink:#f1eddf;
-  --pw-gold:#dfbf70;
+  --pw-bg:var(--bg);
+  --pw-card:var(--panel);
+  --pw-line:var(--line);
+  --pw-muted:var(--muted);
+  --pw-ink:var(--ink);
+  --pw-gold:var(--gold);
   color:var(--pw-ink);
   background:var(--pw-bg);
   width:min(1380px,96vw);
@@ -14,7 +14,7 @@ a single content scroll region. */
   height:94dvh;
   max-height:94dvh;
   padding:0;
-  border:1px solid #77643b;
+  border:1px solid var(--line);
   border-radius:20px;
   overflow:hidden;
   box-shadow:0 32px 140px #000c;
@@ -49,10 +49,10 @@ a single content scroll region. */
   gap:7px;
   min-height:38px;
   padding:8px 12px;
-  border:1px solid #413e39;
+  border:1px solid var(--line);
   border-radius:8px;
-  background:#25221d;
-  color:#ebe8dc;
+  background:var(--panel);
+  color:var(--ink);
   font:600 13px Blinker,sans-serif;
   line-height:1.2;
   cursor:pointer;
@@ -60,8 +60,8 @@ a single content scroll region. */
   text-decoration:none
 }
 .product-workspace button:hover:not(:disabled) {
-  background:#36332e;
-  border-color:#9d8a50
+  background:var(--panel);
+  border-color:var(--line)
 }
 .product-workspace button:disabled {
   opacity:.43;
@@ -78,15 +78,15 @@ a single content scroll region. */
   max-width:100%;
   min-height:43px;
   padding:10px 12px;
-  border:1px solid #45423d;
+  border:1px solid var(--line);
   border-radius:8px;
-  background:#14110c;
-  color:#f1eddf;
+  background:var(--bg);
+  color:var(--ink);
   font:400 15px Blinker,sans-serif;
   box-shadow:inset 0 1px 2px #0003
 }
 .product-workspace input::placeholder,.product-workspace textarea::placeholder {
-  color:#737b6b
+  color:var(--muted)
 }
 .product-workspace textarea {
   resize:vertical;
@@ -102,7 +102,7 @@ a single content scroll region. */
   height:16px;
   flex:0 0 16px;
   margin:0;
-  accent-color:#ddbd6f;
+  accent-color:var(--gold);
   cursor:pointer
 }
 .product-workspace label {
@@ -113,7 +113,7 @@ a single content scroll region. */
   min-width:0;
   font-size:13px;
   font-weight:600;
-  color:#d6d9c8
+  color:var(--ink)
 }
 .product-workspace label small,.product-workspace .pw-cell-note {
   font-size:12px;
@@ -144,8 +144,8 @@ a single content scroll region. */
   gap:20px;
   flex-shrink:0;
   padding:23px 30px;
-  background:radial-gradient(ellipse at 10% 0,#61552b38,transparent 65%),#1d1a15;
-  border-bottom:1px solid #36332e
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
+  border-bottom:1px solid var(--line)
 }
 .pw-header-image {
   display:grid;
@@ -153,8 +153,8 @@ a single content scroll region. */
   width:76px;
   height:76px;
   flex-shrink:0;
-  background:linear-gradient(135deg,#34312c,#23201b);
-  border:1px solid #626039;
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
+  border:1px solid var(--line);
   border-radius:14px;
   color:var(--pw-gold)
 }
@@ -187,47 +187,47 @@ a single content scroll region. */
   min-width:36px;
   min-height:36px;
   padding:7px;
-  background:#14110c;
-  border-color:#413e39
+  background:var(--panel);
+  border-color:var(--line)
 }
 .product-workspace>nav {
   display:flex;
   flex-shrink:0;
   gap:7px;
   padding:11px 30px;
-  background:#1a1712;
+  background:var(--panel-raised);
   border-bottom:1px solid var(--pw-line);
   overflow-x:auto
 }
 .product-workspace>nav button {
   border:1px solid transparent;
   background:transparent;
-  color:#aeb6a0;
+  color:var(--muted);
   white-space:nowrap;
   min-height:44px;
   padding:10px 17px
 }
 .product-workspace>nav button[aria-current] {
-  background:#c8ae5921;
-  border-color:#93804870;
-  color:#f4d992
+  background:rgba(243,201,40,.1);
+  border-color:var(--line-strong);
+  color:var(--gold)
 }
 .product-workspace>nav b {
   font:500 10px 'Geist Mono',monospace;
-  background:#ffffff0b;
+  background:var(--panel-raised);
   border-radius:4px;
   padding:2px 5px
 }
 .product-workspace>nav b.pw-nav-alert {
-  background:#b37d2233;
-  color:#f6c97f
+  background:var(--panel-raised);
+  color:var(--gold)
 }
 .product-workspace__body {
   overflow:auto;
   flex:1;
   min-height:0;
   padding:28px 30px;
-  scrollbar-color:#4e4b46 #16130e;
+  scrollbar-color:var(--gold) var(--sidebar);
   scrollbar-width:thin;
   overscroll-behavior:contain
 }
@@ -252,7 +252,7 @@ a single content scroll region. */
   font-size:14px
 }
 .pw-card {
-  background:linear-gradient(135deg,#201d18,#1b1813);
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
   border:1px solid var(--pw-line);
   border-radius:13px;
   padding:23px
@@ -296,17 +296,17 @@ a single content scroll region. */
   align-items:center;
   gap:7px;
   padding-left:12px;
-  border:1px solid #37342f;
+  border:1px solid var(--line);
   border-radius:8px;
-  background:#15120d;
-  color:#8d967d
+  background:var(--bg);
+  color:var(--muted)
 }
 .product-workspace .pw-url input {
   border:0;
   background:transparent;
   box-shadow:none;
   font-size:12px;
-  color:#a8b199;
+  color:var(--muted);
   padding-left:2px
 }
 .pw-tags,.pw-collections {
@@ -320,18 +320,18 @@ a single content scroll region. */
   align-items:center;
   gap:8px;
   padding:11px 13px;
-  border:1px solid #43403b;
+  border:1px solid var(--line);
   border-radius:8px;
-  background:#17140f;
-  color:#b5bda8;
+  background:var(--panel);
+  color:var(--muted);
   cursor:pointer;
   font-size:13px;
   font-weight:400
 }
 .product-workspace label.pw-collection.is-selected {
-  background:#b29a4421;
-  border-color:#988649;
-  color:#efd18a
+  background:rgba(243,201,40,.1);
+  border-color:var(--line-strong);
+  color:var(--gold)
 }
 .pw-collection input {
   width:14px!important;
@@ -339,19 +339,19 @@ a single content scroll region. */
   flex-basis:14px!important
 }
 .pw-storefront-card {
-  border:1px solid #46433e;
+  border:1px solid var(--line);
   border-radius:14px;
   overflow:hidden;
-  background:#1f1c17
+  background:var(--panel)
 }
 .pw-preview-stage {
   position:relative;
   display:grid;
   place-items:center;
   height:218px;
-  background:radial-gradient(ellipse at center,#4e53342e,transparent 65%),repeating-conic-gradient(#ffffff03 0% 25%,transparent 0% 50%) 50% / 20px 20px,#26231e;
-  border-bottom:1px solid #423f3a;
-  color:#c7ad66
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
+  border-bottom:1px solid var(--line);
+  color:var(--gold)
 }
 .pw-preview-stage img {
   width:100%;
@@ -364,12 +364,12 @@ a single content scroll region. */
   position:absolute;
   left:14px;
   top:13px;
-  color:#c6cdba;
+  color:var(--muted);
   font:500 9px 'Geist Mono',monospace;
   letter-spacing:.08em;
   text-transform:uppercase;
-  border:1px solid #656d4955;
-  background:#1a2015b8;
+  border:1px solid var(--line);
+  background:var(--panel);
   padding:5px 7px;
   border-radius:4px
 }
@@ -398,7 +398,7 @@ a single content scroll region. */
   gap:8px;
   font-weight:500;
   font-size:14px;
-  color:#ecebdd
+  color:var(--ink)
 }
 .pw-switch-row small {
   line-height:1.4
@@ -409,9 +409,9 @@ a single content scroll region. */
   width:36px;
   height:21px;
   flex:0 0 36px;
-  border:1px solid #56534e;
+  border:1px solid var(--line);
   border-radius:20px;
-  background:#322f2a;
+  background:var(--bg);
   box-shadow:none;
   transition:background .15s
 }
@@ -422,25 +422,25 @@ a single content scroll region. */
   height:13px;
   top:3px;
   left:3px;
-  background:#a4af92;
+  background:var(--bg);
   border-radius:50%;
   transition:transform .15s
 }
 .product-workspace input.pw-switch:checked {
-  background:#cfb15a;
-  border-color:#ddc271
+  background:rgba(243,201,40,.1);
+  border-color:var(--line-strong)
 }
 .product-workspace input.pw-switch:checked::after {
   transform:translateX(15px);
-  background:#fff5d4
+  background:rgba(243,201,40,.1)
 }
 .pw-mini-stats {
   display:grid;
   grid-template-columns:1fr 1fr;
-  border:1px solid #43403b;
+  border:1px solid var(--line);
   border-radius:9px;
   margin:12px 0 15px;
-  background:#181510
+  background:var(--panel)
 }
 .pw-mini-stats>div {
   padding:12px 16px;
@@ -448,20 +448,20 @@ a single content scroll region. */
   flex-direction:column
 }
 .pw-mini-stats>div+div {
-  border-left:1px solid #43403b
+  border-left:1px solid var(--line)
 }
 .pw-mini-stats strong {
   font-size:24px;
   font-weight:400;
-  color:#eee4bf
+  color:var(--ink)
 }
 .pw-mini-stats strong small {
   font-size:14px;
-  color:#899575
+  color:var(--muted)
 }
 .pw-mini-stats span {
   font-size:11px;
-  color:#a5b191
+  color:var(--muted)
 }
 .product-workspace .pw-note {
   display:flex;
@@ -469,14 +469,14 @@ a single content scroll region. */
   gap:8px;
   font-size:12px;
   line-height:1.5;
-  color:#aeb99b
+  color:var(--muted)
 }
 .pw-note svg {
   margin-top:1px;
-  color:#b5a563
+  color:var(--gold)
 }
 .pw-merchandising .pw-switch-row {
-  border-bottom:1px solid #36332e
+  border-bottom:1px solid var(--line)
 }
 .pw-merchandising .workspace-fields {
   margin-top:20px
@@ -489,10 +489,10 @@ a single content scroll region. */
   max-width:100%;
   vertical-align:middle;
   padding:5px 8px;
-  border:1px solid #51584766;
+  border:1px solid var(--line);
   border-radius:6px;
-  background:#747c6512;
-  color:#abb39c;
+  background:var(--panel);
+  color:var(--muted);
   font-size:11px;
   font-weight:500;
   line-height:1.2;
@@ -527,16 +527,16 @@ a single content scroll region. */
   border-color:#639ab34d
 }
 .pw-chip--gold {
-  color:#ead18c;
-  background:#bca2491c;
-  border-color:#ad914b61
+  color:var(--gold);
+  background:rgba(243,201,40,.1);
+  border-color:var(--line-strong)
 }
 .pw-metrics {
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
-  border:1px solid #3e3b36;
+  border:1px solid var(--line);
   border-radius:12px;
-  background:linear-gradient(100deg,#25221d,#1c1914);
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
   margin-bottom:20px
 }
 .pw-metrics>div {
@@ -547,22 +547,22 @@ a single content scroll region. */
   min-width:0
 }
 .pw-metrics>div+div {
-  border-left:1px solid #3e3b36
+  border-left:1px solid var(--line)
 }
 .pw-metrics svg {
-  color:#baac72
+  color:var(--gold)
 }
 .pw-metrics span {
   display:grid;
   gap:2px;
   font-size:11px;
-  color:#a6b193
+  color:var(--muted)
 }
 .pw-metrics strong {
   font-size:24px;
   line-height:1.15;
   font-weight:400;
-  color:#eeead6
+  color:var(--ink)
 }
 .workspace-tools {
   display:flex;
@@ -576,12 +576,12 @@ a single content scroll region. */
   display:flex;
   align-items:center;
   gap:6px;
-  background:#14110c;
-  border:1px solid #484540;
+  background:var(--bg);
+  border:1px solid var(--line);
   border-radius:8px;
   padding-left:12px;
   flex:1 1 230px;
-  color:#879672
+  color:var(--muted)
 }
 .product-workspace .pw-search input {
   border:0;
@@ -590,13 +590,13 @@ a single content scroll region. */
 }
 .product-workspace .pw-quiet {
   background:transparent;
-  border-color:#403d38;
-  color:#b2bda1
+  border-color:var(--line);
+  color:var(--muted)
 }
 .pw-table-card {
-  border:1px solid #423f3a;
+  border:1px solid var(--line);
   border-radius:12px;
-  background:#1b1813;
+  background:var(--panel);
   overflow:hidden
 }
 .pw-table-caption {
@@ -605,7 +605,7 @@ a single content scroll region. */
   justify-content:space-between;
   gap:16px;
   padding:15px 18px;
-  border-bottom:1px solid #3d3a35
+  border-bottom:1px solid var(--line)
 }
 .pw-table-caption>div:first-child {
   display:grid;
@@ -617,7 +617,7 @@ a single content scroll region. */
 }
 .pw-table-caption span {
   font-size:12px;
-  color:#98a784
+  color:var(--muted)
 }
 .pw-inline-actions {
   display:flex;
@@ -628,7 +628,7 @@ a single content scroll region. */
   max-width:100%;
   min-width:0;
   overflow-x:auto;
-  scrollbar-color:#57544f #1b1813
+  scrollbar-color:var(--gold) var(--sidebar)
 }
 .workspace-table table {
   width:100%;
@@ -639,12 +639,12 @@ a single content scroll region. */
 .workspace-table th {
   padding:13px 16px;
   text-align:left;
-  background:#282520;
+  background:var(--panel-raised);
   font:500 10px 'Geist Mono',monospace;
   text-transform:uppercase;
   letter-spacing:.04em;
-  color:#b6c59e;
-  border-bottom:1px solid #484540
+  color:var(--muted);
+  border-bottom:1px solid var(--line)
 }
 .workspace-table th:first-child {
   font-size:0
@@ -652,7 +652,7 @@ a single content scroll region. */
 .workspace-table td {
   padding:17px 16px;
   text-align:left;
-  border-bottom:1px solid #393631;
+  border-bottom:1px solid var(--line);
   vertical-align:middle;
   overflow-wrap:anywhere;
   font-size:13px;
@@ -662,7 +662,7 @@ a single content scroll region. */
   border-bottom:0
 }
 .workspace-table tr.is-selected td {
-  background:#b4ae4010
+  background:rgba(243,201,40,.1)
 }
 .pw-variant-identity {
   display:flex;
@@ -683,10 +683,10 @@ a single content scroll region. */
   width:58px;
   height:58px;
   padding:5px;
-  border:1px solid #4d4a45;
+  border:1px solid var(--line);
   border-radius:8px;
-  background:#2b2823;
-  color:#bbc896
+  background:var(--bg);
+  color:var(--muted)
 }
 .pw-variant-thumb img {
   width:100%;
@@ -704,26 +704,26 @@ a single content scroll region. */
   gap:5px;
   align-items:center;
   padding:3px 5px;
-  border:1px solid #504d48;
+  border:1px solid var(--line);
   border-radius:4px;
-  color:#b3c29e;
+  color:var(--muted);
   font-size:10px
 }
 .pw-option-chips i {
   width:8px;
   height:8px;
   border-radius:50%;
-  background:#8e927b;
-  border:1px solid #ffffff55
+  background:var(--panel);
+  border:1px solid var(--line)
 }
 .pw-price-input {
   display:flex;
   align-items:center;
-  border:1px solid #55524d;
-  background:#14110c;
+  border:1px solid var(--line);
+  background:var(--bg);
   border-radius:6px;
   padding-left:10px;
-  color:#9bac82
+  color:var(--muted)
 }
 .product-workspace .pw-price-input input {
   border:0;
@@ -735,7 +735,7 @@ a single content scroll region. */
 }
 .pw-price-display {
   display:block;
-  color:#9eaf84;
+  color:var(--muted);
   font-size:11px;
   margin-top:5px
 }
@@ -745,14 +745,14 @@ a single content scroll region. */
   background:none;
   border:0;
   border-radius:3px;
-  color:#c8b979;
+  color:var(--gold);
   font-size:11px;
   justify-content:flex-start;
   text-align:left
 }
 .product-workspace button.pw-text-action:hover:not(:disabled) {
   background:none;
-  color:#f2dc9d
+  color:var(--gold)
 }
 .product-workspace label.pw-include {
   display:flex;
@@ -764,7 +764,7 @@ a single content scroll region. */
 }
 .pw-field-issue {
   display:block;
-  color:#e8bf80;
+  color:var(--gold);
   font-size:11px;
   margin-top:7px
 }
@@ -778,9 +778,9 @@ a single content scroll region. */
   justify-content:space-between;
   gap:15px;
   padding:14px 18px;
-  background:#1f1c17;
+  background:var(--panel-raised);
   font-size:12px;
-  color:#aab998
+  color:var(--muted)
 }
 .pw-pagination>div {
   display:flex;
@@ -815,16 +815,16 @@ a single content scroll region. */
   justify-content:center;
   padding:25px;
   gap:8px;
-  border:1px dashed #758453;
+  border:1px dashed var(--line);
   border-radius:13px;
   min-height:195px;
-  background:radial-gradient(ellipse at top,#667c3220,transparent),#201d18;
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
   cursor:pointer;
   text-align:center;
   overflow:hidden
 }
 .pw-upload>svg {
-  color:#d5be79;
+  color:var(--gold);
   margin-bottom:4px
 }
 .pw-upload>strong {
@@ -833,7 +833,7 @@ a single content scroll region. */
 }
 .pw-upload>span {
   font-size:12px;
-  color:#a5b591
+  color:var(--muted)
 }
 .pw-upload input {
   position:absolute;
@@ -851,9 +851,9 @@ a single content scroll region. */
   display:grid;
   gap:13px;
   padding:20px;
-  border:1px solid #43403b;
+  border:1px solid var(--line);
   border-radius:12px;
-  background:#1f1c17
+  background:var(--bg)
 }
 .pw-inline-input {
   display:flex;
@@ -880,9 +880,9 @@ a single content scroll region. */
   align-items:center;
   gap:9px;
   padding:7px 10px;
-  border:1px solid #4e4b46;
+  border:1px solid var(--line);
   border-radius:7px;
-  background:#181510;
+  background:var(--panel);
   font-size:12px;
   cursor:pointer
 }
@@ -892,9 +892,9 @@ a single content scroll region. */
   object-fit:contain
 }
 .product-workspace .pw-variant-picks .is-selected {
-  border-color:#b09954;
-  background:#b2963321;
-  color:#f2d991
+  border-color:var(--line-strong);
+  background:rgba(243,201,40,.1);
+  color:var(--gold)
 }
 .pw-gallery-heading {
   display:flex;
@@ -904,12 +904,12 @@ a single content scroll region. */
   margin:24px 0 14px
 }
 .pw-gallery-heading h3 span {
-  color:#98ad79;
+  color:var(--muted);
   font-size:15px;
   margin-left:6px
 }
 .pw-gallery-heading p {
-  color:#9fae8d;
+  color:var(--muted);
   font-size:13px;
   margin-top:4px
 }
@@ -920,16 +920,16 @@ a single content scroll region. */
 }
 .workspace-media article {
   min-width:0;
-  border:1px solid #494641;
+  border:1px solid var(--line);
   border-radius:12px;
-  background:#221f1a;
+  background:var(--panel);
   overflow:hidden
 }
 .pw-media-stage {
   position:relative;
   height:190px;
-  background:radial-gradient(ellipse,#5e704529,transparent),repeating-conic-gradient(#ffffff03 0% 25%,transparent 0% 50%) 50% / 16px 16px,#2a2722;
-  border-bottom:1px solid #47443f
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
+  border-bottom:1px solid var(--line)
 }
 .pw-media-stage img {
   width:100%;
@@ -941,7 +941,7 @@ a single content scroll region. */
   position:absolute;
   top:12px;
   left:12px;
-  color:#a5b48c;
+  color:var(--muted);
   font:11px 'Geist Mono',monospace
 }
 .pw-image-badge {
@@ -961,21 +961,21 @@ a single content scroll region. */
 }
 .pw-media-card-body>small {
   font-size:11px;
-  color:#9fae8d
+  color:var(--muted)
 }
 .pw-linked-count {
   display:flex;
   gap:4px;
   align-items:center;
   font-size:11px;
-  color:#a7bb8c
+  color:var(--muted)
 }
 .product-workspace .pw-assign-button {
   width:100%;
   margin-top:14px;
-  background:#b5a1461c;
-  border-color:#a78e4561;
-  color:#e2cd89;
+  background:rgba(243,201,40,.1);
+  border-color:var(--line-strong);
+  color:var(--gold);
   font-size:11px;
   min-height:36px
 }
@@ -1005,7 +1005,7 @@ a single content scroll region. */
   align-items:center;
   gap:12px;
   padding:12px 0;
-  border-top:1px solid #423f3a
+  border-top:1px solid var(--line)
 }
 .pw-assignment-row>div {
   display:flex;
@@ -1020,8 +1020,8 @@ a single content scroll region. */
   display:flex;
   align-items:center;
   gap:22px;
-  background:linear-gradient(110deg,#2b2823,#26231e);
-  border:1px solid #5c5954;
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
+  border:1px solid var(--line);
   border-radius:14px;
   padding:27px;
   margin-bottom:20px
@@ -1032,17 +1032,17 @@ a single content scroll region. */
   flex-shrink:0;
   width:75px;
   height:75px;
-  border:1px solid #66896a75;
+  border:1px solid var(--line);
   border-radius:15px;
-  background:#649c6a17;
-  color:#b9d7ad
+  background:var(--panel);
+  color:var(--ink)
 }
 .product-workspace .pw-policy-hero h3 {
   font-size:28px;
   margin:9px 0 7px
 }
 .pw-policy-hero p {
-  color:#b0c1a8;
+  color:var(--muted);
   font-size:14px;
   max-width:580px
 }
@@ -1053,12 +1053,12 @@ a single content scroll region. */
   margin-left:auto;
   flex-shrink:0;
   padding:10px 14px;
-  border:1px solid #698668;
+  border:1px solid var(--line-strong);
   border-radius:7px;
-  color:#d8e3c8;
+  color:var(--gold);
   font-size:12px;
   text-decoration:none;
-  background:#66826819
+  background:rgba(243,201,40,.1)
 }
 .pw-shipping-facts {
   display:grid;
@@ -1067,18 +1067,18 @@ a single content scroll region. */
   margin-bottom:24px
 }
 .pw-shipping-facts article>svg {
-  color:#c1b67f
+  color:var(--muted)
 }
 .pw-shipping-facts p {
   font-size:13px;
-  color:#a8b99a;
+  color:var(--muted);
   line-height:1.55;
   margin-bottom:17px
 }
 .pw-disclosure {
-  border:1px solid #4a4742;
+  border:1px solid var(--line);
   border-radius:12px;
-  background:#1f1c17;
+  background:var(--panel);
   margin-top:20px;
   overflow:hidden
 }
@@ -1104,10 +1104,10 @@ a single content scroll region. */
 }
 .pw-disclosure>summary small {
   font-size:12px;
-  color:#a5b997
+  color:var(--muted)
 }
 .pw-disclosure>summary>svg:last-child {
-  color:#aeac74;
+  color:var(--muted);
   transition:transform .15s
 }
 .pw-disclosure[open]>summary>svg:last-child {
@@ -1118,30 +1118,30 @@ a single content scroll region. */
   place-items:center;
   width:40px;
   height:40px;
-  border:1px solid #5a5752;
+  border:1px solid var(--line);
   border-radius:8px;
-  color:#bdbb83;
-  background:#66733215
+  color:var(--muted);
+  background:var(--panel)
 }
 .pw-disclosure-body {
   padding:22px;
-  border-top:1px solid #423f3a
+  border-top:1px solid var(--line)
 }
 .pw-inheritance {
   display:flex;
   align-items:center;
   gap:12px;
   flex-wrap:wrap;
-  color:#c4bd82;
+  color:var(--muted);
   margin-bottom:13px
 }
 .pw-inheritance span {
   padding:6px 11px;
-  border:1px solid #524f4a;
+  border:1px solid var(--line);
   border-radius:6px;
-  background:#2b2823;
+  background:var(--panel);
   font-size:12px;
-  color:#c4d5af
+  color:var(--ink)
 }
 .pw-weights .pw-note {
   margin-bottom:18px
@@ -1160,7 +1160,7 @@ a single content scroll region. */
   width:100%
 }
 .pw-weight-list {
-  border:1px solid #484540;
+  border:1px solid var(--line);
   border-radius:9px;
   overflow:hidden
 }
@@ -1169,8 +1169,8 @@ a single content scroll region. */
   align-items:center;
   gap:20px;
   padding:15px;
-  background:#24211c;
-  border-bottom:1px solid #413e39
+  background:var(--panel);
+  border-bottom:1px solid var(--line)
 }
 .pw-weight-row:last-child {
   border:0
@@ -1183,7 +1183,7 @@ a single content scroll region. */
   min-width:0
 }
 .pw-weight-row>div svg {
-  color:#aab483
+  color:var(--muted)
 }
 .pw-weight-row>div span {
   display:grid;
@@ -1195,11 +1195,11 @@ a single content scroll region. */
 }
 .pw-weight-row small {
   font-size:11px;
-  color:#95aa83
+  color:var(--muted)
 }
 .pw-source-note {
   font-size:10px;
-  color:#8f9f7b;
+  color:var(--muted);
   max-width:80px;
   overflow-wrap:anywhere
 }
@@ -1228,7 +1228,7 @@ a single content scroll region. */
   left:19px;
   top:39px;
   bottom:0;
-  border-left:1px solid #5f7850
+  border-left:1px solid var(--line)
 }
 .pw-timeline article>span {
   display:grid;
@@ -1237,9 +1237,9 @@ a single content scroll region. */
   height:40px;
   flex:0 0 40px;
   border-radius:10px;
-  border:1px solid #5a5752;
-  background:#33302b;
-  color:#c0cfaa
+  border:1px solid var(--line);
+  background:var(--panel);
+  color:var(--muted)
 }
 .pw-timeline article>div {
   padding-top:2px
@@ -1250,13 +1250,13 @@ a single content scroll region. */
 }
 .pw-timeline time {
   display:block;
-  color:#c4bc84;
+  color:var(--muted);
   font-size:12px;
   margin:3px 0 6px
 }
 .pw-timeline p {
   font-size:12px;
-  color:#a4b595
+  color:var(--muted)
 }
 .pw-health-card {
   display:flex;
@@ -1304,7 +1304,7 @@ a single content scroll region. */
   align-items:center;
   justify-content:space-between;
   gap:16px;
-  border-top:1px solid #45423d;
+  border-top:1px solid var(--line);
   padding:14px 0
 }
 .pw-readiness-row:last-child {
@@ -1319,9 +1319,9 @@ a single content scroll region. */
   width:42px;
   height:42px;
   padding:3px;
-  border:1px solid #57544f;
+  border:1px solid var(--line);
   border-radius:6px;
-  background:#2f2c27;
+  background:var(--panel);
   object-fit:contain
 }
 .pw-readiness-identity strong {
@@ -1345,7 +1345,7 @@ a single content scroll region. */
 }
 .product-workspace code {
   font:10px 'Geist Mono',monospace;
-  color:#a3b38e;
+  color:var(--muted);
   overflow-wrap:anywhere
 }
 .pw-issue-row {
@@ -1353,8 +1353,8 @@ a single content scroll region. */
   gap:12px;
   align-items:center;
   padding:14px 0;
-  border-top:1px solid #6e6034;
-  color:#e7cb85
+  border-top:1px solid var(--line);
+  color:var(--gold)
 }
 .pw-issue-row>div {
   flex:1
@@ -1370,19 +1370,19 @@ a single content scroll region. */
 }
 .pw-provider-ids>div {
   padding:14px;
-  border:1px solid #4f4c47;
+  border:1px solid var(--line);
   border-radius:7px;
-  background:#1b1813
+  background:var(--bg)
 }
 .pw-provider-ids dt {
   font-size:12px;
-  color:#a4b892;
+  color:var(--muted);
   margin-bottom:8px
 }
 .pw-provider-ids dd {
   margin:0;
   font:12px 'Geist Mono',monospace;
-  color:#d4ddc5;
+  color:var(--ink);
   overflow-wrap:anywhere
 }
 .pw-empty {
@@ -1393,11 +1393,11 @@ a single content scroll region. */
   gap:10px;
   padding:45px 20px;
   text-align:center;
-  color:#b4c09e
+  color:var(--muted)
 }
 .pw-empty p {
   font-size:13px;
-  color:#9cad86
+  color:var(--muted)
 }
 .pw-alert {
   display:flex;
@@ -1420,8 +1420,8 @@ a single content scroll region. */
   gap:20px;
   flex-shrink:0;
   padding:17px 30px;
-  border-top:1px solid #4c4944;
-  background:linear-gradient(100deg,#282520,#1f1c17);
+  border-top:1px solid var(--line);
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
   box-shadow:0 -8px 24px #0002
 }
 .pw-save-state {
@@ -1431,26 +1431,26 @@ a single content scroll region. */
   min-width:0
 }
 .pw-save-state>svg {
-  color:#99c1a1
+  color:var(--muted)
 }
 .pw-save-state.is-dirty>svg {
-  color:#e6c578
+  color:var(--gold)
 }
 .pw-save-state p {
   font-size:14px;
   font-weight:500;
-  color:#e4e8d9
+  color:var(--ink)
 }
 .pw-save-state small {
   display:block;
-  color:#9eae87;
+  color:var(--muted);
   font-size:11px;
   margin-top:3px
 }
 .product-workspace button.pw-save-button {
-  background:linear-gradient(120deg,#eed68e,#c6a64f);
-  color:#262613;
-  border:1px solid #e7ca7b;
+  background:linear-gradient(135deg, rgba(243,201,40,.025), transparent), var(--panel);
+  color:var(--muted);
+  border:1px solid var(--line);
   min-width:190px;
   min-height:44px;
   gap:11px;
@@ -1458,8 +1458,8 @@ a single content scroll region. */
   box-shadow:0 3px 12px #0003
 }
 .product-workspace button.pw-save-button:hover:not(:disabled) {
-  background:#f3d994;
-  color:#15120d
+  background:var(--panel);
+  color:var(--muted)
 }
 .product-workspace button.pw-save-button:disabled {
   opacity:.5
@@ -1551,10 +1551,10 @@ a single content scroll region. */
   }
   .pw-metrics>div:nth-child(3) {
     border-left:0;
-    border-top:1px solid #3e3b36
+    border-top:1px solid var(--line)
   }
   .pw-metrics>div:nth-child(4) {
-    border-top:1px solid #3e3b36
+    border-top:1px solid var(--line)
   }
   .pw-shipping-facts {
     grid-template-columns:1fr
@@ -1989,7 +1989,7 @@ a single content scroll region. */
   padding:5px 8px;
   background:transparent;
   border-color:transparent;
-  color:#ada58e
+  color:var(--muted)
 }
 .workspace-table td {
   padding-top:12px;
@@ -2023,3 +2023,18 @@ a single content scroll region. */
     font-size:9px
   }
 }
+/* Match the dashboard theme for every editor scroll region and primary control. */
+.product-workspace,.product-workspace * { scrollbar-color:var(--gold) var(--sidebar); scrollbar-width:thin; }
+.product-workspace ::-webkit-scrollbar { width:10px; height:10px; }
+.product-workspace ::-webkit-scrollbar-track { background:var(--sidebar); }
+.product-workspace ::-webkit-scrollbar-thumb { min-height:40px; border:2px solid var(--sidebar); border-radius:999px; background:linear-gradient(180deg,#a97717,var(--gold)); }
+.product-workspace ::-webkit-scrollbar-thumb:hover { background:linear-gradient(180deg,var(--gold),var(--gold-hot)); }
+.product-workspace ::-webkit-scrollbar-corner { background:var(--sidebar); }
+.product-workspace input.pw-switch:checked { background:var(--gold); border-color:var(--gold-hot); }
+.product-workspace input.pw-switch:checked::after { background:var(--ink); }
+.product-workspace button.pw-save-button { background:linear-gradient(180deg,var(--gold-hot),var(--gold)); color:var(--bg); border-color:var(--gold); }
+.product-workspace button.pw-save-button:hover:not(:disabled) { background:var(--gold-hot); color:var(--bg); }
+.product-workspace .pw-kicker { color:var(--gold-soft); }
+.product-workspace .pw-chip--gold { color:var(--gold-hot); background:rgba(243,201,40,.06); border-color:var(--line-strong); }
+.product-workspace .pw-chip--good { color:var(--safe); }
+.product-workspace .pw-chip--danger { color:var(--danger); }
