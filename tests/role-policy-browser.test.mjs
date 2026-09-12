@@ -8,6 +8,8 @@ import { chromium } from "playwright-core";
 const ORIGIN = "http://127.0.0.1:44209";
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const capabilities = [
+  ["workshop.use", "workshop", "Use Workshop"], ["workshop.access.manage", "workshop", "Manage Workshop access"],
+  ["workshop.providers.manage", "workshop", "Manage Workshop providers"], ["workshop.profile_restrictions.manage", "workshop", "Manage Workshop provider-profile restrictions"],
   ["overview.view", "overview", "View Overview"], ["analytics.view", "analytics", "View audience analytics"],
   ["inbox.view", "inbox", "View Admin Inbox"], ["inbox.manage", "inbox", "Manage Admin Inbox"],
   ["watch.view", "watch", "View Watch archive"], ["watch.manage", "watch", "Manage Watch archive"],
@@ -190,7 +192,7 @@ function session(role, denied = []) {
 
 function policy(role, denied) {
   const master = role === "master";
-  return { ok: true, targetRole: "full", access: session(role, denied).access, groups, deniedCapabilities: denied, restrictedCount: denied.length, canManage: master, checkedAt: "2026-08-31T00:00:00Z", capabilities: capabilities.map(([id, group, label]) => { const masterOnly = id === "role_permissions.manage"; const mutable = !id.startsWith("role_permissions."); const restricted = denied.includes(id); return { id, group, label, description: `${label} through server-owned authority.`, mutable, masterOnly, effective: !masterOnly && !restricted, state: masterOnly ? "master_only" : !mutable ? "required" : restricted ? "restricted" : "default" }; }) };
+  return { ok: true, targetRole: "full", access: session(role, denied).access, groups, deniedCapabilities: denied, restrictedCount: denied.length, canManage: master, checkedAt: "2026-08-31T00:00:00Z", capabilities: capabilities.map(([id, group, label]) => { const masterOnly = ["role_permissions.manage","workshop.profile_restrictions.manage"].includes(id); const mutable = !id.startsWith("role_permissions.")&&!masterOnly; const restricted = denied.includes(id); return { id, group, label, description: `${label} through server-owned authority.`, mutable, masterOnly, effective: !masterOnly && !restricted, state: masterOnly ? "master_only" : !mutable ? "required" : restricted ? "restricted" : "default" }; }) };
 }
 
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
