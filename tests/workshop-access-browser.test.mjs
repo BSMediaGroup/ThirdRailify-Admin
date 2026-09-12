@@ -79,7 +79,7 @@ test("Workshop Access uses the premium Admin system and keeps Overview first", a
     await profileDialog.waitFor({ state: "visible" });
     assert.equal(await profileDialog.locator(".profile-policy-card").count(), 6, `all profile providers render at ${viewport.width}px`);
     assert.equal(await profileDialog.locator(".profile-policy-card--replicate img, .profile-policy-card--openai img, .profile-policy-card--xai img").count(), 3, "AI providers use their approved SVG marks");
-    assert.equal(await profileDialog.locator(".profile-policy-card--replicate img").evaluate((node) => getComputedStyle(node).filter), "brightness(0) invert(1)", "AI provider marks render white");
+    assert.deepEqual(await profileDialog.locator(".profile-policy-card .profile-provider-mark img").evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).filter)), Array(6).fill("brightness(0) invert(1)"), "all provider marks render white");
     assert.equal(await profileDialog.locator(".profile-policy-card--pexels img, .profile-policy-card--pixabay img, .profile-policy-card--unsplash img").count(), 3, "stock providers use their supplied SVG marks");
     assert.equal(await profileDialog.locator(".profile-access-emblem svg").evaluate((node) => getComputedStyle(node).color), "rgb(243, 201, 40)", "modal shield is gold");
     assert.equal(await page.locator(".profile-restriction-panel").count(), 0, "the legacy expanding drawer is removed");

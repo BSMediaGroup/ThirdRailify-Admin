@@ -312,10 +312,7 @@
 .profile-policy-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: linear-gradient(180deg,#866592,#d0a83d 72%,transparent); }
 .profile-policy-card > header { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #302835; background: radial-gradient(circle at 100% 0,rgba(110,74,124,.18),transparent 48%); }
 .profile-provider-mark { display: grid; width: 42px; height: 42px; place-items: center; overflow: hidden; color: #f2cf64; border: 1px solid #66516f; border-radius: 12px; background: linear-gradient(145deg,#35263e,#18111d); box-shadow: inset 0 1px rgba(255,255,255,.09),0 8px 18px rgba(0,0,0,.28); }
-.profile-provider-mark img { width: 22px; height: 22px; object-fit: contain; filter: invert(91%) sepia(38%) saturate(799%) hue-rotate(348deg) brightness(101%); }
-.profile-policy-card--replicate .profile-provider-mark img,
-.profile-policy-card--openai .profile-provider-mark img,
-.profile-policy-card--xai .profile-provider-mark img { filter: brightness(0) invert(1); }
+.profile-provider-mark img { width: 22px; height: 22px; object-fit: contain; filter: brightness(0) invert(1); }
 .profile-provider-mark b { font: 700 1rem/1 "Geist Mono",monospace; }
 .profile-provider-mark.is-compact { width: 29px; height: 29px; border-radius: 8px; }
 .profile-provider-mark.is-compact img { width: 15px; height: 15px; }
