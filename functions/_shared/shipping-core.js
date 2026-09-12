@@ -74,7 +74,7 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
   const [productResult, variantCountResult, currentAuthority] = await Promise.all([
     db.prepare(
       `SELECT id,title,safe_metadata_json,currency_code,status,unit_amount,checkout_environment,visibility,max_checkout_quantity,
-              requires_shipping,migration_status,target_printful_product_id,provider_presence,provider_store_id,provider_reconciliation_status,archived_at
+              requires_shipping,migration_status,target_printful_product_id,provider_presence,provider_store_id,provider_reconciliation_status,archived_at,updated_at
        FROM commerce_products WHERE id IN (${placeholders})`,
     ).bind(...items.map((item) => item.productId)).all(),
     db.prepare(`SELECT product_id,COUNT(*) variant_count FROM commerce_product_variants WHERE product_id IN (${placeholders}) GROUP BY product_id`).bind(...items.map((item) => item.productId)).all(),
@@ -85,7 +85,7 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
   const variantCounts = new Map((variantCountResult?.results || []).map((row) => [row.product_id, Number(row.variant_count)]));
   const variantIds = items.map((item) => item.variantId).filter(Boolean);
   const variantResult = variantIds.length ? await db.prepare(
-    `SELECT id,product_id,status,visibility,is_sellable,availability_status,unit_amount,currency_code,sku,
+    `SELECT id,product_id,status,visibility,is_sellable,availability_status,unit_amount,currency_code,sku,updated_at,
             size_label,color_label,option_values_json,fulfillment_provider,fulfillment_mapping_status,migration_status,
             target_printful_product_id,target_printful_sync_variant_id,target_catalogue_variant_id,provider_presence,provider_store_id,archived_at,is_ignored,safe_metadata_json
      FROM commerce_product_variants WHERE id IN (${variantIds.map(() => "?").join(",")})`,
@@ -97,7 +97,8 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
     if (product && parseJson(product.safe_metadata_json, {})?.saleRestriction?.enabled === true) throw new AuthFailure(409, "checkout_product_not_for_sale", "An item in your cart is reserved for display or competitions and is not for sale. Remove it to continue.");
     if (!product) throw new AuthFailure(400, "checkout_product_unknown", "A requested product does not exist.");
     if (currentAuthority && product.provider_presence !== "current") throw new AuthFailure(409, "checkout_product_provider_inactive", "A requested product is no longer present in the current provider catalogue.");
-    if (product.status !== "active" || product.visibility !== "public" || product.checkout_environment !== environment) throw new AuthFailure(409, "checkout_product_unavailable", "A requested product is not available for this checkout environment.");
+    if (product.status !== "active" || product.visibility !== "public") throw new AuthFailure(409, "checkout_product_unavailable", "An item is hidden or disabled. Remove it from your cart to continue. Reference: PRODUCT-HIDDEN.");
+    if (product.checkout_environment !== environment) throw new AuthFailure(409, "checkout_environment_mismatch", "An item is not enabled for this checkout. Please contact us. Reference: PRODUCT-ENVIRONMENT.");
     if (String(product.currency_code || "").toUpperCase() !== "CAD") throw new AuthFailure(409, "checkout_product_currency_invalid", "A requested product is not priced in CAD.");
     const hasVariants = (variantCounts.get(item.productId) || 0) > 0;
     if (hasVariants && !item.variantId) throw new AuthFailure(400, "checkout_variant_required", "A concrete product variant is required.");
@@ -120,6 +121,8 @@ export async function authoritativeCartLines(db, items, { gate = "normal", envir
     if (!productName) throw new AuthFailure(409, "checkout_product_name_invalid", "A requested product has no valid authoritative name.");
     return {
       productId: item.productId, variantId: variant?.id || null, productName, description:cleanText(parseJson(product.safe_metadata_json,{}).description,12000),
+      providerStoreId: product.provider_store_id || null, productRevision: product.updated_at || null, variantRevision: variant?.updated_at || null,
+      imageUrl: parseJson(variant?.safe_metadata_json,{}).assignedImages?.[0]?.url || (parseJson(variant?.safe_metadata_json,{}).mediaAssignmentSource === "operator" ? null : parseJson(variant?.safe_metadata_json,{}).providerImageSource?.sourceClass === "merchant_preview" ? parseJson(variant?.safe_metadata_json,{}).providerImage : null) || parseJson(product.safe_metadata_json,{}).publicImage || null,
       variantName: variant ? [cleanText(variant.size_label, 120), cleanText(variant.color_label, 120)].filter(Boolean).join(" / ") || null : null,
       sku: variant ? cleanText(variant.sku, 240) || null : null,
       optionValues: variant ? parseJson(variant.option_values_json, {}) : {}, currencyCode: "CAD",
@@ -140,6 +143,7 @@ export function authoritativeSubtotal(lines) {
 export async function authoritativeCartFingerprint(lines) {
   return sha256Hex(JSON.stringify(lines.map((line) => ({
     productId: line.productId, variantId: line.variantId, currencyCode: line.currencyCode,
+    providerStoreId: line.providerStoreId, productRevision: line.productRevision, variantRevision: line.variantRevision,
     unitAmount: line.unitAmount, quantity: line.quantity, lineTotalAmount: line.lineTotalAmount,
     requiresShipping: line.requiresShipping, fulfillmentProvider: line.fulfillmentProvider,
     fulfillmentVariantId: line.fulfillmentVariantId, catalogueVariantId: line.catalogueVariantId,

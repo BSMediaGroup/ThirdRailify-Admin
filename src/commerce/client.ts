@@ -170,7 +170,7 @@ export type MerchandisingVariant = {
 };
 export type MerchandisingProduct = {
   saleRestriction?: { enabled: boolean; reason: "competition_prize" | "display_only" };
-  publication?: { displayable: boolean; canPublish: boolean; reasons: string[]; eligibleVariants: number; publicVariants: number; exclusions: Record<string, number> };
+  publication?: { purchasable:boolean; purchaseReasons:string[]; variants:Array<{shipping:{ready:boolean;reasons:string[]}}> ; displayable: boolean; canPublish: boolean; reasons: string[]; eligibleVariants: number; publicVariants: number; exclusions: Record<string, number> };
   id: string; slug: string; title: string; description: string; primaryImageUrl: string | null; additionalImages: string[];
   categories: string[]; collectionIds: string[]; tags: string[]; status: string; visibility: string; currencyCode: string; unitAmount: number | null;
   price: { minimum: number | null; maximum: number | null; label: string }; maxQuantity: number; requiresShipping: boolean;

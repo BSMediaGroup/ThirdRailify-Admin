@@ -1,7 +1,9 @@
+import { PrintfulSync } from '../commerce/PrintfulSync';
+import { ProductWorkspace as ProductMerchandisingEditor } from '../commerce/ProductWorkspace';
 import { CatalogueSellabilityReview } from "../commerce/CatalogueSellabilityReview";
 import { StoreLaunchWorkspace } from "../commerce/StoreLaunchWorkspace";
 import { CurrentProductRepair } from "../commerce/CurrentProductRepair";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useOutletContext } from "react-router-dom";
 import paypalFeatureIcon from "../../assets/icons/paypal.svg";
@@ -28,18 +30,12 @@ import {
   updateCollectionMemberships,
   bulkUpdateMerchandisingProducts,
   updateProductFeatured,
-  getCommerceMediaLimits,
-  ingestMerchandisingProductMedia,
-  uploadMerchandisingProductMedia,
   saveFeaturedProducts,
-  saveMerchandisingProduct,
-  saveMerchandisingVariant,
   createCommerceCollection,
   saveCommerceCollection,
   saveCommerceCollectionOrder,
   archiveCommerceCollection,
   deleteCommerceCollection,
-  cadTextToMinorUnits,
   type CommerceOverviewPayload,
   type CommerceLaunchPlan,
   type PaymentAuthorityState,
@@ -53,11 +49,9 @@ import {
   type CollectionBulkOperation,
   type MerchandisingListPayload,
   type MerchandisingProduct,
-  type MerchandisingVariant,
   type ProductBulkOperation,
   type ProductListFilters,
   type ProviderStatus,
-  type CommerceMediaLimits,
   type CatalogueReconciliationPreview,
   type CatalogueReconciliationStatus,
 } from "../commerce/client";
@@ -476,10 +470,13 @@ export function CommerceProductsPage() {
   };
 
   return <>
-    <CommerceHeading eyebrow="Commerce D1 authority" title="Shop / Products" summary="Manage the replacement catalogue, real variants, integer CAD prices, public presentation, and provider readiness. Displayability is independent from the globally disabled checkout and paused fulfillment migration." status={payload?.databaseConfigured ? "connected" : "unavailable"} />
+    <CommerceHeading eyebrow="Commerce D1 authority" title="Shop / Products" summary="Manage the replacement catalogue, real variants, integer CAD prices, public presentation, and provider readiness. Review storefront publication, production eligibility, shipping prerequisites and media in one product workspace." status={payload?.databaseConfigured ? "connected" : "unavailable"} />
     {error && <div className="admin-alert" role="alert">{error}</div>}
     {!payload && !error ? <CommerceState>Loading catalogue merchandising…</CommerceState> : payload ? <div className="merchandising-workspace commerce-catalogue-manager">
+      <PrintfulSync csrfToken={csrfToken} canManage={canManage} onChanged={refresh} />
+      <details><summary>Advanced reconciliation diagnostics</summary>
       <section className="commerce-section catalogue-reconciliation" aria-labelledby="catalogue-reconciliation-title"><div className="commerce-section-heading-actions"><div><p className="eyebrow">Current provider authority</p><h2 id="catalogue-reconciliation-title">Printful catalogue reconciliation</h2></div><button className="button-link" type="button" onClick={() => void previewReconciliation()} disabled={!access.isMasterAdmin || reconciliationBusy}>{reconciliationBusy ? "Reading Printful…" : "Preview reconciliation"}</button></div><p>Configured store <code>{reconciliation?.authority.configuredStoreId || "Unavailable"}</code> · {reconciliation?.authority.storeVerified ? `${reconciliation.authority.store?.name} verified` : "not yet verified by a reconciliation read"}. Preview performs bounded GET requests only; Apply requires a fresh matching snapshot and exact confirmation.</p>{!access.isMasterAdmin && <p className="commerce-action-note">Full Admins can inspect this state. Only Master Admin can preview or apply catalogue reconciliation.</p>}<div className="catalogue-reconciliation__counts"><span>Current <strong>{reconciliation?.counts.currentProducts ?? payload.totals.currentProducts}</strong></span><span>Archived <strong>{reconciliation?.counts.archivedProducts ?? payload.totals.archivedProducts}</strong></span><span>Current variants <strong>{reconciliation?.counts.currentVariants ?? payload.totals.variants}</strong></span><span>Needs review <strong>{reconciliation?.counts.needsReviewProducts ?? payload.totals.needsReviewProducts}</strong></span><span>Provider read <strong>{reconciliationPreview?.snapshot.products ?? reconciliation?.latest?.providerProducts ?? "—"}</strong></span></div>{reconciliationPreview && <div className={reconciliationPreview.unusualReduction || reconciliationPreview.blockers.length ? "catalogue-reconciliation__preview is-warning" : "catalogue-reconciliation__preview"} role="status"><h3>Preview ready: {reconciliationPreview.snapshot.products} products / {reconciliationPreview.snapshot.variants} variants</h3><p>{Object.entries(reconciliationPreview.changes).map(([key, value]) => `${humanize(key)} ${value}`).join(" · ")}</p>{reconciliationPreview.unusualReduction && <p><strong>Unusual reduction detected.</strong> Review every group before applying.</p>}{reconciliationPreview.blockers.map((blocker, index) => <p key={index}><strong>Blocked:</strong> {blocker.reason}</p>)}<details><summary>Classification counts</summary><dl>{Object.entries(reconciliationPreview.counts).map(([key, value]) => <div key={key}><dt>{humanize(key)}</dt><dd>{value}</dd></div>)}</dl></details><Field label={`Type ${reconciliationPreview.confirmationText} to apply`}><input value={reconciliationConfirmation} onChange={(event) => setReconciliationConfirmation(event.target.value)} autoComplete="off" /></Field><button className="button-link" type="button" onClick={() => void applyReconciliation()} disabled={reconciliationBusy || reconciliationPreview.blockers.length > 0 || reconciliationConfirmation !== reconciliationPreview.confirmationText}>Apply reconciliation</button></div>}</section>
+      </details>
       <section className="commerce-posture" aria-label="Catalogue totals"><div><span>Current products</span><strong>{payload.totals.currentProducts || payload.totals.products}</strong></div><div><span>Public current</span><strong>{payload.totals.publicProducts}</strong></div><div><span>Archived</span><strong>{payload.totals.archivedProducts}</strong></div><div><span>Current variants</span><strong>{payload.totals.variants}</strong></div></section>
       <section className="commerce-section" aria-labelledby="catalogue-products-title">
         {repairIds.length > 0 && <CurrentProductRepair key={repairIds.join(",")} productIds={repairIds} csrfToken={csrfToken} disabled={!canManage || busy} onApplied={() => { setRepairIds([]); refresh(); }} />}
@@ -501,7 +498,7 @@ export function CommerceProductsPage() {
             <div><strong>{product.title}</strong><small>/{product.slug}</small><span>{humanize(product.provider.presence)} · {humanize(product.provider.reconciliationStatus)}</span><span>{product.categories.join(" · ") || "Uncategorized"}{product.tags.length ? " · " + product.tags.join(" · ") : ""}</span></div>
             <div><span>Price</span><strong>{product.price.label}</strong><small>{product.activeVariantCount} / {product.variantCount} public variants</small></div>
             <div><span>Storefront</span><strong className={statusToneClass(presentation.storefront.tone)}>{presentation.storefront.label}</strong>{product.publication && !product.publication.displayable && <details><summary>Publication details</summary><p>{product.publication.reasons.map(humanize).join("; ")}</p><p>{product.publication.eligibleVariants} eligible variants; {product.publication.publicVariants} enabled.</p>{Object.entries(product.publication.exclusions).map(([reason, count]) => <p key={reason}>{count}: {humanize(reason)}</p>)}</details>}<small className={product.featured ? "commerce-status-secondary is-featured" : "commerce-status-secondary is-muted"}>{product.featured ? "Featured" : "Order " + String(product.displayOrder)}</small>{product.displayData.imageReview && <small className="commerce-status-secondary is-warning">Image review</small>}</div>
-            <div><span>Fulfillment mapping</span><strong className={statusToneClass(presentation.fulfillment.tone)}>{presentation.fulfillment.label}</strong><small className={"commerce-status-secondary is-" + presentation.migration.tone}>Migration: {presentation.migration.label}</small></div>
+            <div><span>Purchase readiness</span><small>{product.publication?.purchasable && product.publication.variants.some(v=>v.shipping.ready)?"Ready for destination quote":product.publication?.purchaseReasons.join(", ")||"Open editor for blockers"}</small><span>Fulfillment mapping</span><strong className={statusToneClass(presentation.fulfillment.tone)}>{presentation.fulfillment.label}</strong><small className={"commerce-status-secondary is-" + presentation.migration.tone}>Migration: {presentation.migration.label}</small></div>
             <div className="commerce-product-row__actions">
               <button className="commerce-icon-action" type="button" title={providerEligible ? (visible ? "Hide from store" : "Show in store") : "Archived products cannot be published"} aria-label={(visible ? "Hide " : "Show ") + product.title + (visible ? " from store" : " in store")} aria-pressed={visible} onClick={() => void toggleVisibility(product)} disabled={!canManage || visibilityPending || !providerEligible}>{visibilityPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name={visible ? "eye" : "eyeOff"} size={18} />}</button>
               <button className={"commerce-icon-action" + (product.featured ? " is-featured" : "")} type="button" title={featuredEligibility.enabled ? (product.featured ? "Remove from featured" : "Add to featured") : featuredEligibility.reason} aria-label={(product.featured ? "Remove " : "Add ") + product.title + (product.featured ? " from featured products" : " to featured products")} aria-pressed={product.featured} onClick={() => void toggleFeatured(product)} disabled={!canManage || featuredPending || !featuredEligibility.enabled}>{featuredPending ? <span className="commerce-icon-action__pending" aria-hidden="true" /> : <AdminIcon name="star" size={18} />}</button>
@@ -751,151 +748,6 @@ function CollectionManagementEditor({ collectionId, csrfToken, canManage, onClos
 
 function CollectionProductIdentity({ product }: { product: CollectionProductListPayload["items"][number] }) { return <span className="collection-product-identity"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" && product.status === "active" ? "Public" : "Hidden"} · {product.priceLabel}</small></span></span>; }
 
-import { ProductShippingWeights } from "../commerce/ProductShippingWeights";
-function ProductMerchandisingEditor({ product, collections, csrfToken, canManage, onClose, onSaved, onError }: { product: MerchandisingProduct; collections: CommerceCollection[]; csrfToken: string | null; canManage: boolean; onClose: () => void; onSaved: (product: MerchandisingProduct, message: string) => void; onError: (message: string) => void }) {
-  const [form, setForm] = useState(() => productForm(product));
-  const [variantId, setVariantId] = useState(() => product.variants.find(variant => variant.id === new URLSearchParams(window.location.search).get("variantId"))?.id || product.variants[0]?.id || "");
-  const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(0);
-  const providerWritable = product.provider.presence === "current" || product.provider.presence === "legacy";
-  useEffect(() => { setForm(productForm(product)); setVariantId((current) => product.variants.some((variant) => variant.id === current) ? current : product.variants[0]?.id || ""); }, [product]);
-  const variant = product.variants.find((entry) => entry.id === variantId) || null;
-  const update = (key: string, value: string | boolean) => setForm((current) => ({ ...current, [key]: value }));
-  const dirty = JSON.stringify(form) !== JSON.stringify(productForm(product));
-  const addAdditional = (urls: string[]) => setForm((current) => ({ ...current, additionalImages: uniqueMediaUrls([...current.additionalImages, ...urls]) }));
-  const removeAdditional = (index: number) => setForm((current) => ({ ...current, additionalImages: current.additionalImages.filter((_, itemIndex) => itemIndex !== index) }));
-  const moveAdditional = (index: number, offset: -1 | 1) => setForm((current) => {
-    const target = index + offset;
-    if (target < 0 || target >= current.additionalImages.length) return current;
-    const next = [...current.additionalImages]; [next[index], next[target]] = [next[target], next[index]];
-    return { ...current, additionalImages: next };
-  });
-  const promoteAdditional = (index: number) => setForm((current) => {
-    const promoted = current.additionalImages[index]; if (!promoted) return current;
-    const remaining = current.additionalImages.filter((url, itemIndex) => itemIndex !== index && url !== promoted);
-    const additionalImages = current.primaryImageUrl && current.primaryImageUrl !== promoted && !remaining.includes(current.primaryImageUrl) ? [current.primaryImageUrl, ...remaining] : remaining;
-    return { ...current, primaryImageUrl: promoted, additionalImages };
-  });
-  const saveProduct = async (event: FormEvent) => {
-    event.preventDefault(); if (!csrfToken || !canManage || !providerWritable || uploading) return; setSaving(true); onError("");
-    try {
-      const selectedCollections = collections.filter((collection) => form.collectionIds.includes(collection.id));
-      // Stage only newly introduced references (including the advanced URL editor).
-      // Unchanged imported media retains its exact reference and authority.
-      const savedImages = new Set(uniqueMediaUrls([product.primaryImageUrl || "", ...product.additionalImages]));
-      const introduced = uniqueMediaUrls([form.primaryImageUrl, ...form.additionalImages]).filter((url) => !savedImages.has(url));
-      const staged = introduced.length ? await ingestMerchandisingProductMedia(csrfToken, product.id, introduced) : null;
-      const canonical = (url: string) => staged?.assets[introduced.indexOf(url)]?.url || url;
-      const primaryImageUrl = form.primaryImageUrl ? canonical(form.primaryImageUrl) : null;
-      const additionalImages = form.additionalImages.map(canonical);
-      const result = await saveMerchandisingProduct(csrfToken, product.id, { title: form.title, slug: form.slug, description: form.description, primaryImageUrl, additionalImages, categories: selectedCollections.map((collection) => collection.title), tags: splitComma(form.tags), saleRestriction: { enabled: form.notForSale, reason: form.specialStatus }, featured: form.featured, visibility: form.visibility, status: form.status, displayOrder: Number(form.displayOrder), maxQuantity: Number(form.maxQuantity), unitAmount: product.unitAmount, currencyCode: "CAD" });
-      onSaved(result.product, "Product merchandising, first-party media, and collection memberships saved to Commerce D1.");
-    } catch (reason) { onError(errorMessage(reason, "Product merchandising could not be saved.")); }
-    finally { setSaving(false); }
-  };
-  return <CommerceEditorModal titleId="product-editor-title" onClose={onClose}><section className="commerce-product-editor"><header><div><p className="eyebrow">Product editor</p><h2 id="product-editor-title">{product.title}</h2></div><button type="button" className="commerce-editor-close" onClick={onClose} data-autofocus>Close editor</button></header>
-    {!providerWritable && <div className="commerce-callout is-pending" role="status"><AdminIcon name="shield" /><div><strong>Archived provider record — read only</strong><p>This product is {humanize(product.provider.presence)}. History and curation are preserved, but it cannot be edited, published, featured, or made sellable.</p></div></div>}
-    {product.provider.presence === "current" && <CurrentProductRepair productIds={[product.id]} csrfToken={csrfToken} disabled={!canManage || saving || dirty || Boolean(uploading)} onApplied={() => { void getMerchandisingProduct(product.id).then((result) => onSaved(result.product, "Reviewed product repair saved.")).catch((reason) => onError(errorMessage(reason, "Reload failed."))); }} />}
-    <form onSubmit={(event) => void saveProduct(event)}>
-      <div className="commerce-form-grid">
-        <Field label="Title"><input value={form.title} onChange={(event) => update("title", event.target.value)} maxLength={240} required /></Field>
-        <Field label="Slug"><input value={form.slug} onChange={(event) => update("slug", event.target.value)} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={180} required /></Field>
-        <Field label="Description" className="commerce-field--wide"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} maxLength={12000} rows={5} /></Field>
-        <ProductMediaEditor productId={product.id} csrfToken={csrfToken} canManage={canManage && providerWritable} primaryImageUrl={form.primaryImageUrl} additionalImages={form.additionalImages} onPrimaryChange={(url) => setForm((current) => ({ ...current, primaryImageUrl: url }))} onAddAdditional={addAdditional} onReplaceAdditional={(urls) => setForm((current) => ({ ...current, additionalImages: uniqueMediaUrls(urls) }))} onRemoveAdditional={removeAdditional} onMoveAdditional={moveAdditional} onPromoteAdditional={promoteAdditional} onUploadingChange={setUploading} />
-        <fieldset className="commerce-collection-picker commerce-field--wide"><legend>Collections</legend><p>Choose every active collection this product belongs to.</p><div>{collections.map((collection) => { const inputId = `product-collection-${collection.id}`; return <label key={collection.id} htmlFor={inputId} className={form.collectionIds.includes(collection.id) ? "is-selected" : ""}><input id={inputId} type="checkbox" checked={form.collectionIds.includes(collection.id)} onChange={() => setForm((current) => ({ ...current, collectionIds: current.collectionIds.includes(collection.id) ? current.collectionIds.filter((id) => id !== collection.id) : [...current.collectionIds, collection.id] }))} /><span>{collection.title}<small>{collection.visibility === "public" ? "Public" : "Hidden"}</small></span></label>; })}</div></fieldset>
-        <Field label="Tags" hint="Comma separated."><input value={form.tags} onChange={(event) => update("tags", event.target.value)} /></Field>
-        <fieldset className="commerce-presentation-controls commerce-field--wide"><legend>Storefront presentation</legend><p>Control whether this product is visible and whether it receives prioritized storefront placement.</p><div><Field label="Public visibility"><select value={form.visibility} onChange={(event) => update("visibility", event.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field><Field label="Catalogue status"><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="active">Active</option><option value="disabled">Inactive</option></select></Field></div><label className="commerce-featured-switch"><input type="checkbox" role="switch" checked={form.featured} onChange={(event) => update("featured", event.target.checked)} /><span className="commerce-featured-switch__track" aria-hidden="true"><i /></span><span><strong>Featured product</strong><small>Featured products receive prioritized placement in the storefront rail.</small></span></label></fieldset>
-        <fieldset className="commerce-presentation-controls commerce-field--wide"><legend>Special product status</legend><label className="commerce-featured-switch"><input type="checkbox" role="switch" checked={form.notForSale} onChange={(event) => update("notForSale", event.target.checked)} /><span className="commerce-featured-switch__track" aria-hidden="true"><i /></span><span><strong>Not for sale</strong><small>Keep this item on display without allowing purchases. Storefront visibility is controlled separately.</small></span></label><Field label="Special status label"><select value={form.specialStatus} onChange={(event) => update("specialStatus", event.target.value)}><option value="competition_prize">Competition prize</option><option value="display_only">Display only</option></select></Field><p>You can set this status while the product is public or private. When enabled, the status banner appears on published product pages and cards, and checkout rejects the item.</p></fieldset>
-        <Field label="Display order"><input type="number" min={0} max={999999} value={form.displayOrder} onChange={(event) => update("displayOrder", event.target.value)} /></Field>
-        <Field label="Maximum quantity"><input type="number" min={1} max={20} value={form.maxQuantity} onChange={(event) => update("maxQuantity", event.target.value)} /></Field>
-      </div>
-      <div className="merchandising-savebar"><p>{!providerWritable ? "Archived products remain read only." : uploading ? `${uploading} image upload${uploading === 1 ? "" : "s"} in progress. Product association will wait.` : dirty ? "Unsaved product changes. Provider identity and migration provenance remain read-only." : "Product is up to date. Provider identity and migration provenance are read-only."}</p><button className="button-link" type="submit" disabled={!providerWritable || !dirty || !canManage || !csrfToken || saving || Boolean(uploading)}>{saving ? "Saving…" : "Save product"}</button></div>
-    </form>
-    <section className="commerce-variant-manager" aria-labelledby="variant-editor-title"><SectionTitle id="variant-editor-title" eyebrow="Variant authority" title={`Variants (${product.variants.length})`} />{product.variants.length ? <><Field label="Choose variant"><select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{product.variants.map((entry) => <option key={entry.id} value={entry.id}>{entry.displayLabel} — {formatCad(entry.unitAmount)}</option>)}</select></Field>{variant && <VariantMerchandisingEditor key={variant.id} product={product} variant={variant} csrfToken={csrfToken} canManage={canManage && providerWritable} onSaved={onSaved} onError={onError} />}</> : <CommerceState>No variants are attached to this product.</CommerceState>}</section>
-    <ProductShippingWeights productId={product.id} csrfToken={csrfToken} canManage={canManage && providerWritable} />
-  </section></CommerceEditorModal>;
-}
-
-type MediaUploadNotice = { id: string; name: string; status: "uploading" | "success" | "error"; message: string };
-
-function ProductMediaEditor({ productId, csrfToken, canManage, primaryImageUrl, additionalImages, onPrimaryChange, onAddAdditional, onReplaceAdditional, onRemoveAdditional, onMoveAdditional, onPromoteAdditional, onUploadingChange }: { productId: string; csrfToken: string | null; canManage: boolean; primaryImageUrl: string; additionalImages: string[]; onPrimaryChange: (url: string) => void; onAddAdditional: (urls: string[]) => void; onReplaceAdditional: (urls: string[]) => void; onRemoveAdditional: (index: number) => void; onMoveAdditional: (index: number, offset: -1 | 1) => void; onPromoteAdditional: (index: number) => void; onUploadingChange: (count: number) => void }) {
-  const [limits, setLimits] = useState<CommerceMediaLimits | null>(null);
-  const [notices, setNotices] = useState<MediaUploadNotice[]>([]);
-  const [primaryUrlOpen, setPrimaryUrlOpen] = useState(false); const [additionalUrlOpen, setAdditionalUrlOpen] = useState(false);
-  const [primaryUrl, setPrimaryUrl] = useState(""); const [additionalUrl, setAdditionalUrl] = useState("");
-  const [urlBusy, setUrlBusy] = useState<"primary" | "additional" | "">(""); const [urlError, setUrlError] = useState("");
-  const [rawOpen, setRawOpen] = useState(false); const [rawUrls, setRawUrls] = useState(additionalImages.join("\n"));
-  const [dragging, setDragging] = useState(false);
-  useEffect(() => { let active = true; void getCommerceMediaLimits().then((payload) => { if (active) setLimits(payload.limits); }).catch(() => undefined); return () => { active = false; }; }, []);
-  useEffect(() => { if (!rawOpen) setRawUrls(additionalImages.join("\n")); }, [additionalImages, rawOpen]);
-  const pending = notices.filter((notice) => notice.status === "uploading").length;
-  useEffect(() => { onUploadingChange(pending); }, [onUploadingChange, pending]);
-  const accepted = limits?.acceptedTypes.join(",") || "image/jpeg,image/png,image/webp";
-  const limitText = limits ? `${limits.acceptedTypes.map(mediaTypeLabel).join(", ")} • up to ${formatMediaBytes(limits.maxBytes)} each` : "JPG, PNG, WebP • up to 10 MB each";
-  const uploadFiles = async (files: File[], destination: "primary" | "additional") => {
-    if (!csrfToken || !canManage || !files.length) return;
-    const selected = destination === "primary" ? files.slice(0, 1) : files;
-    const available = limits ? Math.max(0, limits.maxAdditionalImages - additionalImages.length) : selected.length;
-    const bounded = destination === "additional" ? selected.slice(0, available) : selected;
-    if (destination === "additional" && bounded.length < selected.length) {
-      const rejected = selected.slice(bounded.length).map((file) => ({ id: mediaNoticeId(), name: file.name, status: "error" as const, message: `Gallery limit reached (${limits?.maxAdditionalImages || 24} additional images).` }));
-      setNotices((current) => [...rejected, ...current].slice(0, 12));
-    }
-    await Promise.all(bounded.map(async (file) => {
-      const id = mediaNoticeId();
-      setNotices((current) => [{ id, name: file.name || "Selected image", status: "uploading" as const, message: "Uploading and validating…" }, ...current].slice(0, 12));
-      try {
-        const payload = await uploadMerchandisingProductMedia(csrfToken, productId, file);
-        setLimits(payload.limits);
-        if (destination === "primary") onPrimaryChange(payload.asset.url); else onAddAdditional([payload.asset.url]);
-        setNotices((current) => current.map((notice) => notice.id === id ? { ...notice, status: "success" as const, message: "Uploaded • save product to publish" } : notice));
-      } catch (reason) {
-        setNotices((current) => current.map((notice) => notice.id === id ? { ...notice, status: "error" as const, message: errorMessage(reason, "Upload failed. The other images were preserved.") } : notice));
-      }
-    }));
-  };
-  const ingestUrl = async (destination: "primary" | "additional") => {
-    const value = (destination === "primary" ? primaryUrl : additionalUrl).trim();
-    if (!csrfToken || !canManage || !value) return;
-    setUrlBusy(destination); setUrlError("");
-    try {
-      const payload = await ingestMerchandisingProductMedia(csrfToken, productId, [value]); const canonical = payload.assets[0]?.url;
-      if (!canonical) throw new Error("The image URL did not return a supported image.");
-      if (destination === "primary") { onPrimaryChange(canonical); setPrimaryUrl(""); setPrimaryUrlOpen(false); }
-      else { onAddAdditional([canonical]); setAdditionalUrl(""); setAdditionalUrlOpen(false); }
-    } catch (reason) { setUrlError(errorMessage(reason, "The image URL could not be added.")); }
-    finally { setUrlBusy(""); }
-  };
-  const dropAdditional = (event: DragEvent<HTMLElement>) => { event.preventDefault(); setDragging(false); void uploadFiles([...event.dataTransfer.files], "additional"); };
-  return <fieldset className="product-media-editor commerce-field--wide"><legend>Product media</legend>
-    <div className="product-media-editor__intro"><div><strong>Storefront artwork</strong><p>Upload from this computer or add a public HTTPS image URL. New files are validated and stored as immutable first-party media before you save the product association.</p></div><span>{limitText}</span></div>
-    <section className="product-media-primary" aria-labelledby="primary-media-title"><div className="product-media-section-heading"><div><p className="eyebrow">Primary image</p><h3 id="primary-media-title">Main storefront image</h3></div>{primaryImageUrl && <span className="product-media-primary-badge"><AdminIcon name="star" size={14} /> Primary</span>}</div>
-      <div className="product-media-primary__body"><MediaThumbnail url={primaryImageUrl} label="Primary product image" large /><div className="product-media-primary__details"><strong>{primaryImageUrl ? mediaSourceLabel(primaryImageUrl) : "No primary image"}</strong><small>{primaryImageUrl ? compactMediaIdentity(primaryImageUrl) : "Add an image to restore the storefront preview."}</small><div className="product-media-actions"><label className="product-media-action"><AdminIcon name="upload" size={17} /><span>{primaryImageUrl ? "Upload / replace image" : "Upload image"}</span><input type="file" accept={accepted} onChange={(event) => { void uploadFiles([...(event.target.files || [])], "primary"); event.target.value = ""; }} disabled={!canManage || !csrfToken} /></label><button type="button" className="product-media-action" onClick={() => { setPrimaryUrlOpen((value) => !value); setUrlError(""); }}><AdminIcon name="link" size={17} />Use image URL</button>{primaryImageUrl && <button type="button" className="product-media-action is-danger" onClick={() => onPrimaryChange("")}><AdminIcon name="trash" size={17} />Clear</button>}</div>{primaryUrlOpen && <div className="product-media-url-entry"><label><span>HTTPS image URL</span><input type="url" value={primaryUrl} onChange={(event) => setPrimaryUrl(event.target.value)} placeholder="https://example.com/product.jpg" /></label><button type="button" onClick={() => void ingestUrl("primary")} disabled={!primaryUrl.trim() || Boolean(urlBusy)}>{urlBusy === "primary" ? "Adding…" : "Use URL"}</button></div>}</div></div>
-    </section>
-    <section className="product-media-additional" aria-labelledby="additional-media-title" onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }} onDrop={dropAdditional}>
-      <div className="product-media-section-heading"><div><p className="eyebrow">Additional images</p><h3 id="additional-media-title">Gallery <span>{additionalImages.length}/{limits?.maxAdditionalImages || 24}</span></h3></div><div className="product-media-actions"><label className="product-media-action"><AdminIcon name="upload" size={17} /><span>Add images</span><input type="file" accept={accepted} multiple onChange={(event) => { void uploadFiles([...(event.target.files || [])], "additional"); event.target.value = ""; }} disabled={!canManage || !csrfToken} /></label><button type="button" className="product-media-action" onClick={() => { setAdditionalUrlOpen((value) => !value); setUrlError(""); }}><AdminIcon name="link" size={17} />Add by URL</button></div></div>
-      {additionalUrlOpen && <div className="product-media-url-entry"><label><span>Public HTTPS image URL</span><input type="url" value={additionalUrl} onChange={(event) => setAdditionalUrl(event.target.value)} placeholder="https://example.com/product-detail.jpg" /></label><button type="button" onClick={() => void ingestUrl("additional")} disabled={!additionalUrl.trim() || Boolean(urlBusy)}>{urlBusy === "additional" ? "Adding…" : "Add URL"}</button></div>}
-      <div className={`product-media-dropzone${dragging ? " is-dragging" : ""}`}><AdminIcon name="upload" size={22} /><span>Drop one or several images here</span><small>Each file uploads independently; failed files will not remove successful siblings.</small></div>
-      {additionalImages.length ? <ol className="product-media-gallery">{additionalImages.map((url, index) => <li key={url}><MediaThumbnail url={url} label={`Additional product image ${index + 1}`} /><div className="product-media-gallery__identity"><strong>{mediaSourceLabel(url)}</strong><small>{compactMediaIdentity(url)}</small></div><div className="product-media-gallery__actions"><button type="button" title="Set as primary" aria-label={`Set additional image ${index + 1} as primary`} onClick={() => onPromoteAdditional(index)}><AdminIcon name="star" size={16} /></button><button type="button" title="Move earlier" aria-label={`Move additional image ${index + 1} earlier`} onClick={() => onMoveAdditional(index, -1)} disabled={index === 0}><AdminIcon name="moveUp" size={16} /></button><button type="button" title="Move later" aria-label={`Move additional image ${index + 1} later`} onClick={() => onMoveAdditional(index, 1)} disabled={index === additionalImages.length - 1}><AdminIcon name="moveDown" size={16} /></button><button type="button" className="is-danger" title="Remove" aria-label={`Remove additional image ${index + 1}`} onClick={() => onRemoveAdditional(index)}><AdminIcon name="trash" size={16} /></button></div></li>)}</ol> : <div className="product-media-empty"><AdminIcon name="media" size={24} /><span>No additional images yet.</span></div>}
-      <button type="button" className="product-media-advanced-toggle" aria-expanded={rawOpen} onClick={() => setRawOpen((value) => !value)}>Advanced URL list <AdminIcon name="chevron" size={14} /></button>{rawOpen && <div className="product-media-advanced"><label><span>One HTTPS URL per line</span><textarea rows={4} value={rawUrls} onChange={(event) => setRawUrls(event.target.value)} /></label><button type="button" onClick={() => { onReplaceAdditional(splitLines(rawUrls)); setRawOpen(false); }}>Apply URL list</button></div>}
-    </section>
-    {urlError && <div className="product-media-error" role="alert">{urlError}</div>}
-    {notices.length > 0 && <div className="product-media-upload-status" aria-live="polite">{notices.map((notice) => <div key={notice.id} className={`is-${notice.status}`}><span>{notice.status === "uploading" ? <i className="commerce-icon-action__pending" /> : <AdminIcon name={notice.status === "success" ? "shield" : "close"} size={15} />}</span><strong>{notice.name}</strong><small>{notice.message}</small></div>)}</div>}
-  </fieldset>;
-}
-
-function MediaThumbnail({ url, label, large = false }: { url: string; label: string; large?: boolean }) {
-  const [broken, setBroken] = useState(false); useEffect(() => setBroken(false), [url]);
-  return <div className={`product-media-thumbnail${large ? " is-large" : ""}`}>{url && !broken ? <img src={url} alt={label} onError={() => setBroken(true)} /> : <span><AdminIcon name="media" size={large ? 28 : 20} /><small>{url ? "Preview unavailable" : "No image"}</small></span>}</div>;
-}
-
-function uniqueMediaUrls(urls: string[]) { return [...new Set(urls.map((url) => url.trim()).filter(Boolean))]; }
-function mediaNoticeId() { return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
-function mediaTypeLabel(value: string) { return value === "image/jpeg" ? "JPG" : value === "image/png" ? "PNG" : value === "image/webp" ? "WebP" : value; }
-function formatMediaBytes(bytes: number) { return bytes % (1024 * 1024) === 0 ? `${bytes / (1024 * 1024)} MB` : `${Math.round(bytes / 1024)} KB`; }
-function mediaSourceLabel(url: string) { return /\/commerce-media\/[a-f0-9]{64}\.(?:jpg|png|webp)(?:$|\?)/.test(url) ? "First-party commerce media" : "External HTTPS image"; }
-function compactMediaIdentity(value: string) { try { const url = new URL(value); const name = url.pathname.split("/").filter(Boolean).at(-1) || url.hostname; return `${url.hostname} / ${name.length > 28 ? `${name.slice(0, 12)}…${name.slice(-11)}` : name}`; } catch { return "Invalid image URL"; } }
-
 function CommerceEditorModal({ titleId, onClose, children }: { titleId: string; onClose: () => void; children: ReactNode }) {
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -919,17 +771,7 @@ function CommerceEditorModal({ titleId, onClose, children }: { titleId: string; 
   return createPortal(<div className="commerce-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialog} className="commerce-editor-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>{children}</div></div>, document.body);
 }
 
-function VariantMerchandisingEditor({ product, variant, csrfToken, canManage, onSaved, onError }: { product: MerchandisingProduct; variant: MerchandisingVariant; csrfToken: string | null; canManage: boolean; onSaved: (product: MerchandisingProduct, message: string) => void; onError: (message: string) => void }) {
-  const [form, setForm] = useState(() => variantForm(variant)); const [saving, setSaving] = useState(false);
-  const update = (key: string, value: string | boolean) => setForm((current) => ({ ...current, [key]: value }));
-  const saveVariant = async (event: FormEvent) => { event.preventDefault(); if (!csrfToken || !canManage) return; setSaving(true); onError(""); try { const options = JSON.parse(form.options) as unknown; const result = await saveMerchandisingVariant(csrfToken, product.id, variant.id, { displayLabel: form.displayLabel, size: form.size, color: form.color, options, unitAmount: cadTextToMinorUnits(form.price), currencyCode: "CAD", status: form.status, visibility: form.visibility, sellable: form.sellable, availability: form.availability }); onSaved(result.product, "Variant merchandising saved to Commerce D1."); } catch (reason) { onError(errorMessage(reason, "Variant merchandising could not be saved.")); } finally { setSaving(false); } };
-  return <form className="commerce-variant-form" onSubmit={(event) => void saveVariant(event)}><div className="commerce-form-grid"><Field label="Display label"><input value={form.displayLabel} onChange={(event) => update("displayLabel", event.target.value)} maxLength={240} /></Field><Field label="CAD price"><input inputMode="decimal" value={form.price} onChange={(event) => update("price", event.target.value)} required /></Field><Field label="Size"><input value={form.size} onChange={(event) => update("size", event.target.value)} /></Field><Field label="Color"><input value={form.color} onChange={(event) => update("color", event.target.value)} /></Field><Field label="Options JSON" className="commerce-field--wide"><textarea value={form.options} onChange={(event) => update("options", event.target.value)} rows={3} /></Field><Field label="Visibility"><select value={form.visibility} onChange={(event) => update("visibility", event.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field><Field label="Status"><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="active">Active</option><option value="disabled">Inactive</option></select></Field><Field label="Availability"><select value={form.availability} onChange={(event) => update("availability", event.target.value)}><option value="active">Available</option><option value="temporarily_out_of_stock">Temporarily out of stock</option><option value="discontinued">Discontinued</option></select></Field><label className="commerce-toggle"><input type="checkbox" checked={form.sellable} onChange={(event) => update("sellable", event.target.checked)} /><span>Sellable when checkout is enabled</span></label></div><dl className="commerce-integration-metadata"><Fact term="SKU" value={variant.sku || "None"} /><Fact term="Migration" value={humanize(variant.migrationStatus)} /><Fact term="Fulfillment mapping" value={humanize(variant.fulfillmentMappingStatus)} /><Fact term="Target variant" value={variant.integration.targetPrintfulVariantId || "Not mapped"} /></dl><button className="button-link" type="submit" disabled={!canManage || !csrfToken || saving}>{saving ? "Saving…" : "Save variant"}</button></form>;
-}
 
-function productForm(product: MerchandisingProduct) { return { notForSale: product.saleRestriction?.enabled === true, specialStatus: product.saleRestriction?.reason || "competition_prize", title: product.title, slug: product.slug, description: product.description, primaryImageUrl: product.primaryImageUrl || "", additionalImages: uniqueMediaUrls(product.additionalImages), collectionIds: [...product.collectionIds], tags: product.tags.join(", "), visibility: product.visibility === "public" ? "public" : "private", status: product.status === "active" ? "active" : "disabled", displayOrder: String(product.displayOrder), maxQuantity: String(product.maxQuantity), featured: product.featured }; }
-function variantForm(variant: MerchandisingVariant) { return { displayLabel: variant.displayLabel, size: variant.size || "", color: variant.color || "", options: JSON.stringify(variant.options, null, 2), price: (variant.unitAmount / 100).toFixed(2), visibility: variant.visibility === "public" ? "public" : "private", status: variant.status === "active" ? "active" : "disabled", sellable: variant.sellable, availability: variant.availability }; }
-function splitComma(value: string) { return [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))]; }
-function splitLines(value: string) { return [...new Set(value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean))]; }
 
 export function CommerceOrdersPage() { return <OrdersManagementPage />; }
 

@@ -1,6 +1,7 @@
 import { AuthFailure, errorResponse, jsonResponse } from "../../../_shared/auth-core.js";
 import { requireCommerceDb } from "../../../_shared/commerce-core.js";
 import { processCommerceJobs } from "../../../_shared/commerce-operations.js";
+import { processScheduledCatalogueSync } from "../../../_shared/catalogue-sync.js";
 import { reconcileRequestedResendDomain } from "../../../_shared/resend-domain.js";
 
 const encoder = new TextEncoder();
@@ -25,7 +26,10 @@ export async function onRequest(context) {
       VALUES ('commerce_operations_worker_configured','true','safe',?)
       ON CONFLICT(setting_key) DO UPDATE SET value_json='true',updated_at=excluded.updated_at`).bind(now).run();
     const providerMaintenance = await reconcileRequestedResendDomain(env);
-    return jsonResponse({ ...(await processCommerceJobs(env)), providerMaintenance });
+    const operations = await processCommerceJobs(env);
+    let catalogueMaintenance = "processed";
+    try { await processScheduledCatalogueSync(env); } catch { catalogueMaintenance = "unavailable"; }
+    return jsonResponse({ ...operations, providerMaintenance, catalogueMaintenance });
   } catch (error) {
     if (error instanceof AuthFailure) return errorResponse(error, request, env);
     return jsonResponse({ ok: false, error: "commerce_operations_unavailable", message: "Commerce operations are temporarily unavailable." }, { status: 500 });

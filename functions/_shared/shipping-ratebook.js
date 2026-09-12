@@ -128,6 +128,14 @@ export async function mutateShippingRatebook(env, input) {
   const authorityBefore = input?.action === "publish" ? (await db.prepare(LAUNCH_AUTHORITY_SQL).first()).fingerprint : null;
   const current = await shippingManagerPayload(env);
   if (!input || !integer(input.revision, 1)) fail("shipping_revision_required", "Reload the current revision before saving.");
+  if (input.action === "policy") {
+    if (input.revision !== current.policy.revision || input.confirmation !== "SAVE SHIPPING POLICY" || !["printful_dynamic","merchant_weight_bands"].includes(input.strategy)) fail("shipping_policy_review_required","Review and confirm the current shipping policy before saving.");
+    if (input.strategy === "merchant_weight_bands" && (!current.policy.active_ratebook_id || current.coverage.missing.length)) fail("shipping_policy_not_ready","Publish a complete merchant ratebook and resolve required weights first.");
+    await db.batch([transactionGuard(db,"EXISTS(SELECT 1 FROM commerce_shipping_policy WHERE id='primary' AND revision=?)",[input.revision]),
+      db.prepare("UPDATE commerce_settings SET value_json=?,updated_at=? WHERE setting_key='shipping_strategy'").bind(JSON.stringify(input.strategy),nowIso()),
+      db.prepare("UPDATE commerce_shipping_policy SET revision=revision+1 WHERE id='primary'")]);
+    return shippingManagerPayload(env);
+  }
   const draft = current.books.find(b => b.status === "draft");
   if (!draft || draft.id !== input.ratebookId || draft.revision !== input.revision) fail("shipping_revision_conflict", "Shipping rates changed in another session. Reload before editing.");
   const body = validateRatebook(input.body, current.markets.map(m => m.country_code));

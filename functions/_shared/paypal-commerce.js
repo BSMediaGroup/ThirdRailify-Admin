@@ -101,8 +101,8 @@ export async function createPayPalStorePayment(env, request, input, session, fet
         .bind(orderId,total,subtotal,shipping.option.amount,configuration.taxAmount,configuration.taxStatus,configuration.taxReason,checkout.checkoutRequestId,requestDigest,await cartDigest(lines),configuration.environment === "live" ? "live" : "test",customer.id,timestamp,timestamp),
       ...lines.map((line, index) => db.prepare(`INSERT INTO commerce_order_items (
         id,order_id,line_number,product_id,variant_id,product_name,variant_name,sku,option_values_json,
-        currency_code,unit_amount,quantity,line_total_amount,requires_shipping,fulfillment_provider,fulfillment_variant_id,created_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,'CAD',?,?,?,?,?,?,?)`).bind(randomId(),orderId,index+1,line.productId,line.variantId,line.productName,line.variantName,line.sku,JSON.stringify(line.optionValues),line.unitAmount,line.quantity,line.lineTotalAmount,1,line.fulfillmentProvider,line.fulfillmentVariantId,timestamp)),
+        currency_code,unit_amount,quantity,line_total_amount,requires_shipping,fulfillment_provider,fulfillment_variant_id,created_at,image_snapshot_url
+      ) VALUES (?,?,?,?,?,?,?,?,?,'CAD',?,?,?,?,?,?,?,?)`).bind(randomId(),orderId,index+1,line.productId,line.variantId,line.productName,line.variantName,line.sku,JSON.stringify(line.optionValues),line.unitAmount,line.quantity,line.lineTotalAmount,1,line.fulfillmentProvider,line.fulfillmentVariantId,timestamp,line.imageUrl||null)),
       db.prepare(`INSERT INTO commerce_order_delivery_snapshots (
         order_id,recipient_ciphertext,destination_country_code,destination_region_code,shipping_strategy,provider,
         provider_shipping_method_id,display_shipping_method,shipping_amount,currency_code,source_quote_id,quoted_at,created_at,updated_at

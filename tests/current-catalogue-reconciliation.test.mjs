@@ -158,6 +158,7 @@ test("preview/apply archives stale rows, imports current rows, records audit, an
   assert.equal(preview.unusualReduction, false);
   const result = await applyCurrentCatalogueReconciliation(env, session, { runId: preview.runId, confirmation: preview.confirmationText }, provider.response, { intervalMs: 0 });
   assert.equal(result.state, "applied");
+  assert.equal((await harness.commerceDb.prepare("SELECT checkout_environment FROM commerce_products WHERE id=?").bind(`printful-${STORE_ID}-2`).first()).checkout_environment, "live", "Native store imports belong to the production catalogue even while private");
   await assert.rejects(
     applyCurrentCatalogueReconciliation(env, session, { runId: preview.runId, confirmation: preview.confirmationText }, provider.response, { intervalMs: 0 }),
     (error) => error.code === "catalogue_reconciliation_preview_not_applicable",

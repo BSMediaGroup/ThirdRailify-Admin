@@ -2,7 +2,7 @@ import { AuthFailure, nowIso, randomId } from "./auth-core.js";
 import { requireCommerceDb } from "./commerce-core.js";
 import { readCurrentPrintfulSnapshot, desiredProductImages, providerMetadata } from "./current-catalogue-reconciliation.js";
 import { ingestCommerceProductMedia } from "./commerce-media.js";
-import { storefrontEligibility } from "./storefront-eligibility.js";
+import { storefrontEligibility, protectedTestProduct } from "./storefront-eligibility.js";
 import { imageList } from "./commerce-image-authority.js";
 import { transactionGuard } from "./commerce-transaction-guards.js";
 import { publicCataloguePayload } from "./public-catalogue.js";
@@ -56,8 +56,8 @@ export async function applyCurrentProductRepair(env, session, input, fetchImpl =
       const { product, variants, provider } = row;
       if (preview.kind === "publication") {
         const ids = row.diagnostic.variants.filter((v) => v.eligible).map((v) => v.id);
-        if (product.status === "active" && product.visibility === "public" && row.metadata.publicationIntent === "operator_publish" && variants.filter((v) => ids.includes(v.id)).every((v) => v.status === "active" && v.visibility === "public" && v.is_sellable === 1 && parse(v.safe_metadata_json).publicationIntent === "operator_publish")) continue;
-        statements.push(db.prepare("UPDATE commerce_products SET status='active',visibility='public',safe_metadata_json=?,updated_at=? WHERE id=?").bind(JSON.stringify({ ...row.metadata, publicationIntent: "operator_publish" }), timestamp, product.id));
+        if (product.checkout_environment === "live" && product.status === "active" && product.visibility === "public" && row.metadata.publicationIntent === "operator_publish" && variants.filter((v) => ids.includes(v.id)).every((v) => v.status === "active" && v.visibility === "public" && v.is_sellable === 1 && parse(v.safe_metadata_json).publicationIntent === "operator_publish")) continue;
+        statements.push(db.prepare("UPDATE commerce_products SET checkout_environment='live',status='active',visibility='public',safe_metadata_json=?,updated_at=? WHERE id=?").bind(JSON.stringify({ ...row.metadata, publicationIntent: "operator_publish" }), timestamp, product.id));
         for (const v of variants.filter((v) => ids.includes(v.id))) statements.push(db.prepare("UPDATE commerce_product_variants SET status='active',visibility='public',is_sellable=1,safe_metadata_json=?,updated_at=? WHERE id=?").bind(JSON.stringify({ ...parse(v.safe_metadata_json), publicationIntent: "operator_publish" }), timestamp, v.id));
         changedProducts += 1;
       } else {
@@ -100,6 +100,7 @@ async function buildPlan(db, snapshot, input) {
     if (!provider) fail("repair_provider_missing", "The selected product is absent from the complete current provider snapshot.");
     const variants = (await db.prepare("SELECT * FROM commerce_product_variants WHERE product_id=? ORDER BY id").bind(id).all()).results;
     const metadata = parse(product.safe_metadata_json);
+    if (input.kind === "publication" && (protectedTestProduct(product) || metadata.saleRestriction?.enabled === true)) fail("repair_publication_excluded", "Display-only and deliberate test products cannot be promoted for purchase.");
     const desired = desiredProductImages({ metadata: input.restoreOverride ? { ...metadata, imageAuthority: null } : metadata }, provider, snapshot);
     if (input.kind === "media" && input.approvedThumbnailIds?.includes(id)) {
       const thumbnail = provider.imageSelection.thumbnailCandidate;
@@ -120,7 +121,7 @@ async function buildPlan(db, snapshot, input) {
       const pv = provider.variants.find((p) => p.id === v.target_printful_sync_variant_id);
       const expected = metadata.providerAssets?.find((asset) => asset.sourceUrl === pv?.customerPreviewUrls[0])?.url || null;
       return parse(v.safe_metadata_json).providerImage !== expected;
-    }) : product.status !== "active" || product.visibility !== "public" || diagnostic.variants.some((v) => v.eligible && !v.published);
+    }) : product.checkout_environment !== "live" || product.status !== "active" || product.visibility !== "public" || diagnostic.variants.some((v) => v.eligible && !v.published);
     rows.push({ product, variants, metadata, provider, desired, diagnostic, blockers, changesRequired });
   }
   return { rows, digest: await hash(rows.map(({ product, variants }) => ({ product, variants }))), products: rows.map((row) => ({ id: row.product.id, title: row.product.title, providerProductId: row.provider.id, beforeImages: imageList(row.metadata), beforeVariantImages: row.variants.map((v) => ({ id: v.id, image: parse(v.safe_metadata_json).providerImage || null })), selectedImages: row.desired.images, preservedImages: imageList(row.metadata).filter((url) => row.desired.images.includes(url) || row.metadata.providerAssets?.some((a) => a.url === url && row.desired.images.includes(a.sourceUrl))), authority: row.desired.authority, changesRequired: row.changesRequired, thumbnailReviewRequired: row.provider.imageSelection.thumbnailReviewRequired, thumbnailCandidate: row.provider.imageSelection.thumbnailCandidate, rejectedCatalogueImages: row.provider.imageSelection.catalogueCandidatesRejected, completeness: row.provider.imageSelection.completeness, diagnostic: row.diagnostic, blockers: row.blockers })) };

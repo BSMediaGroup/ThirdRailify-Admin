@@ -279,9 +279,12 @@ export async function merchandisingProductsPayload(env, session) {
     list.push({ id: cleanText(row.id, 160), title: cleanText(row.title, 160), slug: cleanText(row.slug, 180), visibility: row.visibility, displayOrder: Number(row.display_order) });
     memberships.set(row.product_id, list);
   }
+  const shippingSetting = await db.prepare("SELECT value_json FROM commerce_settings WHERE setting_key='shipping_strategy'").first();
+  const shippingWeights = (await db.prepare("SELECT product_id,variant_id,weight_mg,provenance FROM commerce_shipping_weights").all()).results || [];
+  const shippingStrategy = shippingSetting ? JSON.parse(shippingSetting.value_json) : null;
   const products = (result?.results || []).map((row) => {
     const product = serializeMerchandisingProduct(row, variants.get(row.id) || [], memberships.get(row.id) || []);
-    product.publication = storefrontEligibility(row, (variantResult?.results || []).filter((v) => v.product_id === row.id), env.PRINTFUL_STORE_ID);
+    product.publication = storefrontEligibility(row, (variantResult?.results || []).filter((v) => v.product_id === row.id), env.PRINTFUL_STORE_ID, { shippingStrategy, weights: shippingWeights.filter(w=>w.product_id===row.id) });
     if (row.provider_presence === "current") {
       product.readiness.displayable = product.publication.displayable;
       product.activeVariantCount = product.publication.publicVariants;
