@@ -1,3 +1,13 @@
+## 2026-09-13 - Provider profile access lightbox
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced the cramped inline provider-profile drawer on Workshop Access with a native, focus-restoring modal lightbox and responsive two-column provider policy workspace.
+- Added the supplied Pexels, Pixabay and Unsplash SVG marks, provider grouping, live policy/profile summary metrics, explicit access/default controls and a polished restriction audit treatment.
+- Preserved the existing Master-only server capability, revision checks, encrypted-profile authority and next-submission enforcement. Focused browser acceptance covers the lightbox at 1920, 1440, 768 and 390 pixels.
+
 ## 2026-09-13 - Workshop Access visual authority
 
 CURRENT VER=0.1.0-alpha.0

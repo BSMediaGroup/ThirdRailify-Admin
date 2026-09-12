@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { adminApi } from "../auth/client";
 import { AdminAvatar } from "../auth/AdminAccountWidget";
 import { AccountAccessBadge } from "../components/AccountAccessBadge";
 import { AdminIcon } from "../components/AdminIcon";
 import type { AuthAccount } from "../auth/types";
+import pexelsIcon from "../../assets/icons/pexels-0.svg";
+import pixabayIcon from "../../assets/icons/pixabay-0.svg";
+import unsplashIcon from "../../assets/icons/unsplash-0.svg";
 import "./workshop-access.css";
 
 type Grant = { state: string; expires_at: string | null; revision: number; changed_by: string; changed_at: string; note: string };
@@ -200,10 +203,49 @@ function AccessRow({ item, csrf, current, onUpdate }: { item: Item; csrf: string
 }
 
 function ProfileRestrictions({ account, csrf }: { account: AuthAccount; csrf: string }) {
-  const [open, setOpen] = useState(false), [payload, setPayload] = useState<ProfilePayload | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState("");
-  async function load() { setError(""); try { setPayload(await adminApi<ProfilePayload>(`/api/workshop/accounts/${encodeURIComponent(account.id)}/profiles`)); setOpen(true); } catch (reason) { setError((reason as Error).message); } }
+  const [open, setOpen] = useState(false), [payload, setPayload] = useState<ProfilePayload | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(""), [loading, setLoading] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null), trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    if (open && !element.open) element.showModal();
+    if (!open && element.open) element.close();
+  }, [open]);
+  async function load() { setLoading(true); setError(""); try { setPayload(await adminApi<ProfilePayload>(`/api/workshop/accounts/${encodeURIComponent(account.id)}/profiles`)); } catch (reason) { setError((reason as Error).message); } finally { setLoading(false); } }
+  function show() { setOpen(true); if (!payload && !loading) void load(); }
+  function dismiss() { dialog.current?.close(); }
+  function closed() { setOpen(false); window.requestAnimationFrame(() => trigger.current?.focus()); }
   async function save(item: ProfileProvider, mode: "all" | "selected", profileIds: string[], defaultProfileId: string | null) { setBusy(item.provider); setError(""); try { setPayload(await adminApi<ProfilePayload>(`/api/workshop/accounts/${encodeURIComponent(account.id)}/profiles`, { method: "PUT", headers: { "X-CSRF-Token": csrf }, body: JSON.stringify({ provider: item.provider, mode, profileIds, defaultProfileId, revision: item.policy.revision }) })); } catch (reason) { setError((reason as Error).message); } finally { setBusy(""); } }
-  return <div className="profile-restrictions"><button type="button" onClick={() => open ? setOpen(false) : void (payload ? setOpen(true) : load())} aria-expanded={open}><AdminIcon name="shield" size={16} /> Provider profiles <AdminIcon name="chevron" size={14} /></button>{error && <p role="alert">{error}</p>}{open && payload && <section className="profile-restriction-panel"><header><div><strong>Provider profile access</strong><small>Master-only · applies on the next protected submission for {account.displayName}.</small></div><span>MASTER ONLY</span></header>{payload.providers.map((item) => <ProfilePolicyEditor key={item.provider} item={item} busy={busy === item.provider} onSave={save} />)}{payload.audit.length > 0 && <details><summary>Restriction audit</summary><ol>{payload.audit.slice(0, 12).map((row) => <li key={row.id}>{row.actor_name} · {row.provider} · {formatDate(row.created_at)}</li>)}</ol></details>}</section>}</div>;
+  const providerCount = payload?.providers.length || 0, profileCount = payload?.providers.reduce((sum, item) => sum + item.profiles.filter((profile) => profile.enabled).length, 0) || 0, restrictedCount = payload?.providers.filter((item) => item.policy.mode === "selected").length || 0;
+  const groups = [["AI PROVIDERS", payload?.providers.filter((item) => ["replicate", "openai", "xai"].includes(item.provider)) || []], ["SEARCH & STOCK", payload?.providers.filter((item) => ["pexels", "pixabay", "unsplash"].includes(item.provider)) || []]] as const;
+  return <div className="profile-restrictions">
+    <button ref={trigger} type="button" onClick={show} aria-haspopup="dialog"><AdminIcon name="shield" size={16} /> Provider profiles <AdminIcon name="expand" size={14} /></button>
+    <dialog ref={dialog} className="profile-access-dialog" aria-labelledby={`profile-access-title-${account.id}`} onCancel={(event) => { event.preventDefault(); dismiss(); }} onClose={closed} onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
+      <div className="profile-access-lightbox">
+        <header className="profile-access-header">
+          <span className="profile-access-emblem"><AdminIcon name="shield" size={27} /></span>
+          <div><p>MASTER CONTROL · PROVIDER AUTHORITY</p><h2 id={`profile-access-title-${account.id}`}>Provider profile access</h2><span>Control which encrypted provider credentials the <strong>{account.displayName} account</strong> may use on its next protected submission.</span></div>
+          <button type="button" aria-label="Close provider profile access" onClick={dismiss}><AdminIcon name="close" size={19} /></button>
+        </header>
+        <div className="profile-access-summary" aria-label="Provider profile access summary">
+          <div><span>Providers</span><strong>{payload ? providerCount : "—"}</strong></div>
+          <div><span>Available profiles</span><strong>{payload ? profileCount : "—"}</strong></div>
+          <div><span>Restricted</span><strong>{payload ? restrictedCount : "—"}</strong></div>
+          <div className="profile-access-master"><AdminIcon name="shield" size={16} /><span>Master only</span></div>
+        </div>
+        <div className="profile-access-body">
+          {error && <div className="profile-access-alert" role="alert"><AdminIcon name="rejected" size={18} /><div><strong>Profile authority unavailable</strong><p>{error}</p></div></div>}
+          {loading && !payload && <div className="profile-access-loading" role="status"><span /><div><strong>Reading encrypted profile authority</strong><p>Loading current provider policies and audit state…</p></div></div>}
+          {payload && groups.map(([label, providers]) => providers.length > 0 && <section className="profile-provider-group" key={label} aria-labelledby={`${account.id}-${label}`}>
+            <header><span id={`${account.id}-${label}`}>{label}</span><small>{providers.length} provider{providers.length === 1 ? "" : "s"}</small></header>
+            <div>{providers.map((item) => <ProfilePolicyEditor key={item.provider} item={item} busy={busy === item.provider} onSave={save} />)}</div>
+          </section>)}
+          {payload && payload.audit.length > 0 && <details className="profile-access-audit"><summary><span><AdminIcon name="orders" size={16} /> Restriction audit</span><small>{payload.audit.length} recorded events</small></summary><ol>{payload.audit.slice(0, 12).map((row) => <li key={row.id}><ProviderMark provider={row.provider} compact /><span><strong>{row.actor_name}</strong><small>{providerName(row.provider)} policy updated</small></span><time>{formatDate(row.created_at)}</time></li>)}</ol></details>}
+        </div>
+        <footer className="profile-access-footer"><span><AdminIcon name="shield" size={15} /> Policies are enforced server-side on the next protected submission.</span><button type="button" onClick={dismiss}>Done</button></footer>
+      </div>
+    </dialog>
+  </div>;
 }
 
 function ProfilePolicyEditor({ item, busy, onSave }: { item: ProfileProvider; busy: boolean; onSave: (item: ProfileProvider, mode: "all" | "selected", ids: string[], defaultId: string | null) => Promise<void> }) {
@@ -211,8 +253,27 @@ function ProfilePolicyEditor({ item, busy, onSave }: { item: ProfileProvider; bu
   useEffect(() => { setMode(item.policy.mode); setSelected(item.policy.allowedProfileIds); setDefaultId(item.policy.defaultProfileId || ""); }, [item]);
   const available = item.profiles.filter((profile) => profile.enabled);
   const toggle = (profileId: string) => setSelected((current) => current.includes(profileId) ? current.filter((id) => id !== profileId) : [...current, profileId]);
-  return <fieldset disabled={busy}><legend>{item.provider === "xai" ? "Grok / xAI" : item.provider[0].toUpperCase() + item.provider.slice(1)}</legend><label><span>Access</span><select value={mode} onChange={(event) => setMode(event.target.value as "all" | "selected")}><option value="all">All ordinary available profiles</option><option value="selected">Selected profiles only</option></select></label>{mode === "selected" && <div className="profile-choice-grid">{available.map((profile) => <label key={profile.id}><input type="checkbox" checked={selected.includes(profile.id)} onChange={() => toggle(profile.id)} /><span><strong>{profile.label}</strong><small>{profile.runtime ? "Immutable runtime source" : profile.verification_status}</small></span></label>)}</div>}<label><span>Account default</span><select value={defaultId} onChange={(event) => setDefaultId(event.target.value)}><option value="">Provider default</option>{available.filter((profile) => mode === "all" || selected.includes(profile.id)).map((profile) => <option value={profile.id} key={profile.id}>{profile.label}</option>)}</select></label><button type="button" disabled={mode === "selected" && !selected.length} onClick={() => void onSave(item, mode, mode === "selected" ? selected : [], defaultId || null)}>{busy ? "Saving…" : "Apply profile policy"}</button></fieldset>;
+  return <article className={`profile-policy-card profile-policy-card--${item.provider}`} aria-busy={busy}>
+    <header><ProviderMark provider={item.provider} /><div><h3>{providerName(item.provider)}</h3><p>{providerDescription(item.provider)}</p></div><span className={`profile-policy-state ${mode === "selected" ? "is-restricted" : "is-open"}`}>{mode === "selected" ? `${selected.length} allowed` : "All profiles"}</span></header>
+    <fieldset disabled={busy}><legend className="sr-only">{providerName(item.provider)} profile policy</legend>
+      <div className="profile-policy-fields"><label><span>Access policy</span><select value={mode} onChange={(event) => setMode(event.target.value as "all" | "selected")}><option value="all">All ordinary available profiles</option><option value="selected">Selected profiles only</option></select><small>{mode === "all" ? `${available.length} enabled profile${available.length === 1 ? "" : "s"} available` : "Only checked profiles will be authorized"}</small></label><label><span>Account default</span><select value={defaultId} onChange={(event) => setDefaultId(event.target.value)}><option value="">Provider default</option>{available.filter((profile) => mode === "all" || selected.includes(profile.id)).map((profile) => <option value={profile.id} key={profile.id}>{profile.label}</option>)}</select><small>{defaultId ? "Account-specific preference" : "Uses the provider-level default"}</small></label></div>
+      {mode === "selected" && <div className="profile-choice-grid">{available.map((profile) => <label key={profile.id}><input type="checkbox" checked={selected.includes(profile.id)} onChange={() => toggle(profile.id)} /><span><strong>{profile.label}</strong><small>{profile.runtime ? "Immutable runtime source" : profile.verification_status.replaceAll("_", " ")}</small></span><i>{profile.is_default ? "Provider default" : profile.enabled ? "Available" : "Disabled"}</i></label>)}</div>}
+      <div className="profile-policy-action"><span>Revision {item.policy.revision}</span><button type="button" disabled={mode === "selected" && !selected.length} onClick={() => void onSave(item, mode, mode === "selected" ? selected : [], defaultId || null)}>{busy ? "Saving policy…" : <><AdminIcon name="approved" size={15} /> Apply policy</>}</button></div>
+    </fieldset>
+  </article>;
 }
+
+const providerMeta: Record<string, { name: string; description: string; icon?: string; monogram: string }> = {
+  replicate: { name: "Replicate", description: "Image models and predictions", monogram: "R" },
+  openai: { name: "OpenAI / GPT", description: "Creation and research models", monogram: "O" },
+  xai: { name: "Grok / xAI", description: "Generation and research models", monogram: "G" },
+  pexels: { name: "Pexels", description: "Curated stock photography", icon: pexelsIcon, monogram: "P" },
+  pixabay: { name: "Pixabay", description: "Cached stock-media search", icon: pixabayIcon, monogram: "PX" },
+  unsplash: { name: "Unsplash", description: "Attributed hotlinked photography", icon: unsplashIcon, monogram: "U" },
+};
+function providerName(provider: string) { return providerMeta[provider]?.name || provider; }
+function providerDescription(provider: string) { return providerMeta[provider]?.description || "Protected provider credentials"; }
+function ProviderMark({ provider, compact = false }: { provider: string; compact?: boolean }) { const meta = providerMeta[provider] || { name: provider, description: "", monogram: provider.slice(0, 1).toUpperCase() }; return <span className={`profile-provider-mark${compact ? " is-compact" : ""}`}>{meta.icon ? <img src={meta.icon} alt="" /> : <b>{meta.monogram}</b>}</span>; }
 
 function roleLabel(account: AuthAccount) {
   if (account.adminLevel === "master") return "Master Admin";

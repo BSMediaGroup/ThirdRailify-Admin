@@ -71,6 +71,26 @@ test("Workshop Access uses the premium Admin system and keeps Overview first", a
     assert.equal(geometry.metricColumns, viewport.width > 1100 ? 4 : 2, `metric rail responds at ${viewport.width}px`);
     assert.equal(geometry.directoryColor, "rgb(11, 10, 10)", "Workshop directory uses the charcoal authority surface instead of the old grey fallback");
 
+    const profileTrigger = page.getByRole("button", { name: /Provider profiles/ }).nth(1);
+    const profileResponse = page.waitForResponse((candidate) => /\/api\/workshop\/accounts\/[^/]+\/profiles$/.test(new URL(candidate.url()).pathname));
+    await profileTrigger.click();
+    assert.equal((await profileResponse).status(), 200);
+    const profileDialog = page.getByRole("dialog", { name: "Provider profile access" });
+    await profileDialog.waitFor({ state: "visible" });
+    assert.equal(await profileDialog.locator(".profile-policy-card").count(), 6, `all profile providers render at ${viewport.width}px`);
+    assert.equal(await profileDialog.locator(".profile-policy-card--pexels img, .profile-policy-card--pixabay img, .profile-policy-card--unsplash img").count(), 3, "stock providers use their supplied SVG marks");
+    assert.equal(await page.locator(".profile-restriction-panel").count(), 0, "the legacy expanding drawer is removed");
+    const dialogGeometry = await profileDialog.evaluate((node) => { const rect = node.getBoundingClientRect(), cards = [...node.querySelectorAll(".profile-policy-card")].map((card) => card.getBoundingClientRect()); return { modal: node instanceof HTMLDialogElement && node.open, withinViewport: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight, cardsInside: cards.every((card) => card.left >= rect.left && card.right <= rect.right + 1), columns: getComputedStyle(node.querySelector(".profile-provider-group > div")).gridTemplateColumns.split(" ").length }; });
+    assert.equal(dialogGeometry.modal, true, "provider access uses the native modal top layer");
+    assert.equal(dialogGeometry.withinViewport && dialogGeometry.cardsInside, true, `lightbox geometry remains inside ${viewport.width}px`);
+    assert.equal(dialogGeometry.columns, viewport.width > 820 ? 2 : 1, `provider cards respond at ${viewport.width}px`);
+    await page.screenshot({ path: path.join(ARTIFACTS, `provider-profile-lightbox-${viewport.width}.png`) });
+    await profileDialog.locator('.profile-provider-group').nth(1).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(ARTIFACTS, `provider-profile-stock-${viewport.width}.png`) });
+    await profileDialog.getByRole("button", { name: "Done" }).click();
+    await profileDialog.waitFor({ state: "hidden" });
+    assert.equal(await profileTrigger.evaluate((node) => node === document.activeElement), true, "closing restores focus to the launcher");
+
     if (viewport.width === 1440) {
       const audit = page.getByRole("button", { name: /Access audit/ }).nth(1);
       const response = page.waitForResponse((candidate) => /\/api\/workshop\/accounts\/[^/]+\/history$/.test(new URL(candidate.url()).pathname));
@@ -99,6 +119,7 @@ async function fixture(route) {
     { account: account("master", "Master Admin", "master", true), workshop: policy(true, "master_policy", true, true, null) },
   ] });
   if (/^\/api\/workshop\/accounts\/[^/]+\/history$/.test(pathname)) return json(route, { ok: true, items: [{ id: "audit-1", actor_name: "Master Admin", created_at: "2026-09-12T18:45:00.000Z", next_json: JSON.stringify({ state: "granted" }) }] });
+  if (/^\/api\/workshop\/accounts\/[^/]+\/profiles$/.test(pathname)) return json(route, { ok: true, accountId: pathname.split("/").at(-2), providers: ["replicate", "openai", "xai", "pexels", "pixabay", "unsplash"].map((provider, index) => profileProvider(provider, index === 4)), audit: [{ id: "profile-audit-1", provider: "pexels", actor_name: "Master Admin", created_at: "2026-09-12T18:45:00.000Z", next_json: JSON.stringify({ mode: "selected" }) }] });
   return json(route, { ok: false, error: "fixture_unavailable", message: "Focused Workshop fixture unavailable." }, 503);
 }
 
@@ -107,5 +128,6 @@ function account(id, displayName, adminLevel, locked = false) {
 }
 
 function policy(allowed, source, canManageAccess, canManageProviders, grant) { return { allowed, source, canManageAccess, canManageProviders, grant }; }
+function profileProvider(provider, selected) { return { provider, profiles: [{ id: `runtime:${provider}`, provider, label: "Runtime Default", enabled: true, is_default: true, verification_status: "saved", runtime: true }, { id: `${provider}:editorial`, provider, label: "Editorial Studio", enabled: true, is_default: false, verification_status: "verified", runtime: false }], policy: { mode: selected ? "selected" : "all", defaultProfileId: selected ? `${provider}:editorial` : null, revision: selected ? 3 : 0, allowedProfileIds: selected ? [`${provider}:editorial`] : [] } }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function waitForServer() { for (let attempt = 0; attempt < 80; attempt += 1) { try { if ((await fetch(ORIGIN)).ok) return; } catch { /* Vite is starting. */ } await new Promise((resolve) => setTimeout(resolve, 100)); } throw new Error("Workshop browser server did not start."); }

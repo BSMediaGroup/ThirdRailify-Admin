@@ -45,6 +45,17 @@ test("Overview leads the sidebar and Workshop Access has its own premium control
   assert.doesNotMatch(styles, /var\(--surface,#17191c\)|border:1px solid #7775/);
 });
 
+test("Workshop provider profiles use a branded native lightbox with supplied stock marks", async () => {
+  const [page, styles] = await Promise.all([read("src/pages/WorkshopAccessPage.tsx"), read("src/pages/workshop-access.css")]);
+  for (const provider of ["pexels", "pixabay", "unsplash"]) assert.match(page, new RegExp(`import ${provider}Icon from "../../assets/icons/${provider}-0\\.svg"`));
+  assert.match(page, /<dialog ref=\{dialog\} className="profile-access-dialog"/);
+  assert.match(page, /aria-haspopup="dialog"/);
+  assert.doesNotMatch(page, /profile-restriction-panel/);
+  assert.match(styles, /\.profile-access-dialog::backdrop/);
+  assert.match(styles, /\.profile-provider-group > div \{ display: grid; grid-template-columns: repeat\(2/);
+  assert.match(styles, /@media \(max-width: 820px\)[\s\S]*\.profile-provider-group > div \{ grid-template-columns: 1fr; \}/);
+});
+
 test("Overview leads the sidebar and Workshop Access has its own premium control surface", async () => {
   const [navigation, icons, page, styles] = await Promise.all([
     read("src/config/navigation.ts"),
