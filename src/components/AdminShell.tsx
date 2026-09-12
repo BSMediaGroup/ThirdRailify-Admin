@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { getInboxSummary, type InboxSummary } from "../inbox/client";
 import { ResizableTables } from "./ResizableTables";
 import { adminRoutePolicy } from "../auth/capabilities";
+import { AdminQuickSearch } from "./AdminQuickSearch";
 
 export type AdminShellOutletContext = {
   startLoading: (reason?: string) => () => void;
@@ -92,6 +93,7 @@ export function AdminShell() {
   const currentArea = adminAreas.find((area) => area.path.toLowerCase() === location.pathname.toLowerCase())
     ?? (location.pathname.startsWith("/polls/abootnothing/brackets/") ? adminAreas.find(area => area.path === "/polls/abootnothing/brackets") : undefined)
     ?? (location.pathname.startsWith("/goats/") ? adminAreas.find((area) => area.path === "/goats") : undefined);
+  const visibleAdminAreas = adminAreas.filter((area) => hasCapability(adminRoutePolicy(area.path).view));
 
   const badgeFor = (path: string) => {
     if (!inboxSummary) return 0;
@@ -116,7 +118,7 @@ export function AdminShell() {
 
         <div className="sidebar-scroll-region">
           <nav className="primary-nav">
-            <p className="nav-label">Workspace</p>
+            <AdminQuickSearch areas={visibleAdminAreas} currentPath={location.pathname} collapsed={collapsed} onSelect={(path) => { navigate(path); setMobileOpen(false); }} />
             {topLevelAdminAreas.filter((area) => hasCapability(adminRoutePolicy(area.path).view)).map((area) => {
               const children = childAdminAreas(area.path).filter((child) => hasCapability(adminRoutePolicy(child.path).view));
               if (!children.length) return <NavLink key={area.path} to={area.path} end={area.path === "/"} aria-label={area.label} title={collapsed ? area.label : undefined} className={({ isActive }) => isActive ? "nav-link nav-link--active" : "nav-link"}>

@@ -4,10 +4,21 @@ CURRENT VER=0.1.0-alpha.0
 
 PENDING VER=0.1.0-alpha.0
 
-- Restored Overview as the first Admin sidebar destination and replaced the reused users symbol with a dedicated Workshop gateway icon.
+- Restored Overview as the first Admin sidebar destination and replaced the reused Users icon with a dedicated Workshop gateway mark.
 - Moved Workshop Access directly below Users / Access so account administration remains grouped without displacing Overview.
-- Rebuilt Workshop Access as a premium black, charcoal, gold and muted-plum control surface with an authority hero, live summary rail, semantic access states, protected-account treatment and responsive audit controls.
+- Rebuilt `/workshop/access` as a premium black, charcoal, gold and restrained-plum authority workspace with a branded hero, live summary rail, truthful policy metrics, semantic access states, polished account controls, protected-account messaging and integrated responsive audit controls.
 - Preserved the existing Workshop API, authentication, CSRF, policy evaluation and account-protection behavior. Focused browser coverage validates the page at 1920, 1440, 768 and 390 pixels, including navigation order, responsive geometry, access-state rendering, reduced motion and audit expansion.
+
+## 2026-09-13 - Sidebar quick navigation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced the redundant Workspace label with a compact dark quick-search trigger and a Cloudflare-inspired command palette over the existing capability-filtered Admin route map.
+- Added live ranked matching across page names, routes, summaries, and feature terms; recent destinations stay local to the browser and no search request or server mutation is performed.
+- Added Ctrl/Cmd+K, arrow/Home/End navigation, Enter selection, Escape dismissal, native-dialog focus containment/restoration, collapsed-sidebar presentation, and responsive mobile geometry.
+- Focused browser acceptance covers search ranking, navigation, shortcuts, focus, collapsed mode, 390px presentation, empty results, console safety, and overflow; isolated typecheck, lint, production build, and seven-width shell geometry also pass.
 
 ## 2026-09-13 - Payments production-activation truthfulness
 
