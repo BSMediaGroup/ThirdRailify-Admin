@@ -1,3 +1,4 @@
+import {displayCommerceMedia} from '../commerce/displayMedia';
 import { PrintfulSync } from '../commerce/PrintfulSync';
 import { ProductWorkspace as ProductMerchandisingEditor } from '../commerce/ProductWorkspace';
 import { CatalogueSellabilityReview } from "../commerce/CatalogueSellabilityReview";
@@ -642,7 +643,7 @@ export function CommerceCollectionsPage() {
 function CollectionThumbnail({ url, label }: { url: string | null; label: string }) {
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
-  return <span className="collection-thumbnail">{url && !broken ? <img src={url} alt={label} onError={() => setBroken(true)} /> : <span aria-hidden="true"><AdminIcon name="media" size={20} /><small>{url ? "Unavailable" : "Derived"}</small></span>}</span>;
+  return <span className="collection-thumbnail">{url && !broken ? <img src={displayCommerceMedia(url)} alt={label} onError={() => setBroken(true)} /> : <span aria-hidden="true"><AdminIcon name="media" size={20} /><small>{url ? "Unavailable" : "Derived"}</small></span>}</span>;
 }
 
 function collectionManagementDraft(collection: CommerceCollection | null) { return collection ? { title: collection.title, slug: collection.slug, description: collection.description, visibility: collection.visibility, displayOrder: String(collection.displayOrder) } : { title: "", slug: "", description: "", visibility: "public", displayOrder: "1000" }; }
@@ -746,7 +747,7 @@ function CollectionManagementEditor({ collectionId, csrfToken, canManage, onClos
   </section></CommerceEditorModal>;
 }
 
-function CollectionProductIdentity({ product }: { product: CollectionProductListPayload["items"][number] }) { return <span className="collection-product-identity"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={product.primaryImageUrl} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" && product.status === "active" ? "Public" : "Hidden"} · {product.priceLabel}</small></span></span>; }
+function CollectionProductIdentity({ product }: { product: CollectionProductListPayload["items"][number] }) { return <span className="collection-product-identity"><span className="commerce-product-row__image">{product.primaryImageUrl ? <img src={displayCommerceMedia(product.primaryImageUrl)} alt="" /> : <i aria-hidden="true">TR</i>}</span><span><strong>{product.title}</strong><small>/{product.slug} · {product.visibility === "public" && product.status === "active" ? "Public" : "Hidden"} · {product.priceLabel}</small></span></span>; }
 
 function CommerceEditorModal({ titleId, onClose, children }: { titleId: string; onClose: () => void; children: ReactNode }) {
   const dialog = useRef<HTMLDivElement>(null);
@@ -848,7 +849,7 @@ function ProductThumbnail({ product }: { product: MerchandisingProduct }) {
   useEffect(() => setFailed(false), [product.primaryImageUrl]);
   const review = product.displayData.imageReview || !product.primaryImageUrl;
   return <div className={"commerce-product-row__image" + (failed || review ? " is-fallback" : "")} title={review ? "Image review required" : failed ? "Image unavailable" : undefined}>
-    {product.primaryImageUrl && !failed ? <img src={product.primaryImageUrl} alt="" onError={() => setFailed(true)} /> : <span className="commerce-product-row__image-fallback"><AdminIcon name="products" size={20} /><small>{review ? "Image review" : "Unavailable"}</small></span>}
+    {product.primaryImageUrl && !failed ? <img src={displayCommerceMedia(product.primaryImageUrl)} alt="" onError={() => setFailed(true)} /> : <span className="commerce-product-row__image-fallback"><AdminIcon name="products" size={20} /><small>{review ? "Image review" : "Unavailable"}</small></span>}
   </div>;
 }
 
