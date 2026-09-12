@@ -428,7 +428,7 @@ async function handleOAuthCallback(request, env, provider, fetchImpl) {
 
 async function handleHandoff(request, env) {
   const origin = requireAllowedOrigin(request, env);
-  if (origin !== normalizeOrigin(env?.THIRDRAILIFY_ADMIN_ORIGIN)) {
+  if (origin !== normalizeOrigin(env?.THIRDRAILIFY_ADMIN_ORIGIN) && origin !== normalizeOrigin(env?.THIRDRAILIFY_LAB_ORIGIN)) {
     throw new AuthFailure(403, "origin_not_allowed", "Public handoffs must be exchanged on the Public origin.");
   }
   const body = await readJsonBody(request);

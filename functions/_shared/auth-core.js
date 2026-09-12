@@ -168,7 +168,7 @@ export function safeAvatarUrl(value, env = null) {
 
 export function configuredOrigins(env) {
   return new Set(
-    [env?.THIRDRAILIFY_PUBLIC_ORIGIN, env?.THIRDRAILIFY_ADMIN_ORIGIN]
+    [env?.THIRDRAILIFY_PUBLIC_ORIGIN, env?.THIRDRAILIFY_ADMIN_ORIGIN, env?.THIRDRAILIFY_LAB_ORIGIN === 'https://lab.thirdrailify.com' ? env.THIRDRAILIFY_LAB_ORIGIN : null]
       .map(normalizeOrigin)
       .filter(Boolean),
   );
@@ -855,7 +855,9 @@ export async function verifyTurnstile(env, request, token, expectedAction, fetch
   } finally {
     clearTimeout(timeout);
   }
-  if (!result?.success || result.action !== expectedAction || !allowedHostnames.has(String(result.hostname || "").toLowerCase())) {
+  const labOrigin = env?.THIRDRAILIFY_LAB_ORIGIN === 'https://lab.thirdrailify.com' ? env.THIRDRAILIFY_LAB_ORIGIN : null;
+  const labHostnameMismatch = labOrigin && request.headers.get('origin') === labOrigin && result?.hostname !== 'lab.thirdrailify.com';
+  if (!result?.success || result.action !== expectedAction || labHostnameMismatch || !allowedHostnames.has(String(result.hostname || "").toLowerCase())) {
     const duplicate = Array.isArray(result?.["error-codes"]) && result["error-codes"].includes("timeout-or-duplicate");
     throw new AuthFailure(
       403,

@@ -1,4 +1,5 @@
 export const adminCapabilityIds = [
+  "workshop.use", "workshop.access.manage", "workshop.providers.manage",
   "rumble_intelligence.view", "rumble_intelligence.manage",
   "overview.view", "analytics.view", "inbox.view", "inbox.manage", "watch.view", "watch.manage",
   "content.view", "content.manage", "gaming.view", "gaming.manage", "commerce.view", "commerce.catalogue.manage", "commerce.business.manage",
@@ -13,6 +14,7 @@ export type AdminCapability = typeof adminCapabilityIds[number];
 export type AdminRoutePolicy = { view: AdminCapability; manage?: AdminCapability };
 
 const policies: Record<string, AdminRoutePolicy> = {
+  "/workshop/access": { view: "workshop.access.manage", manage: "workshop.access.manage" },
   "/rumble-intelligence": { view: "rumble_intelligence.view", manage: "rumble_intelligence.manage" },
   "/": { view: "overview.view" },
   "/analytics": { view: "analytics.view" },

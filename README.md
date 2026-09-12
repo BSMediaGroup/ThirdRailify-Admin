@@ -1,5 +1,10 @@
 # Third Railify Admin
 
+## Workshop Access
+
+`/workshop/access` manages existing-account Lab approval, suspension, expiry and audit history through canonical Admin capabilities. The Lab uses the existing login, Turnstile and target-bound handoff with host-only cookies. See [architecture, created files, migrations, backup and validation](docs/WORKSHOP_ACCESS.md). Private Lab conversations and media remain in dedicated Lab storage.
+
+
 ## Rumble Intelligence V1
 
 Private `/rumble-intelligence` provides the named API-listed subscriber registry, amount-derived Self-paid/Gifted/mixed classifications, source/freshness evidence, per-record 30-day review dates, history, filters, CSV and controlled historical imports. A green 24hr/7d/30d/90d subscriber chart highlights the current total and exclusive paid/gifted/mixed/unknown categories; the registry offers 10/20/50/100 rows per page. It consumes the existing Bot fetch through a dedicated HMAC ingestion route. No Wheel integration or billing/renewal claims. See [implementation, file tree and release evidence](docs/RUMBLE_INTELLIGENCE.md) and [reviewed migration manifest](docs/RUMBLE_INTELLIGENCE_RELEASE.json). Production migration 0045 was applied and verified on 2026-09-09 at 04:03:16 UTC after quota recovery. The running Bot delivered a qualified live snapshot; production readback reconciled 108 records / 103 accounts / 11 accounts with paid records.

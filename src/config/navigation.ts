@@ -9,6 +9,7 @@ export type AdminArea = {
 };
 
 export const adminAreas: AdminArea[] = [
+  { path: "/workshop/access", label: "Workshop Access", shortLabel: "Workshop", icon: "users", summary: "Account approvals for the private creative Workshop.", futureScope: [] },
   {
     path: "/",
     label: "Overview",

@@ -1,4 +1,5 @@
 import { MatchupStudio } from './brackets/MatchupStudio';
+import { WorkshopAccessPage } from './pages/WorkshopAccessPage';
 import { AbootNothingPage } from './pages/AbootNothingPage';
 import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -45,11 +46,13 @@ import { adminRoutePolicy } from "./auth/capabilities";
 const implementedPaths = new Set(["/", "/analytics", "/inbox", "/watch", "/gaming", "/content", "/access", "/shop", "/products", "/collections", "/orders", "/customers", "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment", "/media", "/membership", "/integrations", "/settings", "/goats", "/wheels", "/wheels/library", "/wheels/stages", "/wheels/mechanics", "/wheels/access", "/wheels/results", "/polls", "/polls/abootnothing/brackets", "/polls/abootnothing", "/polls/access", "/automations"]);
 
 implementedPaths.add('/rumble-intelligence');
+implementedPaths.add('/workshop/access');
 
 export function App() {
   return (
     <Routes>
       <Route element={<AdminShell />}>
+        <Route path="workshop/access" element={guard("/workshop/access", <WorkshopAccessPage />)} />
         <Route index element={guard("/", <OverviewPage />)} />
         <Route path="inbox" element={guard("/inbox", <InboxPage />)} />
         <Route path="analytics" element={guard("/analytics", <AnalyticsPage />)} />
