@@ -6,7 +6,7 @@ Rumble subscriber rules now use canonical `subscriber_self_paid` semantics: exac
 
 ## Workshop Access
 
-`/workshop/access` manages existing-account Lab approval, suspension, expiry and audit history through canonical Admin capabilities. The Lab uses the existing login, Turnstile and target-bound handoff with host-only cookies. See [architecture, created files, migrations, backup and validation](docs/WORKSHOP_ACCESS.md). Private Lab conversations and media remain in dedicated Lab storage.
+`/workshop/access` manages existing-account Lab approval, suspension, expiry and audit history through canonical Admin capabilities. Its premium black, charcoal, gold and muted-plum control surface keeps effective policy, explicit records and protected accounts legible from desktop through mobile; Overview remains the first workspace destination and Workshop Access uses a dedicated gateway icon. The Lab uses the existing login, Turnstile and target-bound handoff with host-only cookies. See [architecture, created files, migrations, backup and validation](docs/WORKSHOP_ACCESS.md). Private Lab conversations and media remain in dedicated Lab storage.
 
 
 ## Rumble Intelligence V1

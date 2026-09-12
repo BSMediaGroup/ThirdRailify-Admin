@@ -12,7 +12,6 @@ test("Admin controls share one tokenized semantic button system", async () => {
   assert.match(styles, /button:focus-visible \{[^}]*var\(--control-focus-ring\)/);
   assert.match(styles, /input\[type="file"\]::file-selector-button/);
 });
-
 test("Admin sidebar keeps branding outside the independently scrollable navigation region", async () => {
   const [shell, styles] = await Promise.all([
     read("src/components/AdminShell.tsx"),
@@ -26,6 +25,22 @@ test("Admin sidebar keeps branding outside the independently scrollable navigati
   assert.match(styles, /\.sidebar-brand-panel \{[^}]*flex: 0 0 auto;[^}]*border-bottom:/);
   assert.match(styles, /\.admin-layout--collapsed \.sidebar-brand-panel \{ justify-content: center; \}/);
   assert.match(styles, /\.sidebar-scroll-region \{[^}]*min-height: 0;[^}]*flex: 1 1 auto;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/);
+});
+test("Overview leads the sidebar and Workshop Access has its own premium control surface", async () => {
+  const [navigation, icons, page, styles] = await Promise.all([
+    read("src/config/navigation.ts"),
+    read("src/components/AdminIcon.tsx"),
+    read("src/pages/WorkshopAccessPage.tsx"),
+    read("src/pages/workshop-access.css"),
+  ]);
+  assert.ok(navigation.indexOf('path: "/"') < navigation.indexOf('path: "/workshop/access"'), "Overview is defined before Workshop Access");
+  assert.match(navigation, /path: "\/workshop\/access"[^\n]*icon: "workshop"/);
+  assert.match(icons, /workshop: <>/);
+  for (const section of ["workshop-access__hero", "workshop-access__metrics", "workshop-directory", "workshop-policy-grid", "workshop-controls", "workshop-audit"]) assert.match(page, new RegExp(section));
+  assert.match(page, /aria-expanded=\{history !== null\}/);
+  assert.match(styles, /--workshop-plum:/);
+  assert.match(styles, /\.workshop-access__hero \{[\s\S]*radial-gradient[\s\S]*linear-gradient/);
+  assert.doesNotMatch(styles, /var\(--surface,#17191c\)|border:1px solid #7775/);
 });
 
 test("GOATS is a first-class expandable sidebar group with relevant child icons", async () => {
@@ -156,9 +171,9 @@ test("Admin account identity uses suffix badges without an obsolete status dot o
 
 test("Watch authority failures render unknown archive state instead of false zero counts", async () => {
   const page = await read("src/pages/WatchAdminPage.tsx");
-  assert.match(page, /summary \? `\$\{summary\.retained\} \/ 24` : "— \/ 24"/);
+  assert.match(page, /summary \? `\$\{summary\.retained\} \/ 24` : "â€” \/ 24"/);
   for (const field of ["retained", "visible", "hidden", "remaining"]) {
-    assert.match(page, new RegExp(`summary\\?\\.${field} \\?\\? "—"`));
+    assert.match(page, new RegExp(`summary\\?\\.${field} \\?\\? "â€”"`));
   }
   assert.match(page, /archiveUnavailable && <div className="watch-admin-empty">[\s\S]*Retained archive unavailable/);
   assert.match(page, /No zero counts are being inferred/);
@@ -170,7 +185,7 @@ test("Site Content exposes separate normal and fixture-labelled Live Now configu
   const [app, page, client] = await Promise.all([read("src/App.tsx"), read("src/pages/SiteContentPage.tsx"), read("src/banner/client.ts")]);
   assert.match(app, /path="content" element={guard\("\/content", <SiteContentPage/);
   for (const label of ["Normal promo / info", "Homepage content rail", "Seamless marquee scroll", "Third Railify triple zap", "Divider size", "Ticker divider icon", "Ticker divider size", "Allow visitors to dismiss", "Automatic Live Now", "Presentation mode", "Animation speed", "Locked destination", "Fixture preview only", "Unsaved changes"]) assert.match(page, new RegExp(label));
-  assert.match(page, /SAMPLE PREVIEW — Third Railify live broadcast title/);
+  assert.match(page, /SAMPLE PREVIEW â€” Third Railify live broadcast title/);
   assert.match(page, /<code>\/watch\/live<\/code>/);
   assert.doesNotMatch(page, /Active stream title<\/span><input/);
   assert.match(client, /expectedRevision/);

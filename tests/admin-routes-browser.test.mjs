@@ -7,7 +7,7 @@ import { chromium } from "playwright-core";
 const ORIGIN = "http://127.0.0.1:44208";
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const ROUTES = [
-  "/", "/analytics", "/inbox", "/watch", "/content", "/shop", "/products", "/collections", "/orders", "/customers",
+  "/", "/workshop/access", "/analytics", "/inbox", "/watch", "/content", "/shop", "/products", "/collections", "/orders", "/customers",
   "/commerce", "/commerce/payments", "/commerce/analytics", "/commerce/business", "/commerce/tax", "/commerce/emails", "/commerce/fulfillment",
   "/media", "/goats", "/goats/pending", "/goats/approved", "/goats/rejected", "/goats/comments", "/goats/settings", "/goats/emails",
   "/wheels", "/wheels/stages", "/wheels/access", "/wheels/results", "/membership", "/access", "/integrations", "/settings",
@@ -70,7 +70,6 @@ async function respond(route) {
   if (pathname === "/api/admin/analytics") return json(route, { ok: true, range: "7d", generatedAt: "2026-08-31T00:00:00.000Z", timezone: "UTC", configured: true, coverage: { start: null, end: null, totalEvents: 0, lastIngestedAt: null }, windows: {}, selected: { views: 0, sessions: 0, pagesPerSession: null, comparisonComplete: false, previous: { views: 0, sessions: 0, pagesPerSession: null }, deltas: { views: { available: false, value: null, direction: "unavailable" }, sessions: { available: false, value: null, direction: "unavailable" } } }, bucket: "day", series: [], pages: [], sources: [], devices: [], geography: [], revenue: { available: true, profitAvailable: false, profitUnavailableReason: "Cost data unavailable.", currencies: [] } });
   return json(route, { ok: false, error: "route_audit_unavailable", message: "Authority intentionally unavailable in the visual route audit." }, 503);
 }
-
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 
 async function waitForServer() {

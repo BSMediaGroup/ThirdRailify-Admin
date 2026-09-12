@@ -3,13 +3,12 @@ export type AdminArea = {
   parentPath?: string;
   label: string;
   shortLabel: string;
-  icon: "rumble" | "overview" | "analytics" | "content" | "watch" | "gaming" | "wheels" | "wheelStages" | "bracket" | "versus" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "integrations" | "settings";
+  icon: "rumble" | "overview" | "analytics" | "content" | "watch" | "gaming" | "wheels" | "wheelStages" | "bracket" | "versus" | "polls" | "automations" | "products" | "orders" | "commerce" | "payments" | "business" | "tax" | "emails" | "fulfillment" | "media" | "goats" | "pending" | "approved" | "rejected" | "comments" | "vip" | "users" | "workshop" | "integrations" | "settings";
   summary: string;
   futureScope: string[];
 };
 
 export const adminAreas: AdminArea[] = [
-  { path: "/workshop/access", label: "Workshop Access", shortLabel: "Workshop", icon: "users", summary: "Account approvals for the private creative Workshop.", futureScope: [] },
   {
     path: "/",
     label: "Overview",
@@ -18,6 +17,7 @@ export const adminAreas: AdminArea[] = [
     summary: "Cross-system operational state, queues, and direct workspace routes.",
     futureScope: ["Authenticated system posture", "Live authority summaries", "Actionable moderation queues"],
   },
+  { path: "/workshop/access", label: "Workshop Access", shortLabel: "Workshop", icon: "workshop", summary: "Account approvals for the private creative Workshop.", futureScope: [] },
   {
     path: "/watch",
     label: "Watch / Broadcast",
