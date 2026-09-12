@@ -23,7 +23,7 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
   const raid = rule.eventType === RAID_TYPE;
   const streamEvent = textEvent || raid;
   const overlap = rules?.some(r => r.id !== rule.id && r.enabled && r.targetWheelId === rule.targetWheelId && r.sourceScope === rule.sourceScope && ((raid && r.eventType === 'rumble.chat.exact' && r.conditions.exactText?.normalize('NFKC').trim().toLowerCase() === RAID_TEXT) || (rule.eventType === 'rumble.chat.exact' && rule.conditions.exactText?.normalize('NFKC').trim().toLowerCase() === RAID_TEXT && r.eventType === RAID_TYPE)));
-  const gift = rule.eventType === 'rumble.gift_purchase', rant = rule.eventType === 'rumble.rant';
+  const gift = rule.eventType === 'rumble.gift_purchase', rant = rule.eventType === 'rumble.rant', subscriber = rule.eventType === 'subscriber_self_paid';
   const stateOnly = rule.eventType.startsWith('rumble.livestream.');
   const source = discovery?.source;
   const sourceName = source?.scope === rule.sourceScope ? source.displayName : rule.sourceLabel || (rule.sourceScope ? 'Saved / custom source' : 'Select a Rumble source');
@@ -69,7 +69,8 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
     {stateOnly ? <div className="event-incompatible" role="status"><strong>Wheel entry action incompatible</strong><p>Livestream transitions have no actor. Add actor to Wheel is unavailable.</p></div> : <>
       <fieldset><legend>Conditions</legend><div className="event-fields">
         {textEvent ? <><label>{rule.eventType === 'rumble.chat.exact' ? 'Exact message (required)' : 'Exact rant message (optional)'}<input aria-label={rule.eventType === 'rumble.chat.exact' ? 'Exact message (required)' : 'Exact rant message (optional)'} maxLength={500} value={rule.conditions.exactText || ''} {...invalid('exactText')} onChange={e => condition('exactText', e.target.value)} />{hint('exactText')}</label><label>Required badge (optional)<input value={rule.conditions.badge || ''} {...invalid('badge')} onChange={e => condition('badge', e.target.value)} />{hint('badge')}</label></> : null}
-        {rant || rule.eventType === 'rumble.subscribe' ? <label>Minimum amount in cents (optional)<input type="number" min={0} max={100000000} step={1} value={rule.conditions.minAmountCents ?? ''} {...invalid('minAmountCents')} onChange={e => condition('minAmountCents', e.target.value, true)} />{hint('minAmountCents')}</label> : null}
+        {rant ? <label>Minimum amount in cents (optional)<input type="number" min={0} max={100000000} step={1} value={rule.conditions.minAmountCents ?? ''} {...invalid('minAmountCents')} onChange={e => condition('minAmountCents', e.target.value, true)} />{hint('minAmountCents')}</label> : null}
+        {subscriber ? <p>Exactly 500 reported cents is required. A 0-cent record is a gifted recipient and is excluded; missing or unexpected amounts require review.</p> : null}
         {gift ? <><label>Minimum gifts (optional)<input type="number" min={0} max={100000000} step={1} value={rule.conditions.minGifts ?? ''} {...invalid('minGifts')} onChange={e => condition('minGifts', e.target.value, true)} />{hint('minGifts')}</label><label>Gift type (optional)<input value={rule.conditions.giftType || ''} {...invalid('giftType')} onChange={e => condition('giftType', e.target.value)} />{hint('giftType')}</label></> : null}
         {rule.eventType === 'rumble.follow' ? <p>Any new follower from this source. No stream or amount condition.</p> : null}
       </div>{hint('conditions')}
@@ -91,14 +92,14 @@ export function AutomationRuleEditor({ rule, wheels, discovery, readiness, rules
       </fieldset>
       <label className="event-enable"><input type="checkbox" checked={action.appearance != null} onChange={e => update({ actionConfig: { ...action, appearance: e.target.checked ? {} : null } })} />Apply entrant appearance on future successful awards</label>
       {action.appearance != null ? <EntrantAppearanceControls value={action.appearance} onChange={appearance => update({ actionConfig: { ...action, appearance } })} /> : <p>Optional appearance is off. Choose components explicitly to decorate future awards.</p>}
-      {rule.eventType === 'rumble.subscribe' && action.appearance != null ? <p>Subscriber decoration applies only when reported amount_cents is positive. Zero-value subscriber awards retain their existing eligibility and appearance.</p> : null}
+      {subscriber && action.appearance != null ? <p>Subscriber decoration applies only to qualifying 500-cent self-paid events. Gifted-recipient records never receive this award or appearance.</p> : null}
       {action.appearance != null && readiness?.appearance === false ? <p role="status">Entrant appearance requires migration 0040. Saving checks readiness before changing this rule.</p> : null}
       {hint('appearance')}
       <label className="event-enable"><input type="checkbox" checked={rule.enabled} onChange={e => update({ enabled: e.target.checked })} />Enable on save</label><p>Enabling or changing award conditions starts a new activation boundary. Appearance-only edits preserve activation and affect future events.</p>
       <fieldset className="event-tester"><legend>Dry run — no action will be executed</legend><div className="event-fields">
         <label>Sample actor<input value={sample.actorLabel} onChange={e => { setSample({ ...sample, actorLabel: e.target.value }); setTest(null); }} /></label>
         {streamEvent ? <label>Sample message<input value={sample.text} onChange={e => { setSample({ ...sample, text: e.target.value }); setTest(null); }} /></label> : null}
-        {rant || rule.eventType === 'rumble.subscribe' ? <label>Sample amount (cents)<input type="number" min={0} step={1} value={sample.amountCents} onChange={e => { setSample({ ...sample, amountCents: Number(e.target.value) }); setTest(null); }} /></label> : null}
+        {rant || subscriber ? <label>Sample amount (cents)<input type="number" min={0} step={1} value={sample.amountCents} onChange={e => { setSample({ ...sample, amountCents: Number(e.target.value) }); setTest(null); }} /></label> : null}
         {gift ? <><label>Sample gifts<input type="number" min={1} step={1} value={sample.totalGifts} onChange={e => { setSample({ ...sample, totalGifts: Number(e.target.value) }); setTest(null); }} /></label><label>Sample gift type<input value={sample.giftType} onChange={e => { setSample({ ...sample, giftType: e.target.value }); setTest(null); }} /></label></> : null}
         {rule.conditions.badge ? <label>Sample badge<input value={sample.badge} onChange={e => { setSample({ ...sample, badge: e.target.value }); setTest(null); }} /></label> : null}
         {rule.conditions.livestreamId ? <label>Sample livestream<select aria-label="Sample livestream" value={sample.livestreamId} onChange={e => { setSample({ ...sample, livestreamId: e.target.value }); setTest(null); }}><option value="">No stream selected</option><option value={rule.conditions.livestreamId}>Rule's selected livestream</option></select></label> : null}

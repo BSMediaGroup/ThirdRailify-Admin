@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthProvider';
 import '../styles/trigger-studio.css';
 
 import { AutomationRuleEditor } from './AutomationRuleEditor';
+import { SubscriberRosterPanel } from './SubscriberRosterPanel';
 import { AutomationRequestError, automationRequest as request, families, type Rule, type Discovery, type WheelChoice, type Readiness } from '../lib/automation-client';
 import { defaultAction } from '../lib/automation-model.mjs';
 type Payload = { list?: { truncated: boolean }; readiness?: Readiness; rules: Rule[]; wheels: WheelChoice[]; discovery?: Discovery; activity: { id: string; rule_id: string; event_type?: string; actor_label: string; outcome: string; awarded_entries: number; action_result: string | null; created_at: string }[] };
@@ -39,5 +40,6 @@ export function TriggerStudio({ wheelId = '', runtime }: { wheelId?: string; run
     <AutomationRuleList rules={rules} scoped={Boolean(wheelId)} truncated={payload?.list?.truncated} canManage={canManage && !loadError} targetLink={id => `/wheels/${id}`} onEdit={rule => { setEditor(rule); setFieldErrors({}); setError(''); }} onToggle={rule => { if (csrfToken) void toggleRule(rule, csrfToken, request); }} onDelete={rule => { if (window.confirm(`Delete automation ${rule.name}? Existing entries and receipts are retained.`)) void mutate('rules/delete', { id: rule.id, revision: rule.revision, confirm: 'DELETE' }); }} />
     {!rules.length && !loadError ? <p className="event-empty" role="status">{loading ? 'Loading rules…' : payload ? 'No rules yet. Create an automation to connect new Rumble events to a Wheel.' : 'Rules have not loaded.'}</p> : null}
     <div className="event-activity"><h3>Recent Wheel actions</h3>{payload?.activity.length ? payload.activity.map(a => <p key={a.id}><strong>{a.actor_label}</strong>{a.event_type === 'rumble.raid.received' ? ' | Raid Received | Chat-derived' : ''} · {(a.action_result || a.outcome).replaceAll('_', ' ')} · +{a.awarded_entries || 0} entries · {date(a.created_at)}</p>) : <p>{loadError ? "Activity unavailable until rules reload successfully." : loading && !payload ? "Loading recent actions..." : "No event receipts recorded."}</p>}</div>
+    <SubscriberRosterPanel wheelId={wheelId} csrf={csrfToken || ''} canManage={canManage} />
   </section>;
 }

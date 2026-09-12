@@ -1,7 +1,7 @@
 import { AuthFailure } from './auth-core.js';
 import { normalizePollTrigger } from './poll-normalization.js';
 
-import { EVENT_TYPES, RAID_TYPE, RAID_METHOD, RAID_TEXT, defaultAction, ruleFieldErrors } from '../../src/lib/automation-model.mjs';
+import { EVENT_TYPES, RAID_TYPE, RAID_METHOD, RAID_TEXT, SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE, defaultAction, ruleFieldErrors } from '../../src/lib/automation-model.mjs';
 export { EVENT_TYPES };
 export function invalid(code = 'automation_invalid', message = 'The automation input is invalid.') { throw new AuthFailure(400, code, message); }
 export function text(value, maximum, required = true) {
@@ -16,7 +16,8 @@ export function fieldFailure(fields) {
 export function validateRule(input) {
   const errors = ruleFieldErrors(input);
   if (Object.keys(errors).length) fieldFailure(errors);
-  const actionConfig = input.actionConfig ?? defaultAction();
+  const actionConfig = { ...(input.actionConfig ?? defaultAction()) };
+  if ([SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(input.eventType)) actionConfig.subscriberPolicy = 'self_paid_v1';
   return { name: input.name.trim(), description: (input.description ?? '').trim(), enabled: input.enabled,
     sourceScope: input.sourceScope.trim(), eventType: input.eventType,
     conditions: Object.fromEntries(Object.entries(input.conditions).filter(([k, v]) => !(input.eventType === 'rumble.rant' && k === 'exactText' && !v.trim())).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])),
@@ -25,8 +26,9 @@ export function validateRule(input) {
 }
 export function matches(rule, event) {
   const c = rule.conditions, d = event.evidence || {};
+  const subscriber = [SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(rule.eventType) && [SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(event.eventType);
   return (event.eventType !== RAID_TYPE || (d.detectionMethod === RAID_METHOD && normalizePollTrigger(d.announcement || '') === RAID_TEXT))
-    && event.eventType === rule.eventType && event.sourceScope === rule.sourceScope
+    && (event.eventType === rule.eventType || subscriber) && (!subscriber || d.amountCents === 500) && event.sourceScope === rule.sourceScope
     && (!c.livestreamId || c.livestreamId === event.livestreamId)
     && (!c.exactText || normalizePollTrigger(c.exactText) === d.normalizedText)
     && (!c.badge || (d.badges || []).some(b => normalizePollTrigger(b) === normalizePollTrigger(c.badge)))
@@ -40,7 +42,7 @@ export function validateEvent(event) {
   text(event.actorKey, 500); text(event.actorLabel, 120); text(event.sourceScope, 200);
   if (!event.actorKey.startsWith(`rumble:${event.sourceScope}:`)) invalid('automation_actor_invalid');
   const usernameKey = `rumble:${event.sourceScope}:${normalizePollTrigger(event.actorLabel)}`;
-  if (event.actorKey !== usernameKey && !(event.eventType === 'rumble.subscribe' && event.actorKey.startsWith(`rumble:${event.sourceScope}:user:`) && event.actorKey.length > `rumble:${event.sourceScope}:user:`.length)) invalid('automation_actor_invalid');
+  if (event.actorKey !== usernameKey && !([SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(event.eventType) && event.actorKey.startsWith(`rumble:${event.sourceScope}:user:`) && event.actorKey.length > `rumble:${event.sourceScope}:user:`.length)) invalid('automation_actor_invalid');
   if (typeof event.providerEventAt !== 'string' || !Number.isFinite(Date.parse(event.providerEventAt)) || Date.parse(event.providerEventAt) > Date.now() + 300000) invalid('automation_timestamp_invalid');
   if (event.actorAvatarUrl != null) { let url; try { url = new URL(event.actorAvatarUrl); } catch { invalid("automation_avatar_invalid"); } if (typeof event.actorAvatarUrl !== "string" || event.actorAvatarUrl.length > 2048 || url.protocol !== "https:" || url.username || url.password) invalid("automation_avatar_invalid"); }
   const d = event.evidence;
@@ -49,7 +51,8 @@ export function validateEvent(event) {
   if (d.normalizedText !== undefined && (typeof d.normalizedText !== 'string' || d.normalizedText.length > 500 || normalizePollTrigger(d.normalizedText) !== d.normalizedText)) invalid();
   if (d.badges !== undefined && (!Array.isArray(d.badges) || d.badges.length > 20 || d.badges.some(b => typeof b !== 'string' || b.length > 80))) invalid();
   for (const key of ['amountCents', 'totalGifts']) if (d[key] !== undefined && (!Number.isSafeInteger(d[key]) || d[key] < 0 || d[key] > 100000000)) invalid();
-  if (['rumble.rant', 'rumble.subscribe'].includes(event.eventType) && d.amountCents === undefined) invalid();
+  if (['rumble.rant', SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(event.eventType) && d.amountCents === undefined) invalid();
+  if ([SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(event.eventType) && d.amountCents !== 500) invalid('automation_subscriber_not_self_paid');
   if (event.eventType === 'rumble.gift_purchase') { if ((!Number.isSafeInteger(d.totalGifts) || d.totalGifts < 1) || !Number.isSafeInteger(d.videoId) || d.videoId < 0) invalid(); text(d.giftType, 160); }
   if (['rumble.chat.exact', 'rumble.rant'].includes(event.eventType)) text(event.livestreamId, 160);
   if (event.eventType === RAID_TYPE) {

@@ -11,17 +11,21 @@ import { createSession } from '../functions/_shared/auth-core.js';
 import { cookiePair, jsonRequest } from './auth-test-helpers.mjs';
 
 const base = { name: 'New follower entries', description: '', enabled: true, sourceScope: 'user:fixture', eventType: 'rumble.follow', conditions: {}, actionType: 'wheel.add_actor', targetWheelId: 'wheel-fixture', duplicatePolicy: 'skip' };
-test('confirmed redacted provider sample and Python envelopes preserve all five event families', async () => {
+test('confirmed redacted provider sample distinguishes gifted recipients from paid subscriber events', async () => {
   const fixture = JSON.parse(await readFile(new URL('./fixtures/rumble-events-v1.json', import.meta.url), 'utf8'));
   const events = JSON.parse(await readFile(new URL('./fixtures/rumble-event-envelopes-v1.json', import.meta.url), 'utf8'));
   assert.equal(events.length, 5);
-  for (const e of events) assert.equal(validateEvent(e), e);
+  for (const e of events.filter(item => item.eventType !== 'subscriber_gifted_recipient')) assert.equal(validateEvent(e), e);
+  const giftedRecipient = events.find(e => e.eventType === 'subscriber_gifted_recipient');
+  assert.throws(() => validateEvent(giftedRecipient), error => error.code === 'automation_event_invalid');
   const gift = events.find(e => e.eventType === 'rumble.gift_purchase');
   const raw = fixture.gifted_subs.recent_gifted_subs[0];
   const material = ['rumble-event-v1', 'rumble.gift_purchase', 'user:fixture', 'sample viewer', raw.gifted_on, raw.video_id, raw.total_gifts, raw.gift_type];
   assert.equal(gift.eventFingerprint, createHash('sha256').update(JSON.stringify(material)).digest('hex'));
   assert.equal(gift.evidence.videoId, 444666132);
-  assert.equal(events.find(e => e.eventType === 'rumble.subscribe').evidence.amountCents, 0);
+  assert.equal(giftedRecipient.evidence.amountCents, 0);
+  const selfPaid = { ...giftedRecipient, eventType: 'subscriber_self_paid', evidence: { amountCents: 500 } };
+  assert.equal(validateEvent(selfPaid), selfPaid);
   assert.equal(events.find(e => e.eventType === 'rumble.rant').evidence.amountCents, 100);
 });
 const event = (r, n = 1, extra = {}) => ({ ruleId: r.id, ruleRevision: r.revision, eventType: r.eventType, sourceScope: r.sourceScope,
@@ -35,6 +39,27 @@ test('typed rules, conditions, exact normalization and dry run never execute', (
   assert.equal(dryRunAutomation({ rule: rant, sample: { text: 'enter please', amountCents: 500, badge: 'subscriber' } }).matched, false);
   assert.equal(dryRunAutomation({ rule: rant, sample: { text: 'enter', amountCents: 100, badge: 'subscriber' } }).matched, false);
   assert.throws(() => validateEvent(event({ id: 'rule', revision: 1, ...base }, 1, { actorKey: 'wrong-source' })));
+});
+
+test('legacy generic subscriber rules project and execute as self-paid only, then normalize on deliberate save without replay', async t => {
+  const h = await createCommerceDatabases(); t.after(h.dispose); const env = commerceEnvironment(h), db = h.commerceDb, now = new Date().toISOString();
+  await db.prepare(`INSERT INTO wheels(id,reference_code,public_slug,title,lifecycle,visibility,owner_account_id,config_json,created_at,updated_at)
+    VALUES ('wheel-fixture','W-LEGACY','legacy-subscriber','Legacy Subscriber','active','hidden','owner','{}',?,?)`).bind(now, now).run();
+  await db.prepare(`INSERT INTO automation_rules(id,name,description,enabled,source_scope,event_type,conditions_json,action_type,target_wheel_id,duplicate_policy,activated_at,created_by_account_id,created_at,updated_at,action_config_json)
+    VALUES ('legacy-subscriber','Legacy generic subscriber','',1,'user:fixture','rumble.subscribe','{"minAmountCents":0}','wheel.add_actor','wheel-fixture','skip','2000-01-01T00:00:00Z','admin',?,?,?)`).bind(now, now, JSON.stringify({ version: 2, repeatActorPolicy: 'skip', award: { mode: 'fixed', entriesPerUnit: 1, unitCents: 100 } })).run();
+  let projected = (await listAutomationRules(env, '', 'legacy-subscriber')).rules[0];
+  assert.equal(projected.eventType, 'subscriber_self_paid'); assert.equal(projected.legacySubscriberRule, true); assert.deepEqual(projected.conditions, {});
+  assert.equal((await botAutomationRules(env)).rules[0].eventType, 'subscriber_self_paid');
+  const paid = event(projected, 'legacy-paid', { evidence: { amountCents: 500 }, actorLabel: 'Paid Viewer', actorKey: 'rumble:user:fixture:paid viewer' });
+  const send = async value => (await ingestAutomationEvents(env, { events: [value] })).results[0].outcome;
+  assert.equal(await send(paid), 'added'); assert.equal(await send(paid), 'duplicate_event');
+  assert.equal(await send(event(projected, 'legacy-gifted', { evidence: { amountCents: 0 }, actorLabel: 'Gifted Viewer', actorKey: 'rumble:user:fixture:gifted viewer' })), 'invalid_event');
+  const receiptCount = (await db.prepare('SELECT COUNT(*) n FROM automation_receipts').first()).n;
+  projected = (await saveAutomationRule(env, 'admin', { ...projected, name: 'Canonical self-paid subscriber' })).rule;
+  const stored = await db.prepare("SELECT event_type,conditions_json,action_config_json FROM automation_rules WHERE id='legacy-subscriber'").first();
+  assert.equal(stored.event_type, 'rumble.subscribe'); assert.equal(stored.conditions_json, '{}'); assert.equal(JSON.parse(stored.action_config_json).subscriberPolicy, 'self_paid_v1'); assert.equal(projected.legacySubscriberRule, false);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM automation_receipts').first()).n, receiptCount);
+  assert.equal(await send(paid), 'stale_revision');
 });
 
 test('migration, CRUD, activation, atomic exactly-once entries, counters, receipts and Wheel locks', async t => {
@@ -66,10 +91,12 @@ test('migration, CRUD, activation, atomic exactly-once entries, counters, receip
   await db.prepare('UPDATE wheels SET editing_locked=1,revision=revision+1').run();
   assert.equal(await send(event(r, 5, { actorLabel: 'New Viewer' })), 'wheel_unavailable');
   await db.prepare('UPDATE wheels SET editing_locked=0,revision=revision+1').run();
-  for (const [kind, evidence] of [['rumble.chat.exact', { normalizedText: 'enter' }], ['rumble.rant', { amountCents: 500 }], ['rumble.subscribe', { amountCents: 0 }], ['rumble.gift_purchase', { totalGifts: 5, giftType: 'random', videoId: 123 }]]) {
+  for (const [kind, evidence] of [['rumble.chat.exact', { normalizedText: 'enter' }], ['rumble.rant', { amountCents: 500 }], ['subscriber_self_paid', { amountCents: 500 }], ['rumble.gift_purchase', { totalGifts: 5, giftType: 'random', videoId: 123 }]]) {
     const next = (await saveAutomationRule(env, 'admin', { ...base, eventType: kind, conditions: kind === 'rumble.chat.exact' ? { exactText: 'ENTER' } : {} })).rule;
     assert.equal(await send(event(next, kind, { evidence, livestreamId: 'stream', actorLabel: kind, actorKey: `rumble:user:fixture:${kind}` })), 'added');
   }
+  const subscriber = (await saveAutomationRule(env, 'admin', { ...base, eventType: 'subscriber_self_paid', conditions: {} })).rule;
+  assert.equal(await send(event(subscriber, 'gifted-zero', { evidence: { amountCents: 0 }, actorLabel: 'Gift Recipient', actorKey: 'rumble:user:fixture:gift recipient' })), 'invalid_event');
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM wheel_entries').first()).n, 5);
   // A downstream audit failure rolls back the entry, revision, receipt and counters.
   await db.prepare("CREATE TRIGGER test_automation_rollback BEFORE INSERT ON wheel_audit_events BEGIN SELECT RAISE(ABORT, 'fixture rollback'); END").run();

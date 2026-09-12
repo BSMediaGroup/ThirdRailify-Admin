@@ -109,6 +109,7 @@ export async function ingestIntelligence(env, body, { provenance = 'live', accou
   }
   const v = await validateObservation(body, provenance, received);
   const db = await intelligenceDb(env);
+  const previous = await db.prepare(`SELECT o.id,o.set_id FROM rumble_intelligence_sources s LEFT JOIN rumble_intelligence_observations o ON o.id=s.current_id WHERE s.source=?`).bind(v.source).first();
   const attemptAt = v.observedAt || received;
   const attempt = JSON.stringify({ label: v.label, providerAt: v.providerAt, observedAt: v.observedAt, receivedAt: received, qualified: v.qualified, reasons: v.metadata.reasons, provenance, coverageGaps: v.metadata.coverageGaps });
   const statements = [
@@ -119,6 +120,12 @@ export async function ingestIntelligence(env, body, { provenance = 'live', accou
   ];
   if (accountId) statements.push(db.prepare('INSERT OR IGNORE INTO rumble_intelligence_imports(observation_id,account_id,received_at) VALUES(?,?,?)').bind(v.id, accountId, received));
   await db.batch(statements);
+  // Roster membership follows semantic set changes, never Bot timer cadence.
+  // A roster fault cannot reject the independently valid intelligence receipt.
+  if (provenance === 'live' && v.qualified && previous?.set_id !== v.setId) {
+    try { const { syncEnabledRosterRulesForSnapshot } = await import('./subscriber-roster.js'); await syncEnabledRosterRulesForSnapshot(env, v.source); }
+    catch { /* schema may be pending or a target may be locked; manual preview exposes the fault */ }
+  }
   return { ok: true, observationId: v.id, qualified: v.qualified, source: v.source, metadata: v.metadata };
 }
 

@@ -24,9 +24,12 @@ export function manualEntryIdentity(input, prior) {
 export async function automaticEntryIdentity(event) {
   const type = EVENT_ENTRY_TYPES[event.eventType];
   if (!type || !event.actorKey || !event.sourceScope) throw new AuthFailure(400, 'entrant_identity_invalid', 'An automation entry requires a validated actor, source and event type.');
+  // Preserve the pre-canonicalization event-family material so a deliberate
+  // legacy subscriber-rule save cannot create a second identity for one actor.
+  const identityEventType = event.eventType === 'subscriber_self_paid' ? 'rumble.subscribe' : event.eventType;
   // Tuple encoding avoids delimiter collisions; do not use a mutable display label,
   // avatar or appearance. Source and event family remain distinct across rules.
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([1, event.sourceScope, event.actorKey, event.eventType])));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([1, event.sourceScope, event.actorKey, identityEventType])));
   const key = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   return { version: 1, type, origin: 'automation', key };
 }

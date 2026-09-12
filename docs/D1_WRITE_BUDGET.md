@@ -72,6 +72,12 @@ No subscriber-to-Wheel logic is added. Reuse the existing Bot `SubscriberIntelli
 - An unchanged checkpoint may persist only bounded source/observation metadata, no copied member set. Target at most ten D1 written rows per checkpoint including indexes and service-auth overhead, at most 288 five-minute checkpoints/day/source.
 - Measure real D1 metadata for 100 identical inputs and one-member deltas before enabling the next milestone. Budget below 5,000 routine writes/day/source including checkpoints, with explicit event/peak allowances; never infer the budget solely from SQL statement count.
 
+## Subscriber roster measured implementation
+
+The current-roster milestone reuses each persisted source-scoped semantic set and runs only after the intelligence authority reports a qualified membership/classification change. It adds no Bot timer, provider fetch, minute cadence, or per-observation member copy. A rule stores its last snapshot and semantic fingerprint; 100 repeated evaluations of an identical input produced **zero written rows and zero mutations** in the real local D1 harness (400 queries / 1,600 rows read total).
+
+One eligible addition measured 23 queries / 28 rows written / 80 rows read; one exact-managed removal measured 24 / 19 / 99. A gift-only semantic change measured 19 / 11 / 55 while an explicit assertion proved zero Wheel membership writes; its writes were bounded snapshot/rule status and audit/index effects. These figures are Wrangler/D1 metadata, not SQL statement-count guesses. Normal unchanged semantic snapshots do not invoke roster evaluation at all, so the steady-state roster membership budget is zero writes. Changed snapshots scale with the number of actual contribution additions/removals and enabled rules, bounded by the existing 1,000-person projection.
+
 ## Release and rollback
 
 Build and test Admin before deploying its authority, then restart the paired Bot once with its existing single-instance lock, config and durable outboxes. Public and Commerce Worker source are unchanged. No D1 migration, export, bulk rewrite or index build is required. Remote ledgers are captured; unrelated pending migrations must not be applied. For rollback deploy the previous Admin version; Bot falls back to existing routes only on 404. Reverting Bot restores the previous higher write rate, so monitor account headroom.

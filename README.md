@@ -1,5 +1,9 @@
 # Third Railify Admin
 
+## Self-paid subscriber automation and current roster
+
+Rumble subscriber rules now use canonical `subscriber_self_paid` semantics: exactly 500 reported cents qualifies, gifted recipients and review values do not. Current-roster rules can add missing eligible people or exactly manage only their own recorded Wheel contribution, with stale-removal blocking, change-driven evaluation, source-scoped provenance, and shared Admin/Public controls. Existing generic subscriber rules remain compatible, visibly legacy, self-paid-only, and normalize only on deliberate save. See [contract, schema, safeguards, tests, and release controls](docs/SUBSCRIBER_ROSTER_AUTOMATION.md).
+
 ## Workshop Access
 
 `/workshop/access` manages existing-account Lab approval, suspension, expiry and audit history through canonical Admin capabilities. The Lab uses the existing login, Turnstile and target-bound handoff with host-only cookies. See [architecture, created files, migrations, backup and validation](docs/WORKSHOP_ACCESS.md). Private Lab conversations and media remain in dedicated Lab storage.

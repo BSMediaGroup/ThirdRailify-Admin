@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:rumble-intelligence": "node --test --test-concurrency=1 tests/rumble-intelligence.test.mjs tests/rumble-intelligence-connected.test.mjs",
+    "test:subscriber-roster": "node --test --test-concurrency=1 tests/subscriber-roster.test.mjs tests/event-automations.test.mjs tests/automation-awards.test.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

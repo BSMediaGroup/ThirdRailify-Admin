@@ -65,7 +65,7 @@ async function handlePublicRead(request, env, path) {
 }
 
 async function handleInternal(method, env, path, body) {
-  const automation = path.match(/^([^/]+)\/automations\/(read|save|delete|test)$/);
+  const automation = path.match(/^([^/]+)\/automations\/(read|save|delete|test|roster-save|roster-preview|roster-sync)$/);
   if (method === "POST" && automation) return wheelAutomations(env, String(body.accountId || ""), decode(automation[1]), automation[2], body.input || {});
   const accountId = String(body.accountId || "").slice(0, 160);
   if (method === "POST" && path === "access") return getCreatorAccess(env, accountId);

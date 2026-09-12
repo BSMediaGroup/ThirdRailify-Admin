@@ -38,6 +38,16 @@ PENDING VER=0.1.0-alpha.0
 - Registry page sizes are 10/20/50/100 (default 20). Moved Rumble Intelligence below Watch / Broadcast and drew its icon inline from the Rumble reference shape.
 - Local contract, real-handler browser, build/typecheck and scoped lint checks cover the enhancement. The original quota/migration blocker was resolved by the production schema completion above.
 
+## 2026-09-13 - Self-paid subscriber and current-roster automation
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Made `subscriber_self_paid` the canonical event contract, matching only exact-500 subscriber evidence while excluding gifted recipients and review values. Existing `rumble.subscribe` rows remain fingerprint-compatible and visibly legacy until deliberate save.
+- Added disabled-by-default current-roster rules with add-missing and exact-managed modes, change-driven sync, qualified-live removal gates, optimistic concurrency, sparse audit, and per-entry contribution provenance that preserves independent manual/event weight and appearance.
+- Added shared Admin/Public Wheel controls plus Rumble Intelligence eligibility evidence. Migration `0048` is isolated from pending `0046`; see `docs/SUBSCRIBER_ROSTER_AUTOMATION.md`.
+
 # Bump notes
 
 ## 2026-09-09 - D1 schema reporting quota repair

@@ -10,7 +10,7 @@ import { automationsStatus } from '../functions/_shared/polls-core.js';
 
 const ORIGIN = 'http://127.0.0.1:44207';
 const OUTPUT = fileURLToPath(new URL('../.artifacts/raid-automations/', import.meta.url));
-const kinds = ['rumble.chat.exact', 'rumble.rant', 'rumble.follow', 'rumble.subscribe', 'rumble.gift_purchase'];
+const kinds = ['rumble.chat.exact', 'rumble.rant', 'rumble.follow', 'subscriber_self_paid', 'rumble.gift_purchase'];
 test('Raid shared editor, local D1 save/reload, exact dry run and pending runtime at four widths', async t => {
   const h = await createCommerceDatabases(); t.after(h.dispose); const env = commerceEnvironment(h);
   await mkdir(OUTPUT, { recursive: true });

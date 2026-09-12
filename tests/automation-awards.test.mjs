@@ -30,10 +30,10 @@ test('typed field errors, family restrictions, integer arithmetic and dry-run ca
   for (const sourceScope of ['', '1788174504', 'user:', 'user:a b', 123, {}, 'user:a\n']) assert.throws(() => validateRule({ ...base, sourceScope }), e => e.code === 'automation_input_invalid');
   for (const entries of [-1, 0, .5, 100001, Number.MAX_SAFE_INTEGER, '5', null]) assert.throws(() => validateRule({ ...base, actionConfig: config('per_gift', entries) }));
   for (const unit of [0, -1, .5, 100000001, null]) assert.throws(() => validateRule({ ...base, eventType: 'rumble.rant', actionConfig: config('per_amount', 1, 'accumulate', unit) }));
-  for (const eventType of ['rumble.follow', 'rumble.subscribe', 'rumble.chat.exact']) assert.throws(() => validateRule({ ...base, eventType, actionConfig: config('per_gift', 5) }));
+  for (const eventType of ['rumble.follow', 'subscriber_self_paid', 'rumble.chat.exact']) assert.throws(() => validateRule({ ...base, eventType, actionConfig: config('per_gift', 5) }));
   assert.throws(() => validateRule({ ...base, actionConfig: { ...config(), version: 99 } }));
   assert.throws(() => validateRule({ ...base, conditions: { livestreamId: '444666132' } }));
-  for (const eventType of ['rumble.follow', 'rumble.subscribe']) assert.throws(() => validateRule({ ...base, eventType, conditions: { livestreamId: 'live-one' } }));
+  for (const eventType of ['rumble.follow', 'subscriber_self_paid']) assert.throws(() => validateRule({ ...base, eventType, conditions: { livestreamId: 'live-one' } }));
   assert.equal(calculateAward(config('per_gift', 3), base.eventType, gifts(10)).entries, 30);
   assert.equal(calculateAward(config('per_amount', 1), 'rumble.rant', { amountCents: 650 }).entries, 6);
   assert.equal(calculateAward(config('per_amount', 2), 'rumble.rant', { amountCents: 650, amountDollars: 99999 }).entries, 12);
@@ -109,10 +109,12 @@ test('weighted awards, distinct events, replay, thresholds, hidden normalization
   assert.equal(await send(event(r, 'rant-b', { amountCents: 250 })), 'duplicate_event');
   assert.equal(await send(event(r, 'rant-small', { amountCents: 99 })), 'condition_rejected');
   assert.equal(await send(event(r, 'rant-negative', { amountCents: -1 })), 'invalid_event');
-  for (const [eventType, evidence] of [['rumble.chat.exact', { normalizedText: 'enter' }], ['rumble.follow', {}], ['rumble.subscribe', { amountCents: 0 }], ['rumble.rant', { amountCents: 0 }], ['rumble.gift_purchase', gifts(20)]]) {
+  for (const [eventType, evidence] of [['rumble.chat.exact', { normalizedText: 'enter' }], ['rumble.follow', {}], ['subscriber_self_paid', { amountCents: 500 }], ['rumble.rant', { amountCents: 0 }], ['rumble.gift_purchase', gifts(20)]]) {
     const rule = await save({ eventType, conditions: eventType === 'rumble.chat.exact' ? { exactText: 'ENTER' } : {}, actionConfig: config('fixed', 5) });
     assert.equal(await send(event(rule, eventType, evidence)), 'added');
   }
+  const paidRule = await save({ eventType: 'subscriber_self_paid', conditions: {}, actionConfig: config('fixed', 5) });
+  assert.equal(await send(event(paidRule, 'gifted-recipient', { amountCents: 0 })), 'invalid_event');
   assert.equal((await row()).weight, 30);
   const skip = await save({ actionConfig: config('fixed', 5, 'skip') });
   assert.equal(await send(event(skip, 'skip', gifts(5))), 'duplicate_entrant'); assert.equal((await row()).weight, 30);

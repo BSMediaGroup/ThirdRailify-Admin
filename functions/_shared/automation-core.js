@@ -1,5 +1,5 @@
 import { requireAppearanceStorage } from './entrant-style-storage.js';
-import { RAID_TYPE, RAID_METHOD, defaultAction, calculateAward } from '../../src/lib/automation-model.mjs';
+import { RAID_TYPE, RAID_METHOD, SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE, defaultAction, calculateAward } from '../../src/lib/automation-model.mjs';
 import { AuthFailure, nowIso, randomId } from './auth-core.js';
 import { getSafeRumbleDiscovery, requirePollDb } from './polls-core.js';
 import { executeAutomationWheelEntry } from './wheels-core.js';
@@ -26,7 +26,7 @@ export async function automationReadiness(env) {
 export function projectRule(row) {
   const actionConfig = row.action_config_json ? JSON.parse(row.action_config_json) : defaultAction();
   return { id: row.id, name: row.name, description: row.description, enabled: Boolean(row.enabled), sourceScope: row.source_scope,
-    eventType: row.event_type, conditions: JSON.parse(row.conditions_json), actionType: row.action_type, targetWheelId: row.target_wheel_id,
+    eventType: row.event_type === LEGACY_SUBSCRIBER_TYPE ? SELF_PAID_SUBSCRIBER_TYPE : row.event_type, legacySubscriberRule: row.event_type === LEGACY_SUBSCRIBER_TYPE && actionConfig.subscriberPolicy !== 'self_paid_v1', conditions: row.event_type === LEGACY_SUBSCRIBER_TYPE ? {} : JSON.parse(row.conditions_json), actionType: row.action_type, targetWheelId: row.target_wheel_id,
     targetType: 'wheel', targetAvailable: Boolean(row.wheel_title), targetWheelTitle: row.wheel_title || 'Unavailable Wheel', targetLifecycle: row.wheel_lifecycle, targetLocked: Boolean(row.wheel_locked), actionConfig, sourceLabel: row.source_label || null, duplicatePolicy: actionConfig.repeatActorPolicy, revision: row.revision, activatedAt: row.activated_at,
     updatedAt: row.updated_at, counters: { matched: row.matched, executed: row.executed, duplicateEvents: row.duplicate_events,
       duplicateEntrants: row.duplicate_entrants, rejected: row.rejected, failed: row.failed }, lastMatchAt: row.last_match_at, lastOutcome: row.last_outcome, lastFault: row.last_fault };
@@ -73,7 +73,8 @@ export async function saveAutomationRule(env, actorId, input) {
   const discovery = await getSafeRumbleDiscovery(env);
   const sourceLabel = discovery.source?.scope === rule.sourceScope ? discovery.source.displayName : prior?.source_scope === rule.sourceScope ? prior.source_label : null;
   const activated = rule.enabled ? cosmeticOnly ? prior.activated_at : timestamp : null;
-  const values = [rule.name, rule.description, Number(rule.enabled), rule.sourceScope, rule.eventType, JSON.stringify(rule.conditions), rule.targetWheelId, activated, timestamp, JSON.stringify(rule.actionConfig), sourceLabel];
+  const storedEventType = rule.eventType === SELF_PAID_SUBSCRIBER_TYPE ? LEGACY_SUBSCRIBER_TYPE : rule.eventType;
+  const values = [rule.name, rule.description, Number(rule.enabled), rule.sourceScope, storedEventType, JSON.stringify(rule.conditions), rule.targetWheelId, activated, timestamp, JSON.stringify(rule.actionConfig), sourceLabel];
   const statement = prior ? db.prepare(`UPDATE automation_rules SET name=?,description=?,enabled=?,source_scope=?,event_type=?,conditions_json=?,target_wheel_id=?,activated_at=?,updated_at=?,action_config_json=?,source_label=?,revision=revision+1
     WHERE id=? AND revision=? AND deleted_at IS NULL`).bind(...values, id, prior.revision)
     : db.prepare(`INSERT INTO automation_rules(name,description,enabled,source_scope,event_type,conditions_json,target_wheel_id,activated_at,updated_at,action_config_json,source_label,id,created_by_account_id,created_at)
@@ -98,7 +99,7 @@ export function dryRunAutomation(input) {
   const rule = validateRule(input.rule), sample = input.sample || {};
   const sampleErrors = {};
   if (sample.actorLabel !== undefined && (typeof sample.actorLabel !== 'string' || !sample.actorLabel.trim() || sample.actorLabel.length > 120 || /[\p{Cc}\p{Cf}]/u.test(sample.actorLabel))) sampleErrors.sampleActor = 'Enter a sample actor of 1–120 characters without control characters.';
-  if (['rumble.rant', 'rumble.subscribe'].includes(rule.eventType) && (!Number.isSafeInteger(sample.amountCents ?? 0) || (sample.amountCents ?? 0) < 0 || sample.amountCents > 100000000)) sampleErrors.sampleAmount = 'Sample amount must be a whole number of cents from 0 to 100,000,000.';
+  if (['rumble.rant', SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(rule.eventType) && (!Number.isSafeInteger(sample.amountCents ?? 0) || (sample.amountCents ?? 0) < 0 || sample.amountCents > 100000000)) sampleErrors.sampleAmount = 'Sample amount must be a whole number of cents from 0 to 100,000,000.';
   if (rule.eventType === 'rumble.gift_purchase' && (!Number.isSafeInteger(sample.totalGifts) || sample.totalGifts < 1 || sample.totalGifts > 100000000)) sampleErrors.sampleGifts = 'Sample gifts must be a whole number from 1 to 100,000,000.';
   if (Object.keys(sampleErrors).length) fieldFailure(sampleErrors);
   const actorLabel = typeof sample.actorLabel === 'string' ? sample.actorLabel.trim().slice(0, 120) : 'Sample Viewer';

@@ -270,6 +270,8 @@ export async function saveWheel(env, accountId, slug, input) {
   const description = optionalText(input.description, 280);
   const policy = await getWheelSettings(env); const storedConfig = parseJson(wheel.config_json, DEFAULT_CONFIG); const config = validateConfig(input.config || {}, policy.settings.mechanics, { existingDuration: Number(storedConfig.spinDurationMs) });
   const requestedEntries = validateEntries(input.entries || []);
+  try { const { assertManagedEntriesPreserved } = await import('./subscriber-roster.js'); await assertManagedEntriesPreserved(db, wheel.id, requestedEntries); }
+  catch (error) { if (error?.code !== 'subscriber_roster_schema_unavailable' && !String(error?.message || '').includes('no such table')) throw error; }
   if (requestedEntries.some(entry => entry.appearance)) await requireAppearanceStorage(db);
   const referencedSegmentAssets = segmentAssetIds(config, requestedEntries);
   await validateSegmentMediaReferences(env, wheel.id, referencedSegmentAssets);

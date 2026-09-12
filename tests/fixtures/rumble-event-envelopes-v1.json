@@ -28,7 +28,7 @@
     "ruleRevision": 1
   },
   {
-    "eventType": "rumble.subscribe",
+    "eventType": "subscriber_gifted_recipient",
     "eventFingerprint": "8877c74b4b5f4465e0a88351440d51bfab9bf9038b81a79b0cadb001af5fcb1a",
     "sourceScope": "user:fixture",
     "livestreamId": null,
