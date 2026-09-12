@@ -17,7 +17,6 @@ export const adminAreas: AdminArea[] = [
     summary: "Cross-system operational state, queues, and direct workspace routes.",
     futureScope: ["Authenticated system posture", "Live authority summaries", "Actionable moderation queues"],
   },
-  { path: "/workshop/access", label: "Workshop Access", shortLabel: "Workshop", icon: "workshop", summary: "Account approvals for the private creative Workshop.", futureScope: [] },
   {
     path: "/watch",
     label: "Watch / Broadcast",
@@ -43,6 +42,7 @@ export const adminAreas: AdminArea[] = [
     summary: "Authenticated accounts, roles, sessions, and audit posture.",
     futureScope: ["D1 identity authority", "Least-privilege roles", "Session and audit controls"],
   },
+  { path: "/workshop/access", label: "Workshop Access", shortLabel: "Workshop", icon: "workshop", summary: "Account approvals for the private creative Workshop.", futureScope: [] },
   {
     path: "/analytics",
     label: "Audience Analytics",

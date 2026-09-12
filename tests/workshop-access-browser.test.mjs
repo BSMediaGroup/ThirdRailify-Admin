@@ -38,7 +38,9 @@ test("Workshop Access uses the premium Admin system and keeps Overview first", a
     const topLevel = await page.locator(".primary-nav > .nav-link, .primary-nav > .nav-group > .nav-group__row > .nav-link").evaluateAll((links) => links.map((link) => ({ href: link.getAttribute("href"), label: link.textContent?.trim() })));
     assert.equal(topLevel[0]?.href, "/", `Overview is the first destination at ${viewport.width}px`);
     assert.equal(topLevel[0]?.label, "Overview");
-    assert.equal(topLevel[1]?.href, "/workshop/access");
+    const usersIndex = topLevel.findIndex((entry) => entry.href === "/access");
+    const workshopIndex = topLevel.findIndex((entry) => entry.href === "/workshop/access");
+    assert.equal(workshopIndex, usersIndex + 1, `Workshop Access follows Users / Access at ${viewport.width}px`);
     assert.match(await page.locator('.primary-nav a[href="/workshop/access"] svg').innerHTML(), /M4 10\.5 12 4l8 6\.5/, "Workshop navigation uses the dedicated Workshop glyph");
 
     const metrics = await page.locator(".workshop-access__metrics strong").allTextContents();
@@ -80,7 +82,7 @@ test("Workshop Access uses the premium Admin system and keeps Overview first", a
       assert.equal(await audit.getAttribute("aria-expanded"), "false");
     }
 
-    await page.screenshot({ path: path.join(ARTIFACTS, `workshop-access-${viewport.width}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(ARTIFACTS, `workshop-access-order-${viewport.width}.png`), fullPage: true });
     assert.deepEqual(errors, [], `no console or page errors at ${viewport.width}x${viewport.height}`);
     await context.close();
   }
@@ -107,5 +109,3 @@ function account(id, displayName, adminLevel, locked = false) {
 function policy(allowed, source, canManageAccess, canManageProviders, grant) { return { allowed, source, canManageAccess, canManageProviders, grant }; }
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function waitForServer() { for (let attempt = 0; attempt < 80; attempt += 1) { try { if ((await fetch(ORIGIN)).ok) return; } catch { /* Vite is starting. */ } await new Promise((resolve) => setTimeout(resolve, 100)); } throw new Error("Workshop browser server did not start."); }
-
-

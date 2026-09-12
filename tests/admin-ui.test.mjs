@@ -34,6 +34,8 @@ test("Overview leads the sidebar and Workshop Access has its own premium control
     read("src/pages/workshop-access.css"),
   ]);
   assert.ok(navigation.indexOf('path: "/"') < navigation.indexOf('path: "/workshop/access"'), "Overview is defined before Workshop Access");
+  assert.ok(navigation.indexOf('path: "/access"') < navigation.indexOf('path: "/workshop/access"'), "Workshop Access follows Users / Access");
+  assert.ok(navigation.indexOf('path: "/workshop/access"') < navigation.indexOf('path: "/analytics"'), "Workshop Access stays directly above Audience Analytics");
   assert.match(navigation, /path: "\/workshop\/access"[^\n]*icon: "workshop"/);
   assert.match(icons, /workshop: <>/);
   for (const section of ["workshop-access__hero", "workshop-access__metrics", "workshop-directory", "workshop-policy-grid", "workshop-controls", "workshop-audit"]) assert.match(page, new RegExp(section));
