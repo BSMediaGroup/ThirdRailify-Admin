@@ -28,6 +28,25 @@ test("Admin sidebar keeps branding outside the independently scrollable navigati
   assert.match(styles, /\.sidebar-scroll-region \{[^}]*min-height: 0;[^}]*flex: 1 1 auto;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/);
 });
 
+test("Overview leads the sidebar and Workshop Access has its own premium control surface", async () => {
+  const [navigation, icons, page, styles] = await Promise.all([
+    read("src/config/navigation.ts"),
+    read("src/components/AdminIcon.tsx"),
+    read("src/pages/WorkshopAccessPage.tsx"),
+    read("src/pages/workshop-access.css"),
+  ]);
+  assert.ok(navigation.indexOf('path: "/"') < navigation.indexOf('path: "/workshop/access"'), "Overview is defined before Workshop Access");
+  assert.ok(navigation.indexOf('path: "/access"') < navigation.indexOf('path: "/workshop/access"'), "Workshop Access follows Users / Access");
+  assert.ok(navigation.indexOf('path: "/workshop/access"') < navigation.indexOf('path: "/analytics"'), "Workshop Access stays directly above Audience Analytics");
+  assert.match(navigation, /path: "\/workshop\/access"[^\n]*icon: "workshop"/);
+  assert.match(icons, /workshop: <>/);
+  for (const section of ["workshop-access__hero", "workshop-access__metrics", "workshop-directory", "workshop-policy-grid", "workshop-controls", "workshop-audit"]) assert.match(page, new RegExp(section));
+  assert.match(page, /aria-expanded=\{history !== null\}/);
+  assert.match(styles, /--workshop-plum:/);
+  assert.match(styles, /\.workshop-access__hero \{[\s\S]*radial-gradient[\s\S]*linear-gradient/);
+  assert.doesNotMatch(styles, /var\(--surface,#17191c\)|border:1px solid #7775/);
+});
+
 test("GOATS is a first-class expandable sidebar group with relevant child icons", async () => {
   const [navigation, shell, icons] = await Promise.all([
     read("src/config/navigation.ts"),

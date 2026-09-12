@@ -62,6 +62,16 @@ PENDING VER=0.1.0-alpha.0
 
 # Bump notes
 
+## 2026-09-13 - Master-only Workshop provider-profile restrictions
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added the immutable `workshop.profile_restrictions.manage` capability to Role Permissions & Scopes; Master receives it, while Full Admin and Regular User fail closed server-side.
+- Added account/provider all-or-selected policy controls, account defaults, effective profile inspection and before/after audit inside the existing Workshop Access rows.
+- Added Auth migration `0004_workshop_provider_profile_restrictions.sql` and a read-only `LAB_DB` profile-metadata binding. Raw credentials remain solely in Lab custody.
+
 ## 2026-09-09 - D1 schema reporting quota repair
 
 CURRENT VER=0.1.0-alpha.0

@@ -1,5 +1,5 @@
 export const adminCapabilityIds = [
-  "workshop.use", "workshop.access.manage", "workshop.providers.manage",
+  "workshop.use", "workshop.access.manage", "workshop.providers.manage", "workshop.profile_restrictions.manage",
   "rumble_intelligence.view", "rumble_intelligence.manage",
   "overview.view", "analytics.view", "inbox.view", "inbox.manage", "watch.view", "watch.manage",
   "content.view", "content.manage", "gaming.view", "gaming.manage", "commerce.view", "commerce.catalogue.manage", "commerce.business.manage",

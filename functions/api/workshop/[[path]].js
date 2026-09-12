@@ -33,6 +33,16 @@ export async function onRequest({ request, env }) {
       for (const row of rows.results || []) items.push({ account: await serializeAccount(env, row), workshop: { ...await workshopAccess(db, row.id), account: undefined } });
       return jsonResponse({ ok: true, items, total: total.n, page, pageSize: 20, canOpen: policy.allowed });
     }
+    const profileMatch = path.match(/^accounts\/([\w-]{1,100})\/profiles$/);
+    if (profileMatch) {
+      await requireAdminCapability(env, session, 'workshop.profile_restrictions.manage');
+      const targetId = profileMatch[1], target = await workshopAccess(db, targetId);
+      if (!target.account) throw new AuthFailure(404, 'account_not_found', 'Account not found.');
+      if (request.method === 'GET') return jsonResponse({ ok: true, ...(await profileRestrictionPayload(env, targetId)) });
+      if (request.method !== 'PUT') throw new AuthFailure(405, 'method_not_allowed', 'Use GET or PUT for profile restrictions.');
+      const body = await readJsonBody(request);
+      return jsonResponse({ ok: true, ...(await replaceProfileRestriction(env, session, targetId, body)) });
+    }
     const match = path.match(/^accounts\/([\w-]{1,100})(?:\/(history))?$/);
     if (!match) throw new AuthFailure(404, 'not_found', 'Workshop route not found.');
     const targetId = match[1], current = await workshopAccess(db, targetId);
@@ -64,4 +74,64 @@ export async function onRequest({ request, env }) {
     if (result[0].meta.changes !== 1) throw new AuthFailure(409, 'revision_conflict', 'Access changed. Reload this account before saving.');
     return jsonResponse({ ok: true, workshop: { ...await workshopAccess(db, targetId), account: undefined } });
   } catch (error) { return errorResponse(error, request, env); }
+}
+
+const PROFILE_PROVIDERS = new Set(['replicate','openai','xai','pexels','pixabay','unsplash']);
+async function profileRestrictionPayload(env, accountId) {
+  if (!env.LAB_DB?.prepare) throw new AuthFailure(503, 'lab_profile_authority_unavailable', 'Lab profile authority is unavailable.');
+  const ready = await env.LAB_DB.prepare('SELECT version FROM lab_schema WHERE version>=2').first();
+  if (!ready) throw new AuthFailure(503, 'lab_profile_authority_unavailable', 'Lab profile schema is unavailable.');
+  const [named, policies, grants, audit] = await Promise.all([
+    env.LAB_DB.prepare("SELECT id,provider,label,enabled,is_default,verification_status,verified_at FROM provider_key_profiles WHERE deleted_at IS NULL ORDER BY provider,is_default DESC,label").all(),
+    env.THIRDRAILIFY_AUTH_DB.prepare('SELECT * FROM workshop_provider_profile_policies WHERE account_id=? ORDER BY provider').bind(accountId).all(),
+    env.THIRDRAILIFY_AUTH_DB.prepare('SELECT provider,profile_id FROM workshop_provider_profile_grants WHERE account_id=? ORDER BY provider,profile_id').bind(accountId).all(),
+    env.THIRDRAILIFY_AUTH_DB.prepare('SELECT a.*,actor.display_name actor_name FROM workshop_provider_profile_audit a JOIN accounts actor ON actor.id=a.actor_id WHERE a.account_id=? ORDER BY a.created_at DESC LIMIT 50').bind(accountId).all(),
+  ]);
+  const byProvider = Object.fromEntries([...PROFILE_PROVIDERS].map(provider => [provider, [{ id:`runtime:${provider}`,provider,label:'Runtime Default',enabled:true,is_default:true,verification_status:'saved',runtime:true }, ...(named.results||[]).filter(row=>row.provider===provider).map(row=>({...row,enabled:Boolean(row.enabled),is_default:Boolean(row.is_default),runtime:false}))]]));
+  const policyMap = Object.fromEntries((policies.results||[]).map(row=>[row.provider,row]));
+  const grantMap = Object.fromEntries([...PROFILE_PROVIDERS].map(provider=>[provider,(grants.results||[]).filter(row=>row.provider===provider).map(row=>row.profile_id)]));
+  return {accountId,providers:[...PROFILE_PROVIDERS].map(provider=>({provider,profiles:byProvider[provider],policy:policyMap[provider]?{mode:policyMap[provider].access_mode,defaultProfileId:policyMap[provider].default_profile_id,revision:policyMap[provider].revision,allowedProfileIds:grantMap[provider]}:{mode:'all',defaultProfileId:null,revision:0,allowedProfileIds:[]}})),audit:audit.results||[]};
+}
+async function replaceProfileRestriction(env, session, accountId, body) {
+  const provider = String(body.provider || '').toLowerCase();
+  if (!PROFILE_PROVIDERS.has(provider) || !['all', 'selected'].includes(body.mode) || !Number.isSafeInteger(body.revision) || body.revision < 0 || !Array.isArray(body.profileIds) || body.profileIds.length > 20) {
+    throw new AuthFailure(400, 'profile_restriction_invalid', 'A valid provider profile restriction is required.');
+  }
+  const currentPayload = await profileRestrictionPayload(env, accountId);
+  const current = currentPayload.providers.find(item => item.provider === provider);
+  const available = new Set(current.profiles.filter(item => item.enabled).map(item => item.id));
+  const requested = [...new Set(body.profileIds.map(String))];
+  if (requested.some(value => !available.has(value)) || (body.mode === 'selected' && !requested.length)) {
+    throw new AuthFailure(400, 'profile_restriction_invalid', 'Only enabled profiles from this provider may be selected.');
+  }
+  const defaultProfileId = body.defaultProfileId ? String(body.defaultProfileId) : null;
+  if ((defaultProfileId && !available.has(defaultProfileId)) || (body.mode === 'selected' && defaultProfileId && !requested.includes(defaultProfileId))) {
+    throw new AuthFailure(400, 'profile_default_invalid', 'The account default must be allowed by this policy.');
+  }
+  if (body.revision !== current.policy.revision) throw new AuthFailure(409, 'revision_conflict', 'Provider profile access changed. Reload before saving.');
+  const timestamp = new Date().toISOString();
+  const revision = body.revision + 1;
+  const writeToken = crypto.randomUUID();
+  const previous = { ...current.policy };
+  const next = { mode: body.mode, defaultProfileId, revision, allowedProfileIds: body.mode === 'selected' ? requested : [] };
+  const db = env.THIRDRAILIFY_AUTH_DB;
+  const guard = 'EXISTS(SELECT 1 FROM workshop_provider_profile_policies WHERE account_id=? AND provider=? AND revision=? AND write_token=?)';
+  const statements = [
+    db.prepare(`INSERT INTO workshop_provider_profile_policies(account_id,provider,access_mode,default_profile_id,revision,changed_by,changed_at,write_token)
+      VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(account_id,provider) DO UPDATE SET
+        access_mode=excluded.access_mode,default_profile_id=excluded.default_profile_id,revision=excluded.revision,
+        changed_by=excluded.changed_by,changed_at=excluded.changed_at,write_token=excluded.write_token
+      WHERE workshop_provider_profile_policies.revision=?`)
+      .bind(accountId, provider, body.mode, defaultProfileId, revision, session.accountId, timestamp, writeToken, body.revision),
+    db.prepare(`DELETE FROM workshop_provider_profile_grants WHERE account_id=? AND provider=? AND ${guard}`)
+      .bind(accountId, provider, accountId, provider, revision, writeToken),
+    ...next.allowedProfileIds.map(profileId => db.prepare(`INSERT INTO workshop_provider_profile_grants(account_id,provider,profile_id) SELECT ?,?,? WHERE ${guard}`)
+      .bind(accountId, provider, profileId, accountId, provider, revision, writeToken)),
+    db.prepare(`INSERT INTO workshop_provider_profile_audit(id,account_id,actor_id,provider,previous_json,next_json,created_at) SELECT ?,?,?,?,?,?,? WHERE ${guard}`)
+      .bind(crypto.randomUUID(), accountId, session.accountId, provider, JSON.stringify(previous), JSON.stringify(next), timestamp, accountId, provider, revision, writeToken),
+  ];
+  const result = await db.batch(statements);
+  if (result[0].meta.changes !== 1) throw new AuthFailure(409, 'revision_conflict', 'Provider profile access changed. Reload before saving.');
+  return profileRestrictionPayload(env, accountId);
 }
