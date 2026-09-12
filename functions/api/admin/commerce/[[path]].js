@@ -93,6 +93,8 @@ import {
   pauseCommerceLaunch,
 } from "../../../_shared/commerce-launch.js";
 import { commerceJobsPayload, retryCommerceJob } from "../../../_shared/commerce-operations.js";
+import { productWorkspace, saveProductWorkspace, readCatalogueInput } from "../../../_shared/product-workspace.js";
+import { catalogueSyncStatus, startCatalogueSync, actCatalogueSync, saveCatalogueSyncPolicy } from "../../../_shared/catalogue-sync.js";
 import { commerceIntelligenceReport } from "../../../_shared/commerce-intelligence.js";
 
 const ROUTE_PREFIX = "/api/admin/commerce";
@@ -115,7 +117,10 @@ async function handleGet(request, env, path) {
   requireAdminOriginWhenPresent(request, env);
   const session = await requireAdmin(env, request);
   let payload;
-  if (!path || path === "overview") {
+  if (path === "products/sync") {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await catalogueSyncStatus(env);
+  } else if (!path || path === "overview") {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await commerceOverview(env, session);
     if (payload.databaseConfigured) payload.readiness = await productionReadinessPayload(env, session);
@@ -184,6 +189,9 @@ async function handleGet(request, env, path) {
   } else if (/^collections\/[^/]+$/.test(path)) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await collectionDetailPayload(env, session, decodePathPart(path.split("/")[1]));
+  } else if (/^products\/[^/]+\/workspace$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.view");
+    payload = await productWorkspace(env, session, decodePathPart(path.split("/")[1]));
   } else if (path.startsWith("products/")) {
     await requireCommerceCapability(env, session, "commerce.view");
     payload = await merchandisingProductPayload(env, session, decodePathPart(path.slice("products/".length)));
@@ -224,7 +232,7 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
   await requireCsrf(request, session);
   const snapshotBody = path === "printful/catalogue/snapshot" ? await readSnapshotRequest(request) : null;
   const isSnapshotStart = snapshotBody?.phase === "begin" && !snapshotBody?.checkpoint;
-  const rateCategory = isFeaturedCatalogueMutation(path)
+  const rateCategory = path === "products/sync" ? "commerce_snapshot" : isFeaturedCatalogueMutation(path)
     ? "commerce_catalogue_mutation"
     : path === "products/reconciliation/apply" || path === "products/repair/apply"
     ? "commerce_catalogue_mutation"
@@ -497,6 +505,15 @@ async function handlePost(request, env, path, fetchImpl = fetch, schedulerRuntim
     await requireCommerceCapability(env, session, "commerce.catalogue.manage");
     payload = await updateProductCollections(env, session, decodePathPart(path.split("/")[1]), body);
     authEventType = "commerce_product_collections_updated";
+  } else if (path === "products/sync") {
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
+    const body = await readCatalogueInput(request);
+    payload = body.action === "start" ? await startCatalogueSync(env,session) : body.action === "policy" ? await saveCatalogueSyncPolicy(env,body.policy) : await actCatalogueSync(env,session,body.jobId,body,fetchImpl);
+    authEventType = "commerce_catalogue_sync";
+  } else if (/^products\/[^/]+\/workspace$/.test(path)) {
+    await requireCommerceCapability(env, session, "commerce.catalogue.manage");
+    payload = await saveProductWorkspace(env, session, decodePathPart(path.split("/")[1]), await readCatalogueInput(request), fetchImpl);
+    authEventType = "commerce_product_workspace_saved";
   } else if (/^products\/[^/]+\/variants\/[^/]+$/.test(path)) {
     const body = await readJsonBody(request);
     await requireCommerceCapability(env, session, "commerce.catalogue.manage");

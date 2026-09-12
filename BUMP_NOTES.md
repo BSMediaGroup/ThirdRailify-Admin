@@ -1,3 +1,14 @@
+## 2026-09-12 ? Admin-managed Workshop access
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Added existing-account Workshop search, explicit grants/suspensions/expiry, effective permission sources, revision-protected controls and actor audit history.
+- Extended canonical login/handoff to the exact Lab origin; retained Turnstile, OAuth, CSRF, host-only cookies and Master recovery.
+- Applied only reviewed account migrations 0002/0003 after verified backup. Lab owns its independent project/media storage.
+- Existing 16 authorization/auth tests passed. See docs/WORKSHOP_ACCESS.md for release evidence and boundaries.
+
 ## 2026-09-09 - Flat Rumble subscriber line rendering
 
 CURRENT VER=0.1.0-alpha.0

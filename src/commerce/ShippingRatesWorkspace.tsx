@@ -17,6 +17,11 @@ export function ShippingRatesWorkspace() {
   const { csrfToken, hasCapability } = useAuth();
   const [payload, setPayload] = useState<Payload | null>(null), [book, setBook] = useState<Book | null>(null);
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [busy, setBusy] = useState(false);
+  const [policyChoice,setPolicyChoice] = useState("printful_dynamic");
+  async function savePolicy() {
+    if(!payload||!csrfToken||!window.confirm(`Save shipping policy: ${policyChoice === "printful_dynamic" ? "Automatic Printful rates: customers pay the quoted provider rate, without a local mass requirement." : "Merchant weight-based rates: customer charges use the existing published ratebook."} This changes customer shipping prices. Existing ratebooks and weights are retained.`)) return;
+    setBusy(true);setError("");try { const next=await adminApi<Payload>("/api/admin/commerce/shipping-rates",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({action:"policy",revision:payload.policy.revision,strategy:policyChoice,confirmation:"SAVE SHIPPING POLICY"})});setPayload(next);setNotice("Shipping policy saved."); } catch(e){setError(message(e));}finally{setBusy(false);}
+  }
   const [zoneId, setZoneId] = useState("ca"), [editing, setEditing] = useState<"destinations" | string | null>(null);
   const [country, setCountry] = useState("CA"), [weight, setWeight] = useState("6600"), [subtotal, setSubtotal] = useState("0"), [result, setResult] = useState("");
   const draft = payload?.books.find(b => b.status === "draft"), dirty = Boolean(book && draft && JSON.stringify(book) !== JSON.stringify(draft.body));
@@ -39,6 +44,7 @@ export function ShippingRatesWorkspace() {
   return <section className="shipping-rates" id="shipping-rates" aria-labelledby="shipping-rates-title">
     <header><p className="eyebrow">Merchant customer pricing</p><h2 id="shipping-rates-title">Shipping rates</h2><p><img src={flagSource("CA")} width="24" height="16" alt="Canadian currency" /> CAD · Rate by weight · One charge for the physical cart. Provider fulfillment costs remain separate.</p></header>
     {error && <p role="alert" className="admin-alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    <fieldset disabled={busy||!hasCapability("commerce.operations.manage")}><legend>Effective pricing policy: {payload?.strategy === "printful_dynamic" ? "Automatic Printful rates" : "Merchant weight-based rates"}</legend><p>Provider service/cost estimates and customer shipping charges are separate. Importing products does not change this policy.</p><label>Policy mode<select value={policyChoice} onChange={e=>setPolicyChoice(e.target.value)}><option value="printful_dynamic">Automatic Printful rates — no manual mass required</option><option value="merchant_weight_bands">Merchant weight-based rates — published ratebook</option><option disabled>Category flat rates — requires reviewed variant, currency and shipment-group coverage</option></select></label><button type="button" onClick={()=>void savePolicy()}>Preview &amp; save shipping policy</button></fieldset>
     {!book || !payload ? <p>Loading shipping ratebook…</p> : <>
       <p>Draft revision {draft?.revision} · {payload.policy.active_ratebook_id ? `Published: ${payload.policy.active_ratebook_id} (policy revision ${payload.policy.revision})` : "Not published; existing customer pricing remains active."}</p>
       <div className="shipping-zone-grid">{book.zones.map(z => <article key={z.id} className={z.id === zoneId ? "is-selected" : ""}>

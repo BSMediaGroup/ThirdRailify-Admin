@@ -89,6 +89,7 @@ test("real local D1/R2 repair is protected, stages before activation, preserves 
   preview=await previewCurrentProductRepair(env,session,{kind:"publication",productIds:["local-product"]},fetchAll,{intervalMs:0});
   assert.equal(preview.products[0].diagnostic.eligibleVariants,1);
   await applyCurrentProductRepair(env,session,{runId:preview.runId,confirmation:preview.confirmationText},fetchAll,{intervalMs:0});
+  assert.equal((await h.commerceDb.prepare("SELECT checkout_environment FROM commerce_products WHERE id='local-product'").first()).checkout_environment,"live","Publication must align native current-store products with production checkout");
   const projected=await publicCataloguePayload(env);assert.equal(projected.checkoutEnabled,false);assert.equal(projected.products[0].featured,true);assert.equal(projected.products[0].variants.length,1);assert.equal(projected.products[0].variants[0].image,metadata.publicImage);
   assert.deepEqual((await h.commerceDb.prepare("SELECT * FROM commerce_settings ORDER BY setting_key").all()).results,settings);
   const hidden=await h.commerceDb.prepare("SELECT * FROM commerce_product_variants WHERE id='local-2'").first();assert.equal(hidden.is_sellable,0);

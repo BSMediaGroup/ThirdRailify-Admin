@@ -1,7 +1,9 @@
 const OLD_ADMIN_HOST = "thirdrailify-admin.pages.dev";
 const ADMIN_ORIGIN = "https://admin.thirdrailify.com";
 const MEDIA_ORIGIN = "https://cdn.thirdrailify.com";
-const PUBLIC_MEDIA_PATH = /^(?:\/commerce-media\/[a-f0-9]{64}\.(?:jpg|png|webp)|\/u\/[a-f0-9]{20}\/avatar\/[a-f0-9]{64}\.(?:jpg|png|webp))$/;
+// Catalogue images also have a same-origin delivery path. Keep this request on
+// Admin so browser/Pages delivery does not depend on a cross-host CDN redirect.
+const PUBLIC_MEDIA_PATH = /^\/u\/[a-f0-9]{20}\/avatar\/[a-f0-9]{64}\.(?:jpg|png|webp)$/;
 
 export function onRequest(context) {
   const { request } = context;

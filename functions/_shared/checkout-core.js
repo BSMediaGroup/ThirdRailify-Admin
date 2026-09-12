@@ -123,13 +123,13 @@ export async function createStripeCheckoutSession(env, request, input, fetchImpl
         `INSERT INTO commerce_order_items (
            id, order_id, line_number, product_id, variant_id, product_name, variant_name,
            sku, option_values_json, currency_code, unit_amount, quantity, line_total_amount,
-           requires_shipping, fulfillment_provider, fulfillment_variant_id, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CAD', ?, ?, ?, ?, ?, ?, ?)`,
+           requires_shipping, fulfillment_provider, fulfillment_variant_id, created_at, image_snapshot_url
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CAD', ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         randomId(), orderId, index + 1, line.productId, line.variantId, line.productName,
         line.variantName, line.sku, JSON.stringify(line.optionValues), line.unitAmount,
         line.quantity, line.lineTotalAmount, line.requiresShipping ? 1 : 0,
-        line.fulfillmentProvider, line.fulfillmentVariantId, timestamp,
+        line.fulfillmentProvider, line.fulfillmentVariantId, timestamp, line.imageUrl || null,
       )),
       ...(shippingSelection ? [db.prepare(
         `INSERT INTO commerce_order_delivery_snapshots (
@@ -385,7 +385,7 @@ export async function commerceOrderDetailPayload(env, session, rawOrderId) {
       `SELECT i.id, i.line_number, i.product_id, i.variant_id, i.product_name, i.variant_name, i.sku,
               i.option_values_json, i.currency_code, i.unit_amount, i.quantity, i.line_total_amount,
               i.requires_shipping, i.fulfillment_provider, i.fulfillment_variant_id,
-              json_extract(p.safe_metadata_json, '$.publicImage') AS current_image_url
+              COALESCE(i.image_snapshot_url,json_extract(p.safe_metadata_json, '$.publicImage')) AS current_image_url
        FROM commerce_order_items i LEFT JOIN commerce_products p ON p.id = i.product_id
        WHERE i.order_id = ? ORDER BY i.line_number`,
     ).bind(orderId).all(),

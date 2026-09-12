@@ -253,7 +253,7 @@ function applyStatements(db, plan, snapshot, timestamp) {
   return statements;
 }
 
-function upsertProductStatements(db, item, snapshot, timestamp) {
+export function upsertProductStatements(db, item, snapshot, timestamp) {
   const desired = item.desired;
   const metadataJson = JSON.stringify(desired.metadata);
   const statements = [];
@@ -263,7 +263,7 @@ function upsertProductStatements(db, item, snapshot, timestamp) {
       is_featured,featured_order,unit_amount,checkout_environment,visibility,max_checkout_quantity,requires_shipping,
       target_printful_product_id,target_printful_external_id,migration_status,migration_provenance_json,
       provider_store_id,provider_presence,provider_reconciliation_status,provider_last_seen_at,provider_reconciled_at,provider_snapshot_hash
-    ) VALUES (?,'printful',?,?,?,'CAD','active',?,?,?,0,NULL,?,'test','private',20,1,?,?,'target_verified',?,?,?,?,?,?,?)`)
+    ) VALUES (?,'printful',?,?,?,'CAD','active',?,?,?,0,NULL,?,'live','private',20,1,?,?,'target_verified',?,?,?,?,?,?,?)`)
       .bind(desired.id, desired.externalProductId, desired.slug, desired.title, metadataJson, timestamp, timestamp, desired.unitAmount,
         desired.providerProductId, desired.providerExternalId, JSON.stringify(desired.provenance), snapshot.store.id, CURRENT, desired.reconciliationStatus,
         snapshot.retrievedAt, timestamp, snapshot.fingerprint));
@@ -352,16 +352,16 @@ function desiredVariants(local, provider, snapshot) {
       providerVariantId: variant.id, externalId: variant.externalId, localVariantKey: existing?.localVariantKey || `printful-${variant.id}`,
       status: eligible ? (existing?.status || "active") : "disabled", visibility: eligible ? (existing?.visibility || "public") : "private",
       sellable: eligible ? (existing?.isSellable ? 1 : 0) : 0, ignored: variant.isIgnored ? 1 : 0, availability,
-      unitAmount: existing?.unitAmount > 0 ? existing.unitAmount : variant.unitAmount || 1, sku: variant.sku, size: variant.size, color: variant.color, options: variant.options,
+      unitAmount: existing?.unitAmount > 0 ? existing.unitAmount : variant.unitAmount || 1, sku: existing?.sku ?? variant.sku, size: existing?.size ?? variant.size, color: existing?.color ?? variant.color, options: existing?.options ?? variant.options,
       catalogueProductId: variant.catalogueProductId, catalogueVariantId: variant.catalogueVariantId,
       mappingStatus: eligible && variant.catalogueVariantId ? "mapped" : "manual_review",
-      metadata: { ...(existing?.metadata || {}), displayLabel: existing?.metadata?.displayLabel || variant.name || [variant.size, variant.color].filter(Boolean).join(" / ") || "Standard", providerImage: local.metadata?.providerAssets?.find((asset) => asset.sourceUrl === variant.customerPreviewUrls?.[0])?.url || variant.customerPreviewUrls?.[0] || null, providerImageSource: variant.customerPreviews?.[0] || null },
+      metadata: { ...(existing?.metadata || {}), providerValues: { unitAmount: variant.unitAmount, size: variant.size, color: variant.color, options: variant.options, fingerprint: snapshot.fingerprint }, displayLabel: existing?.metadata?.displayLabel || variant.name || [variant.size, variant.color].filter(Boolean).join(" / ") || "Standard", providerImage: local.metadata?.providerAssets?.find((asset) => asset.sourceUrl === variant.customerPreviewUrls?.[0])?.url || variant.customerPreviewUrls?.[0] || null, providerImageSource: variant.customerPreviews?.[0] || null },
       provenance: { contract: CONTRACT, storeId: snapshot.store.id, syncProductId: provider.id, syncVariantId: variant.id, snapshotHash: snapshot.fingerprint },
     };
   });
 }
 
-async function loadLocalCatalogue(db) {
+export async function loadLocalCatalogue(db) {
   const [productsResult, variantsResult] = await Promise.all([
     db.prepare(`SELECT p.*,COUNT(DISTINCT pc.collection_id) collection_count,
       (SELECT COUNT(*) FROM commerce_order_items oi WHERE oi.product_id=p.id) order_references,
@@ -393,7 +393,7 @@ function localVariant(row) { return { id: row.id, localVariantKey: row.local_var
   targetPrintfulSyncVariantId: textOrNull(row.target_printful_sync_variant_id), providerStoreId: textOrNull(row.provider_store_id), providerPresence: row.provider_presence,
   providerSnapshotHash: textOrNull(row.provider_snapshot_hash), metadata: safeObject(row.safe_metadata_json) }; }
 
-function normalizeProduct(result, summary) {
+export function normalizeProduct(result, summary) {
   if (!result || typeof result !== "object" || Array.isArray(result)) throw new AuthFailure(502, "printful_product_detail_invalid", "Printful returned invalid Sync Product detail.");
   const rawProduct = result.sync_product && typeof result.sync_product === "object" ? result.sync_product : summary;
   const id = providerId(rawProduct.id ?? summary.id, "printful_product_id_invalid");

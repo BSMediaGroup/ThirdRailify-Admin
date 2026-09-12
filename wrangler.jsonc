@@ -5,6 +5,7 @@
   "pages_build_output_dir": "./dist",
   "limits": { "cpu_ms": 100 },
   "vars": {
+    "THIRDRAILIFY_LAB_ORIGIN": "https://lab.thirdrailify.com",
     "AUTH_ENVIRONMENT": "staging",
     "THIRDRAILIFY_PUBLIC_ORIGIN": "https://thirdrailify.com",
     "THIRDRAILIFY_ADMIN_ORIGIN": "https://admin.thirdrailify.com",

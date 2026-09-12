@@ -7,6 +7,13 @@ export const MAX_COMMERCE_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_COMMERCE_PRODUCT_IMAGES = 25;
 const IMAGE_TYPES = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"]]);
 
+export async function stageCatalogueMedia(env, urls, fetchImpl = fetch) {
+  if (!Array.isArray(urls) || urls.length > MAX_COMMERCE_PRODUCT_IMAGES) throw new AuthFailure(400,"commerce_media_urls_invalid","Use up to 25 customer-facing images.");
+  const assets=[];
+  for (const url of [...new Set(urls)]) assets.push({...publicAsset(await ingestOne(env,url,fetchImpl)),sourceUrl:url});
+  return assets;
+}
+
 export async function ingestCommerceProductMedia(env, session, productId, input, fetchImpl = fetch) {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => key !== "imageUrls")) {
     throw new AuthFailure(400, "commerce_media_request_invalid", "The product-media request is invalid.");

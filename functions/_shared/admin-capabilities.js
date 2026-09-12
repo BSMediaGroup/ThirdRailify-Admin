@@ -17,6 +17,9 @@ const definition = (id, group, label, description, options = {}) => Object.freez
 });
 
 export const ADMIN_CAPABILITIES = Object.freeze([
+  definition("workshop.use", "workshop", "Use Workshop", "Use private Lab projects and provider workflows."),
+  definition("workshop.access.manage", "workshop", "Manage Workshop access", "Approve or suspend existing accounts without promoting site roles or accessing their private projects."),
+  definition("workshop.providers.manage", "workshop", "Manage Workshop providers", "Test and manage global Lab provider configuration independently from access grants."),
   definition("rumble_intelligence.view", "rumble-intelligence", "View Rumble Intelligence", "Read private source-scoped subscriber observations."),
   definition("rumble_intelligence.manage", "rumble-intelligence", "Import subscriber history", "Preview and audit historical subscriber imports."),
   definition("overview.view", "overview", "View Overview", "View cross-system Admin posture and operational summaries."),
@@ -60,6 +63,7 @@ export const ADMIN_CAPABILITY_SET = new Set(ADMIN_CAPABILITY_IDS);
 const MUTABLE_FULL_ADMIN_CAPABILITIES = new Set(ADMIN_CAPABILITIES.filter((item) => item.mutable && !item.masterOnly).map((item) => item.id));
 
 export const ADMIN_CAPABILITY_GROUPS = Object.freeze([
+  { id: "workshop", label: "Workshop", description: "Lab use, access administration, and provider configuration." },
   { id: "overview", label: "Overview", description: "Cross-system operational posture." },
   { id: "analytics", label: "Audience Analytics", description: "Privacy-minimized audience reporting." },
   { id: "inbox", label: "Admin Inbox", description: "Internal notices and action queues." },

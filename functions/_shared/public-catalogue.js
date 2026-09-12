@@ -121,7 +121,7 @@ function serializePublicProduct(row, variants, collections, env) {
       label: priceLabel(minUnitAmount, maxUnitAmount),
     },
     variants,
-    available: variants.length ? variants.some((variant) => variant.availability === "active") : true,
+    available: (row.provider_presence !== "current" || row.checkout_environment === "live") && (variants.length ? variants.some((variant) => variant.availability === "active") : true),
     updatedAt: cleanText(row.updated_at, 80),
   };
 }
@@ -146,7 +146,8 @@ function serializePublicVariant(row, env) {
     size,
     color,
     options,
-    image: metadata.providerImageSource?.sourceClass === "merchant_preview" ? safeHttpsUrl(canonicalPublicMediaUrl(metadata.providerImage, env)) : null,
+    image: metadata.assignedImages?.length ? safeHttpsUrl(canonicalPublicMediaUrl(metadata.assignedImages[0].url, env)) : metadata.mediaAssignmentSource === "operator" ? null : metadata.providerImageSource?.sourceClass === "merchant_preview" ? safeHttpsUrl(canonicalPublicMediaUrl(metadata.providerImage, env)) : null,
+    images: (Array.isArray(metadata.assignedImages) ? metadata.assignedImages : []).slice(0,25).map(i=>({url:safeHttpsUrl(canonicalPublicMediaUrl(i.url,env)),alt:cleanText(i.alt,240)})).filter(i=>i.url),
     unitAmount: boundedAmount(row.unit_amount),
     currency: "CAD",
     availability: row.availability_status === "temporarily_out_of_stock" ? "temporarily_out_of_stock" : "active",

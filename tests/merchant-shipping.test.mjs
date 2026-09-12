@@ -39,8 +39,8 @@ test("exact units and free shipping use merchandise subtotal only within coverag
 test("D1 draft publication, weights, independent provider cost, stale quote rejection and zero provider effects on invalid carts", async () => {
   const h=await createCommerceDatabases();const db=h.commerceDb;const env=commerceEnvironment(h,{PRINTFUL_API_TOKEN:"synthetic-provider-token"});
   try {
-    await insertTestProduct(db,{requiresShipping:1});await insertTestVariant(db,{targetCatalogueVariantId:"11576"});
-    await db.batch([db.prepare("UPDATE commerce_products SET provider_presence='current' WHERE id='product-test-001'"),db.prepare("UPDATE commerce_product_variants SET provider_presence='current' WHERE id='variant-test-001'")]);
+    await insertTestProduct(db,{requiresShipping:1,targetPrintfulProductId:"100"});await insertTestVariant(db,{targetPrintfulProductId:"100",targetPrintfulSyncVariantId:"101",targetCatalogueVariantId:"11576"});
+    await db.batch([db.prepare("UPDATE commerce_products SET provider_presence='current',provider_store_id='18668025',provider_reconciliation_status='current',safe_metadata_json=json_set(safe_metadata_json,'$.publicImage','https://example.test/product.png') WHERE id='product-test-001'"),db.prepare("UPDATE commerce_product_variants SET provider_presence='current',provider_store_id='18668025' WHERE id='variant-test-001'"),db.prepare("UPDATE commerce_provider_connections SET external_account_id='18668025' WHERE provider='printful'")]);
     await db.batch(worldwideShippingMarkets().map(m=>db.prepare("INSERT OR IGNORE INTO commerce_shipping_markets(country_code,display_name,status,strategy,revision,created_at,updated_at) VALUES(?,?,'active','printful_dynamic',1,'2026-09-06','2026-09-06')").bind(m.countryCode,m.displayName)));
     await db.prepare("UPDATE commerce_shipping_markets SET status='active'").run();
     const initial=await shippingManagerPayload(env);assert.equal(initial.coverage.missing.length,1);
