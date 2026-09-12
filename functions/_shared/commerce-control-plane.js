@@ -254,7 +254,7 @@ export async function productionReadinessPayload(env, session) {
     documents:group(["customer_documents"], "Retainable agreement and branded receipt access are enabled by launch. Tax invoices are NOT APPLICABLE under not_collecting.", {receiptTemplateReady:byId.customer_documents.ready,receiptReady:byId.customer_documents.ready,invoiceReady:false,invoiceStatus:"not_applicable",customerAccessEnabled:plan.settings.customerDocumentAccessEnabled}),
     checkout:group(["transaction_disclosure_checkout","emergency_pause_clear"], "Final agreement review, explicit acceptance, and immutable retained records precede PayPal order creation.", {normalCheckoutEnabled:plan.settings.paypalStoreCheckoutEnabled,transactionDisclosureEnabled:plan.settings.internetAgreementDisclosureEnabled,disclosureSchemaInstalled:byId.transaction_disclosure_checkout.ready,disclosureThresholdMinor:5000,donationsEnabled:plan.settings.paypalDonationsEnabled}),
   };
-  return {ok:true,access,authority:"Commerce D1",phase:plan.state,productionReady:plan.ready,mandatoryDomains:Object.keys(domains),domains,launchRevision:plan.revision,readinessRevision:plan.digest,checkedAt:plan.checkedAt};
+  return {ok:true,access,authority:"Commerce D1",phase:plan.state,productionReady:plan.ready,operationalReady:plan.operationalReady,operationalState:plan.operationalState,mandatoryDomains:Object.keys(domains),domains,launchRevision:plan.revision,readinessRevision:plan.digest,checkedAt:plan.checkedAt};
 }
 
 const PRINTFUL_DRAFT_BUILDER_VERSION = "printful-draft-preview-v1";
@@ -852,10 +852,13 @@ export async function paymentsControlPlanePayload(env, session) {
   const communicationsDomain = readiness.domains.communications;
   const documentsDomain = readiness.domains.documents;
   const fulfillmentDomain = readiness.domains.fulfillment;
-  const checkoutEnabled = settings.paypal_store_checkout_enabled === true;
-  const livePaymentsEnabled = settings.paypal_live_capture_enabled === true;
+  const paypalStoreCheckoutEnabled = settings.paypal_store_checkout_enabled === true;
+  const publicCheckoutEnabled = settings.checkout_enabled === true && paypalStoreCheckoutEnabled;
+  const paypalLivePaymentsEnabled = settings.paypal_live_capture_enabled === true;
+  const livePaymentsEnabled = settings.live_payment_capture_enabled === true && paypalLivePaymentsEnabled;
   const donationLiveCaptureEnabled = settings.paypal_donation_live_capture_enabled === true;
   const fulfillmentEnabled = settings.fulfillment_submission_enabled === true;
+  const emergencyPaused = settings.commerce_emergency_paused === true;
   const summaries = paymentSummaries(paymentRows?.results || []);
   const merchantCountryReady = profile?.country_code === "CA" && paypalRow?.country_code?.toUpperCase() === "CA";
   const merchantCurrencyReady = profile?.currency_code === "CAD" && paypalRow?.currency_code?.toUpperCase() === "CAD";
@@ -864,7 +867,8 @@ export async function paymentsControlPlanePayload(env, session) {
   const paypalLiveOAuth = paypalAuthority.credentials.live.oauthVerified === true;
   const paypalLiveWebhook = paypalAuthority.credentials.live.webhookIdConfigured && paypalAuthority.credentials.live.webhookReadbackVerified === true && settings.paypal_live_webhook_configured === true;
   const paypalProductionReady = paypalLiveCredentials && paypalLiveOAuth && paypalLiveWebhook;
-  const paypalProductionActive = paypalProductionReady && ((settings.paypal_store_checkout_enabled === true && livePaymentsEnabled) || (settings.paypal_donations_enabled === true && donationLiveCaptureEnabled));
+  const paypalProductionActive = paypalProductionReady && ((publicCheckoutEnabled && livePaymentsEnabled) || (settings.paypal_donations_enabled === true && donationLiveCaptureEnabled));
+  const activationState = deriveProductionActivationState({ checkoutEnabled: publicCheckoutEnabled, livePaymentsEnabled, fulfillmentEnabled, emergencyPaused, operationalState: readiness.operationalState });
 
   return {
     ok: true,
@@ -894,8 +898,8 @@ export async function paymentsControlPlanePayload(env, session) {
       apiVerified,
       webhookSigningSecretConfigured,
       webhookAcceptanceVerified,
-      checkoutEnabled,
-      livePaymentsEnabled,
+      checkoutEnabled: settings.stripe_enabled === true && settings.checkout_enabled === true,
+      livePaymentsEnabled: settings.stripe_enabled === true && settings.live_payment_capture_enabled === true,
       chargesEnabledInTest: apiVerified && typeof metadata.charges_enabled === "boolean" ? metadata.charges_enabled : null,
       payoutsEnabledInTest: apiVerified && typeof metadata.payouts_enabled === "boolean" ? metadata.payouts_enabled : null,
       detailsSubmittedInTest: apiVerified && typeof metadata.details_submitted === "boolean" ? metadata.details_submitted : null,
@@ -907,9 +911,9 @@ export async function paymentsControlPlanePayload(env, session) {
       paymentGate("paypal_live_credentials", "PayPal LIVE credentials", paypalLiveCredentials ? "ready" : "action_required", paypalLiveCredentials ? "A LIVE Client ID and Client Secret are in server-only runtime custody." : "PayPal Live Client ID/Secret and webhook registration are not configured."),
       paymentGate("paypal_live_oauth", "PayPal LIVE OAuth", paypalLiveOAuth ? "ready" : "action_required", paypalLiveOAuth ? "The LIVE direct merchant app authenticated successfully and sanitized evidence is persisted." : "LIVE OAuth verification has not passed."),
       paymentGate("paypal_live_webhook", "PayPal LIVE webhook", paypalLiveWebhook ? "ready" : "action_required", paypalLiveWebhook ? "The LIVE Webhook ID is configured and persisted read-back state is true." : "A LIVE Webhook ID and provider read-back evidence are required."),
-      paymentGate("paypal_store_capture", "PayPal LIVE store capture", livePaymentsEnabled ? "ready" : "disabled", livePaymentsEnabled ? "Physical store capture is enabled." : "Physical store capture remains explicitly disabled."),
+      paymentGate("paypal_store_capture", "PayPal LIVE store capture", paypalLivePaymentsEnabled ? "ready" : "disabled", paypalLivePaymentsEnabled ? "Physical store capture is enabled." : "Physical store capture remains explicitly disabled."),
       paymentGate("paypal_donation_capture", "PayPal LIVE donation capture", donationLiveCaptureEnabled ? "ready" : "disabled", donationLiveCaptureEnabled ? "Donation-only server capture is enabled." : "LIVE donation capture remains explicitly disabled."),
-      paymentGate("stripe_retained", "Stripe future option", "not_applicable", canonicalTestAccepted ? "Configured / disabled. Historical TEST acceptance remains readable and does not block PayPal." : "Stripe is disabled and not a PayPal readiness gate."),
+      paymentGate("stripe_retained", "Stripe retained option", "not_applicable", canonicalTestAccepted ? "Configured / disabled. Historical TEST acceptance remains readable and does not block PayPal." : "Stripe is disabled, non-preferred, and not a PayPal readiness gate."),
       paymentGate("business", "Business profile", businessDomain.ready ? "ready" : "action_required", businessDomain.summary, "/commerce/business"),
       paymentGate("merchant_country", "Merchant country", merchantCountryReady ? "ready" : "action_required", merchantCountryReady ? "Business and PayPal evidence agree on Canada." : "Stored business and PayPal country evidence does not agree on Canada.", "/commerce/business"),
       paymentGate("commerce_currency", "Commerce currency", merchantCurrencyReady ? "ready" : "action_required", merchantCurrencyReady ? "Business and PayPal evidence agree on CAD." : "Stored business and PayPal currency evidence does not agree on CAD.", "/commerce/business"),
@@ -917,15 +921,18 @@ export async function paymentsControlPlanePayload(env, session) {
       paymentGate("communications", "Customer receipts and email", communicationsDomain.ready ? "ready" : communicationsDomain.details.sendEnabled === false ? "disabled" : "action_required", communicationsDomain.summary, "/commerce/emails"),
       paymentGate("documents", "Receipt and invoice readiness", documentsDomain.ready ? "ready" : "action_required", documentsDomain.summary, "/commerce/tax"),
       paymentGate("fulfillment", "Fulfillment", fulfillmentEnabled && fulfillmentDomain.ready ? "ready" : "disabled", fulfillmentDomain.summary, "/commerce/fulfillment"),
-      paymentGate("checkout", "Public checkout", checkoutEnabled ? "ready" : "disabled", checkoutEnabled ? "Normal checkout is enabled." : "Normal checkout remains explicitly disabled."),
+      paymentGate("checkout", "Public checkout", publicCheckoutEnabled ? "ready" : "disabled", publicCheckoutEnabled ? "Normal checkout is enabled through the global and PayPal store authorities." : "Normal checkout remains explicitly disabled."),
       paymentGate("live_payments", "Live payment capture", livePaymentsEnabled ? "ready" : "disabled", livePaymentsEnabled ? "Live payment capture is enabled." : "Live payment capture remains explicitly disabled."),
       paymentGate("payouts", "Payout readiness", "unverified", "Third Railify does not store Stripe balance, schedule, bank, or payout execution state."),
     ],
     productionActivation: {
-      checkout: { enabled: checkoutEnabled, state: checkoutEnabled ? "configured" : "disabled" },
+      state: activationState,
+      operationalState: readiness.operationalState,
+      emergencyPaused,
+      checkout: { enabled: publicCheckoutEnabled, state: publicCheckoutEnabled ? "configured" : "disabled" },
       livePayments: { enabled: livePaymentsEnabled, state: livePaymentsEnabled ? "configured" : "disabled" },
       fulfillment: { enabled: fulfillmentEnabled, state: fulfillmentEnabled ? "configured" : "disabled" },
-      controlledTestCheckout: { enabled: false, state: "disabled" },
+      controlledTestCheckout: { enabled: false, state: "closed", purpose: "controlled_test", acceptanceEvidence: canonicalTestAccepted ? "preserved" : "unverified" },
       mutableFromThisRoute: false,
     },
     testEvidence: canonicalTestAccepted ? serializeTestEvidence(acceptedOrder, acceptedWebhook) : null,
@@ -955,7 +962,7 @@ export async function paymentsControlPlanePayload(env, session) {
     },
     paymentMethods: [
       { id: "paypal", label: "PayPal", state: paypalLiveCredentials ? "configured" : "unverified", detail: "Preferred standard PayPal checkout using server-created and server-captured Orders v2." },
-      { id: "card", label: "Card payments", state: "disabled", detail: "Card payments temporarily unavailable. Stripe is retained for a future separately authorized activation." },
+      { id: "card", label: "Card payments", state: "disabled", detail: "Stripe is retained as configured but disabled and non-preferred." },
     ],
     payoutState: {
       state: "unverified",
@@ -1003,16 +1010,24 @@ function emptyPaymentsControlPlane({ overview, stripeOverview, access, apiCreden
     stripe: { provider: "stripe", displayName: "Third Railify Official", integrationMode: "direct_merchant", environment: "test", accountCreated: stripeOverview?.accountCreated === true, accountId: null, accountIdRestricted: false, countryCode: stripeOverview?.countryCode || "CA", currencyCode: stripeOverview?.currencyCode || "CAD", apiCredentialConfigured, apiVerified: false, webhookSigningSecretConfigured, webhookAcceptanceVerified: false, checkoutEnabled: false, livePaymentsEnabled: false, chargesEnabledInTest: null, payoutsEnabledInTest: null, detailsSubmittedInTest: null, lastVerifiedAt: null },
     paypal: { provider: "paypal", state: "setup_required", integrationMode: "direct_merchant", environment: "live", countryCode: "CA", currencyCode: "CAD", credentialConfigured: false, sandbox: { clientIdConfigured: false, clientSecretConfigured: false, webhookIdConfigured: false, oauthVerified: false, webhookReadbackVerified: false, storeAcceptance: "not_run", donationAcceptance: "not_run" }, live: { clientIdConfigured: false, clientSecretConfigured: false, webhookIdConfigured: false, oauthVerified: false, webhookReadbackVerified: false, storeAcceptance: "not_run", donationAcceptance: "not_run" }, preferred: true, donationsEnabled: false, membershipEnabled: false, shopCheckoutEnabled: false, captureEnabled: false, storeCaptureEnabled: false, donationCaptureEnabled: false, webhookEvents: [], webhookUrl: null, setupCommand: "npm run commerce:paypal -- status", latestVerifiedDelivery: null, attempts: [], donations: [], diagnostics: [], providerMutationAvailable: false, lastVerifiedAt: null },
     gates: [paymentGate("authority", "Commerce D1 authority", "action_required", "Commerce D1 is unavailable, so persisted payments evidence cannot be verified."), paymentGate("checkout", "Public checkout", "disabled", "Normal checkout remains disabled."), paymentGate("live_payments", "Live payment capture", "disabled", "Live payment capture remains disabled."), paymentGate("payouts", "Payout readiness", "unverified", "No Stripe balance, payout, or bank state is available.")],
-    productionActivation: { checkout: { enabled: false, state: "disabled" }, livePayments: { enabled: false, state: "disabled" }, fulfillment: { enabled: false, state: "disabled" }, controlledTestCheckout: { enabled: false, state: "disabled" }, mutableFromThisRoute: false },
+    productionActivation: { state: "disabled", operationalState: "preflight", emergencyPaused: false, checkout: { enabled: false, state: "disabled" }, livePayments: { enabled: false, state: "disabled" }, fulfillment: { enabled: false, state: "disabled" }, controlledTestCheckout: { enabled: false, state: "closed", purpose: "controlled_test", acceptanceEvidence: "unverified" }, mutableFromThisRoute: false },
     testEvidence: null,
     webhookHealth: { endpointImplemented: true, signingSecretConfigured: webhookSigningSecretConfigured, acceptanceVerified: false, externallyVerified: false, environment: "test", counts: { total: null, processed: null, failed: null, test: null, live: null, duplicates: null }, latestProcessed: null, latestFailed: null, idempotency: { implemented: true, evidence: "Unique provider and event ID ledger requires Commerce D1." } },
     paymentSummary: { currencyCode: "CAD", live: unavailablePaymentSummary(), test: unavailablePaymentSummary(), processingFees: { available: false, reason: "Stripe processing fees are not available." } },
-    paymentMethods: [{ id: "paypal", label: "PayPal", state: "unverified", detail: "Preferred standard PayPal experience; server configuration is unavailable." }, { id: "card", label: "Card payments", state: "disabled", detail: "Stripe is retained for a future separately authorized activation." }],
+    paymentMethods: [{ id: "paypal", label: "PayPal", state: "unverified", detail: "Preferred standard PayPal experience; server configuration is unavailable." }, { id: "card", label: "Card payments", state: "disabled", detail: "Stripe is retained as configured but disabled and non-preferred." }],
     payoutState: { state: "unverified", management: "managed_in_paypal", balanceIntegrationAvailable: false, payoutIntegrationAvailable: false, bankDestinationStored: false, nextPayout: null, availableBalance: null, pendingBalance: null, schedule: null, testCapabilityObserved: null },
     dependencies: [],
     technical: { checkoutArchitecture: "provider_neutral_paypal_orders_v2", directMerchant: true, stripeConnect: false, connectedAccounts: false, stripeAccountHeader: false, destinationCharges: false, applicationFees: false, transfers: false, publishableKeyRequired: true, providerMutationAvailable: false },
     checkedAt: nowIso(),
   };
+}
+
+export function deriveProductionActivationState({ checkoutEnabled, livePaymentsEnabled, fulfillmentEnabled, emergencyPaused, operationalState }) {
+  if (emergencyPaused === true || operationalState === "paused") return "paused";
+  const enabledCount = [checkoutEnabled, livePaymentsEnabled, fulfillmentEnabled].filter(Boolean).length;
+  if (enabledCount === 0) return "disabled";
+  if (enabledCount < 3) return "action_required";
+  return operationalState === "active" ? "active" : "action_required";
 }
 
 function acceptedTestEvidenceValid(order, webhook) {

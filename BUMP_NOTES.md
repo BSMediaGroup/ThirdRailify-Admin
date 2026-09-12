@@ -1,3 +1,15 @@
+## 2026-09-13 - Payments production-activation truthfulness
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced the hard-coded DISABLED production-activation heading and disabled checkbox lookalikes with a canonical, read-only state projection and accessible static status rows.
+- Production checkout, PayPal LIVE capture, fulfillment, and emergency-pause presentation now follow the existing launch/control-plane authority; enabled/configured states use safe styling and actual disabled/paused failures retain danger styling.
+- Kept the controlled Stripe TEST checkout closed and labelled it as a test-only acceptance harness that is not a production dependency. No commerce setting or provider operation is exposed by the page.
+- Refreshed the Payments-page and README language for the PayPal-preferred production posture while retaining Stripe as configured, disabled, and non-preferred.
+- Deployed the isolated Admin-only release as Cloudflare Pages deployment `01e78962-7563-4ee6-8f0f-48ed8db2f888`; the custom domain serves the same corrected production bundle.
+
 ## 2026-09-12 ? Admin-managed Workshop access
 
 CURRENT VER=0.1.0-alpha.0

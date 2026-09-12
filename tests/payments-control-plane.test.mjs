@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest as commerceRequest } from "../functions/api/admin/commerce/[[path]].js";
-import { paymentsControlPlanePayload } from "../functions/_shared/commerce-control-plane.js";
+import { deriveProductionActivationState, paymentsControlPlanePayload } from "../functions/_shared/commerce-control-plane.js";
 import { createSession, ensureEnvironmentMasters, loadAccountByEmail } from "../functions/_shared/auth-core.js";
 import { cookiePair, jsonRequest } from "./auth-test-helpers.mjs";
 import { commerceEnvironment, createCommerceDatabases, insertTestProduct, insertTestVariant } from "./commerce-test-helpers.mjs";
@@ -10,6 +10,13 @@ const ADMIN_ORIGIN = "https://thirdrailify-admin.pages.dev";
 const ORDER_ID = "ord_e47b94a4-4252-438b-8ca7-c47470029940";
 const SESSION_ID = "cs_test_a1vXUK8hmsaKfXmciNGnU25zL1PdhbkyjFJ0KgDRoHFUkaYvROZiWoG5OC";
 const EVENT_ID = "evt_1U9OysB2jGrq9Tn1apdsFgi2";
+
+test("production activation state is derived from production gates and excludes the controlled TEST harness", () => {
+  assert.equal(deriveProductionActivationState({ checkoutEnabled: true, livePaymentsEnabled: true, fulfillmentEnabled: true, emergencyPaused: false, operationalState: "active", controlledTestCheckoutEnabled: false }), "active");
+  assert.equal(deriveProductionActivationState({ checkoutEnabled: false, livePaymentsEnabled: false, fulfillmentEnabled: false, emergencyPaused: false, operationalState: "preflight" }), "disabled");
+  assert.equal(deriveProductionActivationState({ checkoutEnabled: true, livePaymentsEnabled: false, fulfillmentEnabled: true, emergencyPaused: false, operationalState: "degraded" }), "action_required");
+  assert.equal(deriveProductionActivationState({ checkoutEnabled: true, livePaymentsEnabled: true, fulfillmentEnabled: true, emergencyPaused: true, operationalState: "paused" }), "paused");
+});
 
 async function masterSession(env) {
   await ensureEnvironmentMasters(env);
@@ -57,6 +64,8 @@ test("payments projection distinguishes configured secrets from verified evidenc
   assert.equal(payload.payoutState.availableBalance, null); assert.equal(payload.payoutState.nextPayout, null); assert.equal(payload.payoutState.schedule, null);
   assert.equal(payload.paymentSummary.live.grossAmount, 0); assert.equal(payload.paymentSummary.test.grossAmount, 0);
   assert.equal(payload.paymentSummary.processingFees.available, false);
+  assert.equal(payload.productionActivation.state, "disabled");
+  assert.deepEqual(payload.productionActivation.controlledTestCheckout, { enabled: false, state: "closed", purpose: "controlled_test", acceptanceEvidence: "unverified" });
   assert.doesNotMatch(JSON.stringify(payload), /rk_test_notAReal|whsec_synthetic|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|credential_ciphertext|bank_account_number/i);
 });
 
@@ -83,16 +92,23 @@ test("payments read route requires Admin auth and commerce view, exposes no secr
   const harness = await createCommerceDatabases(); t.after(harness.dispose); await seedVerifiedPayments(harness);
   const env = commerceEnvironment(harness, { STRIPE_SECRET_KEY: "rk_test_notARealRestrictedKey123", STRIPE_WEBHOOK_SECRET: "whsec_synthetic_payments_only" });
   const { cookie } = await masterSession(env); const url = `${ADMIN_ORIGIN}/api/admin/commerce/payments`;
+  const commerceSettingsBefore = await harness.commerceDb.prepare("SELECT setting_key,value_json,updated_at FROM commerce_settings ORDER BY setting_key").all();
+  const commerceAuditBefore = await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_audit").first();
   let providerCalls = 0; const commerceFetch = async () => { providerCalls += 1; throw new Error("status route must not contact Stripe"); };
   const unauthenticated = await commerceRequest({ request: jsonRequest(url, { method: "GET", origin: ADMIN_ORIGIN }), env, data: { commerceFetch } });
   assert.equal(unauthenticated.status, 401);
   const response = await commerceRequest({ request: jsonRequest(url, { method: "GET", origin: ADMIN_ORIGIN, cookie }), env, data: { commerceFetch } });
   assert.equal(response.status, 200); assert.equal(providerCalls, 0);
   const payload = await response.json(); assert.equal(payload.access.isMasterAdmin, true); assert.equal(payload.stripe.accountId, "acct_TestMerchantSafe123");
+  assert.deepEqual(payload.productionActivation.controlledTestCheckout, { enabled: false, state: "closed", purpose: "controlled_test", acceptanceEvidence: "preserved" });
   assert.doesNotMatch(JSON.stringify(payload), /rk_test_notAReal|whsec_synthetic|credential_ciphertext|safe_metadata_json|payload_sha256/i);
+  assert.deepEqual(await harness.commerceDb.prepare("SELECT setting_key,value_json,updated_at FROM commerce_settings ORDER BY setting_key").all(), commerceSettingsBefore);
+  assert.deepEqual(await harness.commerceDb.prepare("SELECT COUNT(*) count FROM commerce_audit").first(), commerceAuditBefore);
 
   const now = new Date().toISOString();
   await harness.authDb.prepare("INSERT INTO accounts (id,email_normalized,display_name,role,admin_level,status,email_verified_at,created_at,updated_at,source) VALUES ('payments-view-admin','payments-view@example.test','Payments View Admin','admin','full','active',?,?,?,'test'),('payments-user','payments-user@example.test','Payments User','user','none','active',?,?,?,'test')").bind(now, now, now, now, now, now).run();
+  const policyMaster = await harness.authDb.prepare("SELECT id FROM accounts WHERE source='env_master' ORDER BY created_at LIMIT 1").first();
+  await harness.authDb.prepare("INSERT INTO admin_role_capability_denials (role,capability,denied_by_account_id,created_at,updated_at) VALUES ('full','commerce.payments.manage',?,?,?)").bind(policyMaster.id, now, now).run();
   const viewAdmin = await loadAccountByEmail(env, "payments-view@example.test"); const viewAdminSession = await createSession(env, new Request(`${ADMIN_ORIGIN}/`, { headers: { Origin: ADMIN_ORIGIN } }), viewAdmin, ADMIN_ORIGIN);
   const delegated = await commerceRequest({ request: jsonRequest(url, { method: "GET", origin: ADMIN_ORIGIN, cookie: cookiePair(viewAdminSession.cookie) }), env, data: { commerceFetch } }); const delegatedPayload = await delegated.json();
   assert.equal(delegated.status, 200); assert.equal(delegatedPayload.access.capabilities.includes("commerce.view"), true); assert.equal(delegatedPayload.access.capabilities.includes("commerce.payments.manage"), false); assert.equal(delegatedPayload.stripe.accountId, null); assert.equal(delegatedPayload.stripe.accountIdRestricted, true);
