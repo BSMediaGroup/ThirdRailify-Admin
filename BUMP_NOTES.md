@@ -1,3 +1,14 @@
+## 2026-09-13 - Workshop Access visual authority
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Restored Overview as the first Admin sidebar destination and replaced the reused users symbol with a dedicated Workshop gateway icon.
+- Moved Workshop Access directly below Users / Access so account administration remains grouped without displacing Overview.
+- Rebuilt Workshop Access as a premium black, charcoal, gold and muted-plum control surface with an authority hero, live summary rail, semantic access states, protected-account treatment and responsive audit controls.
+- Preserved the existing Workshop API, authentication, CSRF, policy evaluation and account-protection behavior. Focused browser coverage validates the page at 1920, 1440, 768 and 390 pixels, including navigation order, responsive geometry, access-state rendering, reduced motion and audit expansion.
+
 ## 2026-09-13 - Payments production-activation truthfulness
 
 CURRENT VER=0.1.0-alpha.0

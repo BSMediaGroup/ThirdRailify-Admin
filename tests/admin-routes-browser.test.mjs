@@ -70,7 +70,6 @@ async function respond(route) {
   if (pathname === "/api/admin/analytics") return json(route, { ok: true, range: "7d", generatedAt: "2026-08-31T00:00:00.000Z", timezone: "UTC", configured: true, coverage: { start: null, end: null, totalEvents: 0, lastIngestedAt: null }, windows: {}, selected: { views: 0, sessions: 0, pagesPerSession: null, comparisonComplete: false, previous: { views: 0, sessions: 0, pagesPerSession: null }, deltas: { views: { available: false, value: null, direction: "unavailable" }, sessions: { available: false, value: null, direction: "unavailable" } } }, bucket: "day", series: [], pages: [], sources: [], devices: [], geography: [], revenue: { available: true, profitAvailable: false, profitUnavailableReason: "Cost data unavailable.", currencies: [] } });
   return json(route, { ok: false, error: "route_audit_unavailable", message: "Authority intentionally unavailable in the visual route audit." }, 503);
 }
-
 function json(route, body, status = 200) { return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 
 async function waitForServer() {
