@@ -78,7 +78,10 @@ test("Workshop Access uses the premium Admin system and keeps Overview first", a
     const profileDialog = page.getByRole("dialog", { name: "Provider profile access" });
     await profileDialog.waitFor({ state: "visible" });
     assert.equal(await profileDialog.locator(".profile-policy-card").count(), 6, `all profile providers render at ${viewport.width}px`);
+    assert.equal(await profileDialog.locator(".profile-policy-card--replicate img, .profile-policy-card--openai img, .profile-policy-card--xai img").count(), 3, "AI providers use their approved SVG marks");
+    assert.equal(await profileDialog.locator(".profile-policy-card--replicate img").evaluate((node) => getComputedStyle(node).filter), "brightness(0) invert(1)", "AI provider marks render white");
     assert.equal(await profileDialog.locator(".profile-policy-card--pexels img, .profile-policy-card--pixabay img, .profile-policy-card--unsplash img").count(), 3, "stock providers use their supplied SVG marks");
+    assert.equal(await profileDialog.locator(".profile-access-emblem svg").evaluate((node) => getComputedStyle(node).color), "rgb(243, 201, 40)", "modal shield is gold");
     assert.equal(await page.locator(".profile-restriction-panel").count(), 0, "the legacy expanding drawer is removed");
     const dialogGeometry = await profileDialog.evaluate((node) => { const rect = node.getBoundingClientRect(), cards = [...node.querySelectorAll(".profile-policy-card")].map((card) => card.getBoundingClientRect()); return { modal: node instanceof HTMLDialogElement && node.open, withinViewport: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight, cardsInside: cards.every((card) => card.left >= rect.left && card.right <= rect.right + 1), columns: getComputedStyle(node.querySelector(".profile-provider-group > div")).gridTemplateColumns.split(" ").length }; });
     assert.equal(dialogGeometry.modal, true, "provider access uses the native modal top layer");

@@ -8,6 +8,9 @@ import type { AuthAccount } from "../auth/types";
 import pexelsIcon from "../../assets/icons/pexels-0.svg";
 import pixabayIcon from "../../assets/icons/pixabay-0.svg";
 import unsplashIcon from "../../assets/icons/unsplash-0.svg";
+import replicateIcon from "../../assets/icons/replicate-0.svg";
+import openaiIcon from "../../assets/icons/gpt-0.svg";
+import xaiIcon from "../../assets/icons/grok-0.svg";
 import "./workshop-access.css";
 
 type Grant = { state: string; expires_at: string | null; revision: number; changed_by: string; changed_at: string; note: string };
@@ -264,9 +267,9 @@ function ProfilePolicyEditor({ item, busy, onSave }: { item: ProfileProvider; bu
 }
 
 const providerMeta: Record<string, { name: string; description: string; icon?: string; monogram: string }> = {
-  replicate: { name: "Replicate", description: "Image models and predictions", monogram: "R" },
-  openai: { name: "OpenAI / GPT", description: "Creation and research models", monogram: "O" },
-  xai: { name: "Grok / xAI", description: "Generation and research models", monogram: "G" },
+  replicate: { name: "Replicate", description: "Image models and predictions", icon: replicateIcon, monogram: "R" },
+  openai: { name: "OpenAI / GPT", description: "Creation and research models", icon: openaiIcon, monogram: "O" },
+  xai: { name: "Grok / xAI", description: "Generation and research models", icon: xaiIcon, monogram: "G" },
   pexels: { name: "Pexels", description: "Curated stock photography", icon: pexelsIcon, monogram: "P" },
   pixabay: { name: "Pixabay", description: "Cached stock-media search", icon: pixabayIcon, monogram: "PX" },
   unsplash: { name: "Unsplash", description: "Attributed hotlinked photography", icon: unsplashIcon, monogram: "U" },

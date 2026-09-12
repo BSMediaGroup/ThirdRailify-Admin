@@ -288,6 +288,7 @@
 .profile-access-lightbox { display: grid; max-height: min(920px, calc(100dvh - 30px)); grid-template-rows: auto auto minmax(0,1fr) auto; overflow: hidden; background: radial-gradient(circle at 7% 0,rgba(110,74,124,.24),transparent 34%),radial-gradient(circle at 93% 16%,rgba(243,201,40,.075),transparent 28%),#0d0a10; }
 .profile-access-header { position: relative; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 17px; padding: 22px 25px; border-bottom: 1px solid #342b39; background: rgba(20,15,24,.96); box-shadow: 0 12px 32px rgba(0,0,0,.34); }
 .profile-access-emblem { display: grid; width: 55px; height: 55px; place-items: center; color: #f3c928; border: 1px solid rgba(243,201,40,.36); border-radius: 15px; background: linear-gradient(145deg,rgba(243,201,40,.12),rgba(110,74,124,.22)); box-shadow: inset 0 1px rgba(255,255,255,.09),0 13px 28px rgba(0,0,0,.3); }
+.profile-access-header .profile-access-emblem > svg { color: #f3c928; stroke: currentColor; }
 .profile-access-header p { margin: 0 0 5px; color: #b69b63; font: 700 .58rem/1.3 "Geist Mono",monospace; letter-spacing: .16em; }
 .profile-access-header h2 { margin: 0; color: #f6f0e9; font-family: "American Captain",sans-serif; font-size: clamp(2rem,4vw,3rem); font-weight: 400; line-height: .9; letter-spacing: .025em; text-transform: uppercase; }
 .profile-access-header > div > span { display: block; margin-top: 8px; color: #9d939f; font-size: .75rem; line-height: 1.45; }
@@ -312,6 +313,9 @@
 .profile-policy-card > header { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #302835; background: radial-gradient(circle at 100% 0,rgba(110,74,124,.18),transparent 48%); }
 .profile-provider-mark { display: grid; width: 42px; height: 42px; place-items: center; overflow: hidden; color: #f2cf64; border: 1px solid #66516f; border-radius: 12px; background: linear-gradient(145deg,#35263e,#18111d); box-shadow: inset 0 1px rgba(255,255,255,.09),0 8px 18px rgba(0,0,0,.28); }
 .profile-provider-mark img { width: 22px; height: 22px; object-fit: contain; filter: invert(91%) sepia(38%) saturate(799%) hue-rotate(348deg) brightness(101%); }
+.profile-policy-card--replicate .profile-provider-mark img,
+.profile-policy-card--openai .profile-provider-mark img,
+.profile-policy-card--xai .profile-provider-mark img { filter: brightness(0) invert(1); }
 .profile-provider-mark b { font: 700 1rem/1 "Geist Mono",monospace; }
 .profile-provider-mark.is-compact { width: 29px; height: 29px; border-radius: 8px; }
 .profile-provider-mark.is-compact img { width: 15px; height: 15px; }
