@@ -36,7 +36,7 @@ export function RumbleSubscriberTrend({ source, snapshotId, total, paidTotal, as
     if (!snapshotId) { setLoading(false); return; }
     setLoading(true);
     const url = `/api/admin/rumble-intelligence/trend?${new URLSearchParams({ source, snapshotId, range })}`;
-    void coordinatedJsonGet<Trend>(url, 'Subscriber trend did not return JSON.', 'Subscriber trend unavailable.')
+    void coordinatedJsonGet<Trend>(url, 'Subscriber trend did not return JSON.', 'Subscriber trend is temporarily unavailable.')
       .then(value => { if (activeRequest) setData(value); })
       .catch(e => { if (activeRequest) setError(e instanceof Error ? e.message : 'Subscriber trend unavailable.'); })
       .finally(() => { if (activeRequest) setLoading(false); });

@@ -9,6 +9,7 @@ PENDING VER=0.1.0-alpha.0
 - Coalesced equivalent client GETs, asserted one chart request per active state, removed timer-path automation PRAGMAs, and throttled persisted nonce cleanup without weakening active/concurrent replay rejection or expired-ID reuse.
 - Added explicit retryable D1 code-7500 responses. The paired Bot honors quota `Retry-After` for control and heartbeat while preserving ordinary cadence and liveness semantics.
 - Added reviewed migration `0049_rumble_intelligence_rollups.sql`, its isolated release script, measured cost coverage, and read+write budget documentation. Protected pre-migration backup: 6,900,631 bytes, SHA-256 `7EEFF6CE24D5C741A0712A77030D0DD9BC7B1482F192063EC54541A8846D8FAD`.
+- Issued unique JS/CSS release assets after a concurrent Git/manual Pages deployment briefly cached SPA fallback HTML at the first manual asset URLs; stable-domain acceptance requires real JavaScript/CSS MIME types.
 
 ## 2026-09-13 - Provider profile access lightbox
 

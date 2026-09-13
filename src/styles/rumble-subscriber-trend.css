@@ -11,4 +11,6 @@
 .ri-trend__paid{padding-left:26px;border-left:1px solid #435638}.ri-trend__paid strong{color:#75dbb3}.ri-trend__paid small{display:block;margin-top:5px;font-size:.7rem;color:#94ad9c}.ri-trend__legend-label{margin:18px 0 9px;font-size:.73rem;color:#a4b699}.ri-trend__legend{gap:7px}.ri-trend__legend button{border:1px solid #4b653e;border-radius:7px;padding:7px 9px;background:#70ae2e0b}.ri-trend__legend button[aria-pressed=false]{opacity:1;color:#8b9982;border-color:#384432;background:transparent;text-decoration:none}.ri-trend__legend button[aria-pressed=false] i{opacity:.35}.ri-trend__series-check{display:grid;place-items:center;width:13px;height:13px;border:1px solid #667e54;border-radius:3px;font-size:11px;line-height:1;color:#112207;background:#86cc50}.ri-trend__legend button[aria-pressed=false] .ri-trend__series-check{background:transparent;border-color:#617055}
 @media(max-width:600px){.ri-trend__headline{flex-wrap:wrap;gap:18px}.ri-trend__headline>div{flex:1;min-width:0}.ri-trend__paid{padding-left:16px}.ri-trend__headline>p{flex-basis:100%;margin:0;padding-left:0;border-left:0}.ri-trend__legend button{font-size:.7rem;padding:7px}}
 
+.ri-trend{--ri-bounded-history-release:1}
+
 .ri-trend__headline{align-items:flex-start}
