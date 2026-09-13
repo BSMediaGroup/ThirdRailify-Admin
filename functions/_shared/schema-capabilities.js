@@ -7,6 +7,7 @@ const names = Object.freeze([
   'automation_rules', 'poll_credit_guards', 'poll_credit_lifecycle',
   'poll_credit_allocation_guard', 'poll_credit_review_audit', 'poll_credit_structure_update',
   'poll_result_history', 'poll_manual_votes', 'poll_media_assets',
+  'wheel_entries',
   'aboot_brackets', 'aboot_publications', 'aboot_poll_links', 'aboot_decisions',
   'aboot_audit', 'aboot_guards', 'aboot_media',
 ]);

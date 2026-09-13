@@ -242,7 +242,17 @@ export function errorResponse(error, request, env) {
       { status: 502, headers: corsHeaders(request, env) },
     );
   }
-  if (/no such (?:table|column)/i.test(String(error?.message || error || ""))) {
+  const errorText = String(error?.message || error || "");
+  if (/exceeded D1(?:'s)? free tier daily row read limit|D1 row read requests are temporarily blocked/i.test(errorText)) {
+    const now = new Date();
+    const reset = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    const retryAfter = Math.max(60, Math.ceil((reset - now.getTime()) / 1000));
+    return jsonResponse(
+      { ok: false, error: "database_read_quota_exhausted", message: "Live data is temporarily unavailable because today's database read capacity is exhausted. Previously loaded data has not been replaced." },
+      { status: 503, headers: { ...corsHeaders(request, env), "Retry-After": String(retryAfter) } },
+    );
+  }
+  if (/no such (?:table|column)/i.test(errorText)) {
     console.error("service_schema_mismatch", { errorName: cleanText(error?.name, 80) || "Error" });
     return jsonResponse(
       { ok: false, error: "service_schema_mismatch", message: "The service database schema is not compatible with this deployment." },

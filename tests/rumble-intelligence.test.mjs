@@ -9,7 +9,10 @@ import { onRequest as reportRoute } from '../functions/api/admin/rumble-intellig
 const row = (name, amount, date = '2026-01-01T00:00:00Z') => ({ username: name, user: name, amount_cents: amount, subscribed_on: date });
 const snapshot = (rows, now = 1788749506, extra = {}) => ({ user_id: '1sl8zm', channel_id: null, username: 'ThirdRailify', type: 'user', since: null, max_num_results: 50, now, subscribers: { num_subscribers: rows.length, recent_subscribers: rows, latest_subscriber: rows[0] }, ...extra });
 const project = s => projectProvider(s, new Date().toISOString());
-const migration = await readFile(new URL('../commerce-migrations/0045_rumble_intelligence.sql', import.meta.url), 'utf8');
+const migration = [
+  await readFile(new URL('../commerce-migrations/0045_rumble_intelligence.sql', import.meta.url), 'utf8'),
+  await readFile(new URL('../commerce-migrations/0049_rumble_intelligence_rollups.sql', import.meta.url), 'utf8'),
+].join('\n');
 async function harness(t) { const h = await createCommerceDatabases(); t.after(() => h.dispose()); await applyMigration(h.commerceDb, migration); return { ...h, env: commerceEnvironment(h) }; }
 
 test('trend covers 90 days beyond recent history, samples actual observations and pins source/snapshot', async t => {
@@ -91,6 +94,21 @@ test('new unchanged observations reuse sets; older and failed batch cannot repla
   const db = new Proxy(h.commerceDb, { get(target, key) { if (key === 'batch') return statements => target.batch(++batches > 1 ? [...statements, target.prepare('INSERT INTO rumble_intelligence_sets(id,source,records_json,created_at) VALUES(NULL,NULL,NULL,NULL)')] : statements); const v = target[key]; return typeof v === 'function' ? v.bind(target) : v; } });
   await assert.rejects(ingestIntelligence({ ...h.env, THIRDRAILIFY_COMMERCE_DB: db }, project(snapshot([], input.now + 120))));
   assert.equal((await intelligenceReport(h.env)).current.id, before.current.id);
+});
+
+test('100 identical snapshots retain two confirmations without roster/blob history growth', async t => {
+  const h = await harness(t);
+  const base = Math.floor(Date.now() / 1000) - 200;
+  const rows = [row('Stable', 500)];
+  for (let index = 0; index < 100; index++) await ingestIntelligence(h.env, project(snapshot(rows, base + index)));
+  assert.equal(Number((await h.commerceDb.prepare('SELECT COUNT(*) count FROM rumble_intelligence_sets').first()).count), 1);
+  assert.equal(Number((await h.commerceDb.prepare('SELECT COUNT(*) count FROM rumble_intelligence_observations').first()).count), 2);
+  assert.equal(Number((await h.commerceDb.prepare("SELECT COUNT(*) count FROM rumble_intelligence_rollups WHERE grain='change'").first()).count), 1);
+  assert.equal(Number((await h.commerceDb.prepare("SELECT COUNT(*) count FROM rumble_intelligence_rollups WHERE grain='hour'").first()).count), 1);
+  assert.equal(Number((await h.commerceDb.prepare("SELECT COUNT(*) count FROM rumble_intelligence_rollups WHERE grain='day'").first()).count), 1);
+  const state = await h.commerceDb.prepare('SELECT current_confirmations,current_at FROM rumble_intelligence_sources WHERE source=?').bind('user:1sl8zm').first();
+  assert.equal(state.current_confirmations, 2);
+  assert.equal(state.current_at, new Date((base + 99) * 1000).toISOString());
 });
 
 test('private report rejects unsigned requests before reading the roster; schema unavailable writes nothing', async t => {

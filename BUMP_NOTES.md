@@ -1,3 +1,15 @@
+## 2026-09-14 - D1 read-quota incident repair
+
+CURRENT VER=0.1.0-alpha.0
+
+PENDING VER=0.1.0-alpha.0
+
+- Replaced the 29.12M-row Rumble subscriber trend CTE/group/join with scalar hour/day/change rollups and server-owned 24h/7d/30d/90d limits. The 100k-observation regression measures 144.3M reads for the former one-hour query versus 153 for the new full seven-day request.
+- Made subscriber storage sparse: one semantic set, a distinct confirmation, conditional compact freshness, and no repeated full roster blob/history writes for unchanged scheduler snapshots. Chart reads never load `records_json`.
+- Coalesced equivalent client GETs, asserted one chart request per active state, removed timer-path automation PRAGMAs, and throttled persisted nonce cleanup without weakening active/concurrent replay rejection or expired-ID reuse.
+- Added explicit retryable D1 code-7500 responses. The paired Bot honors quota `Retry-After` for control and heartbeat while preserving ordinary cadence and liveness semantics.
+- Added reviewed migration `0049_rumble_intelligence_rollups.sql`, its isolated release script, measured cost coverage, and read+write budget documentation. Protected pre-migration backup: 6,900,631 bytes, SHA-256 `7EEFF6CE24D5C741A0712A77030D0DD9BC7B1482F192063EC54541A8846D8FAD`.
+
 ## 2026-09-13 - Provider profile access lightbox
 
 CURRENT VER=0.1.0-alpha.0

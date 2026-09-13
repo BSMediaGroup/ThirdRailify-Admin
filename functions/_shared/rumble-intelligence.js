@@ -87,12 +87,16 @@ export async function intelligenceDb(env) {
     try {
       // Zero-row column preparation checks the exact schema without scanning sqlite_master.
       await db.batch([
-        db.prepare('SELECT source,current_id,current_at,attempt_at,attempt_json FROM rumble_intelligence_sources LIMIT 0'),
+        db.prepare('SELECT source,current_id,current_at,attempt_at,attempt_json,current_confirmations FROM rumble_intelligence_sources LIMIT 0'),
         db.prepare('SELECT id,source,records_json,created_at FROM rumble_intelligence_sets LIMIT 0'),
         db.prepare('SELECT id,source,provider_at,observed_at,received_at,provenance,qualified,set_id,metadata_json FROM rumble_intelligence_observations LIMIT 0'),
+        db.prepare("SELECT source,grain,bucket_start,snapshot_id,provider_at,observed_at,provenance,set_id,total_count,paid_count,gifted_count,mixed_count,review_count,raw_count,arrivals,removals FROM rumble_intelligence_rollups LIMIT 0"),
         db.prepare('SELECT observation_id,account_id,received_at FROM rumble_intelligence_imports LIMIT 0'),
       ]);
-    } catch { throw new AuthFailure(503, 'intelligence_schema_unavailable', 'Subscriber schema is unavailable. Verify migration 0045 and D1 availability.'); }
+    } catch (error) {
+      if (/exceeded D1(?:'s)? free tier daily row read limit|D1 row read requests are temporarily blocked/i.test(String(error?.message || error || ''))) throw error;
+      throw new AuthFailure(503, 'intelligence_schema_unavailable', 'Subscriber schema is unavailable. Verify migrations 0045/0049 and D1 availability.');
+    }
     ready.set(db, Date.now());
   }
   return db;
@@ -109,15 +113,58 @@ export async function ingestIntelligence(env, body, { provenance = 'live', accou
   }
   const v = await validateObservation(body, provenance, received);
   const db = await intelligenceDb(env);
-  const previous = await db.prepare(`SELECT o.id,o.set_id FROM rumble_intelligence_sources s LEFT JOIN rumble_intelligence_observations o ON o.id=s.current_id WHERE s.source=?`).bind(v.source).first();
+  const previous = await db.prepare(`SELECT o.id,o.set_id,o.provenance,s.current_confirmations FROM rumble_intelligence_sources s LEFT JOIN rumble_intelligence_observations o ON o.id=s.current_id WHERE s.source=?`).bind(v.source).first();
+  const sameQualifiedLive = provenance === 'live' && previous?.provenance === 'live' && v.qualified && previous.set_id === v.setId;
+  const newConfirmation = sameQualifiedLive && previous.id !== v.id && Number(previous.current_confirmations || 0) < 2;
+  const unchangedLive = sameQualifiedLive && !newConfirmation;
+  let delta = { arrivals: null, removals: null };
+  if (sameQualifiedLive) delta = { arrivals: 0, removals: 0 };
+  else if (v.qualified && provenance === 'live' && previous?.set_id) {
+    const prior = await db.prepare('SELECT records_json FROM rumble_intelligence_sets WHERE id=? AND source=?').bind(previous.set_id, v.source).first();
+    if (prior?.records_json) {
+      const before = new Set(accounts(JSON.parse(prior.records_json)).map(record => record.name));
+      const after = new Set(accounts(v.records).map(record => record.name));
+      delta = { arrivals: [...after].filter(name => !before.has(name)).length, removals: [...before].filter(name => !after.has(name)).length };
+    }
+  }
   const attemptAt = v.observedAt || received;
-  const attempt = JSON.stringify({ label: v.label, providerAt: v.providerAt, observedAt: v.observedAt, receivedAt: received, qualified: v.qualified, reasons: v.metadata.reasons, provenance, coverageGaps: v.metadata.coverageGaps });
-  const statements = [
+  const attempt = JSON.stringify({ label: v.label, providerAt: v.providerAt, observedAt: v.observedAt, receivedAt: received, qualified: v.qualified, setId: v.setId, reasons: v.metadata.reasons, provenance, coverageGaps: v.metadata.coverageGaps });
+  const storedObservationId = unchangedLive ? previous.id : v.id;
+  const statements = unchangedLive ? [
+    // A confirmed unchanged roster advances only compact source freshness. The
+    // immutable observation/set tables do not grow on Bot scheduler cadence.
+    db.prepare(`INSERT INTO rumble_intelligence_sources(source,current_id,current_at,attempt_at,attempt_json,current_confirmations) VALUES(?,?,?,?,?,2)
+      ON CONFLICT(source) DO UPDATE SET
+        current_at=CASE WHEN excluded.current_at>rumble_intelligence_sources.current_at THEN excluded.current_at ELSE rumble_intelligence_sources.current_at END,
+        attempt_at=CASE WHEN excluded.attempt_at>rumble_intelligence_sources.attempt_at THEN excluded.attempt_at ELSE rumble_intelligence_sources.attempt_at END,
+        attempt_json=CASE WHEN excluded.attempt_at>rumble_intelligence_sources.attempt_at THEN excluded.attempt_json ELSE rumble_intelligence_sources.attempt_json END
+      WHERE excluded.current_at>rumble_intelligence_sources.current_at OR excluded.attempt_at>rumble_intelligence_sources.attempt_at`)
+      .bind(v.source, previous.id, v.providerAt, attemptAt, attempt),
+  ] : [
     db.prepare('INSERT OR IGNORE INTO rumble_intelligence_sets(id,source,records_json,created_at) VALUES(?,?,?,?)').bind(v.setId, v.source, JSON.stringify(v.records), received),
     db.prepare('INSERT OR IGNORE INTO rumble_intelligence_observations(id,source,provider_at,observed_at,received_at,provenance,qualified,set_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)').bind(v.id, v.source, v.providerAt, v.observedAt, received, provenance, Number(v.qualified), v.setId, JSON.stringify(v.metadata)),
     db.prepare(`INSERT INTO rumble_intelligence_sources(source,attempt_at,attempt_json) VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET attempt_at=excluded.attempt_at,attempt_json=excluded.attempt_json WHERE excluded.attempt_at>rumble_intelligence_sources.attempt_at`).bind(v.source, attemptAt, attempt),
-    db.prepare(`UPDATE rumble_intelligence_sources SET current_id=?,current_at=? WHERE source=? AND (current_at IS NULL OR current_at<?) AND EXISTS(SELECT 1 FROM rumble_intelligence_observations WHERE id=? AND qualified=1)`).bind(v.id, v.providerAt, v.source, v.providerAt, v.id),
+    db.prepare(`UPDATE rumble_intelligence_sources SET current_id=?,current_at=?,current_confirmations=? WHERE source=? AND (current_at IS NULL OR current_at<? OR (current_at=? AND ?='live')) AND EXISTS(SELECT 1 FROM rumble_intelligence_observations WHERE id=? AND qualified=1)`).bind(v.id, v.providerAt, sameQualifiedLive ? Math.min(2, Number(previous.current_confirmations || 0) + 1) : 1, v.source, v.providerAt, v.providerAt, provenance, v.id),
   ];
+  if (v.qualified) {
+    const summary = summarize(v.records);
+    const grains = [['hour', 3600], ['day', 86400], ...(!sameQualifiedLive ? [['change', 0]] : [])];
+    for (const [grain, seconds] of grains) {
+      const bucketStart = seconds ? new Date(Math.floor(Date.parse(v.providerAt) / (seconds * 1000)) * seconds * 1000).toISOString() : v.providerAt;
+      statements.push(db.prepare(`INSERT INTO rumble_intelligence_rollups
+        (source,grain,bucket_start,snapshot_id,provider_at,observed_at,provenance,set_id,total_count,paid_count,gifted_count,mixed_count,review_count,raw_count,arrivals,removals,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(source,grain,bucket_start) DO UPDATE SET
+          snapshot_id=excluded.snapshot_id,provider_at=excluded.provider_at,observed_at=excluded.observed_at,provenance=excluded.provenance,set_id=excluded.set_id,
+          total_count=excluded.total_count,paid_count=excluded.paid_count,gifted_count=excluded.gifted_count,mixed_count=excluded.mixed_count,review_count=excluded.review_count,raw_count=excluded.raw_count,
+          arrivals=CASE WHEN rumble_intelligence_rollups.arrivals IS NULL OR excluded.arrivals IS NULL THEN NULL ELSE rumble_intelligence_rollups.arrivals+excluded.arrivals END,
+          removals=CASE WHEN rumble_intelligence_rollups.removals IS NULL OR excluded.removals IS NULL THEN NULL ELSE rumble_intelligence_rollups.removals+excluded.removals END,
+          updated_at=excluded.updated_at
+        WHERE (excluded.provider_at>rumble_intelligence_rollups.provider_at AND excluded.set_id<>rumble_intelligence_rollups.set_id)
+          OR (excluded.provider_at=rumble_intelligence_rollups.provider_at AND excluded.provenance='live' AND rumble_intelligence_rollups.provenance<>'live')`)
+        .bind(v.source, grain, bucketStart, storedObservationId, v.providerAt, v.observedAt, provenance, v.setId, summary.total, summary.paid, summary.gifted, summary.mixed, summary.unknown, v.metadata.rawCount, delta.arrivals, delta.removals, received, received));
+    }
+  }
   if (accountId) statements.push(db.prepare('INSERT OR IGNORE INTO rumble_intelligence_imports(observation_id,account_id,received_at) VALUES(?,?,?)').bind(v.id, accountId, received));
   await db.batch(statements);
   // Roster membership follows semantic set changes, never Bot timer cadence.
@@ -126,13 +173,24 @@ export async function ingestIntelligence(env, body, { provenance = 'live', accou
     try { const { syncEnabledRosterRulesForSnapshot } = await import('./subscriber-roster.js'); await syncEnabledRosterRulesForSnapshot(env, v.source); }
     catch { /* schema may be pending or a target may be locked; manual preview exposes the fault */ }
   }
-  return { ok: true, observationId: v.id, qualified: v.qualified, source: v.source, metadata: v.metadata };
+  return { ok: true, observationId: storedObservationId, qualified: v.qualified, source: v.source, unchanged: unchangedLive, metadata: v.metadata };
 }
 
 export function accounts(records) {
   const grouped = new Map();
   for (const r of records) { if (!grouped.has(r.name)) grouped.set(r.name, { name: r.name, displayName: r.displayName, avatar: r.avatar, records: [], hasPaid: false, hasGifted: false, needsReview: false }); const a = grouped.get(r.name); a.records.push(r); a.hasPaid ||= r.classification === 'Self-paid'; a.hasGifted ||= r.classification === 'Gifted'; a.needsReview ||= r.classification === 'Needs review'; }
   return [...grouped.values()].map(a => ({ ...a, classification: a.needsReview ? 'Needs review' : a.hasPaid && a.hasGifted ? 'Self-paid + gifted' : a.hasPaid ? 'Self-paid' : 'Gifted' }));
+}
+
+function summarize(records) {
+  const roster = accounts(records);
+  return {
+    total: roster.length,
+    paid: roster.filter(account => account.classification === 'Self-paid').length,
+    gifted: roster.filter(account => account.classification === 'Gifted').length,
+    mixed: roster.filter(account => account.classification === 'Self-paid + gifted').length,
+    unknown: roster.filter(account => account.classification === 'Needs review').length,
+  };
 }
 
 export async function intelligencePerson(env, source, name) {
@@ -155,40 +213,49 @@ export async function intelligencePerson(env, source, name) {
 }
 
 export async function intelligenceTrend(env, source, range = '7d', snapshotId) {
-  const windows = { '24h': [1, 3600], '7d': [7, 3600], '30d': [30, 86400], '90d': [90, 86400] };
+  const windows = {
+    '24h': { days: 1, grain: 'hour', bucketSeconds: 3600, maxPoints: 25 },
+    '7d': { days: 7, grain: 'hour', bucketSeconds: 3600, maxPoints: 169 },
+    '30d': { days: 30, grain: 'day', bucketSeconds: 86400, maxPoints: 31 },
+    '90d': { days: 90, grain: 'day', bucketSeconds: 86400, maxPoints: 91 },
+  };
   if (!Object.hasOwn(windows, range) || !/^(user|channel):[\w-]{1,100}$/.test(source) || !/^[a-f0-9]{64}$/.test(snapshotId || '')) fail('intelligence_trend_range');
   const db = await intelligenceDb(env);
-  const anchor = await db.prepare('SELECT provider_at FROM rumble_intelligence_observations WHERE id=? AND source=? AND qualified=1').bind(snapshotId, source).first();
+  const anchor = await db.prepare(`SELECT CASE WHEN s.current_id=o.id THEN s.current_at ELSE o.provider_at END provider_at
+    FROM rumble_intelligence_observations o LEFT JOIN rumble_intelligence_sources s ON s.source=o.source
+    WHERE o.id=? AND o.source=? AND o.qualified=1`).bind(snapshotId, source).first();
   if (!anchor) throw new AuthFailure(404, 'intelligence_snapshot_missing', 'The requested subscriber snapshot is unavailable.');
-  const [days, bucketSeconds] = windows[range];
-  const to = new Date().toISOString(), from = new Date(Date.parse(to) - days * DAY).toISOString();
-  // Select the latest actual observation in each UTC bucket BEFORE loading rosters.
-  // This covers the full selected window, independent of the 180-checkpoint drawer.
-  const rows = await db.prepare(`WITH selected AS (
-    SELECT MAX(provider_at) at FROM rumble_intelligence_observations
-    WHERE source=? AND qualified=1 AND provider_at>=? AND provider_at<=?
-    GROUP BY CAST(unixepoch(provider_at)/? AS INTEGER)
-  ) SELECT o.provider_at,o.provenance,o.set_id,m.records_json
-    FROM selected s JOIN rumble_intelligence_observations o ON o.provider_at=s.at AND o.source=? AND o.qualified=1
-    JOIN rumble_intelligence_sets m ON m.id=o.set_id ORDER BY o.provider_at,o.provenance LIMIT 340`).bind(source, from, anchor.provider_at < to ? anchor.provider_at : to, bucketSeconds, source).all();
-  const sets = new Map(), points = new Map();
-  for (const row of rows.results) {
-    if (!sets.has(row.set_id)) {
-      const roster = accounts(JSON.parse(row.records_json));
-      sets.set(row.set_id, { total: roster.length, paid: roster.filter(a => a.classification === 'Self-paid').length, gifted: roster.filter(a => a.classification === 'Gifted').length, mixed: roster.filter(a => a.classification === 'Self-paid + gifted').length, unknown: roster.filter(a => a.classification === 'Needs review').length });
-    }
-    points.set(row.provider_at, { at: row.provider_at, provenance: row.provenance, ...sets.get(row.set_id) });
-  }
-  return { ok: true, source, snapshotId, range, from, to, bucketSeconds, points: [...points.values()] };
+  const window = windows[range];
+  const to = new Date().toISOString(), boundedTo = anchor.provider_at < to ? anchor.provider_at : to;
+  const from = new Date(Date.parse(to) - window.days * DAY).toISOString();
+  const firstBucket = new Date(Math.floor(Date.parse(from) / (window.bucketSeconds * 1000)) * window.bucketSeconds * 1000).toISOString();
+  // One indexed seek over precomputed scalar summaries. Browser input cannot set
+  // the grain, divisor, date window, or result bound, and no roster JSON is read.
+  const [checkpoints, changes] = await db.batch([
+    db.prepare(`SELECT provider_at,provenance,total_count,paid_count,gifted_count,mixed_count,review_count
+      FROM rumble_intelligence_rollups
+      WHERE source=? AND grain=? AND bucket_start>=? AND bucket_start<=? AND provider_at>=? AND provider_at<=?
+      ORDER BY bucket_start DESC LIMIT ?`).bind(source, window.grain, firstBucket, boundedTo, from, boundedTo, window.maxPoints),
+    db.prepare(`SELECT provider_at,provenance,total_count,paid_count,gifted_count,mixed_count,review_count
+      FROM rumble_intelligence_rollups
+      WHERE source=? AND grain='change' AND bucket_start>=? AND bucket_start<=?
+      ORDER BY bucket_start DESC LIMIT ?`).bind(source, from, boundedTo, window.maxPoints),
+  ]);
+  const point = row => ({ at: row.provider_at, provenance: row.provenance, total: Number(row.total_count), paid: Number(row.paid_count), gifted: Number(row.gifted_count), mixed: Number(row.mixed_count), unknown: Number(row.review_count) });
+  const merged = new Map([...checkpoints.results, ...changes.results].map(row => [row.provider_at, point(row)]));
+  const points = [...merged.values()].sort((a, b) => a.at.localeCompare(b.at)).slice(-window.maxPoints);
+  return { ok: true, source, snapshotId, range, from, to, bucketSeconds: window.bucketSeconds, maxPoints: window.maxPoints, points };
 }
 
 export async function intelligenceReport(env, source = PRIMARY_SOURCE) {
   if (!/^(user|channel):[\w-]{1,100}$/.test(source)) fail('intelligence_source');
   const db = await intelligenceDb(env);
   // One joined read pins the coherent current snapshot before any history read.
-  const state = await db.prepare(`SELECT s.*,o.id,o.provider_at,o.observed_at,o.received_at,o.provenance,o.metadata_json,m.records_json FROM rumble_intelligence_sources s LEFT JOIN rumble_intelligence_observations o ON o.id=s.current_id LEFT JOIN rumble_intelligence_sets m ON m.id=o.set_id WHERE s.source=?`).bind(source).first();
+  const state = await db.prepare(`SELECT s.*,o.id,o.set_id,o.provider_at,o.observed_at,o.received_at,o.provenance,o.metadata_json,m.records_json FROM rumble_intelligence_sources s LEFT JOIN rumble_intelligence_observations o ON o.id=s.current_id LEFT JOIN rumble_intelligence_sets m ON m.id=o.set_id WHERE s.source=?`).bind(source).first();
   if (!state?.id) return { ok: true, source, health: 'unavailable', current: null, accounts: [], history: [], attempt: state ? JSON.parse(state.attempt_json) : null };
-  const current = { id: state.id, providerAt: state.provider_at, observedAt: state.observed_at, receivedAt: state.received_at, provenance: state.provenance, ...JSON.parse(state.metadata_json) };
+  const latestAttempt = JSON.parse(state.attempt_json);
+  const currentConfirmed = latestAttempt.qualified && latestAttempt.setId === state.set_id;
+  const current = { id: state.id, providerAt: currentConfirmed ? state.current_at : state.provider_at, observedAt: currentConfirmed ? latestAttempt.observedAt : state.observed_at, receivedAt: currentConfirmed ? latestAttempt.receivedAt : state.received_at, provenance: state.provenance, ...JSON.parse(state.metadata_json) };
   const roster = accounts(JSON.parse(state.records_json));
   const rawHistory = await db.prepare(`SELECT o.id,o.provider_at,o.observed_at,o.provenance,o.metadata_json,m.records_json FROM rumble_intelligence_observations o JOIN rumble_intelligence_sets m ON m.id=o.set_id WHERE o.source=? AND o.qualified=1 AND o.provider_at<=? ORDER BY o.provider_at DESC LIMIT 180`).bind(source, state.provider_at).all();
   const checkpoints = rawHistory.results.map(h => ({ id: h.id, providerAt: h.provider_at, observedAt: h.observed_at, provenance: h.provenance, metadata: JSON.parse(h.metadata_json), accounts: accounts(JSON.parse(h.records_json)) })).reverse();
@@ -209,6 +276,6 @@ export async function intelligenceReport(env, source = PRIMARY_SOURCE) {
     Object.assign(all.get(name), { timeline: sightings, firstObserved: first.at, lastObserved: last.at, firstMissing: missing[0]?.providerAt || null, confirmedMissing: missing[1]?.providerAt || null, hadPaid: sightings.some(s => s.records.some(r => r.classification === 'Self-paid')), hadGifted: sightings.some(s => s.records.some(r => r.classification === 'Gifted')) });
   }
   const counts = Object.fromEntries(['Self-paid', 'Gifted', 'Self-paid + gifted', 'Needs review'].map(label => [label, roster.filter(a => a.classification === label).length]));
-  const attempt = JSON.parse(state.attempt_json);
-  return { ok: true, source, label: attempt.label || source, health: Date.now() - Date.parse(state.provider_at) > 15 * 60000 ? 'stale' : attempt.qualified ? 'qualified' : 'degraded', attempt, current, counts, distinctCount: roster.length, accounts: [...all.values()], history, coverage: { limit: 180, from: history[0]?.providerAt, to: state.provider_at, bounded: rawHistory.results.length === 180 }, rule: RULE };
+  const attempt = latestAttempt;
+  return { ok: true, source, label: attempt.label || source, health: Date.now() - Date.parse(current.providerAt) > 15 * 60000 ? 'stale' : attempt.qualified ? 'qualified' : 'degraded', attempt, current, counts, distinctCount: roster.length, accounts: [...all.values()], history, coverage: { limit: 180, from: history[0]?.providerAt, to: current.providerAt, bounded: rawHistory.results.length === 180 }, rule: RULE };
 }

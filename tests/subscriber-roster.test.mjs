@@ -19,7 +19,7 @@ function meter(db) {
 
 async function setup(t) {
   const h = await createCommerceDatabases(); t.after(h.dispose); const env = commerceEnvironment(h), db = h.commerceDb;
-  for (const file of ['0045_rumble_intelligence.sql', '0048_subscriber_roster_automation.sql']) await applyMigration(db, await readFile(new URL(`../commerce-migrations/${file}`, import.meta.url), 'utf8'));
+  for (const file of ['0045_rumble_intelligence.sql', '0049_rumble_intelligence_rollups.sql', '0048_subscriber_roster_automation.sql']) await applyMigration(db, await readFile(new URL(`../commerce-migrations/${file}`, import.meta.url), 'utf8'));
   const now = new Date().toISOString();
   for (const id of ['roster-wheel', 'second-wheel', 'rollback-wheel']) await db.prepare(`INSERT INTO wheels(id,reference_code,public_slug,title,lifecycle,visibility,owner_account_id,config_json,created_at,updated_at)
     VALUES (?,?,?,?, 'active','hidden','owner','{}',?,?)`).bind(id, `W-${id}`, id, id, now, now).run();

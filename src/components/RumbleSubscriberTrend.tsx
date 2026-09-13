@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AdminIcon } from './AdminIcon';
+import { coordinatedJsonGet } from '../lib/coordinated-json';
 import '../styles/rumble-subscriber-trend.css';
 
 type Series = 'total' | 'paid' | 'gifted' | 'mixed' | 'unknown';
@@ -31,15 +32,15 @@ export function RumbleSubscriberTrend({ source, snapshotId, total, paidTotal, as
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    const controller = new AbortController(); setData(null); setActive(null); setError('');
+    let activeRequest = true; setData(null); setActive(null); setError('');
     if (!snapshotId) { setLoading(false); return; }
     setLoading(true);
-    void fetch(`/api/admin/rumble-intelligence/trend?${new URLSearchParams({ source, snapshotId, range })}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json' }, signal: controller.signal })
-      .then(async response => { if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Subscriber trend did not return JSON.'); const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Subscriber trend unavailable.'); return body as Trend; })
-      .then(value => { if (!controller.signal.aborted) setData(value); })
-      .catch(e => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Subscriber trend unavailable.'); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
+    const url = `/api/admin/rumble-intelligence/trend?${new URLSearchParams({ source, snapshotId, range })}`;
+    void coordinatedJsonGet<Trend>(url, 'Subscriber trend did not return JSON.', 'Subscriber trend unavailable.')
+      .then(value => { if (activeRequest) setData(value); })
+      .catch(e => { if (activeRequest) setError(e instanceof Error ? e.message : 'Subscriber trend unavailable.'); })
+      .finally(() => { if (activeRequest) setLoading(false); });
+    return () => { activeRequest = false; };
   }, [source, snapshotId, range, refreshVersion]);
   const points = data?.points || [];
   const enabled = series.filter(s => visible.has(s.key));

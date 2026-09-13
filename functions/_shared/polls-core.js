@@ -24,6 +24,8 @@ const SOURCE_SCOPE = /^(?:channel|user):[A-Za-z0-9_-]{1,180}$/;
 const ID = /^[A-Za-z0-9_-]{8,180}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const SERVICE_WINDOW_SECONDS = 300;
+const NONCE_CLEANUP_INTERVAL_MS = SERVICE_WINDOW_SECONDS * 1000;
+const nonceCleanupAt = new WeakMap();
 const PUBLIC_PAGE_SIZE = 12;
 const PUBLIC_MAX_PAGE_SIZE = 48;
 
@@ -523,16 +525,7 @@ export async function verifyBotServiceRequest(request, env, rawBody = "") {
   const pathname = new URL(request.url).pathname;
   const expected = await hmacSha256(secret, `${request.method}\n${pathname}\n${timestamp}\n${requestId}\n${digest}`);
   if (!timingSafeEqual(expected, signature)) throw new AuthFailure(401, "bot_signature_invalid", "The bot service request could not be verified.");
-  const db = requirePollDb(env);
-  const timestampIso = nowIso();
-  await db.prepare("DELETE FROM bot_service_nonces WHERE expires_at < ?").bind(timestampIso).run();
-  try {
-    await db.prepare("INSERT INTO bot_service_nonces (request_id,route,received_at,expires_at) VALUES (?,?,?,?)")
-      .bind(requestId, pathname, timestampIso, nowIso(Date.now() + SERVICE_WINDOW_SECONDS * 1000)).run();
-  } catch (error) {
-    if (/UNIQUE constraint/i.test(String(error?.message || error))) throw new AuthFailure(409, "bot_request_replayed", "The bot service request was already received.");
-    throw error;
-  }
+  await retainServiceNonce(env, requestId, pathname, 'bot_request_replayed', 'The bot service request was already received.');
 }
 
 export async function verifyPublicPollRequest(request, env, rawBody = "") {
@@ -548,7 +541,7 @@ export async function verifyPublicPollRequest(request, env, rawBody = "") {
   const digest = await digestHex(bytes); const pathname = new URL(request.url).pathname;
   const expected = await hmacSha256(secret, `${request.method}\n${pathname}\n${timestamp}\n${requestId}\n${digest}`);
   if (!timingSafeEqual(expected, signature)) throw new AuthFailure(401, "poll_signature_invalid", "The Public Poll request could not be verified.");
-  await retainServiceNonce(env, requestId, pathname);
+  await retainServiceNonce(env, requestId, pathname, 'service_request_replayed', 'The signed service request was already received.');
 }
 
 export async function botDesiredConfig(env) {
@@ -854,14 +847,28 @@ async function activity(env, pollId, actorAccountId, eventType, result, metadata
     .bind(`pae_${randomId()}`, pollId || null, actorAccountId || null, clean(eventType, 80), clean(result, 30), metadata ? JSON.stringify(metadata).slice(0, 1000) : null, nowIso()).run();
 }
 
-async function retainServiceNonce(env, requestId, pathname) {
-  const db = requirePollDb(env); const timestampIso = nowIso();
-  await db.prepare("DELETE FROM bot_service_nonces WHERE expires_at < ?").bind(timestampIso).run();
+async function retainServiceNonce(env, requestId, pathname, replayCode, replayMessage) {
+  const db = requirePollDb(env); const now = Date.now(); const timestampIso = nowIso(now);
+  const previousCleanup = nonceCleanupAt.get(db);
+  if (!Number.isFinite(previousCleanup) || now < previousCleanup || now - previousCleanup >= NONCE_CLEANUP_INTERVAL_MS) {
+    try {
+      await db.prepare("DELETE FROM bot_service_nonces WHERE expires_at < ?").bind(timestampIso).run();
+      nonceCleanupAt.set(db, now);
+    } catch { /* Replay insertion remains authoritative; retry cleanup next request. */ }
+  }
+  const insert = () => db.prepare("INSERT INTO bot_service_nonces (request_id,route,received_at,expires_at) VALUES (?,?,?,?)")
+    .bind(requestId, pathname, timestampIso, nowIso(now + SERVICE_WINDOW_SECONDS * 1000)).run();
   try {
-    await db.prepare("INSERT INTO bot_service_nonces (request_id,route,received_at,expires_at) VALUES (?,?,?,?)")
-      .bind(requestId, pathname, timestampIso, nowIso(Date.now() + SERVICE_WINDOW_SECONDS * 1000)).run();
+    await insert();
   } catch (error) {
-    if (/UNIQUE constraint/i.test(String(error?.message || error))) throw new AuthFailure(409, "service_request_replayed", "The signed service request was already received.");
+    if (/UNIQUE constraint/i.test(String(error?.message || error))) {
+      // A request id may be reused only after its persisted replay window ended,
+      // including across isolates. This targeted fallback does not weaken active
+      // nonce uniqueness when general cleanup is throttled.
+      const expired = await db.prepare("DELETE FROM bot_service_nonces WHERE request_id=? AND expires_at<?").bind(requestId, timestampIso).run();
+      if (Number(expired?.meta?.changes || 0) > 0) { await insert(); return; }
+      throw new AuthFailure(409, replayCode, replayMessage);
+    }
     throw error;
   }
 }

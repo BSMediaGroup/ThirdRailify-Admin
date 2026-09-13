@@ -17,6 +17,7 @@ import { ingestIntelligence, projectProvider } from '../functions/_shared/rumble
 test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> authenticated reporting -> real browser', async t => {
   const h = await createCommerceDatabases(); t.after(() => h.dispose());
   await applyMigration(h.commerceDb, await readFile(new URL('../commerce-migrations/0045_rumble_intelligence.sql', import.meta.url), 'utf8'));
+  await applyMigration(h.commerceDb, await readFile(new URL('../commerce-migrations/0049_rumble_intelligence_rollups.sql', import.meta.url), 'utf8'));
   const server = createServer(async (req, res) => {
     try {
       const chunks = []; for await (const c of req) chunks.push(c);
@@ -85,10 +86,13 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
   for (const width of [1920, 1440, 768, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: 'reduce' });
     const split = cookie.indexOf('='); await context.addCookies([{ name: cookie.slice(0, split), value: cookie.slice(split + 1), url: origin }]);
-    const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
+    const page = await context.newPage(); const errors = []; const trendRequests = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('request', request => { if (request.url().includes('/api/admin/rumble-intelligence/trend?')) trendRequests.push(request.url()); });
     await page.goto(origin + '/rumble-intelligence'); await page.getByRole('heading', { name: 'Subscriber Registry', exact: true }).waitFor();
     try { await page.getByText('116 accounts', { exact: false }).waitFor(); } catch (e) { await page.screenshot({ path: `${evidenceDir}/connected-failure.png`, fullPage: true }); t.diagnostic(await page.locator('body').innerText()); throw e; }
     await page.locator('.ri-trend[aria-busy="false"] svg g[role="button"]').first().waitFor();
+    assert.equal(trendRequests.length, 1, `initial render must issue one trend request at ${width}px`);
     assert.equal(await page.getByTestId('subscriber-total').innerText(), '116');
     assert.equal(await page.getByTestId('subscriber-paid-total').innerText(), '11');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `overflow at ${width}`);
@@ -110,8 +114,10 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
     assert.equal(await page.getByRole('tooltip').count(), 0);
     if (width <= 900) { await page.locator('.ri-person').first().scrollIntoViewIfNeeded(); await page.screenshot({ path: `${evidenceDir}/registry-cards-${width}.png` }); }
     if (width === 1440) {
+      const beforeRefresh = trendRequests.length;
       const refreshedTrend = page.waitForResponse(r => r.url().includes('/rumble-intelligence/trend?') && r.status() === 200);
       await page.getByRole('button', { name: 'Refresh report' }).click(); await refreshedTrend;
+      assert.equal(trendRequests.length, beforeRefresh + 1, 'one refresh issues one trend request');
       assert.equal(await page.locator('.ri-person').count(), 20);
       for (const size of [10, 20, 50, 100]) {
         await page.getByRole('combobox', { name: 'Rows per page' }).selectOption(String(size));
@@ -122,8 +128,10 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
       assert.equal(await page.getByRole('button', { name: 'Next', exact: true }).isDisabled(), true);
       await page.getByRole('combobox', { name: 'Rows per page' }).selectOption('20');
       for (const range of ['24hr', '30d', '90d', '7d']) {
+        const beforeRange = trendRequests.length;
         const response = page.waitForResponse(r => r.url().includes('/rumble-intelligence/trend?') && r.status() === 200);
         await page.getByRole('button', { name: range, exact: true }).click(); await response;
+        assert.equal(trendRequests.length, beforeRange + 1, `${range} range change issues one trend request`);
         await page.locator('.ri-trend[aria-busy="false"] svg g[role="button"]').first().waitFor();
       }
       await page.getByRole('button', { name: 'Gifted only', exact: true }).click();
@@ -146,7 +154,10 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
       }
       await page.locator('.ri-person').first().focus(); await page.keyboard.press('Enter'); await page.locator('dialog[open]').waitFor(); await page.screenshot({ path: `${evidenceDir}/mixed-detail.png`, fullPage: true }); await page.keyboard.press('Escape'); assert.equal(await page.locator('dialog[open]').count(), 0);
       await page.getByRole('button', { name: 'history', exact: true }).click(); await page.screenshot({ path: `${evidenceDir}/history.png`, fullPage: true });
+      const beforeReload = trendRequests.length;
       await page.reload(); await page.getByText('116 accounts', { exact: false }).waitFor();
+      await page.locator('.ri-trend[aria-busy="false"] svg g[role="button"]').first().waitFor();
+      assert.equal(trendRequests.length, beforeReload + 1, 'hard reload issues one trend request');
     }
     await page.getByRole('combobox', { name: /^Classification/ }).selectOption('Self-paid + gifted');
     await page.locator('.ri-person').first().click();
@@ -168,8 +179,10 @@ test('actual Python serializer/HMAC HTTP client -> Admin handler -> local D1 -> 
         body.points = body.points.map(p => ({ ...p, total: 116, paid: 9, gifted: 105, mixed: 2, unknown: 0 }));
         await route.fulfill({ response, json: body });
       });
+      const beforeFlatRefresh = trendRequests.length;
       await page.getByRole('button', { name: 'Refresh report' }).click();
       await page.waitForResponse(r => r.url().includes('/rumble-intelligence/trend?') && r.status() === 200);
+      assert.equal(trendRequests.length, beforeFlatRefresh + 1, 'flat-chart refresh issues one trend request');
       await page.locator('.ri-trend[aria-busy="false"]').waitFor();
       await page.mouse.move(0, 0);
       const svg = page.locator('.ri-trend__plot svg'); await svg.scrollIntoViewIfNeeded();

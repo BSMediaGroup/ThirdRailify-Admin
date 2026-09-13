@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { ensureEnvironmentMasters } from '../functions/_shared/auth-core.js';
+import { ensureEnvironmentMasters, errorResponse } from '../functions/_shared/auth-core.js';
 import { onRequest } from '../functions/api/internal/bot/[[path]].js';
 import { recordBotHeartbeat } from '../functions/_shared/polls-core.js';
 import { createAuthDatabase, authEnvironment } from './auth-test-helpers.mjs';
 import { createCommerceDatabases, commerceEnvironment } from './commerce-test-helpers.mjs';
 
 function meter(db) {
-  const cost = { queries: 0, writes: 0, reads: 0, mutations: 0 };
+  const cost = { queries: 0, writes: 0, reads: 0, mutations: 0, nonceCleanups: 0, nonceTargetedCleanups: 0, schemaPragmas: 0 };
   const record = result => {
     for (const row of Array.isArray(result) ? result : [result]) {
       cost.queries++; cost.writes += row?.meta?.rows_written || 0;
@@ -18,6 +18,10 @@ function meter(db) {
     return result;
   };
   return { cost, prepare: (...args) => {
+    const sql = String(args[0] || '');
+    if (sql === 'DELETE FROM bot_service_nonces WHERE expires_at < ?') cost.nonceCleanups++;
+    if (/DELETE FROM bot_service_nonces WHERE request_id=/.test(sql)) cost.nonceTargetedCleanups++;
+    if (/PRAGMA\s+table_info/i.test(sql)) cost.schemaPragmas++;
     let statement = db.prepare(...args);
     const wrapper = { bind: (...values) => { statement = statement.bind(...values); return wrapper; },
       run: async () => record(await statement.run()), all: async () => record(await statement.all()),
@@ -82,12 +86,20 @@ test('100 control cycles preserve projections with one nonce instead of three; r
   const after = { ...db.cost, duration: performance.now() - afterStart };
   assert.equal(after.writes * 3, before.writes);
   assert.ok(after.queries < before.queries); assert.ok(after.reads <= before.reads);
+  assert.ok(before.nonceCleanups <= 1); assert.ok(after.nonceCleanups <= 1);
+  assert.equal(after.schemaPragmas, 0, 'Bot control must not introspect schemas');
   assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) AS n FROM bot_service_nonces').first()).n, 400);
   const repeated = request('control');
   const concurrent = await Promise.all([onRequest({ request: repeated.clone(), env }), onRequest({ request: repeated.clone(), env })]);
   assert.deepEqual(concurrent.map(r => r.status).sort(), [200, 409]);
   const invalid = request('control'); invalid.headers.set('x-thirdrailify-signature', 'invalid');
   assert.equal((await onRequest({ request: invalid, env })).status, 401);
+  const targetedBeforeExpiredReuse = db.cost.nonceTargetedCleanups;
+  const reused = randomUUID();
+  await h.commerceDb.prepare("INSERT INTO bot_service_nonces(request_id,route,received_at,expires_at) VALUES(?,?,?,?)")
+    .bind(reused, '/api/internal/bot/control', '2020-01-01T00:00:00.000Z', '2020-01-01T00:05:00.000Z').run();
+  assert.equal((await onRequest({ request: request('control', reused), env })).status, 200, 'expired ids can be reused after persisted cleanup');
+  assert.equal(db.cost.nonceTargetedCleanups, targetedBeforeExpiredReuse + 1);
   await h.commerceDb.prepare("UPDATE bot_automation_config SET desired_revision=desired_revision+1 WHERE singleton_id=1").run();
   assert.equal((await run('control')).config.body.revision, legacy.config.revision + 1);
   const heartbeatsBefore = db.cost.writes;
@@ -102,4 +114,18 @@ test('100 control cycles preserve projections with one nonce instead of three; r
   const partial = await run('control');
   assert.equal(partial.config.status, 200); assert.equal(partial.poll.status, 200); assert.equal(partial.rules.status, 503);
   t.diagnostic(JSON.stringify({ before, after }));
+});
+
+test('D1 read-quota exhaustion is a retryable explicit unavailable response', async () => {
+  const response = errorResponse(new Error("D1_ERROR: exceeded D1's free tier daily row read limit [code: 7500]"), new Request('https://admin.example/api/admin/rumble-intelligence'), {});
+  assert.equal(response.status, 503);
+  const retryAfter = Number(response.headers.get('retry-after'));
+  assert.ok(retryAfter >= 60 && retryAfter <= 86400);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: 'database_read_quota_exhausted',
+    message: "Live data is temporarily unavailable because today's database read capacity is exhausted. Previously loaded data has not been replaced.",
+  });
+  const unrelated7500 = errorResponse(new Error('D1_ERROR: too many terms in compound SELECT [code: 7500]'), new Request('https://admin.example/api/admin/rumble-intelligence'), {});
+  assert.equal(unrelated7500.status, 500, 'generic D1 error code 7500 is not sufficient quota evidence');
 });

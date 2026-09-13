@@ -500,6 +500,10 @@ Production inspection confirmed 0035 applied and 0036 missing. Applied only pend
 
 Shared editor now lets the server recheck schema on Save rather than disabling on missing/stale readiness. Server schema/auth validation remains authoritative. Server errors appear beside Save and permit retry. Browser coverage passed at four widths, including missing readiness and stale false readiness followed by successful save/reload. Typecheck, focused lint and production build passed. No production rules or Wheel entries were created or enabled by this repair.
 
+### 2026-09-14 Rumble Intelligence bounded history
+
+Rumble subscriber trend requests read precomputed scalar checkpoints and semantic-change summaries from `rumble_intelligence_rollups`, never full historical roster JSON. Server-owned ranges cap returned data at 25/169/31/91 points for 24h/7d/30d/90d. Unchanged live snapshots retain only compact freshness after one distinct confirmation. Migration `0049_rumble_intelligence_rollups.sql` and `scripts/release-rumble-intelligence-rollups.ps1` are the additive production release authority; the script exposes only 0049 so unrelated pending migration 0046 cannot be applied. See [the measured read/write budget and incident contract](docs/D1_WRITE_BUDGET.md).
+
 
 ### 2026-09-07 optional Rant message repair
 

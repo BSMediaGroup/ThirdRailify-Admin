@@ -5,22 +5,20 @@ import { getSafeRumbleDiscovery, requirePollDb } from './polls-core.js';
 import { executeAutomationWheelEntry } from './wheels-core.js';
 import { fieldFailure, invalid, matches, validateEvent, validateRule } from './automation-contract.js';
 import { normalizePollTrigger } from './poll-normalization.js';
-import { schemaObject, invalidateSchemaCapabilities } from './schema-capabilities.js';
+import { schemaObject } from './schema-capabilities.js';
 
 export async function automationReadiness(env) {
   const db = requirePollDb(env);
   const table = await schemaObject(db, 'automation_rules', 'table');
-  const columns = (await db.prepare('PRAGMA table_info(automation_rules)').all()).results;
-  const awards = columns.some(c => c.name === 'action_config_json');
+  const entryTable = await schemaObject(db, 'wheel_entries', 'table');
+  const awards = Boolean(table?.sql && /\baction_config_json\b/i.test(table.sql));
   const raidSchema = awards && Boolean(table?.sql?.includes("'rumble.raid.received'"));
-  if (!raidSchema) invalidateSchemaCapabilities(db);
   const heartbeat = await db.prepare('SELECT runtime_json,heartbeat_at FROM bot_runtime_heartbeat WHERE singleton_id=1').first();
   let runtime = {}; try { runtime = JSON.parse(heartbeat?.runtime_json || '{}'); } catch { /* fail closed */ }
   const age = Date.now() - Date.parse(heartbeat?.heartbeat_at);
   const raidRuntime = runtime.eventAutomation?.raidNoticeVersion === 1 && age >= -300000 && age <= 45000;
-  const entryColumns = (await db.prepare('PRAGMA table_info(wheel_entries)').all()).results;
-  const appearance = entryColumns.some(c => c.name === 'entrant_appearance_json');
-  const entryIdentity = entryColumns.some(c => c.name === 'entrant_identity_json');
+  const appearance = Boolean(entryTable?.sql && /\bentrant_appearance_json\b/i.test(entryTable.sql));
+  const entryIdentity = Boolean(entryTable?.sql && /\bentrant_identity_json\b/i.test(entryTable.sql));
   return { entryIdentity, appearance, awards, raidSchema, raidRuntime, raidStatus: !raidSchema ? 'schema_required' : !raidRuntime ? 'pending_capable_bot' : 'ready' };
 }
 export function projectRule(row) {
@@ -43,11 +41,14 @@ export async function listAutomationRules(env, wheelId = '', ruleId = '') {
   return { ok: true, readiness, list: { limit: 200, truncated: rows.results.length > 200 }, rules: rows.results.slice(0, 200).map(row => ({ ...projectRule(row), ...(row.event_type === RAID_TYPE ? { runtimeStatus: readiness.raidStatus } : {}) })), wheels: wheels.results, activity: activity.results, discovery: await getSafeRumbleDiscovery(env) };
 }
 export async function botAutomationRules(env, raidCapable = false) {
-  const readiness = await automationReadiness(env);
-  const rows = await requirePollDb(env).prepare(`SELECT * FROM automation_rules WHERE enabled=1 AND deleted_at IS NULL AND target_wheel_id IS NOT NULL ORDER BY id LIMIT 201`).all();
+  // The high-frequency Bot projection deliberately avoids schema introspection.
+  // Selecting every required runtime column is itself a fail-closed migration
+  // check: a genuinely old schema raises a bounded 503 without a PRAGMA loop.
+  const rows = await requirePollDb(env).prepare(`SELECT id,revision,activated_at,source_scope,event_type,conditions_json,action_type,target_wheel_id,action_config_json
+    FROM automation_rules WHERE enabled=1 AND deleted_at IS NULL AND target_wheel_id IS NOT NULL ORDER BY id LIMIT 201`).all();
   if (rows.results.length > 200) throw new AuthFailure(503, 'automation_projection_limit', 'Rule projection exceeds its limit.');
   // Legacy duplicatePolicy is a matching-protocol compatibility token only. Bot never executes awards.
-  return { ok: true, rules: rows.results.filter(row => row.event_type !== RAID_TYPE || (raidCapable && readiness.raidSchema)).map(row => { const r = projectRule(row); return { id: r.id, revision: r.revision, activatedAt: r.activatedAt,
+  return { ok: true, rules: rows.results.filter(row => row.event_type !== RAID_TYPE || raidCapable).map(row => { const r = projectRule(row); return { id: r.id, revision: r.revision, activatedAt: r.activatedAt,
     sourceScope: r.sourceScope, eventType: r.eventType, conditions: r.conditions, actionType: r.actionType, targetWheelId: r.targetWheelId, duplicatePolicy: 'skip' }; }), fetchedAt: nowIso() };
 }
 export async function saveAutomationRule(env, actorId, input) {

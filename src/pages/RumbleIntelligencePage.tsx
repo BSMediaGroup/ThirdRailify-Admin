@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AdminIcon } from '../components/AdminIcon';
 import { RumbleSubscriberTrend } from '../components/RumbleSubscriberTrend';
 import { useAuth } from '../auth/AuthProvider';
+import { coordinatedJsonGet } from '../lib/coordinated-json';
 import '../styles/rumble-intelligence.css';
 
 type RecordEvidence = { id: string; displayName: string; username: string; user: string | null; amount: unknown; amountPresent: boolean; dateRaw: string | null; dateUtc: string | null; reviewAt: string | null; classification: string; rule: string };
@@ -15,6 +16,7 @@ const rosterPolicy = (person: Person) => person.current && person.hasPaid && !pe
 const date = (v: string | null | undefined) => v ? new Date(v).toLocaleString(undefined, { timeZoneName: 'short' }) : 'Unknown';
 const csvCell = (v: unknown) => `"${String(v ?? '').replace(/^[\s]*[=+@-]/, m => `'${m}`).replaceAll('"', '""')}"`;
 async function request<T>(path = '', body?: unknown, csrf = ''): Promise<T> {
+  if (!body) return coordinatedJsonGet<T>(`/api/admin/rumble-intelligence${path}`, 'The report did not return JSON. Check API routing.', 'Report unavailable');
   const response = await fetch(`/api/admin/rumble-intelligence${path}`, { credentials: 'include', cache: 'no-store', method: body ? 'POST' : 'GET', headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The report did not return JSON. Check API routing.');
   const value = await response.json(); if (!response.ok) throw new Error(value.message || value.error || 'Report unavailable'); return value;

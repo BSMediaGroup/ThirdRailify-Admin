@@ -15,7 +15,7 @@ const OUTPUT = fileURLToPath(new URL('../.artifacts/event-automations-v11/', imp
 const kinds = ['rumble.chat.exact', 'rumble.rant', 'rumble.follow', 'subscriber_self_paid', 'rumble.gift_purchase'];
 test('operational Trigger Studio and Wheel panel: real local D1 CRUD and dry run at four viewports', async t => {
   const h = await createCommerceDatabases(); t.after(h.dispose); const env = commerceEnvironment(h);
-  for (const file of ['0045_rumble_intelligence.sql', '0048_subscriber_roster_automation.sql']) await applyMigration(h.commerceDb, await readFile(new URL(`../commerce-migrations/${file}`, import.meta.url), 'utf8'));
+  for (const file of ['0045_rumble_intelligence.sql', '0049_rumble_intelligence_rollups.sql', '0048_subscriber_roster_automation.sql']) await applyMigration(h.commerceDb, await readFile(new URL(`../commerce-migrations/${file}`, import.meta.url), 'utf8'));
   await mkdir(OUTPUT, { recursive: true });
   const now = new Date().toISOString();
   await h.commerceDb.prepare(`INSERT INTO wheels(id,reference_code,public_slug,title,lifecycle,visibility,owner_account_id,config_json,created_at,updated_at)

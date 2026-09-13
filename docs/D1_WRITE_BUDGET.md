@@ -1,13 +1,79 @@
-# Production D1 write budget
+# Production D1 read and write budget
 
 Current/pending version: 0.1.0-alpha.0. Audit started 2026-09-12 UTC.
 Protected evidence: `X:/GIT/_EVIDENCE/ThirdRailify/d1-write-audit-20260912-222440/`.
+Read-incident evidence: `X:/GIT/_EVIDENCE/ThirdRailify/d1-read-incident-20260913-132327/`.
 
 ## Database authority
 
 - Commerce (`3dd23a7e-7c64-49cb-a52c-c1540b41db1c`): Admin Functions own Commerce, Polls, Wheels, analytics, Bot control and subscriber observations. The Commerce Operations Worker invokes authenticated Admin maintenance every five minutes and binds this same database.
 - Accounts (`b8be3879-7aa1-4d70-af3f-617abce7a929`): Admin owns authentication and account mutations; Public reads shared sessions. Live Lab Pages and its recovery Worker also bind Accounts; their independent Lab database contributes to the same account-wide quota. Lab is outside this repair's writable scope.
 - Community and broadcast snapshots use the existing Public State SQLite Durable Object, not either D1 database. Community semantic changes debounce for five seconds, with a 600-second freshness checkpoint; broadcast checkpoints are 75/150/600 seconds for live/upcoming/offline state.
+
+## 2026-09-13 read-quota incident
+
+Cloudflare's rolling 24-hour Query Insights attributed 29,117,668 Commerce D1
+rows read to ten Rumble Intelligence trend requests: 2,911,766 rows per
+request on average. The page called
+`/api/admin/rumble-intelligence/trend`; `intelligenceTrend()` grouped raw
+observations by `CAST(unixepoch(provider_at)/? AS INTEGER)`, joined every
+selected bucket back through a source-leading index, and loaded full
+`records_json` blobs to derive chart counts. The range seek used the existing
+`(source,qualified,provider_at DESC)` index, but the planner also created a
+temporary GROUP BY B-tree and repeatedly searched all observations for the
+source. There is no history timer. The ten executions can only be attributed
+to interactive page mounts, refreshes, and range changes; D1 Insights does not
+retain request/caller identity, so a more exact mix is not claimed.
+
+Migration `0049_rumble_intelligence_rollups.sql` adds a `WITHOUT ROWID`
+materialized summary keyed by `(source,grain,bucket_start)`. It stores scalar
+chart counts and snapshot references, never roster JSON. Ingestion writes
+hour/day checkpoints and semantic-change rows; conflict updates are conditional
+and repeated unchanged snapshots do not rewrite a bucket. Immutable full sets
+are now retained only for a change plus one distinct live confirmation. Later
+unchanged observations advance compact source freshness without inserting
+another set/blob/observation. One hundred identical local inputs leave one set,
+two confirmation observations, one change row, one hour row, and one day row.
+
+The API accepts only server-owned `24h`, `7d`, `30d`, and `90d` windows, maps
+them to hour/day grains, and caps them at 25, 169, 31, and 91 points. Two direct
+primary-key range seeks merge sparse checkpoints and semantic changes; no raw
+observations, runtime divisor, GROUP BY, or `records_json` participate. The
+browser coalesces equivalent in-flight GETs and ignores stale range responses.
+It has no automatic retry or chart polling; browser acceptance asserts exactly
+one trend request for initial state, each range change, Refresh, and hard reload.
+
+The production-scale regression uses 100,000 qualified observations. The exact
+old plan, measured over only one hour, read 144,300,000 D1 rows to return two
+points in 11.57 seconds. The new full 7-day request returned 149 points with 153
+rows read and zero writes in 25 ms locally. New 24h/30d/90d requests read
+30/20/20 rows. The new plan is a single rollup primary-key seek with no scan or
+temporary B-tree. These are local D1 metadata and timings, not live latency.
+
+Schema readiness no longer executes `PRAGMA table_info(automation_rules)` or
+`PRAGMA table_info(wheel_entries)` on the Bot timer. The high-frequency rules
+projection selects its required columns directly and fails closed on genuinely
+old schema; operator readiness uses the existing successful per-isolate
+whitelisted `sqlite_master` capability cache while heartbeat freshness remains
+live. Signed-service replay protection remains D1-authoritative, but general
+expired-nonce cleanup runs at most once per successful five-minute interval per
+isolate. A unique collision performs a targeted persisted expiry delete before
+allowing an expired ID to be reused; active and concurrent replay stays 409.
+
+While Free D1 is quota-blocked, routes translate the exact code 7500/read-limit
+failure into an explicit 503 `database_read_quota_exhausted` response with
+`Retry-After` to midnight UTC. The Bot respects that response for control and
+heartbeat (up to 24 hours) instead of issuing its normal cadence during the
+outage. Other failures and normal heartbeat behavior are unchanged.
+
+After this query repair, expected legitimate traffic is again comfortably
+below 5 million reads/day: the observed non-catastrophic rolling total was
+about 1.3 million reads/day, and ten equivalent 7-day trends add roughly 1,530
+rows rather than 29.12 million. Current writes were about 52,000/day before the
+new cleanup/sparse-observation savings, below Free's 100,000/day limit. Free is
+technically appropriate after correction; Workers Paid remains recommended for
+production headroom and immediate recovery during an already-exhausted Free
+day, not as a substitute for fixing the query. No plan change was made.
 
 ## Proven dominant writers
 
