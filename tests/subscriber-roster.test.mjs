@@ -93,8 +93,9 @@ test('roster classifies, deduplicates, writes only deltas and preserves unrelate
 test('roster reuses one exact event identity, blocks unsafe removals, and serializes competing syncs', async t => {
   const h = await setup(t);
   await h.ingest([record('Event Actor', 500), record('Stale Actor', 500)]);
-  // Exact automation identity for a Rant by Event Actor; no receipt-history inference is needed.
-  const material = JSON.stringify([1, source, `rumble:${source}:event actor`, 'rumble.rant']);
+  // Exact automation identity for a self-paid subscription by Event Actor; a
+  // different family such as Rant must remain a separate entrant.
+  const material = JSON.stringify([1, source, `rumble:${source}:event actor`, 'rumble.subscribe']);
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material)));
   const key = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   await h.db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at,entrant_identity_json)

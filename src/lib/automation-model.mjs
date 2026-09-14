@@ -1,4 +1,5 @@
 import { normalizeFeatureComponents } from './entrant-appearance.mjs';
+import { normalizeEntrySuffix } from './entrant-label.mjs';
 // Shared editor/server contract. Wheel schema and validateEntries use this same ceiling.
 export const MAX_ENTRY_WEIGHT = 100000;
 export const SELF_PAID_SUBSCRIBER_TYPE = 'subscriber_self_paid';
@@ -38,7 +39,8 @@ export function ruleFieldErrors(input) {
   }
   if (r.eventType === 'rumble.chat.exact' && (typeof c?.exactText !== 'string' || !c.exactText.trim())) errors.exactText = 'Enter the complete chat message to match.';
   const a = r.actionConfig === undefined ? defaultAction() : r.actionConfig;
-  if (!a || a.version !== 2 || Object.keys(a).some(k => !['version', 'repeatActorPolicy', 'award', 'appearance', 'subscriberPolicy'].includes(k))) errors.actionConfig = 'Use a supported entry award configuration (version 2).';
+  if (!a || a.version !== 2 || Object.keys(a).some(k => !['version', 'repeatActorPolicy', 'award', 'appearance', 'subscriberPolicy', 'displaySuffix'].includes(k))) errors.actionConfig = 'Use a supported entry award configuration (version 2).';
+  if (a?.displaySuffix !== undefined) { try { normalizeEntrySuffix(a.displaySuffix); } catch (e) { errors.displaySuffix = e.message; } }
   if (a?.subscriberPolicy !== undefined && a.subscriberPolicy !== 'self_paid_v1') errors.actionConfig = 'Use the supported self-paid subscriber policy.';
   if (!['skip', 'accumulate'].includes(a?.repeatActorPolicy)) errors.repeatActorPolicy = 'Choose how to handle a repeat actor.';
   if (r.duplicatePolicy !== undefined && !['skip', 'accumulate'].includes(r.duplicatePolicy)) errors.repeatActorPolicy = 'Choose how to handle a repeat actor.';

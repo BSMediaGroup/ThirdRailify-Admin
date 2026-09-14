@@ -2,7 +2,7 @@ import { pollVotingAdmin, savePollPolicy, reconcilePollCredit, matchPaidTrigger 
 import { AuthFailure, corsHeaders, errorResponse, jsonResponse, normalizeOrigin, requireCsrf } from "../../../_shared/auth-core.js";
 import { requireAdminCapability } from "../../../_shared/admin-capabilities.js";
 import { automationsStatus, readPollJson, updateAutomationConfig } from "../../../_shared/polls-core.js";
-import { listAutomationRules, saveAutomationRule, deleteAutomationRule, dryRunAutomation } from "../../../_shared/automation-core.js";
+import { getAutomationReceiptDetail, listAutomationRules, saveAutomationRule, deleteAutomationRule, dryRunAutomation } from "../../../_shared/automation-core.js";
 import { listRosterRules, previewRosterSync, saveRosterRule, syncRosterRule } from "../../../_shared/subscriber-roster.js";
 
 export async function onRequest({ request, env }) {
@@ -13,6 +13,7 @@ export async function onRequest({ request, env }) {
       if (path === 'poll-voting') { await requireAdminCapability(env, request, 'polls.manage'); return response(await pollVotingAdmin(env, Object.fromEntries(url.searchParams)), request, env); }
       if (path === 'rules') { await requireAdminCapability(env, request, 'wheels.view'); return response(await listAutomationRules(env, url.searchParams.get('wheelId') || '', url.searchParams.get('ruleId') || ''), request, env); }
       if (path === 'rosters') { await requireAdminCapability(env, request, 'wheels.view'); return response(await listRosterRules(env, url.searchParams.get('wheelId') || '', url.searchParams.get('ruleId') || ''), request, env); }
+      if (path.startsWith('receipts/')) { await requireAdminCapability(env, request, 'wheels.view'); return response(await getAutomationReceiptDetail(env, path.slice('receipts/'.length)), request, env); }
       if (path) throw new AuthFailure(404, 'automation_route_not_found', 'Unknown automation route.');
       return response(await automationsStatus(env), request, env);
     }

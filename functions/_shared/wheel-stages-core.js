@@ -7,6 +7,7 @@ import {
   getPublicWheel,
   getWheelSettings,
   officialSpinProjection,
+  officialEntriesForWheel,
   participantSnapshotHash,
   publicSummary,
   publicWheelOwner,
@@ -15,6 +16,7 @@ import {
   requireWheelDb,
   resolveWheelAccess,
   secureBoundedInteger,
+  winnerSnapshot,
 } from "./wheels-core.js";
 
 const MAX_STAGE_WHEELS = 6;
@@ -138,7 +140,7 @@ export async function performStageOfficialSpinAll(env, accountId, slug, input) {
     if (wheel.lifecycle !== "active") issues.push({ wheel: wheel.title, code: "wheel_inactive", message: "Wheel is not active." });
     if (!wheel.official_spin_enabled || wheel.official_spinning_locked) issues.push({ wheel: wheel.title, code: "official_spin_locked", message: "Official spin is locked." });
     try { await requireOfficialCooldown(env, wheel, now); } catch (error) { if (error instanceof AuthFailure) issues.push({ wheel: wheel.title, code: error.code, message: "Official cooldown is active." }); else throw error; }
-    const entries = await officialEntries(env, wheel.id);
+    const entries = await officialEntriesForWheel(env, wheel.id);
     if (entries.length < 2) issues.push({ wheel: wheel.title, code: "participants_insufficient", message: "At least two active participants are required." });
     if (!access.canSpinOfficially || wheel.lifecycle !== "active" || !wheel.official_spin_enabled || wheel.official_spinning_locked || entries.length < 2 || Number(wheel.revision) !== expectedItem.revision) continue;
     const totalWeight = entries.reduce((sum, entry) => sum + entry.weight, 0); let cursor = secureBoundedInteger(totalWeight); let winner = entries[entries.length - 1];
@@ -152,19 +154,19 @@ export async function performStageOfficialSpinAll(env, accountId, slug, input) {
     statements.push(
       db.prepare(`INSERT INTO wheel_official_spins (
         id,wheel_id,wheel_revision,participant_snapshot_hash,winning_entry_id,winning_label_snapshot,
-        winning_weight_snapshot,performed_by_account_id,result_type,idempotency_key,created_at
+        winning_weight_snapshot,winning_entry_snapshot_json,performed_by_account_id,result_type,idempotency_key,created_at
       ) SELECT ?,?,?,?,?,?,CASE WHEN
         EXISTS (SELECT 1 FROM wheel_stages s JOIN wheel_stage_items i ON i.stage_id=s.id
           WHERE s.id=? AND s.revision=? AND s.lifecycle='active' AND i.position=? AND i.wheel_id=?)
         AND EXISTS (SELECT 1 FROM wheels w WHERE w.id=? AND w.revision=? AND w.spin_sequence=? AND w.lifecycle='active'
           AND w.official_spin_enabled=1 AND w.official_spinning_locked=0 AND (w.latest_official_spin_at IS NULL OR w.latest_official_spin_at<=?))
         AND (?=1 OR EXISTS (SELECT 1 FROM wheel_access a WHERE a.wheel_id=? AND a.account_id=? AND a.active=1 AND a.role IN ('owner','editor','spinner')))
-        THEN ? ELSE 0 END,?,'official',?,?`).bind(
+        THEN ? ELSE 0 END,?,?,'official',?,?`).bind(
         plan.spinId, plan.wheel.id, plan.item.revision, plan.snapshotHash, plan.winner.id, plan.winner.label,
         stage.id, expectedStageRevision, plan.item.position, plan.wheel.id,
         plan.wheel.id, plan.item.revision, plan.sequence, cutoff,
         master ? 1 : 0, plan.wheel.id, accountId,
-        plan.winner.weight, accountId, plan.idempotencyKey, timestamp,
+        plan.winner.weight, JSON.stringify(winnerSnapshot(plan.winner)), accountId, plan.idempotencyKey, timestamp,
       ),
       db.prepare("UPDATE wheels SET spin_sequence=spin_sequence+1,latest_official_spin_at=?,updated_at=? WHERE id=? AND revision=? AND spin_sequence=?").bind(timestamp, timestamp, plan.wheel.id, plan.item.revision, plan.sequence),
       db.prepare("INSERT INTO wheel_audit_events (id,wheel_id,actor_account_id,event_type,metadata_json,created_at) VALUES (?,?,?,'official_spin_recorded',?,?)").bind(randomId(), plan.wheel.id, accountId, JSON.stringify({ spinId: plan.spinId, wheelRevision: plan.item.revision, snapshotHash: plan.snapshotHash, stageId: stage.id, batch: true }), timestamp),
@@ -179,7 +181,7 @@ export async function performStageOfficialSpinAll(env, accountId, slug, input) {
     throw error;
   }
   if (prepared.some((_, index) => Number(results?.[index * 3]?.meta?.changes || 0) !== 1 || Number(results?.[index * 3 + 1]?.meta?.changes || 0) !== 1)) throw new AuthFailure(409, "stage_spin_all_conflict", "A Wheel changed while Official All was starting.");
-  return { ok: true, mode: "official", idempotent: false, results: await Promise.all(prepared.map(async (plan) => ({ position: plan.item.position, wheelSlug: plan.wheel.public_slug, wheelTitle: plan.wheel.title, spin: await officialSpinProjection({ id: plan.spinId, wheel_id: plan.wheel.id, wheel_revision: plan.item.revision, participant_snapshot_hash: plan.snapshotHash, winning_entry_id: plan.winner.id, winning_label_snapshot: plan.winner.label, winning_weight_snapshot: plan.winner.weight, created_at: timestamp }) }))) };
+  return { ok: true, mode: "official", idempotent: false, results: await Promise.all(prepared.map(async (plan) => ({ position: plan.item.position, wheelSlug: plan.wheel.public_slug, wheelTitle: plan.wheel.title, spin: await officialSpinProjection({ id: plan.spinId, wheel_id: plan.wheel.id, wheel_revision: plan.item.revision, participant_snapshot_hash: plan.snapshotHash, winning_entry_id: plan.winner.id, winning_label_snapshot: plan.winner.label, winning_weight_snapshot: plan.winner.weight, winning_entry_snapshot_json: JSON.stringify(winnerSnapshot(plan.winner)), created_at: timestamp }) }))) };
 }
 
 export async function createStage(env, accountId, input) {
@@ -281,7 +283,6 @@ async function requireStageEditor(env, accountId, slug) {
 async function stageBySlug(env, slug) { return requireWheelDb(env).prepare("SELECT * FROM wheel_stages WHERE public_slug=? COLLATE NOCASE LIMIT 1").bind(clean(slug, 80)).first(); }
 async function stageItemRows(env, stageId) { const rows = await requireWheelDb(env).prepare("SELECT i.position,w.public_slug FROM wheel_stage_items i JOIN wheels w ON w.id=i.wheel_id WHERE i.stage_id=? ORDER BY i.position").bind(stageId).all(); return rows?.results || []; }
 async function officialStageItemRows(env, stageId) { const rows = await requireWheelDb(env).prepare("SELECT i.position,w.* FROM wheel_stage_items i JOIN wheels w ON w.id=i.wheel_id WHERE i.stage_id=? ORDER BY i.position").bind(stageId).all(); return rows?.results || []; }
-async function officialEntries(env, wheelId) { const rows = await requireWheelDb(env).prepare("SELECT id,display_label,display_order,weight,segment_colour,state FROM wheel_entries WHERE wheel_id=? AND state='active' ORDER BY display_order,id").bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, label: row.display_label, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, state: row.state })); }
 async function stageWheelIdempotencyKey(stageId, batchKey, position, slug) { const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`thirdrailify-stage-spin-all-v1\n${stageId}\n${batchKey}\n${position}\n${slug.toLowerCase()}`))); return `stage-all-v1:${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`; }
 async function stageSpinAllResponse(rows, idempotent) { return { ok: true, mode: "official", idempotent, results: await Promise.all(rows.map(async ({ item, wheel, existing }) => ({ position: item.position, wheelSlug: wheel.public_slug, wheelTitle: wheel.title, spin: await officialSpinProjection(existing) }))) }; }
 function uniqueIssues(issues) { const seen = new Set(); return issues.filter((issue) => { const key = `${issue.wheel}\n${issue.code}`; if (seen.has(key)) return false; seen.add(key); return true; }); }

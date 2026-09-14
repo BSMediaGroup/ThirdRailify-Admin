@@ -7,7 +7,7 @@ import { createCommerceDatabases } from "./commerce-test-helpers.mjs";
 test("0014 creates an empty normalized Wheels authority with immutable result constraints", async (t) => {
   const harness = await createCommerceDatabases(); t.after(harness.dispose);
   const tables = await harness.commerceDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'wheel_%' ORDER BY name").all();
-  assert.deepEqual(tables.results.map((row) => row.name), ["wheel_access", "wheel_audit_events", "wheel_creator_grants", "wheel_entries", "wheel_media_assets", "wheel_official_spins", "wheel_rate_limits", "wheel_settings", "wheel_stage_items", "wheel_stages", "wheels"]);
+  assert.deepEqual(tables.results.map((row) => row.name), ["wheel_access", "wheel_audit_events", "wheel_creator_grants", "wheel_entries", "wheel_entry_source_bindings", "wheel_media_assets", "wheel_official_spins", "wheel_rate_limits", "wheel_settings", "wheel_stage_items", "wheel_stages", "wheel_successions", "wheels"]);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM wheels").first()).count), 0);
   assert.equal(Number((await harness.commerceDb.prepare("SELECT COUNT(*) AS count FROM wheel_official_spins").first()).count), 0);
   const setting = await harness.commerceDb.prepare("SELECT value_json FROM wheel_settings WHERE setting_key = 'global'").first();

@@ -98,6 +98,24 @@ export async function mediaForWheel(env, wheelId, options = {}) {
   return projected;
 }
 
+export async function prepareWheelMediaClone(env, sourceWheelId, targetWheelId, actorId) {
+  const db = requireDb(env); const timestamp = nowIso();
+  const result = await db.prepare("SELECT * FROM wheel_media_assets WHERE wheel_id=? AND lifecycle='active' ORDER BY created_at,id").bind(sourceWheelId).all();
+  if (!(result.results || []).length) return { statements: [], assetIds: new Map(), cleanup: async () => [] };
+  const bucket = requireBucket(env);
+  const clones = []; const copiedKeys = []; const assetIds = new Map();
+  try {
+    for (const row of result.results || []) {
+      const object = await bucket.get(row.object_key); if (!object) throw new AuthFailure(503, 'wheel_media_clone_unavailable', 'A Wheel image could not be copied safely. The original Wheel was not closed.');
+      const id = randomId(); const extension = String(row.object_key).match(/\.([a-z0-9]+)$/i)?.[1] || TYPES.get(row.content_type) || 'bin'; const objectKey = `wheels/${targetWheelId}/${row.purpose}/${row.sha256}-${id}.${extension}`;
+      const bytes = await object.arrayBuffer(); await bucket.put(objectKey, bytes, { httpMetadata: object.httpMetadata || { contentType: row.content_type, cacheControl: 'public, max-age=31536000, immutable' }, customMetadata: { ...(object.customMetadata || {}), copiedFromAssetId: row.id } }); copiedKeys.push(objectKey); assetIds.set(row.id, id);
+      clones.push(db.prepare(`INSERT INTO wheel_media_assets(id,wheel_id,purpose,object_key,sha256,content_type,byte_size,width,height,original_filename,lifecycle,uploaded_by_account_id,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?)`).bind(id,targetWheelId,row.purpose,objectKey,row.sha256,row.content_type,row.byte_size,row.width,row.height,row.original_filename,actorId,timestamp,timestamp));
+    }
+  } catch (error) { await Promise.all(copiedKeys.map((key) => bucket.delete(key).catch(() => {}))); throw error; }
+  return { statements: clones, assetIds, cleanup: () => Promise.all(copiedKeys.map((key) => bucket.delete(key).catch(() => {}))) };
+}
+
 export async function validateSegmentMediaReferences(env, wheelId, assetIds) {
   const unique = [...new Set(assetIds || [])];
   if (unique.length > LIMITS.segment_fill.maxActiveAssets) throw new AuthFailure(400, "wheel_segment_media_count_invalid", "A wheel may reference at most 20 unique segment images.");

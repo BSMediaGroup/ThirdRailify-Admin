@@ -1,5 +1,5 @@
 import type { FeatureComponents } from './entrant-appearance.mjs';
-export type ActionConfig = { version: 2; appearance?: FeatureComponents | null; subscriberPolicy?: 'self_paid_v1'; repeatActorPolicy: 'skip' | 'accumulate'; award: { mode: 'fixed' | 'per_gift' | 'per_amount'; entriesPerUnit: number; unitCents: number } };
+export type ActionConfig = { version: 2; appearance?: FeatureComponents | null; displaySuffix?: string | null; subscriberPolicy?: 'self_paid_v1'; repeatActorPolicy: 'skip' | 'accumulate'; award: { mode: 'fixed' | 'per_gift' | 'per_amount'; entriesPerUnit: number; unitCents: number } };
 export const SELF_PAID_SUBSCRIBER_TYPE: string;
 export const LEGACY_SUBSCRIBER_TYPE: string;
 export const RAID_TYPE: string;

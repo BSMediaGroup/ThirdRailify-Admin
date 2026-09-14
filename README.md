@@ -504,6 +504,8 @@ Shared editor now lets the server recheck schema on Save rather than disabling o
 
 Rumble subscriber trend requests read precomputed scalar checkpoints and semantic-change summaries from `rumble_intelligence_rollups`, never full historical roster JSON. Server-owned ranges cap returned data at 25/169/31/91 points for 24h/7d/30d/90d. Unchanged live snapshots retain only compact freshness after one distinct confirmation. Migration `0049_rumble_intelligence_rollups.sql` and `scripts/release-rumble-intelligence-rollups.ps1` are the additive production release authority; the script exposes only 0049 so unrelated pending migration 0046 cannot be applied. See [the measured read/write budget and incident contract](docs/D1_WRITE_BUDGET.md).
 
+Wheel entrant identity V2 is documented in [`docs/WHEEL_ENTRANT_IDENTITY_V2.md`](docs/WHEEL_ENTRANT_IDENTITY_V2.md). Additive migration `commerce-migrations/0050_wheel_entrant_codes_activity_and_successions.sql` adds stable seven-character entrant codes, exact source bindings, receipt detail snapshots, official winner snapshots, and Wheel successions. `scripts/release-wheel-identity-schema.ps1` exposes only 0050 and requires a verified external backup; `scripts/backfill-wheel-entrant-codes.ps1` performs the resumable bounded code backfill. New authority helpers are `functions/_shared/entrant-code-storage.js` and the mirrored `src/lib/entrant-code.*` / `entrant-label.*` contracts. Admin must be released before Public.
+
 
 ### 2026-09-07 optional Rant message repair
 

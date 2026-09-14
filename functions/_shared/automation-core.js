@@ -40,6 +40,22 @@ export async function listAutomationRules(env, wheelId = '', ruleId = '') {
     WHERE (?='' OR a.target_wheel_id=?) ORDER BY a.created_at DESC LIMIT 40`).bind(wheelId, wheelId).all();
   return { ok: true, readiness, list: { limit: 200, truncated: rows.results.length > 200 }, rules: rows.results.slice(0, 200).map(row => ({ ...projectRule(row), ...(row.event_type === RAID_TYPE ? { runtimeStatus: readiness.raidStatus } : {}) })), wheels: wheels.results, activity: activity.results, discovery: await getSafeRumbleDiscovery(env) };
 }
+export async function getAutomationReceiptDetail(env, receiptId = '') {
+  const id = String(receiptId || '').slice(0, 80);
+  if (!/^[a-f0-9-]{16,80}$/i.test(id)) throw new AuthFailure(400, 'automation_receipt_invalid', 'Choose a valid activity receipt.');
+  const row = await requirePollDb(env).prepare(`SELECT a.id,a.rule_id,a.rule_revision,a.event_type,a.provider_event_at,a.outcome,a.target_wheel_id,a.awarded_entries,a.action_result,a.created_at,
+      d.entry_id,d.entrant_code_snapshot,d.display_label_snapshot,d.display_suffix_snapshot,d.provider,d.source_scope,d.entry_type,d.provenance_origin,d.rule_name_snapshot,d.received_quantity,d.received_unit,d.award_calculation,d.previous_weight,d.new_weight,d.award_delta,d.safe_reason,d.evidence_json,d.chat_derived,
+      r.name AS current_rule_name,w.title AS current_wheel_title,e.display_label AS current_entry_label,e.display_suffix AS current_entry_suffix,e.entrant_code AS current_entry_code
+    FROM automation_receipts a LEFT JOIN automation_receipt_details d ON d.receipt_id=a.id
+    LEFT JOIN automation_rules r ON r.id=a.rule_id LEFT JOIN wheels w ON w.id=a.target_wheel_id LEFT JOIN wheel_entries e ON e.id=d.entry_id AND e.wheel_id=d.wheel_id
+    WHERE a.id=? LIMIT 1`).bind(id).first();
+  if (!row) throw new AuthFailure(404, 'automation_receipt_not_found', 'That activity receipt is no longer available.');
+  let evidence = null; try { evidence = row.evidence_json ? JSON.parse(row.evidence_json) : null; } catch { evidence = null; }
+  const recorded = (value) => value == null || value === '' ? 'Not recorded' : value;
+  return { ok: true, receipt: { id: row.id, eventType: row.event_type, providerEventAt: row.provider_event_at || null, createdAt: row.created_at, outcome: row.outcome, actionResult: row.action_result || null,
+    historical: { entrantCode: recorded(row.entrant_code_snapshot), displayLabel: recorded(row.display_label_snapshot), displaySuffix: recorded(row.display_suffix_snapshot), provider: recorded(row.provider), sourceScope: recorded(row.source_scope), entryType: recorded(row.entry_type), provenanceOrigin: recorded(row.provenance_origin), ruleName: recorded(row.rule_name_snapshot), ruleRevision: Number(row.rule_revision), receivedQuantity: row.received_quantity == null ? 'Not recorded' : Number(row.received_quantity), receivedUnit: recorded(row.received_unit), awardCalculation: recorded(row.award_calculation), previousWeight: row.previous_weight == null ? 'Not recorded' : Number(row.previous_weight), newWeight: row.new_weight == null ? 'Not recorded' : Number(row.new_weight), awardDelta: Number(row.award_delta ?? row.awarded_entries ?? 0), reason: recorded(row.safe_reason), evidence, chatDerived: Boolean(row.chat_derived) },
+    current: { wheelId: row.target_wheel_id || null, wheelTitle: row.current_wheel_title || 'Unavailable Wheel', ruleId: row.rule_id, ruleName: row.current_rule_name || 'Unavailable rule', entryId: row.entry_id || null, entrantCode: row.current_entry_code || null, displayLabel: row.current_entry_label || null, displaySuffix: row.current_entry_suffix || null } } };
+}
 export async function botAutomationRules(env, raidCapable = false) {
   // The high-frequency Bot projection deliberately avoids schema introspection.
   // Selecting every required runtime column is itself a fail-closed migration
@@ -66,6 +82,10 @@ export async function saveAutomationRule(env, actorId, input) {
   if (prior && input.actionConfig?.appearance === undefined) {
     const previousAction = prior.action_config_json ? JSON.parse(prior.action_config_json) : defaultAction();
     if (previousAction.appearance !== undefined) rule.actionConfig = { ...rule.actionConfig, appearance: previousAction.appearance };
+  }
+  if (prior && input.actionConfig?.displaySuffix === undefined) {
+    const previousAction = prior.action_config_json ? JSON.parse(prior.action_config_json) : defaultAction();
+    if (previousAction.displaySuffix !== undefined) rule.actionConfig = { ...rule.actionConfig, displaySuffix: previousAction.displaySuffix };
   }
   if (rule.actionConfig.appearance) await requireAppearanceStorage(db);
   const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;

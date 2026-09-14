@@ -1,6 +1,8 @@
 import { storedAppearance, requireAppearanceStorage, validateEntryAppearance, mergeEntryAppearance } from './entrant-style-storage.js';
 import { requireIdentityStorage, automaticEntryIdentity, storedEntryIdentity, publicEntryIdentity, manualEntryIdentity, validateEntryIdentity, provenLegacyIdentity } from './entrant-identity-storage.js';
+import { allocateEntrantCodes, requireEntrantCodeStorage } from './entrant-code-storage.js';
 import { applyAutomaticAppearance, publicAppearance } from '../../src/lib/entrant-appearance.mjs';
+import { normalizeEntrySuffix } from '../../src/lib/entrant-label.mjs';
 import { MAX_ENTRY_WEIGHT, calculateAward, defaultAction } from '../../src/lib/automation-model.mjs';
 import {
   AuthFailure,
@@ -13,7 +15,7 @@ import {
   serializeAccount,
   timingSafeEqual,
 } from "./auth-core.js";
-import { mediaForWheel, retireSegmentMediaAssets, validateSegmentMediaReferences } from "./wheel-media.js";
+import { mediaForWheel, prepareWheelMediaClone, retireSegmentMediaAssets, validateSegmentMediaReferences } from "./wheel-media.js";
 import { cloneDefaultWheelMechanics, normalizeWheelMechanics } from "../../src/wheels/mechanics.mjs";
 
 const MAX_ENTRIES = 1000;
@@ -50,6 +52,7 @@ const DEFAULT_CONFIG = Object.freeze({
   backgroundImageOpacity: 72,
   backgroundOverlayIntensity: 58,
   winnerMessageTemplate: "Signal locked: {winner}",
+  showEntrySuffix: true,
   publicHistoryVisible: true,
 });
 
@@ -95,14 +98,17 @@ export async function listPublicWheels(env, input = {}) {
   const search = clean(input.search, 80).toLowerCase();
   const sort = new Set(["recent", "title", "participants"]).has(input.sort) ? input.sort : "recent";
   const order = sort === "title" ? "title COLLATE NOCASE ASC, id ASC" : sort === "participants" ? "participant_count DESC, title COLLATE NOCASE ASC" : "display_order ASC, updated_at DESC";
+  const view = input.view === "past" ? "past" : "current";
   const rows = await db.prepare(
     `SELECT id, public_slug, title, description, owner_account_id, config_json, participant_count, public_demo_spin_enabled,
-            official_spin_enabled, latest_official_spin_at, updated_at, display_order,
+            official_spin_enabled, latest_official_spin_at, updated_at, display_order, closed_at, successor_wheel_id,
             EXISTS (SELECT 1 FROM wheel_entries e WHERE e.wheel_id = wheels.id AND e.state = 'active' AND e.weight != 1) AS is_weighted
      FROM wheels
-     WHERE lifecycle = 'active' AND visibility = 'public' AND (? = '' OR lower(title) LIKE ? OR lower(COALESCE(description, '')) LIKE ?)
+     WHERE lifecycle = 'active' AND visibility = 'public'
+       AND ((? = 'past' AND closed_at IS NOT NULL) OR (? = 'current' AND closed_at IS NULL))
+       AND (? = '' OR lower(title) LIKE ? OR lower(COALESCE(description, '')) LIKE ?)
      ORDER BY ${order} LIMIT 100`,
-  ).bind(search, `%${escapeLike(search)}%`, `%${escapeLike(search)}%`).all();
+  ).bind(view, view, search, `%${escapeLike(search)}%`, `%${escapeLike(search)}%`).all();
   return { ok: true, items: await Promise.all((rows?.results || []).map(async (row) => ({ ...publicSummary(row), owner: await publicWheelOwner(env, row.owner_account_id) }))), count: (rows?.results || []).length };
 }
 
@@ -154,7 +160,10 @@ export async function createWheel(env, accountId, input) {
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const lifecycle = input.lifecycle === "draft" ? "draft" : "active";
   const policy = await getWheelSettings(env); const config = validateConfig(input.config || {}, policy.settings.mechanics);
-  const entries = validateEntries(input.entries || [], { newIds: true }).map(entry => ({ ...entry, identity: manualEntryIdentity(entry), appearance: mergeEntryAppearance(entry, null) }));
+  const requestedEntries = validateEntries(input.entries || [], { newIds: true });
+  if (requestedEntries.length) await requireEntrantCodeStorage(db);
+  const codes = await allocateEntrantCodes(db, requestedEntries.length);
+  const entries = requestedEntries.map((entry, index) => ({ ...entry, code: codes[index], provenanceOrigin: entry.identity?.origin === 'imported' ? 'imported' : 'manual', identity: manualEntryIdentity(entry), appearance: mergeEntryAppearance(entry, null) }));
   if (entries.length) await requireIdentityStorage(db);
   if (entries.some(entry => entry.appearance)) await requireAppearanceStorage(db);
   if (segmentAssetIds(config, entries).length) throw new AuthFailure(400, "wheel_segment_media_invalid", "Create the wheel before assigning wheel-owned segment images.");
@@ -199,6 +208,7 @@ export async function executeAutomationWheelEntry(env, rule, event) {
   // required deployed Wheel schema. The whitelisted capability cache preserves
   // the explicit migration error without a PRAGMA on every event.
   await requireIdentityStorage(db);
+  await requireEntrantCodeStorage(db);
   const entries = await db.prepare('SELECT * FROM wheel_entries WHERE wheel_id=? ORDER BY display_order,id').bind(wheel.id).all();
   const policy = await getWheelSettings(env);
   const capacity = Math.min(MAX_ENTRIES, policy.settings.maximumParticipants || MAX_ENTRIES);
@@ -207,7 +217,12 @@ export async function executeAutomationWheelEntry(env, rule, event) {
   if (appearanceReady) await requireAppearanceStorage(db);
   const award = calculateAward(action, event.eventType, event.evidence);
   const identity = await automaticEntryIdentity(event);
-  let duplicate = entries.results.find(entry => storedEntryIdentity(entry.entrant_identity_json)?.key === identity.key);
+  const binding = await db.prepare(`SELECT b.*,e.id AS live_entry_id FROM wheel_entry_source_bindings b
+    LEFT JOIN wheel_entries e ON e.id=b.entry_id AND e.wheel_id=b.wheel_id
+    WHERE b.wheel_id=? AND b.provider='rumble' AND b.source_scope=? AND b.actor_key=? AND b.accumulation_group=? AND b.retired_at IS NULL LIMIT 1`)
+    .bind(wheel.id, event.sourceScope, event.actorKey, identity.type).first();
+  const bindingStale = Boolean(binding && !binding.live_entry_id);
+  let duplicate = binding ? entries.results.find(entry => entry.id === binding.entry_id) : entries.results.find(entry => storedEntryIdentity(entry.entrant_identity_json)?.key === identity.key);
   if (!duplicate && entries.results.some(entry => !entry.entrant_identity_json)) {
     const legacyId = await provenLegacyIdentity(db, wheel.id, identity.key);
     duplicate = entries.results.find(entry => entry.id === legacyId);
@@ -215,7 +230,7 @@ export async function executeAutomationWheelEntry(env, rule, event) {
   // Hidden rows keep their identity, visibility and styling. Names are not keys.
   const accumulate = action.repeatActorPolicy === 'accumulate';
   const total = entries.results.reduce((n, entry) => n + (entry.state === 'active' ? entry.weight : 0), 0);
-  const actionResult = wheel.editing_locked || wheel.lifecycle === 'archived' ? 'wheel_locked' :
+  const actionResult = wheel.editing_locked || wheel.lifecycle === 'archived' || wheel.closed_at ? 'wheel_locked' : bindingStale ? 'identity_binding_stale' :
     award.reason || (duplicate && !accumulate ? 'skipped_existing' :
       !duplicate && entries.results.length >= capacity ? 'capacity_exceeded' :
       (duplicate?.weight || 0) + award.entries > MAX_ENTRY_WEIGHT || (duplicate?.state !== 'hidden' && total + award.entries > 0xffffffff) ? 'weight_limit_exceeded' :
@@ -223,11 +238,19 @@ export async function executeAutomationWheelEntry(env, rule, event) {
   const outcome = ['created', 'accumulated'].includes(actionResult) ? 'added' : actionResult === 'skipped_existing' ? 'duplicate_entrant' : 'wheel_unavailable';
   const awardedEntries = outcome === 'added' ? award.entries : 0;
   const adoptLegacy = Boolean(duplicate && !duplicate.entrant_identity_json && ['accumulated', 'skipped_existing'].includes(actionResult));
-  const receiptId = randomId(), entryId = randomId(), timestamp = nowIso();
+  const receiptId = randomId(), entryId = duplicate?.id || randomId(), timestamp = nowIso();
+  const entrantCode = duplicate?.entrant_code || (actionResult === 'created' ? (await allocateEntrantCodes(db, 1))[0] : null);
+  const displaySuffix = duplicate?.display_suffix || (actionResult === 'created' ? normalizeEntrySuffix(action.displaySuffix) : null);
   const oldAppearance = storedAppearance(duplicate?.entrant_appearance_json);
   const eventKey = await digestHex(new TextEncoder().encode(JSON.stringify([event.eventFingerprint, rule.id])));
   const nextAppearance = outcome === 'added' ? applyAutomaticAppearance(oldAppearance, action.appearance, event, eventKey) : oldAppearance;
   const styled = nextAppearance ? JSON.stringify(nextAppearance) : null;
+  const previousWeight = duplicate ? Number(duplicate.weight) : actionResult === 'created' ? 0 : null;
+  const newWeight = actionResult === 'created' ? awardedEntries : actionResult === 'accumulated' ? previousWeight + awardedEntries : previousWeight;
+  const receivedUnit = action.award.mode === 'per_gift' ? 'gifts' : action.award.mode === 'per_amount' ? 'cents' : 'event';
+  const receivedQuantity = receivedUnit === 'gifts' ? event.evidence.totalGifts : receivedUnit === 'cents' ? event.evidence.amountCents : 1;
+  const safeEvidence = JSON.stringify({ ...(Number.isSafeInteger(event.evidence.amountCents) ? { amountCents: event.evidence.amountCents } : {}), ...(Number.isSafeInteger(event.evidence.totalGifts) ? { totalGifts: event.evidence.totalGifts } : {}), ...(event.evidence.giftType ? { giftType: event.evidence.giftType } : {}), ...(event.livestreamId ? { livestreamId: event.livestreamId } : {}), ...(event.evidence.detectionMethod ? { detectionMethod: event.evidence.detectionMethod } : {}) });
+  const bindingId = randomId();
   const result = await db.batch([
     db.prepare(`INSERT OR IGNORE INTO automation_receipts(id,rule_id,rule_revision,event_fingerprint,event_type,provider_event_at,actor_key,actor_label,outcome,target_wheel_id,created_at,awarded_entries,action_result)
       SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=?)
@@ -237,13 +260,19 @@ export async function executeAutomationWheelEntry(env, rule, event) {
     db.prepare(`UPDATE wheel_entries SET entrant_identity_json=?,updated_at=? WHERE id=? AND wheel_id=? AND entrant_identity_json IS NULL AND ?=1
       AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`)
       .bind(JSON.stringify(identity), timestamp, duplicate?.id || '', wheel.id, Number(adoptLegacy), receiptId),
-    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at,entrant_identity_json,source_avatar_url${appearanceReady ? ',entrant_appearance_json' : ''})
-      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?,?,?${appearanceReady ? ',?' : ''}
+    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,entrant_code,display_label,display_suffix,display_order,weight,state,created_at,updated_at,entrant_identity_json,source_avatar_url,provenance_origin,origin_rule_id,origin_rule_name${appearanceReady ? ',entrant_appearance_json' : ''})
+      SELECT ?,?,?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?,?,?,?,?,?${appearanceReady ? ',?' : ''}
       WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='created')`)
-      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, JSON.stringify(identity), event.actorAvatarUrl || null, ...(appearanceReady ? [styled] : []), receiptId),
+      .bind(entryId, wheel.id, entrantCode, event.actorLabel, displaySuffix, wheel.id, awardedEntries, timestamp, timestamp, JSON.stringify(identity), event.actorAvatarUrl || null, 'automation', rule.id, rule.name, ...(appearanceReady ? [styled] : []), receiptId),
     db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=?,source_avatar_url=COALESCE(?,source_avatar_url)${appearanceReady ? ',entrant_appearance_json=?' : ''} WHERE id=? AND wheel_id=?
       AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='accumulated')`)
       .bind(awardedEntries, timestamp, event.actorAvatarUrl || null, ...(appearanceReady ? [styled] : []), duplicate?.id || '', wheel.id, receiptId),
+    db.prepare(`INSERT INTO wheel_entry_source_bindings(id,wheel_id,entry_id,provider,source_scope,actor_key,actor_label_snapshot,entry_type,accumulation_group,origin_rule_id,origin_rule_name_snapshot,created_receipt_id,created_at,updated_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ?=0 AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result IN ('created','accumulated','skipped_existing'))`)
+      .bind(bindingId, wheel.id, entryId, 'rumble', event.sourceScope, event.actorKey, event.actorLabel, identity.type, identity.type, rule.id, rule.name, receiptId, timestamp, timestamp, Number(Boolean(binding)), receiptId),
+    db.prepare(`INSERT INTO automation_receipt_details(receipt_id,wheel_id,entry_id,entrant_code_snapshot,display_label_snapshot,display_suffix_snapshot,provider,source_scope,actor_key,entry_type,provenance_origin,rule_name_snapshot,received_quantity,received_unit,award_calculation,previous_weight,new_weight,award_delta,safe_reason,evidence_json,chat_derived,created_at)
+      SELECT ?,?,?,?,?,?,'rumble',?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`)
+      .bind(receiptId, wheel.id, duplicate || actionResult === 'created' ? entryId : null, entrantCode, duplicate?.display_label || event.actorLabel, displaySuffix, event.sourceScope, event.actorKey, identity.type, duplicate?.provenance_origin || (actionResult === 'created' ? 'automation' : 'legacy'), rule.name, receivedQuantity, receivedUnit, award.calculation, previousWeight, newWeight, awardedEntries, outcome === 'wheel_unavailable' ? actionResult : null, safeEvidence, Number(event.eventType === 'rumble.raid.received'), timestamp, receiptId),
     db.prepare(`UPDATE wheels SET participant_count=(SELECT COUNT(*) FROM wheel_entries WHERE wheel_id=? AND state='active'),revision=revision+1,updated_at=?
       WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND (outcome='added' OR ?=1))`).bind(wheel.id, timestamp, wheel.id, receiptId, Number(adoptLegacy)),
     db.prepare(`UPDATE automation_rules SET matched=matched+1,executed=executed+?,duplicate_entrants=duplicate_entrants+?,failed=failed+?,last_match_at=?,last_outcome=?,last_fault=?
@@ -264,6 +293,7 @@ export async function saveWheel(env, accountId, slug, input) {
   if (!wheel) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   const access = await resolveWheelAccess(env, accountId, wheel);
   if (!access.canEdit) throw new AuthFailure(403, "wheel_edit_forbidden", "Editor access is required.");
+  if (wheel.closed_at) throw new AuthFailure(409, "wheel_closed", "Closed Wheels preserve their final participants and cannot be edited.");
   if (wheel.editing_locked && !access.isMasterAdmin) throw new AuthFailure(423, "wheel_edit_locked", "Wheel editing is locked by Admin.");
   const expectedRevision = positiveInteger(input.revision, "wheel_revision_invalid", 2_147_483_647);
   if (expectedRevision !== Number(wheel.revision)) throw new AuthFailure(409, "wheel_revision_conflict", "The wheel changed. Reload it before saving.");
@@ -271,6 +301,7 @@ export async function saveWheel(env, accountId, slug, input) {
   const description = optionalText(input.description, 280);
   const policy = await getWheelSettings(env); const storedConfig = parseJson(wheel.config_json, DEFAULT_CONFIG); const config = validateConfig(input.config || {}, policy.settings.mechanics, { existingDuration: Number(storedConfig.spinDurationMs) });
   const requestedEntries = validateEntries(input.entries || []);
+  if (requestedEntries.length) await requireEntrantCodeStorage(db);
   try { const { assertManagedEntriesPreserved } = await import('./subscriber-roster.js'); await assertManagedEntriesPreserved(db, wheel.id, requestedEntries); }
   catch (error) { if (error?.code !== 'subscriber_roster_schema_unavailable' && !String(error?.message || '').includes('no such table')) throw error; }
   if (requestedEntries.some(entry => entry.appearance)) await requireAppearanceStorage(db);
@@ -280,21 +311,32 @@ export async function saveWheel(env, accountId, slug, input) {
   const currentEntryRows = await db.prepare("SELECT * FROM wheel_entries WHERE wheel_id = ?").bind(wheel.id).all();
   const currentEntryIds = new Set((currentEntryRows?.results || []).map((row) => row.id));
   const usedEntryIds = new Set();
+  const requestedIds = new Set(); const newCount = requestedEntries.reduce((count, entry) => { const isNew = !currentEntryIds.has(entry.id) || requestedIds.has(entry.id); requestedIds.add(entry.id); return count + Number(isNew); }, 0);
+  const newCodes = await allocateEntrantCodes(db, newCount); let newCodeIndex = 0;
   const entries = requestedEntries.map((entry, index) => {
     const id = currentEntryIds.has(entry.id) && !usedEntryIds.has(entry.id) ? entry.id : randomId();
     usedEntryIds.add(id);
-    const prior = previousEntries.find(prior => prior.id === id);
-    return { ...entry, id, identity: manualEntryIdentity(input.entries[index], currentEntryRows.results.find(row => row.id === id)), appearance: mergeEntryAppearance(input.entries[index], storedAppearance(currentEntryRows.results.find(row => row.id === id)?.entrant_appearance_json)), sourceAvatarUrl: prior?.sourceAvatarUrl || null, avatarUrl: input.entries[index].customAvatarUrl === undefined && (input.entries[index].avatarUrl === undefined || input.entries[index].avatarUrl === prior?.avatarUrl) ? prior?.customAvatarUrl || null : entry.avatarUrl };
+    const priorRow = currentEntryRows.results.find(row => row.id === id); const prior = previousEntries.find(candidate => candidate.id === id);
+    const identity = manualEntryIdentity(input.entries[index], priorRow);
+    return { ...entry, id, code: priorRow?.entrant_code || newCodes[newCodeIndex++], identity, provenanceOrigin: priorRow?.provenance_origin || (identity?.origin === 'imported' ? 'imported' : 'manual'), originRuleId: priorRow?.origin_rule_id || null, originRuleName: priorRow?.origin_rule_name || null, appearance: mergeEntryAppearance(input.entries[index], storedAppearance(priorRow?.entrant_appearance_json)), sourceAvatarUrl: prior?.sourceAvatarUrl || null, avatarUrl: input.entries[index].customAvatarUrl === undefined && (input.entries[index].avatarUrl === undefined || input.entries[index].avatarUrl === prior?.avatarUrl) ? prior?.customAvatarUrl || null : entry.avatarUrl };
   });
   if (entries.some(entry => entry.identity)) await requireIdentityStorage(db);
   const visibility = input.visibility === "hidden" ? "hidden" : "public";
   const timestamp = nowIso();
   const savedRevision = expectedRevision + 1;
+  const removedIds = currentEntryRows.results.filter((row) => !entries.some((entry) => entry.id === row.id)).map((row) => row.id);
   const result = await db.batch([
     db.prepare(`UPDATE wheels SET title = ?, description = ?, visibility = ?, config_json = ?, participant_count = ?, revision = revision + 1, updated_at = ?
-                WHERE id = ? AND revision = ?`).bind(title, description, visibility, JSON.stringify(config), entries.length, timestamp, wheel.id, expectedRevision),
-    db.prepare("DELETE FROM wheel_entries WHERE wheel_id = ? AND EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)").bind(wheel.id, wheel.id, savedRevision, timestamp),
-    ...entries.map((entry, index) => entryInsertConditional(db, wheel.id, entry, index, timestamp, savedRevision)),
+                WHERE id = ? AND revision = ?`).bind(title, description, visibility, JSON.stringify(config), entries.filter((entry) => entry.state === 'active').length, timestamp, wheel.id, expectedRevision),
+    db.prepare(`UPDATE wheel_entries SET display_order=display_order+1001 WHERE wheel_id=?
+      AND EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=? AND updated_at=?)`).bind(wheel.id, wheel.id, savedRevision, timestamp),
+    ...removedIds.map((id) => db.prepare(`UPDATE wheel_entry_source_bindings SET retired_at=?,updated_at=? WHERE wheel_id=? AND entry_id=? AND retired_at IS NULL
+      AND EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=? AND updated_at=?)`).bind(timestamp, timestamp, wheel.id, id, wheel.id, savedRevision, timestamp)),
+    ...removedIds.map((id) => db.prepare(`DELETE FROM wheel_entries WHERE wheel_id=? AND id=?
+      AND EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=? AND updated_at=?)`).bind(wheel.id, id, wheel.id, savedRevision, timestamp)),
+    ...entries.map((entry, index) => currentEntryIds.has(entry.id)
+      ? entryUpdateConditional(db, wheel.id, entry, index, timestamp, savedRevision)
+      : entryInsertConditional(db, wheel.id, entry, index, timestamp, savedRevision)),
     db.prepare(`INSERT INTO wheel_audit_events (id, wheel_id, actor_account_id, target_account_id, event_type, metadata_json, created_at)
       SELECT ?, id, ?, NULL, 'wheel_saved', ?, ? FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?`).bind(
       randomId(), accountId, JSON.stringify({ previousRevision: expectedRevision, participantCount: entries.length }), timestamp,
@@ -311,6 +353,7 @@ export async function changeWheelLifecycle(env, accountId, slug, input) {
   if (!wheel) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   const access = await resolveWheelAccess(env, accountId, wheel);
   if (!access.canEdit) throw new AuthFailure(403, "wheel_edit_forbidden", "Owner or editor access is required.");
+  if (wheel.closed_at) throw new AuthFailure(409, "wheel_closed", "Closed Wheels remain in Past Wheels and cannot change lifecycle.");
   const action = String(input.action || "");
   if (!new Set(["archive", "restore", "publish", "hide"]).has(action)) throw new AuthFailure(400, "wheel_lifecycle_invalid", "The wheel lifecycle action is invalid.");
   if (wheel.editing_locked && !access.isMasterAdmin) throw new AuthFailure(423, "wheel_edit_locked", "Wheel editing is locked by Admin.");
@@ -331,6 +374,7 @@ export async function performOfficialSpin(env, accountId, slug, input) {
   if (!wheel) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   const access = await resolveWheelAccess(env, accountId, wheel);
   if (!access.canSpinOfficially) throw new AuthFailure(403, "official_spin_forbidden", "Official spinner access is required.");
+  if (wheel.closed_at) throw new AuthFailure(409, "wheel_closed", "Closed Wheels cannot record additional official draws.");
   if (wheel.lifecycle !== "active") throw new AuthFailure(409, "wheel_archived", "Archived or draft wheels cannot record official draws.");
   if (!wheel.official_spin_enabled || wheel.official_spinning_locked) throw new AuthFailure(423, "official_spin_locked", "Official drawing is locked.");
   const expectedRevision = positiveInteger(input.revision, "wheel_revision_invalid", 2_147_483_647);
@@ -353,11 +397,11 @@ export async function performOfficialSpin(env, accountId, slug, input) {
     result = await db.batch([
       db.prepare(`INSERT INTO wheel_official_spins (
         id, wheel_id, wheel_revision, participant_snapshot_hash, winning_entry_id, winning_label_snapshot,
-        winning_weight_snapshot, performed_by_account_id, result_type, idempotency_key, created_at
-      ) SELECT ?, id, revision, ?, ?, ?, ?, ?, 'official', ?, ? FROM wheels
+        winning_weight_snapshot, winning_entry_snapshot_json, performed_by_account_id, result_type, idempotency_key, created_at
+      ) SELECT ?, id, revision, ?, ?, ?, ?, ?, ?, 'official', ?, ? FROM wheels
         WHERE id = ? AND revision = ? AND spin_sequence = ? AND lifecycle = 'active'
           AND official_spin_enabled = 1 AND official_spinning_locked = 0`).bind(
-        spinId, snapshotHash, winner.id, winner.label, winner.weight, accountId, idempotencyKey, timestamp,
+        spinId, snapshotHash, winner.id, winner.label, winner.weight, JSON.stringify(winnerSnapshot(winner)), accountId, idempotencyKey, timestamp,
         wheel.id, expectedRevision, sequence,
       ),
       db.prepare("UPDATE wheels SET spin_sequence = spin_sequence + 1, latest_official_spin_at = ?, updated_at = ? WHERE id = ? AND revision = ? AND spin_sequence = ?").bind(timestamp, timestamp, wheel.id, expectedRevision, sequence),
@@ -373,7 +417,57 @@ export async function performOfficialSpin(env, accountId, slug, input) {
     if (repeated) return { ok: true, spin: await officialSpinProjection(repeated), idempotent: true };
     throw new AuthFailure(409, "official_spin_conflict", "The wheel changed or another official draw started. Reload before drawing again.");
   }
-  return { ok: true, spin: await officialSpinProjection({ id: spinId, wheel_id: wheel.id, wheel_revision: expectedRevision, participant_snapshot_hash: snapshotHash, winning_entry_id: winner.id, winning_label_snapshot: winner.label, winning_weight_snapshot: winner.weight, created_at: timestamp }), idempotent: false };
+  return { ok: true, spin: await officialSpinProjection({ id: spinId, wheel_id: wheel.id, wheel_revision: expectedRevision, participant_snapshot_hash: snapshotHash, winning_entry_id: winner.id, winning_label_snapshot: winner.label, winning_weight_snapshot: winner.weight, winning_entry_snapshot_json: JSON.stringify(winnerSnapshot(winner)), created_at: timestamp }), idempotent: false };
+}
+
+export async function closeAndCreateNextWheel(env, accountId, slug, input) {
+  await enforceWheelRateLimit(env, 'close_create_next', accountId, 6, 3600);
+  const db = requireWheelDb(env); const wheel = await wheelBySlug(env, slug);
+  if (!wheel) throw new AuthFailure(404, 'wheel_not_found', 'This wheel was not found.');
+  const access = await resolveWheelAccess(env, accountId, wheel);
+  if (!access.canEdit) throw new AuthFailure(403, 'wheel_edit_forbidden', 'Owner or editor access is required.');
+  const idempotencyKey = requiredText(input.idempotencyKey, 16, 120, 'idempotency_key_invalid');
+  const existing = await db.prepare('SELECT s.*,w.public_slug AS successor_slug FROM wheel_successions s JOIN wheels w ON w.id=s.successor_wheel_id WHERE s.idempotency_key=?').bind(idempotencyKey).first();
+  if (existing) return { ok: true, idempotent: true, originalSlug: slug, successorSlug: existing.successor_slug, decidedResultId: existing.decided_result_id };
+  if (wheel.closed_at) throw new AuthFailure(409, 'wheel_already_closed', 'This Wheel is already closed. Open its recorded successor from Past Wheels.');
+  if (wheel.editing_locked && !access.isMasterAdmin) throw new AuthFailure(423, 'wheel_edit_locked', 'Wheel editing is locked by Admin.');
+  const expectedRevision = positiveInteger(input.revision, 'wheel_revision_invalid', 2_147_483_647);
+  if (expectedRevision !== Number(wheel.revision)) throw new AuthFailure(409, 'wheel_revision_conflict', 'The Wheel changed. Reload before closing it.');
+  const resultId = requiredText(input.resultId, 16, 80, 'official_result_invalid');
+  const decided = await db.prepare('SELECT * FROM wheel_official_spins WHERE id=? AND wheel_id=? AND voided_at IS NULL').bind(resultId, wheel.id).first();
+  if (!decided) throw new AuthFailure(409, 'official_result_invalid', 'Choose a current, unvoided official result from this Wheel.');
+  const copyParticipants = input.copyParticipants === true; const successorId = randomId(); const successionId = randomId(); const timestamp = nowIso();
+  const title = requiredText(input.title || `${wheel.title} - Next`, 1, 100, 'wheel_title_invalid'); const successorSlug = await uniqueSlug(db, input.slug || title);
+  const sourceEntries = copyParticipants ? (await db.prepare('SELECT * FROM wheel_entries WHERE wheel_id=? ORDER BY display_order,id').bind(wheel.id).all()).results || [] : [];
+  const codes = await allocateEntrantCodes(db, sourceEntries.length); const entryIds = new Map(sourceEntries.map((entry) => [entry.id, randomId()]));
+  const mediaClone = await prepareWheelMediaClone(env, wheel.id, successorId, accountId);
+  const remapAsset = (id) => mediaClone.assetIds.get(id) || id;
+  const nextConfig = remapMediaReferences(parseJson(wheel.config_json, DEFAULT_CONFIG), remapAsset);
+  let rules = []; let rosters = [];
+  try { rules = (await db.prepare('SELECT * FROM automation_rules WHERE target_wheel_id=? AND deleted_at IS NULL ORDER BY created_at,id').bind(wheel.id).all()).results || []; } catch { rules = []; }
+  try { rosters = (await db.prepare('SELECT * FROM subscriber_roster_rules WHERE target_wheel_id=? AND deleted_at IS NULL ORDER BY created_at,id').bind(wheel.id).all()).results || []; } catch { rosters = []; }
+  const statements = [
+    db.prepare(`INSERT INTO wheels(id,reference_code,public_slug,title,description,lifecycle,visibility,owner_account_id,display_order,revision,spin_sequence,official_spin_enabled,public_demo_spin_enabled,editing_locked,official_spinning_locked,config_json,participant_count,created_at,updated_at)
+      VALUES(?,?,?,?,?,'draft','hidden',?,0,1,0,1,1,0,0,?,?,?,?)`).bind(successorId,`WHL-${successorId.slice(0,8).toUpperCase()}`,successorSlug,title,wheel.description,wheel.owner_account_id,JSON.stringify(nextConfig),sourceEntries.filter((entry) => entry.state === 'active').length,timestamp,timestamp),
+    ...((await db.prepare('SELECT * FROM wheel_access WHERE wheel_id=? AND active=1 ORDER BY created_at').bind(wheel.id).all()).results || []).map((row) => db.prepare(`INSERT INTO wheel_access(wheel_id,account_id,role,active,granted_by_account_id,created_at,updated_at) VALUES(?,?,?,1,?,?,?)`).bind(successorId,row.account_id,row.role,accountId,timestamp,timestamp)),
+    ...sourceEntries.map((row,index) => db.prepare(`INSERT INTO wheel_entries(id,wheel_id,entrant_code,display_label,display_suffix,display_order,weight,segment_colour,segment_style_json,avatar_url,source_avatar_url,state,provenance_origin,origin_rule_id,origin_rule_name,created_at,updated_at,entrant_identity_json,entrant_appearance_json)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'template_copy',NULL,NULL,?,?,?,?)`).bind(entryIds.get(row.id),successorId,codes[index],row.display_label,row.display_suffix,index,row.weight,row.segment_colour,remapStyleJson(row.segment_style_json,remapAsset),remapMediaUrl(row.avatar_url,mediaClone.assetIds),remapMediaUrl(row.source_avatar_url,mediaClone.assetIds),row.state,timestamp,timestamp,row.entrant_identity_json,row.entrant_appearance_json)),
+    ...mediaClone.statements,
+    ...rules.map((row) => db.prepare(`INSERT INTO automation_rules(id,name,description,provider,enabled,source_scope,event_type,conditions_json,action_type,target_wheel_id,duplicate_policy,revision,activated_at,created_by_account_id,created_at,updated_at,matched,executed,duplicate_events,duplicate_entrants,rejected,failed,last_match_at,last_outcome,last_fault,action_config_json,source_label)
+      VALUES(?,?,?,?,0,?,?,?,?,?,'skip',1,NULL,?,?,?,0,0,0,0,0,0,NULL,NULL,NULL,?,?)`).bind(randomId(),row.name,row.description,row.provider,row.source_scope,row.event_type,row.conditions_json,row.action_type,successorId,accountId,timestamp,timestamp,row.action_config_json,row.source_label)),
+    ...rosters.map((row) => db.prepare(`INSERT INTO subscriber_roster_rules(id,name,source_scope,source_label,target_wheel_id,enabled,sync_mode,entries_per_member,minimum_quality,appearance_json,revision,created_by_account_id,created_at,updated_at)
+      VALUES(?,?,?,?,?,0,?,?,?,?,1,?,?,?)`).bind(randomId(),row.name,row.source_scope,row.source_label,successorId,row.sync_mode,row.entries_per_member,row.minimum_quality,row.appearance_json,accountId,timestamp,timestamp)),
+    db.prepare('UPDATE automation_rules SET enabled=0,activated_at=NULL,revision=revision+1,updated_at=? WHERE target_wheel_id=? AND deleted_at IS NULL').bind(timestamp,wheel.id),
+    ...(rosters.length ? [db.prepare('UPDATE subscriber_roster_rules SET enabled=0,revision=revision+1,updated_at=? WHERE target_wheel_id=? AND deleted_at IS NULL').bind(timestamp,wheel.id)] : []),
+    db.prepare('UPDATE wheels SET closed_at=?,decided_result_id=?,successor_wheel_id=?,official_spin_enabled=0,public_demo_spin_enabled=0,revision=revision+1,updated_at=? WHERE id=? AND revision=? AND closed_at IS NULL').bind(timestamp,resultId,successorId,timestamp,wheel.id,expectedRevision),
+    db.prepare(`INSERT INTO wheel_successions(id,original_wheel_id,decided_result_id,successor_wheel_id,idempotency_key,copied_participants,copied_automation_count,created_by_account_id,created_at)
+      SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM wheels WHERE id=? AND closed_at=? AND successor_wheel_id=?)`).bind(successionId,wheel.id,resultId,successorId,idempotencyKey,Number(copyParticipants),rules.length+rosters.length,accountId,timestamp,wheel.id,timestamp,successorId),
+    auditStatement(db,wheel.id,accountId,null,'wheel_closed_successor_created',{ decidedResultId: resultId, successorWheelId: successorId, copiedParticipants: copyParticipants, copiedAutomationDefinitions: rules.length + rosters.length },timestamp),
+    auditStatement(db,successorId,accountId,null,'wheel_created_from_successor',{ originalWheelId: wheel.id, decidedResultId: resultId, copiedParticipants: copyParticipants },timestamp),
+  ];
+  try { const response = await db.batch(statements); const closeIndex = statements.length - 4; if (Number(response[closeIndex]?.meta?.changes || 0) !== 1) throw new AuthFailure(409,'wheel_revision_conflict','The Wheel changed before it could be closed.'); }
+  catch (error) { await mediaClone.cleanup(); throw error; }
+  return { ok: true, idempotent: false, originalSlug: slug, successorSlug, decidedResultId: resultId, copiedParticipants: copyParticipants, copiedAutomationDefinitions: rules.length + rosters.length };
 }
 
 export async function applyWinnerAction(env, accountId, slug, input) {
@@ -382,6 +476,7 @@ export async function applyWinnerAction(env, accountId, slug, input) {
   if (!wheel) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   const access = await resolveWheelAccess(env, accountId, wheel);
   if (!access.canEdit) throw new AuthFailure(403, "wheel_edit_forbidden", "Editor access is required.");
+  if (wheel.closed_at) throw new AuthFailure(409, "wheel_closed", "Closed Wheels preserve their final result and participants.");
   if (wheel.editing_locked && !access.isMasterAdmin) throw new AuthFailure(423, "wheel_edit_locked", "Wheel editing is locked by Admin.");
   const action = String(input.action || ""); const entryId = requiredText(input.entryId, 1, 80, "entry_id_invalid");
   if (!new Set(["keep", "hide", "remove", "remove-matching"]).has(action)) throw new AuthFailure(400, "winner_action_invalid", "The winner action is invalid.");
@@ -401,7 +496,19 @@ export async function applyWinnerAction(env, accountId, slug, input) {
     : action === "remove-matching"
       ? matching
       : db.prepare("DELETE FROM wheel_entries WHERE wheel_id = ? AND id = ?").bind(wheel.id, entryId);
+  let removedIds = [];
+  if (action === 'remove') removedIds = [entryId];
+  else if (action === 'remove-matching') {
+    const rows = !identity || identity.origin === 'automation' || identity.type === 'legacy'
+      ? { results: [{ id: entryId }] }
+      : await db.prepare(`SELECT id FROM wheel_entries WHERE wheel_id = ? AND display_label = ?
+          AND COALESCE(json_extract(entrant_identity_json, '$.type'), 'legacy') = ?
+          AND COALESCE(json_extract(entrant_identity_json, '$.origin'), 'legacy') = ?`)
+        .bind(wheel.id, entry.display_label, identity.type, identity.origin).all();
+    removedIds = (rows?.results || []).map((row) => row.id);
+  }
   await db.batch([
+    ...removedIds.map((id) => db.prepare("UPDATE wheel_entry_source_bindings SET retired_at=?,updated_at=? WHERE wheel_id=? AND entry_id=? AND retired_at IS NULL").bind(timestamp, timestamp, wheel.id, id)),
     mutation,
     db.prepare("UPDATE wheels SET participant_count = (SELECT COUNT(*) FROM wheel_entries WHERE wheel_id = ?), revision = revision + 1, updated_at = ? WHERE id = ?").bind(wheel.id, timestamp, wheel.id),
     auditStatement(db, wheel.id, accountId, null, `winner_${action.replace("-", "_")}`, { entryId, label: entry.display_label }, timestamp),
@@ -589,7 +696,8 @@ function validateEntries(input, options = {}) {
     const appearance = validateEntryAppearance(value.appearance);
     const identity = validateEntryIdentity(value.identity);
     const style = value.style == null ? null : validateSegmentStyle(value.style, colour || DEFAULT_CONFIG.palette[index % DEFAULT_CONFIG.palette.length]);
-    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), avatarUrl: validateAvatarUrl(value.customAvatarUrl !== undefined ? value.customAvatarUrl : value.avatarUrl), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", MAX_ENTRY_WEIGHT), colour: style?.color || colour?.toUpperCase() || null, style, identity, ...(appearance !== undefined ? { appearance } : {}), state: value.state === "hidden" ? "hidden" : "active" };
+    let suffix; try { suffix = normalizeEntrySuffix(value.suffix); } catch { throw new AuthFailure(400, 'participant_suffix_invalid', 'Entry suffixes must be plain text with at most 32 characters.'); }
+    return { id: !options.newIds && /^[a-f0-9-]{16,80}$/i.test(String(value.id || "")) ? String(value.id) : randomId(), label: requiredText(value.label, 1, 120, "participant_label_invalid"), suffix, avatarUrl: validateAvatarUrl(value.customAvatarUrl !== undefined ? value.customAvatarUrl : value.avatarUrl), order: index, weight: positiveInteger(value.weight ?? 1, "participant_weight_invalid", MAX_ENTRY_WEIGHT), colour: style?.color || colour?.toUpperCase() || null, style, identity, ...(appearance !== undefined ? { appearance } : {}), state: value.state === "hidden" ? "hidden" : "active" };
   });
 }
 
@@ -614,6 +722,7 @@ function validateConfig(input, mechanics = null, options = {}) {
     centreTreatment: input.centreTreatment === "signal" ? "signal" : input.centreTreatment === "ring" ? "ring" : "bolt",
     backgroundIntensity: input.backgroundIntensity === "low" ? "low" : input.backgroundIntensity === "medium" ? "medium" : "high",
     entrantDisplay: ["names", "avatars", "both"].includes(input.entrantDisplay) ? input.entrantDisplay : "names",
+    showEntrySuffix: input.showEntrySuffix !== false,
     labelContrast: input.labelContrast === "dark" ? "dark" : "light",
     spinDurationMs: duration,
     tickingSoundEnabled: input.tickingSoundEnabled !== false,
@@ -651,20 +760,45 @@ async function resolveWheelAccess(env, accountId, wheel) {
 }
 
 function emptyAccess() { return { accountId: "", isMasterAdmin: false, role: null, canViewPrivate: false, canEdit: false, canSpinOfficially: false }; }
-function accessProjection(access, wheel) { return { role: access.role, isMasterAdmin: access.isMasterAdmin, canEdit: access.canEdit && (!wheel.editing_locked || access.isMasterAdmin), canSpinOfficially: access.canSpinOfficially && wheel.lifecycle === "active" && Boolean(wheel.official_spin_enabled) && (!wheel.official_spinning_locked || access.isMasterAdmin), editingLocked: Boolean(wheel.editing_locked), officialSpinLocked: Boolean(wheel.official_spinning_locked), revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
+function accessProjection(access, wheel) { return { role: access.role, isMasterAdmin: access.isMasterAdmin, canEdit: access.canEdit && !wheel.closed_at && (!wheel.editing_locked || access.isMasterAdmin), canSpinOfficially: access.canSpinOfficially && !wheel.closed_at && wheel.lifecycle === "active" && Boolean(wheel.official_spin_enabled) && (!wheel.official_spinning_locked || access.isMasterAdmin), editingLocked: Boolean(wheel.editing_locked), officialSpinLocked: Boolean(wheel.official_spinning_locked), closed: Boolean(wheel.closed_at), revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
 
 async function activeAccount(env, accountId) { const row = await loadAccountById(env, clean(accountId, 160)); return row?.status === "active" ? serializeAccount(env, row) : null; }
 async function accountSummary(env, accountId) { const account = await activeAccount(env, accountId); return account ? { id: account.id, displayName: account.displayName, email: account.email, role: account.role, adminLevel: account.adminLevel } : { id: accountId, displayName: "Unavailable account", email: null, role: "user", adminLevel: "none" }; }
 async function publicWheelOwner(env, accountId) { const account = await activeAccount(env, accountId); return account ? { displayName: account.displayName, avatarUrl: account.avatarUrl || null } : { displayName: "Unavailable creator", avatarUrl: null }; }
 
 async function wheelBySlug(env, slug) { return requireWheelDb(env).prepare("SELECT * FROM wheels WHERE public_slug = ? COLLATE NOCASE LIMIT 1").bind(clean(slug, 80)).first(); }
-async function entriesForWheel(env, wheelId, includeHidden) { const rows = await requireWheelDb(env).prepare(`SELECT * FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all(); return (rows?.results || []).map((row) => ({ id: row.id, identity: publicEntryIdentity(row.entrant_identity_json), label: row.display_label, avatarUrl: row.avatar_url || row.source_avatar_url || null, customAvatarUrl: row.avatar_url || null, sourceAvatarUrl: row.source_avatar_url || null, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, appearance: publicAppearance(storedAppearance(row.entrant_appearance_json)), state: row.state })); }
+async function entriesForWheel(env, wheelId, includeHidden) {
+  const db = requireWheelDb(env); const rows = await db.prepare(`SELECT * FROM wheel_entries WHERE wheel_id = ? ${includeHidden ? "" : "AND state = 'active'"} ORDER BY display_order, id`).bind(wheelId).all();
+  let bindings = [];
+  if (includeHidden) try { bindings = (await db.prepare(`SELECT entry_id,provider,source_scope,actor_key,actor_label_snapshot,entry_type,accumulation_group,origin_rule_id,origin_rule_name_snapshot,created_at,updated_at
+    FROM wheel_entry_source_bindings WHERE wheel_id=? AND retired_at IS NULL ORDER BY entry_id,created_at`).bind(wheelId).all()).results || []; } catch { /* pre-0050 read compatibility */ }
+  const byEntry = new Map(); for (const binding of bindings) { if (!byEntry.has(binding.entry_id)) byEntry.set(binding.entry_id, []); byEntry.get(binding.entry_id).push({ provider: binding.provider, sourceScope: binding.source_scope, actorKey: binding.actor_key, actorLabel: binding.actor_label_snapshot, entryType: binding.entry_type, accumulationGroup: binding.accumulation_group, originRuleId: binding.origin_rule_id, originRuleName: binding.origin_rule_name_snapshot, createdAt: binding.created_at, updatedAt: binding.updated_at }); }
+  return (rows?.results || []).map((row) => ({ id: row.id, code: row.entrant_code || null, identity: publicEntryIdentity(row.entrant_identity_json), provenance: { origin: row.provenance_origin || 'legacy', ruleId: row.origin_rule_id || null, ruleName: row.origin_rule_name || null, ...(includeHidden ? { sourceBindings: byEntry.get(row.id) || [] } : {}) }, label: row.display_label, suffix: row.display_suffix || null, avatarUrl: row.avatar_url || row.source_avatar_url || null, customAvatarUrl: row.avatar_url || null, sourceAvatarUrl: row.source_avatar_url || null, order: Number(row.display_order), weight: Number(row.weight), colour: row.segment_colour, style: row.segment_style_json ? parseJson(row.segment_style_json, null) : null, appearance: publicAppearance(storedAppearance(row.entrant_appearance_json)), state: row.state }));
+}
+export async function officialEntriesForWheel(env, wheelId) { return entriesForWheel(env, wheelId, false); }
+
+export async function listPublicWheelActivity(env, slug, accountId = "", input = {}) {
+  const wheel = await wheelBySlug(env, slug);
+  if (!wheel) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
+  const access = accountId ? await resolveWheelAccess(env, accountId, wheel) : emptyAccess();
+  if (!(wheel.lifecycle === 'active' && wheel.visibility === 'public') && !access.canViewPrivate) throw new AuthFailure(404, 'wheel_not_found', 'This wheel was not found.');
+  const limit = Math.min(50, Math.max(1, Number(input.limit) || 20));
+  const [cursorAt, cursorId] = decodeActivityCursor(input.cursor);
+  const result = await requireWheelDb(env).prepare(`SELECT a.id,a.event_type,a.outcome,a.action_result,a.awarded_entries,a.created_at,
+      d.entrant_code_snapshot,d.display_label_snapshot,d.display_suffix_snapshot,d.entry_type,d.award_delta,d.safe_reason
+    FROM automation_receipts a LEFT JOIN automation_receipt_details d ON d.receipt_id=a.id
+    WHERE a.target_wheel_id=? AND (?='' OR a.created_at<? OR (a.created_at=? AND a.id<?))
+    ORDER BY a.created_at DESC,a.id DESC LIMIT ?`).bind(wheel.id, cursorAt, cursorAt, cursorAt, cursorId, limit + 1).all();
+  const all = result?.results || []; const page = all.slice(0, limit); const last = page.at(-1);
+  return { ok: true, items: page.map((row) => ({ id: row.id, createdAt: row.created_at, eventType: publicEventLabel(row.event_type, row.entry_type), entrant: row.display_label_snapshot ? { code: row.entrant_code_snapshot || null, label: row.display_label_snapshot, suffix: row.display_suffix_snapshot || null } : null, awardDelta: Number(row.award_delta ?? row.awarded_entries ?? 0), outcome: row.outcome, reason: row.safe_reason || row.action_result || null })), nextCursor: all.length > limit && last ? encodeActivityCursor(last.created_at, last.id) : null };
+}
 async function publicHistory(env, wheel, limit) { const config = parseJson(wheel.config_json, DEFAULT_CONFIG); if (!config.publicHistoryVisible) return []; return (await resultRows(env, wheel.id, limit)).map(officialProjection); }
 async function resultRows(env, wheelId, limit) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_official_spins WHERE wheel_id = ? ORDER BY created_at DESC, id DESC LIMIT ?").bind(wheelId, limit).all(); return rows?.results || []; }
 
-function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled), officialEnabled: Boolean(row.official_spin_enabled), latestOfficialAt: row.latest_official_spin_at || null, updatedAt: row.updated_at || null, directoryOrder: Number(row.display_order || 0) }; }
-function publicDetail(wheel, entries, history, access, media, owner) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", owner, createdAt: wheel.created_at, updatedAt: wheel.updated_at, participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, media, demoEnabled: Boolean(wheel.public_demo_spin_enabled), officialEnabled: Boolean(wheel.official_spin_enabled), latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
-function officialProjection(row) { return { id: row.id, type: "official", winningEntryId: row.winning_entry_id, winningLabel: row.winning_label_snapshot, winningWeight: Number(row.winning_weight_snapshot), wheelRevision: Number(row.wheel_revision), snapshotHash: row.participant_snapshot_hash, createdAt: row.created_at, voided: Boolean(row.voided_at) }; }
+function publicSummary(row) { const config = parseJson(row.config_json, DEFAULT_CONFIG); return { slug: row.public_slug, title: row.title, description: row.description, participantCount: Number(row.participant_count), weighted: Boolean(row.is_weighted), themePreset: config.themePreset, palette: config.palette, demoEnabled: Boolean(row.public_demo_spin_enabled) && !row.closed_at, officialEnabled: Boolean(row.official_spin_enabled) && !row.closed_at, latestOfficialAt: row.latest_official_spin_at || null, updatedAt: row.updated_at || null, directoryOrder: Number(row.display_order || 0), closedAt: row.closed_at || null, successorWheelId: row.successor_wheel_id || null }; }
+function publicDetail(wheel, entries, history, access, media, owner) { const config = validateConfig(parseJson(wheel.config_json, DEFAULT_CONFIG)); return { slug: wheel.public_slug, title: wheel.title, description: wheel.description, lifecycle: wheel.lifecycle, visibility: access.canViewPrivate ? wheel.visibility : "public", owner, createdAt: wheel.created_at, updatedAt: wheel.updated_at, closedAt: wheel.closed_at || null, decidedResultId: wheel.decided_result_id || null, successorWheelId: wheel.successor_wheel_id || null, participantCount: entries.filter((entry) => entry.state === "active").length, weighted: entries.some((entry) => entry.weight !== 1), entries, config, media, demoEnabled: Boolean(wheel.public_demo_spin_enabled) && !wheel.closed_at, officialEnabled: Boolean(wheel.official_spin_enabled) && !wheel.closed_at, latestOfficialResult: history[0] || null, recentOfficialResults: history, revision: access.canViewPrivate ? Number(wheel.revision) : undefined }; }
+function officialProjection(row) { return { id: row.id, type: "official", winningEntryId: row.winning_entry_id, winningLabel: row.winning_label_snapshot, winningWeight: Number(row.winning_weight_snapshot), winningEntry: parseJson(row.winning_entry_snapshot_json, null), wheelRevision: Number(row.wheel_revision), snapshotHash: row.participant_snapshot_hash, createdAt: row.created_at, voided: Boolean(row.voided_at) }; }
+export function winnerSnapshot(entry) { return { id: entry.id, code: entry.code || null, label: entry.label, suffix: entry.suffix || null, weight: entry.weight, colour: entry.colour || null, style: entry.style || null, avatarUrl: entry.avatarUrl || null, identity: entry.identity || null, provenance: entry.provenance || null, appearance: entry.appearance || null }; }
 export async function officialAnimationPlan(row) {
   const seed = new TextEncoder().encode(`thirdrailify-spin-plan-v1\n${row.id}\n${row.wheel_id}\n${row.participant_snapshot_hash}`);
   const digest = await crypto.subtle.digest("SHA-256", seed); const view = new DataView(digest);
@@ -675,10 +809,12 @@ function adminResultProjection(row) { return { ...officialProjection(row), wheel
 async function adminWheelSummary(env, row) { return { id: row.id, reference: row.reference_code, slug: row.public_slug, title: row.title, description: row.description, lifecycle: row.lifecycle, visibility: row.visibility, owner: await accountSummary(env, row.owner_account_id), participantCount: Number(row.participant_count), revision: Number(row.revision), officialEnabled: Boolean(row.official_spin_enabled), demoEnabled: Boolean(row.public_demo_spin_enabled), editingLocked: Boolean(row.editing_locked), spinLocked: Boolean(row.official_spinning_locked), latestWinner: row.latest_winner || null, latestResultAt: row.latest_result_at || row.latest_official_spin_at || null, updatedAt: row.updated_at }; }
 async function wheelAccessRows(env, wheelId) { const rows = await requireWheelDb(env).prepare("SELECT * FROM wheel_access WHERE wheel_id = ? ORDER BY active DESC, role, created_at").bind(wheelId).all(); return Promise.all((rows?.results || []).map(async (row) => ({ account: await accountSummary(env, row.account_id), role: row.role, active: Boolean(row.active), updatedAt: row.updated_at }))); }
 
-function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at${entry.identity ? ', entrant_identity_json' : ''}${entry.appearance ? ', entrant_appearance_json' : ''}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${entry.identity ? ', ?' : ''}${entry.appearance ? ', ?' : ''})`).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp, ...(entry.identity ? [JSON.stringify(entry.identity)] : []), ...(entry.appearance ? [JSON.stringify(entry.appearance)] : [])); }
-function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id, wheel_id, display_label, display_order, weight, segment_colour, segment_style_json, avatar_url, source_avatar_url, state, created_at, updated_at${entry.identity ? ', entrant_identity_json' : ''}${entry.appearance ? ', entrant_appearance_json' : ''})
-  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${entry.identity ? ', ?' : ''}${entry.appearance ? ', ?' : ''} WHERE EXISTS (SELECT 1 FROM wheels WHERE id = ? AND revision = ? AND updated_at = ?)`
-).bind(entry.id, wheelId, entry.label, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, timestamp, timestamp, ...(entry.identity ? [JSON.stringify(entry.identity)] : []), ...(entry.appearance ? [JSON.stringify(entry.appearance)] : []), wheelId, revision, timestamp); }
+function entryInsert(db, wheelId, entry, index, timestamp) { return db.prepare(`INSERT INTO wheel_entries (id,wheel_id,entrant_code,display_label,display_suffix,display_order,weight,segment_colour,segment_style_json,avatar_url,source_avatar_url,state,provenance_origin,origin_rule_id,origin_rule_name,created_at,updated_at${entry.identity ? ',entrant_identity_json' : ''}${entry.appearance ? ',entrant_appearance_json' : ''}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?${entry.identity ? ',?' : ''}${entry.appearance ? ',?' : ''})`).bind(entry.id, wheelId, entry.code, entry.label, entry.suffix || null, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, entry.provenanceOrigin || 'manual', entry.originRuleId || null, entry.originRuleName || null, timestamp, timestamp, ...(entry.identity ? [JSON.stringify(entry.identity)] : []), ...(entry.appearance ? [JSON.stringify(entry.appearance)] : [])); }
+function entryInsertConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`INSERT INTO wheel_entries (id,wheel_id,entrant_code,display_label,display_suffix,display_order,weight,segment_colour,segment_style_json,avatar_url,source_avatar_url,state,provenance_origin,origin_rule_id,origin_rule_name,created_at,updated_at${entry.identity ? ',entrant_identity_json' : ''}${entry.appearance ? ',entrant_appearance_json' : ''})
+  SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?${entry.identity ? ',?' : ''}${entry.appearance ? ',?' : ''} WHERE EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=? AND updated_at=?)`
+).bind(entry.id, wheelId, entry.code, entry.label, entry.suffix || null, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, entry.provenanceOrigin || 'manual', entry.originRuleId || null, entry.originRuleName || null, timestamp, timestamp, ...(entry.identity ? [JSON.stringify(entry.identity)] : []), ...(entry.appearance ? [JSON.stringify(entry.appearance)] : []), wheelId, revision, timestamp); }
+function entryUpdateConditional(db, wheelId, entry, index, timestamp, revision) { return db.prepare(`UPDATE wheel_entries SET entrant_code=?,display_label=?,display_suffix=?,display_order=?,weight=?,segment_colour=?,segment_style_json=?,avatar_url=?,source_avatar_url=?,state=?,provenance_origin=?,origin_rule_id=?,origin_rule_name=?,updated_at=?,entrant_identity_json=?,entrant_appearance_json=?
+  WHERE id=? AND wheel_id=? AND EXISTS (SELECT 1 FROM wheels WHERE id=? AND revision=? AND updated_at=?)`).bind(entry.code, entry.label, entry.suffix || null, index, entry.weight, entry.colour, entry.style ? JSON.stringify(entry.style) : null, entry.avatarUrl || null, entry.sourceAvatarUrl || null, entry.state, entry.provenanceOrigin || 'manual', entry.originRuleId || null, entry.originRuleName || null, timestamp, entry.identity ? JSON.stringify(entry.identity) : null, entry.appearance ? JSON.stringify(entry.appearance) : null, entry.id, wheelId, wheelId, revision, timestamp); }
 
 function validatePaletteStyles(value, palette, custom) {
   if (!Array.isArray(value) || value.length !== palette.length || value.length > (custom ? 5 : 12)) throw new AuthFailure(400, "wheel_palette_styles_invalid", "Palette styles must align exactly with the palette.");
@@ -724,7 +860,13 @@ function positiveInteger(value, code, max) { const number = Number(value); if (!
 function boundedPercent(value, fallback) { const number = Number(value); return Number.isFinite(number) ? Math.min(100, Math.max(0, Math.round(number))) : fallback; }
 function legacyCelebration(value) { return value === "restrained" ? "subtle" : value === "full" ? "normal" : DEFAULT_CONFIG.celebrationIntensity; }
 function parseJson(value, fallback) { try { const parsed = JSON.parse(String(value || "")); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback; } catch { return fallback; } }
+function remapStyleJson(value, remap) { if (!value) return null; const style = parseJson(value, null); if (!style) return null; return JSON.stringify(style.mode === 'image' ? { ...style, imageAssetId: remap(style.imageAssetId) } : style); }
+function remapMediaReferences(config, remap) { return { ...config, paletteStyles: Array.isArray(config.paletteStyles) ? config.paletteStyles.map((style) => style?.mode === 'image' ? { ...style, imageAssetId: remap(style.imageAssetId) } : style) : config.paletteStyles }; }
+function remapMediaUrl(value, assetIds) { if (!value) return null; const match = String(value).match(/\/wheel-media\/([a-f0-9-]{16,80})|\/api\/wheels\/media\/([a-f0-9-]{16,80})/i); const next = assetIds.get(match?.[1] || match?.[2]); return next ? `/api/wheels/media/${encodeURIComponent(next)}` : value; }
 function escapeLike(value) { return String(value).replace(/[\\%_]/g, (match) => `\\${match}`); }
+function encodeActivityCursor(createdAt, id) { return encodeURIComponent(`${createdAt}|${id}`); }
+function decodeActivityCursor(value) { try { const [at, id] = decodeURIComponent(String(value || '')).split('|'); return Number.isFinite(Date.parse(at)) && /^[a-f0-9-]{16,80}$/i.test(id || '') ? [at, id] : ['', '']; } catch { return ['', '']; } }
+function publicEventLabel(eventType, entryType) { return ({ 'rumble.chat.exact': 'Chat entry', 'rumble.follow': 'Follower entry', subscriber: 'Subscriber entry', subscriber_self_paid: 'Subscriber entry', 'rumble.gift_purchase': 'Gift purchase entry', 'rumble.raid.received': 'Raid entry', 'rumble.rant': 'Rant entry' })[eventType] || `${String(entryType || 'automation').replaceAll('_', ' ')} entry`; }
 async function digestHex(bytes) { const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); return Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
 export { DEFAULT_CONFIG, MAX_ENTRIES, accountSummary, activeAccount, auditStatement, enforceWheelRateLimit, publicSummary, publicWheelOwner, requireCreator, resolveWheelAccess, validateConfig, validateEntries };

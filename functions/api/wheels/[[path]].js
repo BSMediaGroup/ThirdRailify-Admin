@@ -3,11 +3,13 @@ import { AuthFailure, errorResponse, jsonResponse } from "../../_shared/auth-cor
 import {
   applyWinnerAction,
   changeWheelLifecycle,
+  closeAndCreateNextWheel,
   createWheel,
   getCreatorAccess,
   getPublicWheel,
   getPublicWheelMechanics,
   getWheelAccess,
+  listPublicWheelActivity,
   listPublicWheels,
   performOfficialSpin,
   readWheelJson,
@@ -54,11 +56,13 @@ async function handlePublicRead(request, env, path) {
     if (request.headers.get("x-thirdrailify-signature")) { await verifyWheelInternalRequest(request, env, new Uint8Array()); accountId = String(request.headers.get("x-thirdrailify-account-id") || "").slice(0, 160); }
     return wheelMediaResponse(env, decode(media[1]), request, accountId);
   }
-  if (!path) return cached(await listPublicWheels(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort") }));
+  if (!path) return cached(await listPublicWheels(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort"), view: url.searchParams.get('view') }));
   if (path === "mechanics") return cached(await getPublicWheelMechanics(env));
   if (path === "stages") return cached(await listPublicStages(env, { search: url.searchParams.get("search"), sort: url.searchParams.get("sort") }));
   const stage = path.match(/^stages\/([^/]+)$/);
   if (stage) return cached(await getStage(env, decode(stage[1])));
+  const activity = path.match(/^([^/]+)\/activity$/);
+  if (activity) return noStore(await listPublicWheelActivity(env, decode(activity[1]), '', { cursor: url.searchParams.get('cursor'), limit: url.searchParams.get('limit') }));
   if (path === "access" || path.endsWith("/access")) throw new AuthFailure(401, "authentication_required", "Sign in to view wheel access.");
   if (!/^[a-z0-9][a-z0-9-]{1,78}[a-z0-9]$/i.test(path)) throw new AuthFailure(404, "wheel_not_found", "This wheel was not found.");
   return cached(await getPublicWheel(env, path));
@@ -84,6 +88,8 @@ async function handleInternal(method, env, path, body) {
   if (method === "POST" && stageSpinAll) return performStageOfficialSpinAll(env, accountId, decode(stageSpinAll[1]), body.input || {});
   const read = path.match(/^([^/]+)\/read$/);
   if (method === "POST" && read) return getPublicWheel(env, decode(read[1]), accountId);
+  const activityRead = path.match(/^([^/]+)\/activity\/read$/);
+  if (method === 'POST' && activityRead) return listPublicWheelActivity(env, decode(activityRead[1]), accountId, body.input || body);
   const access = path.match(/^([^/]+)\/access$/);
   if (method === "POST" && access) return getWheelAccess(env, accountId, decode(access[1]));
   const save = path.match(/^([^/]+)\/save$/);
@@ -92,6 +98,8 @@ async function handleInternal(method, env, path, body) {
   if (method === "POST" && spins) return performOfficialSpin(env, accountId, decode(spins[1]), body.input || {});
   const winner = path.match(/^([^/]+)\/winner-action$/);
   if (method === "POST" && winner) return applyWinnerAction(env, accountId, decode(winner[1]), body.input || {});
+  const closeNext = path.match(/^([^/]+)\/close-and-create-next$/);
+  if (method === 'POST' && closeNext) return closeAndCreateNextWheel(env, accountId, decode(closeNext[1]), body.input || {});
   const lifecycle = path.match(/^([^/]+)\/lifecycle$/);
   if (method === "POST" && lifecycle) return changeWheelLifecycle(env, accountId, decode(lifecycle[1]), body.input || {});
   const mediaRemove = path.match(/^([^/]+)\/media\/(background|centre)$/);

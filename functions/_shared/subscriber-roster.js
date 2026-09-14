@@ -4,6 +4,7 @@ import { MAX_ENTRY_WEIGHT } from '../../src/lib/automation-model.mjs';
 import { AuthFailure, nowIso, randomId } from './auth-core.js';
 import { getSafeRumbleDiscovery, requirePollDb } from './polls-core.js';
 import { automaticEntryIdentity, storedEntryIdentity } from './entrant-identity-storage.js';
+import { allocateEntrantCodes, requireEntrantCodeStorage } from './entrant-code-storage.js';
 import { hash, intelligenceReport, normalizeName } from './rumble-intelligence.js';
 import { getWheelSettings, MAX_ENTRIES } from './wheels-core.js';
 
@@ -129,18 +130,23 @@ export async function previewRosterSync(env, ruleId) {
 }
 
 async function rosterIdentity(rule, actorKey) {
-  return { version: 1, type: 'subscription', origin: 'automation', key: await hash(['subscriber-roster-entry-v1', rule.id, rule.sourceScope, actorKey]) };
+  return automaticEntryIdentity({ sourceScope: rule.sourceScope, actorKey, eventType: 'subscriber_self_paid' });
 }
 
-async function existingActorEntry(entries, rule, item) {
+async function existingActorEntry(db, entries, rule, item) {
+  const binding = await db.prepare(`SELECT b.entry_id,e.id AS live_entry_id FROM wheel_entry_source_bindings b LEFT JOIN wheel_entries e ON e.id=b.entry_id AND e.wheel_id=b.wheel_id
+    WHERE b.wheel_id=? AND b.provider='rumble' AND b.source_scope=? AND b.actor_key=? AND b.accumulation_group='subscription' AND b.retired_at IS NULL LIMIT 1`)
+    .bind(rule.targetWheelId, rule.sourceScope, item.actorKey).first();
+  if (binding && !binding.live_entry_id) throw new AuthFailure(409, 'subscriber_roster_identity_binding_stale', 'A Subscriber source link points to a removed entrant. Repair the source link before syncing.');
+  if (binding) return { entry: entries.find(entry => entry.id === binding.entry_id) || null, bound: true };
   // Existing automation identities are cryptographic source+actor+family keys.
-  // Reusing a single exact match lets event and roster contributions sum without
-  // guessing from display labels or reconstructing ownership from receipts.
-  const eventTypes = ['rumble.subscribe', 'rumble.rant', 'rumble.gift_purchase', 'rumble.raid.received', 'rumble.follow', 'rumble.chat.exact'];
+  // Reuse only the canonical self-paid subscription family. Gifts, Rants,
+  // raids, follows, chat, manual rows and imports remain distinct.
+  const eventTypes = ['rumble.subscribe', 'subscriber_self_paid'];
   const keys = new Set();
   for (const eventType of eventTypes) keys.add((await automaticEntryIdentity({ sourceScope: rule.sourceScope, actorKey: item.actorKey, eventType })).key);
   const matches = entries.filter(entry => keys.has(storedEntryIdentity(entry.entrant_identity_json)?.key));
-  return matches.length === 1 ? matches[0] : null;
+  return { entry: matches.length === 1 ? matches[0] : null, bound: false };
 }
 
 async function performRosterSync(env, actorId, input) {
@@ -156,10 +162,11 @@ async function performRosterSync(env, actorId, input) {
     reviewExcluded: authority.counts.reviewExcluded, failures: delta.failures };
   if (!changed && !plan.removalBlocked && rule.lastEvaluatedSnapshotId === authority.current.id && rule.lastRosterFingerprint === authority.fingerprint) return { ...plan, synced: true, noOp: true, result: resultName, counts };
   const db = requirePollDb(env), wheel = await db.prepare('SELECT * FROM wheels WHERE id=?').bind(rule.targetWheelId).first();
-  if (!wheel || wheel.lifecycle === 'archived' || wheel.editing_locked) throw new AuthFailure(409, 'subscriber_roster_wheel_unavailable', 'The target Wheel is unavailable for roster changes.');
+  if (!wheel || wheel.lifecycle === 'archived' || wheel.closed_at || wheel.editing_locked) throw new AuthFailure(409, 'subscriber_roster_wheel_unavailable', 'The target Wheel is unavailable for roster changes.');
+  await requireEntrantCodeStorage(db);
   const settings = await getWheelSettings(env); const currentEntries = (await db.prepare('SELECT * FROM wheel_entries WHERE wheel_id=? ORDER BY display_order,id').bind(wheel.id).all()).results;
   const additions = [];
-  for (const item of delta.added) additions.push({ ...item, existing: await existingActorEntry(currentEntries, rule, item) });
+  for (const item of delta.added) { const match = await existingActorEntry(db, currentEntries, rule, item); additions.push({ ...item, existing: match.entry, bound: match.bound }); }
   const newEntryCount = additions.filter(item => !item.existing).length;
   if (newEntryCount && currentEntries.length + newEntryCount > Math.min(MAX_ENTRIES, settings.settings.maximumParticipants || MAX_ENTRIES)) throw new AuthFailure(409, 'subscriber_roster_capacity', 'The target Wheel does not have enough participant capacity.');
   const activeWeight = currentEntries.reduce((sum, entry) => sum + (entry.state === 'active' ? Number(entry.weight) : 0), 0);
@@ -169,14 +176,15 @@ async function performRosterSync(env, actorId, input) {
     - delta.removed.reduce((sum, item) => sum + (item.state === 'active' ? Number(item.weight) : 0), 0);
   if (activeWeight + weightDelta > 0xffffffff) throw new AuthFailure(409, 'subscriber_roster_weight_limit', 'The roster would exceed the Wheel weight limit.');
   const token = randomId(), timestamp = nowIso(); let order = currentEntries.reduce((maximum, entry) => Math.max(maximum, Number(entry.display_order)), -1);
+  const codes = await allocateEntrantCodes(db, newEntryCount); let codeIndex = 0;
   for (const item of additions) {
     item.identity = await rosterIdentity(rule, item.actorKey); item.entryId = item.existing?.id || randomId(); item.contributionId = randomId();
-    if (!item.existing) { order += 1; item.order = order; item.appearance = rule.appearance ? applyAutomaticAppearance(null, rule.appearance, { providerEventAt: authority.current.providerAt }, item.identity.key) : null; }
+    if (!item.existing) { order += 1; item.order = order; item.code = codes[codeIndex++]; item.appearance = rule.appearance ? applyAutomaticAppearance(null, rule.appearance, { providerEventAt: authority.current.providerAt }, item.identity.key) : null; }
   }
   const removedJson = JSON.stringify(delta.removed.map(item => ({ contributionId: item.id, entryId: item.entry_id, weight: Number(item.weight), deleteEntry: Number(item.entry_weight) === Number(item.weight) })));
   const existingJson = JSON.stringify(additions.filter(item => item.existing).map(item => ({ entryId: item.entryId })));
-  const newJson = JSON.stringify(additions.filter(item => !item.existing).map(item => ({ contributionId: item.contributionId, entryId: item.entryId, actorKey: item.actorKey, actorLabel: item.displayName, order: item.order, identityJson: JSON.stringify(item.identity), avatar: item.avatar || null, appearanceJson: item.appearance ? JSON.stringify(item.appearance) : null })));
-  const additionJson = JSON.stringify(additions.map(item => ({ contributionId: item.contributionId, entryId: item.entryId, actorKey: item.actorKey, actorLabel: item.displayName })));
+  const newJson = JSON.stringify(additions.filter(item => !item.existing).map(item => ({ contributionId: item.contributionId, entryId: item.entryId, code: item.code, actorKey: item.actorKey, actorLabel: item.displayName, order: item.order, identityJson: JSON.stringify(item.identity), avatar: item.avatar || null, appearanceJson: item.appearance ? JSON.stringify(item.appearance) : null })));
+  const additionJson = JSON.stringify(additions.map(item => ({ contributionId: item.contributionId, bindingId: randomId(), entryId: item.entryId, actorKey: item.actorKey, actorLabel: item.displayName, bound: item.bound })));
   const updatedJson = JSON.stringify(delta.updated.map(item => ({ entryId: item.entryId, actorKey: item.actorKey, delta: rule.entriesPerMember - item.previousWeight })));
   const statements = [db.prepare(`UPDATE subscriber_roster_rules SET sync_token=?,revision=revision+1 WHERE id=? AND revision=? AND enabled=1 AND deleted_at IS NULL
     AND EXISTS(SELECT 1 FROM wheels WHERE id=? AND revision=?)`).bind(token, rule.id, rule.revision, wheel.id, wheel.revision)];
@@ -187,6 +195,9 @@ async function performRosterSync(env, actorId, input) {
       AND EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(removedJson, timestamp, wheel.id, removedJson, removedJson, rule.id, token, rule.revision + 1));
     statements.push(db.prepare(`DELETE FROM wheel_entry_contributions WHERE rule_id=? AND id IN (SELECT json_extract(value,'$.contributionId') FROM json_each(?))
       AND EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(rule.id, removedJson, rule.id, token, rule.revision + 1));
+    statements.push(db.prepare(`UPDATE wheel_entry_source_bindings SET retired_at=?,updated_at=? WHERE wheel_id=? AND retired_at IS NULL
+      AND entry_id IN (SELECT json_extract(value,'$.entryId') FROM json_each(?) WHERE json_extract(value,'$.deleteEntry')=1)
+      AND EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(timestamp, timestamp, wheel.id, removedJson, rule.id, token, rule.revision + 1));
     statements.push(db.prepare(`DELETE FROM wheel_entries WHERE wheel_id=? AND id IN (SELECT json_extract(value,'$.entryId') FROM json_each(?) WHERE json_extract(value,'$.deleteEntry')=1)
       AND json_extract(entrant_identity_json,'$.origin')='automation'
       AND NOT EXISTS(SELECT 1 FROM wheel_entry_contributions c WHERE c.entry_id=wheel_entries.id)
@@ -194,12 +205,16 @@ async function performRosterSync(env, actorId, input) {
   }
   if (additions.some(item => item.existing)) statements.push(db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=? WHERE wheel_id=?
     AND id IN (SELECT json_extract(value,'$.entryId') FROM json_each(?)) AND EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(rule.entriesPerMember, timestamp, wheel.id, existingJson, rule.id, token, rule.revision + 1));
-  if (additions.some(item => !item.existing)) statements.push(db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at,entrant_identity_json,source_avatar_url,entrant_appearance_json)
-    SELECT json_extract(value,'$.entryId'),?,json_extract(value,'$.actorLabel'),json_extract(value,'$.order'),?,'active',?,?,json_extract(value,'$.identityJson'),json_extract(value,'$.avatar'),json_extract(value,'$.appearanceJson') FROM json_each(?)
-    WHERE EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(wheel.id, rule.entriesPerMember, timestamp, timestamp, newJson, rule.id, token, rule.revision + 1));
+  if (additions.some(item => !item.existing)) statements.push(db.prepare(`INSERT INTO wheel_entries(id,wheel_id,entrant_code,display_label,display_order,weight,state,created_at,updated_at,entrant_identity_json,source_avatar_url,entrant_appearance_json,provenance_origin,origin_rule_id,origin_rule_name)
+    SELECT json_extract(value,'$.entryId'),?,json_extract(value,'$.code'),json_extract(value,'$.actorLabel'),json_extract(value,'$.order'),?,'active',?,?,json_extract(value,'$.identityJson'),json_extract(value,'$.avatar'),json_extract(value,'$.appearanceJson'),'roster',?,? FROM json_each(?)
+    WHERE EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(wheel.id, rule.entriesPerMember, timestamp, timestamp, rule.id, rule.name, newJson, rule.id, token, rule.revision + 1));
   if (additions.length) statements.push(db.prepare(`INSERT INTO wheel_entry_contributions(id,rule_id,wheel_id,entry_id,source_scope,actor_key,actor_label,contribution_type,weight,snapshot_id,created_at,updated_at)
     SELECT json_extract(value,'$.contributionId'),?,?,json_extract(value,'$.entryId'),?,json_extract(value,'$.actorKey'),json_extract(value,'$.actorLabel'),'subscriber_roster',?,?,?,? FROM json_each(?)
-    WHERE EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(rule.id, wheel.id, rule.sourceScope, rule.entriesPerMember, authority.current.id, timestamp, timestamp, additionJson, rule.id, token, rule.revision + 1));
+      WHERE EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(rule.id, wheel.id, rule.sourceScope, rule.entriesPerMember, authority.current.id, timestamp, timestamp, additionJson, rule.id, token, rule.revision + 1));
+  if (additions.some(item => !item.bound)) statements.push(db.prepare(`INSERT INTO wheel_entry_source_bindings(id,wheel_id,entry_id,provider,source_scope,actor_key,actor_label_snapshot,entry_type,accumulation_group,origin_rule_id,origin_rule_name_snapshot,created_at,updated_at)
+    SELECT json_extract(value,'$.bindingId'),?,json_extract(value,'$.entryId'),'rumble',?,json_extract(value,'$.actorKey'),json_extract(value,'$.actorLabel'),'subscription','subscription',?,?,?,? FROM json_each(?)
+    WHERE json_extract(value,'$.bound')=0 AND EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`)
+    .bind(wheel.id, rule.sourceScope, rule.id, rule.name, timestamp, timestamp, additionJson, rule.id, token, rule.revision + 1));
   if (delta.updated.length) {
     statements.push(db.prepare(`UPDATE wheel_entries SET weight=weight+(SELECT json_extract(j.value,'$.delta') FROM json_each(?) j WHERE json_extract(j.value,'$.entryId')=wheel_entries.id),updated_at=?
       WHERE wheel_id=? AND id IN (SELECT json_extract(value,'$.entryId') FROM json_each(?)) AND EXISTS(SELECT 1 FROM subscriber_roster_rules WHERE id=? AND sync_token=? AND revision=?)`).bind(updatedJson, timestamp, wheel.id, updatedJson, rule.id, token, rule.revision + 1));

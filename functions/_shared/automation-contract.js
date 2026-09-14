@@ -1,5 +1,6 @@
 import { AuthFailure } from './auth-core.js';
 import { normalizePollTrigger } from './poll-normalization.js';
+import { normalizeEntrySuffix } from '../../src/lib/entrant-label.mjs';
 
 import { EVENT_TYPES, RAID_TYPE, RAID_METHOD, RAID_TEXT, SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE, defaultAction, ruleFieldErrors } from '../../src/lib/automation-model.mjs';
 export { EVENT_TYPES };
@@ -17,6 +18,7 @@ export function validateRule(input) {
   const errors = ruleFieldErrors(input);
   if (Object.keys(errors).length) fieldFailure(errors);
   const actionConfig = { ...(input.actionConfig ?? defaultAction()) };
+  if (actionConfig.displaySuffix !== undefined) actionConfig.displaySuffix = normalizeEntrySuffix(actionConfig.displaySuffix);
   if ([SELF_PAID_SUBSCRIBER_TYPE, LEGACY_SUBSCRIBER_TYPE].includes(input.eventType)) actionConfig.subscriberPolicy = 'self_paid_v1';
   return { name: input.name.trim(), description: (input.description ?? '').trim(), enabled: input.enabled,
     sourceScope: input.sourceScope.trim(), eventType: input.eventType,
