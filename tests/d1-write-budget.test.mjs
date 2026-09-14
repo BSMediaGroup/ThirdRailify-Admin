@@ -4,6 +4,7 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { ensureEnvironmentMasters, errorResponse } from '../functions/_shared/auth-core.js';
 import { onRequest } from '../functions/api/internal/bot/[[path]].js';
+import { ingestAutomationEvents, saveAutomationRule } from '../functions/_shared/automation-core.js';
 import { recordBotHeartbeat } from '../functions/_shared/polls-core.js';
 import { createAuthDatabase, authEnvironment } from './auth-test-helpers.mjs';
 import { createCommerceDatabases, commerceEnvironment } from './commerce-test-helpers.mjs';
@@ -128,4 +129,28 @@ test('D1 read-quota exhaustion is a retryable explicit unavailable response', as
   });
   const unrelated7500 = errorResponse(new Error('D1_ERROR: too many terms in compound SELECT [code: 7500]'), new Request('https://admin.example/api/admin/rumble-intelligence'), {});
   assert.equal(unrelated7500.status, 500, 'generic D1 error code 7500 is not sufficient quota evidence');
+});
+
+test('100 automation award events never introspect the Wheel schema', async t => {
+  const h = await createCommerceDatabases(); t.after(() => h.dispose());
+  const db = meter(h.commerceDb); const env = commerceEnvironment(h, { THIRDRAILIFY_COMMERCE_DB: db });
+  const timestamp = new Date().toISOString();
+  await h.commerceDb.prepare(`INSERT INTO wheels(id,reference_code,public_slug,title,lifecycle,visibility,owner_account_id,config_json,created_at,updated_at)
+    VALUES ('pragma-budget-wheel','PRAGMA','pragma-budget','Schema Budget','active','public','admin','{}',?,?)`).bind(timestamp, timestamp).run();
+  const rule = (await saveAutomationRule(env, 'admin', {
+    name: 'Schema budget', description: '', enabled: true, sourceScope: 'user:1sl8zm', eventType: 'rumble.follow', conditions: {},
+    actionType: 'wheel.add_actor', targetWheelId: 'pragma-budget-wheel',
+  })).rule;
+  db.cost.schemaPragmas = 0;
+  for (let i = 0; i < 100; i++) {
+    const fingerprint = createHash('sha256').update(`schema-budget-${i}`).digest('hex');
+    const result = await ingestAutomationEvents(env, { events: [{
+      ruleId: rule.id, ruleRevision: rule.revision, eventType: rule.eventType, sourceScope: rule.sourceScope,
+      actorLabel: 'SchemaBudgetActor', actorKey: 'rumble:user:1sl8zm:schemabudgetactor', eventFingerprint: fingerprint,
+      providerEventAt: new Date(Date.now() + i * 1000).toISOString(), livestreamId: 'schema-budget-live', evidence: {},
+    }] });
+    assert.ok(['added', 'duplicate_entrant'].includes(result.results[0].outcome));
+  }
+  assert.equal(db.cost.schemaPragmas, 0);
+  assert.equal((await h.commerceDb.prepare('SELECT COUNT(*) AS n FROM automation_receipts WHERE rule_id=?').bind(rule.id).first()).n, 100);
 });

@@ -10,6 +10,8 @@ PENDING VER=0.1.0-alpha.0
 - Added explicit retryable D1 code-7500 responses. The paired Bot honors quota `Retry-After` for control and heartbeat while preserving ordinary cadence and liveness semantics.
 - Added reviewed migration `0049_rumble_intelligence_rollups.sql`, its isolated release script, measured cost coverage, and read+write budget documentation. Protected pre-migration backup: 6,900,631 bytes, SHA-256 `7EEFF6CE24D5C741A0712A77030D0DD9BC7B1482F192063EC54541A8846D8FAD`.
 - Issued unique JS/CSS release assets after a concurrent Git/manual Pages deployment briefly cached SPA fallback HTML at the first manual asset URLs; stable-domain acceptance requires real JavaScript/CSS MIME types.
+- After the UTC quota reset, the guarded production preflight passed and only `0049` was applied as ledger row 49. The backfill produced 7 change, 105 hourly, and 5 daily summaries with zero foreign-key violations; the unrelated local Poll migration `0046` remains unapplied.
+- Post-reset production D1 proof measured the exact 7-day trend seeks at 106 checkpoint rows plus 7 change rows in under 1 ms of SQL time, versus the former 2,911,766-row average. Fresh Insights also exposed `wheel_entries` schema PRAGMA once per live award; the final event path now uses the required schema with cached fail-closed capability checks, and a real-D1 100-event regression records zero PRAGMAs.
 
 ## 2026-09-13 - Provider profile access lightbox
 

@@ -60,6 +60,35 @@ expired-nonce cleanup runs at most once per successful five-minute interval per
 isolate. A unique collision performs a targeted persisted expiry delete before
 allowing an expired ID to be reused; active and concurrent replay stays 409.
 
+Post-reset production Insights found one remaining `PRAGMA table_info(wheel_entries)`
+caller in the live automation-award executor: 44 executions accompanied 44
+award-path requests in the first observed hour. The executor now uses the
+required identity/avatar columns directly and consults the successful
+whitelisted table-definition cache for fail-closed identity/appearance
+capabilities. Missing additive columns force one immediate metadata refresh so
+a newly applied migration is visible; healthy events issue no PRAGMA. A real-D1
+100-event regression asserts zero schema PRAGMAs while retaining 100 durable
+receipts, replay behavior, appearance updates, and atomic award writes.
+
+## 2026-09-14 post-reset production acceptance
+
+The protected release guard reverified the 6,900,631-byte backup and both
+reviewed SHA-256 hashes, read the remote ledger, excluded unrelated migration
+`0046_poll_permanent_delete.sql`, and applied only
+`0049_rumble_intelligence_rollups.sql`. D1 executed six migration commands in
+268.43 ms. Remote ledger row 49 names `0049`; the new table has the reviewed
+18-column `WITHOUT ROWID` shape, `current_confirmations` is present, and the
+foreign-key check is empty. Backfill counts are 7 semantic-change rows, 105
+hourly checkpoints, and 5 daily checkpoints for the single source.
+
+The exact production 7-day query plan is `SEARCH
+rumble_intelligence_rollups USING PRIMARY KEY
+(source=? AND grain=? AND bucket_start>? AND bucket_start<?)` for both seeks.
+The hourly seek returned/read 106 rows in 0.764 ms and the change seek returned/read
+7 rows in 0.205 ms: 113 D1 rows total, zero writes, and no raw observation or
+roster JSON access. Against the incident average of 2,911,766 reads per trend
+request, this is a measured 25,768-fold reduction on production data.
+
 While Free D1 is quota-blocked, routes translate the exact code 7500/read-limit
 failure into an explicit 503 `database_read_quota_exhausted` response with
 `Retry-After` to midnight UTC. The Bot respects that response for control and

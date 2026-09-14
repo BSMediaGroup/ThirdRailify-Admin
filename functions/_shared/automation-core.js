@@ -5,12 +5,12 @@ import { getSafeRumbleDiscovery, requirePollDb } from './polls-core.js';
 import { executeAutomationWheelEntry } from './wheels-core.js';
 import { fieldFailure, invalid, matches, validateEvent, validateRule } from './automation-contract.js';
 import { normalizePollTrigger } from './poll-normalization.js';
-import { schemaObject } from './schema-capabilities.js';
+import { schemaTable } from './schema-capabilities.js';
 
 export async function automationReadiness(env) {
   const db = requirePollDb(env);
-  const table = await schemaObject(db, 'automation_rules', 'table');
-  const entryTable = await schemaObject(db, 'wheel_entries', 'table');
+  const table = await schemaTable(db, 'automation_rules', ['action_config_json']);
+  const entryTable = await schemaTable(db, 'wheel_entries', ['entrant_appearance_json', 'entrant_identity_json']);
   const awards = Boolean(table?.sql && /\baction_config_json\b/i.test(table.sql));
   const raidSchema = awards && Boolean(table?.sql?.includes("'rumble.raid.received'"));
   const heartbeat = await db.prepare('SELECT runtime_json,heartbeat_at FROM bot_runtime_heartbeat WHERE singleton_id=1').first();

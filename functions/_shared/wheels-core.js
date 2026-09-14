@@ -195,15 +195,16 @@ export async function executeAutomationWheelEntry(env, rule, event) {
     if (receipt && receipt.id !== id) await db.prepare('UPDATE automation_rules SET duplicate_events=duplicate_events+1 WHERE id=?').bind(rule.id).run();
     return receipt ? receipt.id === id ? 'wheel_unavailable' : 'duplicate_event' : 'retry';
   }
-  const entryColumns = (await db.prepare('PRAGMA table_info(wheel_entries)').all()).results;
-  await requireIdentityStorage(db, entryColumns);
-  const appearanceReady = entryColumns.some(c => c.name === 'entrant_appearance_json');
-  const sourceAvatars = entryColumns.some(c => c.name === 'source_avatar_url');
+  // Automation awards run on a hot event path. These columns are part of the
+  // required deployed Wheel schema. The whitelisted capability cache preserves
+  // the explicit migration error without a PRAGMA on every event.
+  await requireIdentityStorage(db);
   const entries = await db.prepare('SELECT * FROM wheel_entries WHERE wheel_id=? ORDER BY display_order,id').bind(wheel.id).all();
   const policy = await getWheelSettings(env);
   const capacity = Math.min(MAX_ENTRIES, policy.settings.maximumParticipants || MAX_ENTRIES);
   const action = rule.action_config_json ? JSON.parse(rule.action_config_json) : defaultAction();
-  if (action.appearance && !appearanceReady) await requireAppearanceStorage(db);
+  const appearanceReady = Boolean(action.appearance);
+  if (appearanceReady) await requireAppearanceStorage(db);
   const award = calculateAward(action, event.eventType, event.evidence);
   const identity = await automaticEntryIdentity(event);
   let duplicate = entries.results.find(entry => storedEntryIdentity(entry.entrant_identity_json)?.key === identity.key);
@@ -236,13 +237,13 @@ export async function executeAutomationWheelEntry(env, rule, event) {
     db.prepare(`UPDATE wheel_entries SET entrant_identity_json=?,updated_at=? WHERE id=? AND wheel_id=? AND entrant_identity_json IS NULL AND ?=1
       AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=?)`)
       .bind(JSON.stringify(identity), timestamp, duplicate?.id || '', wheel.id, Number(adoptLegacy), receiptId),
-    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at,entrant_identity_json${sourceAvatars ? ',source_avatar_url' : ''}${appearanceReady ? ',entrant_appearance_json' : ''})
-      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?,?${sourceAvatars ? ',?' : ''}${appearanceReady ? ',?' : ''}
+    db.prepare(`INSERT INTO wheel_entries(id,wheel_id,display_label,display_order,weight,state,created_at,updated_at,entrant_identity_json,source_avatar_url${appearanceReady ? ',entrant_appearance_json' : ''})
+      SELECT ?,?,?,COALESCE((SELECT MAX(display_order)+1 FROM wheel_entries WHERE wheel_id=?),0),?,'active',?,?,?,?${appearanceReady ? ',?' : ''}
       WHERE EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='created')`)
-      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, JSON.stringify(identity), ...(sourceAvatars ? [event.actorAvatarUrl || null] : []), ...(appearanceReady ? [styled] : []), receiptId),
-    db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=?${sourceAvatars ? ',source_avatar_url=COALESCE(?,source_avatar_url)' : ''}${appearanceReady ? ',entrant_appearance_json=?' : ''} WHERE id=? AND wheel_id=?
+      .bind(entryId, wheel.id, event.actorLabel, wheel.id, awardedEntries, timestamp, timestamp, JSON.stringify(identity), event.actorAvatarUrl || null, ...(appearanceReady ? [styled] : []), receiptId),
+    db.prepare(`UPDATE wheel_entries SET weight=weight+?,updated_at=?,source_avatar_url=COALESCE(?,source_avatar_url)${appearanceReady ? ',entrant_appearance_json=?' : ''} WHERE id=? AND wheel_id=?
       AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND action_result='accumulated')`)
-      .bind(awardedEntries, timestamp, ...(sourceAvatars ? [event.actorAvatarUrl || null] : []), ...(appearanceReady ? [styled] : []), duplicate?.id || '', wheel.id, receiptId),
+      .bind(awardedEntries, timestamp, event.actorAvatarUrl || null, ...(appearanceReady ? [styled] : []), duplicate?.id || '', wheel.id, receiptId),
     db.prepare(`UPDATE wheels SET participant_count=(SELECT COUNT(*) FROM wheel_entries WHERE wheel_id=? AND state='active'),revision=revision+1,updated_at=?
       WHERE id=? AND EXISTS (SELECT 1 FROM automation_receipts WHERE id=? AND (outcome='added' OR ?=1))`).bind(wheel.id, timestamp, wheel.id, receiptId, Number(adoptLegacy)),
     db.prepare(`UPDATE automation_rules SET matched=matched+1,executed=executed+?,duplicate_entrants=duplicate_entrants+?,failed=failed+?,last_match_at=?,last_outcome=?,last_fault=?

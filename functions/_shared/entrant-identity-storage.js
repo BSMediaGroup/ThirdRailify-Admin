@@ -1,9 +1,10 @@
 import { AuthFailure } from './auth-core.js';
+import { schemaTable } from './schema-capabilities.js';
 import { EVENT_ENTRY_TYPES, normalizeEntryIdentity } from '../../src/lib/entrant-identity.mjs';
 
-export async function requireIdentityStorage(db, columns) {
-  columns ||= (await db.prepare('PRAGMA table_info(wheel_entries)').all()).results;
-  if (!columns.some(column => column.name === 'entrant_identity_json')) throw new AuthFailure(503, 'entrant_identity_schema_required', 'Wheel entry identity storage is unavailable. Apply migration 0042 before processing automation awards or saving typed entries.');
+export async function requireIdentityStorage(db) {
+  const table = await schemaTable(db, 'wheel_entries', ['entrant_identity_json']);
+  if (!table?.sql || !/\bentrant_identity_json\b/i.test(table.sql)) throw new AuthFailure(503, 'entrant_identity_schema_required', 'Wheel entry identity storage is unavailable. Apply migration 0042 before processing automation awards or saving typed entries.');
 }
 export function storedEntryIdentity(json) { return json ? JSON.parse(json) : null; }
 export function publicEntryIdentity(json) {

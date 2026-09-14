@@ -33,6 +33,19 @@ export async function schemaObject(db, name, type) {
   return object && (!type || object.type === type) ? object : null;
 }
 
+export async function schemaTable(db, name, requiredColumns = []) {
+  let table = await schemaObject(db, name, 'table');
+  const missing = () => table?.sql && requiredColumns.some(column => !new RegExp(`\\b${column}\\b`, 'i').test(table.sql));
+  // A table can predate an additive column migration. Refresh that incomplete
+  // capability once immediately so an applied migration is visible without
+  // weakening the steady-state five-minute cache.
+  if (missing()) {
+    invalidateSchemaCapabilities(db);
+    table = await schemaObject(db, name, 'table');
+  }
+  return table;
+}
+
 export async function hasSchemaObjects(db, required, type) {
   // Sequential lookup deliberately reuses the first completed catalogue read.
   for (const name of required) if (!await schemaObject(db, name, type)) return false;
